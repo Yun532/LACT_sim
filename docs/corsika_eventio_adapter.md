@@ -203,7 +203,7 @@ Whiteboard trace:
 DYLD_LIBRARY_PATH=$PWD/external/hessioxxx/source/lib \
 build/run_corsika_trace configs/official_tests/corsika_whiteboard.cfg \
   /path/to/photon_E500_th0_run000001.zst \
-  > run_logs/official_tests/corsika/whiteboard_run.log 2>&1
+  2>&1 | tee run_logs/official_tests/corsika/whiteboard_run.log
 ```
 
 Dense HDF5 pixel-camera trace:
@@ -212,7 +212,7 @@ Dense HDF5 pixel-camera trace:
 DYLD_LIBRARY_PATH=$PWD/external/hessioxxx/source/lib \
 build/run_corsika_trace configs/official_tests/corsika_new_camera.cfg \
   /path/to/photon_E500_th0_run000001.zst \
-  > run_logs/official_tests/corsika/camera_run.log 2>&1
+  2>&1 | tee run_logs/official_tests/corsika/camera_run.log
 ```
 
 These write:

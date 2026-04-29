@@ -219,7 +219,7 @@ Run ray tracing:
 ```bash
 mkdir -p run_logs/official_tests/perfect_parallel
 build/run_optical_sim configs/official_tests/perfect_parallel_whiteboard.cfg \
-  > run_logs/official_tests/perfect_parallel/run.log 2>&1
+  2>&1 | tee run_logs/official_tests/perfect_parallel/run.log
 ```
 
 Plot the whiteboard spot:
@@ -248,7 +248,7 @@ Run ray tracing:
 ```bash
 mkdir -p run_logs/official_tests/point_900m
 build/run_optical_sim configs/official_tests/perfect_point_900m_whiteboard.cfg \
-  > run_logs/official_tests/point_900m/run.log 2>&1
+  2>&1 | tee run_logs/official_tests/point_900m/run.log
 ```
 
 Plot the whiteboard spot:
@@ -359,7 +359,7 @@ mkdir -p run_logs/official_tests/corsika
 build/run_corsika_trace \
   configs/official_tests/corsika_whiteboard.cfg \
   /path/to/input.zst \
-  > run_logs/official_tests/corsika/whiteboard_run.log 2>&1
+  2>&1 | tee run_logs/official_tests/corsika/whiteboard_run.log
 ```
 
 Main outputs:
@@ -415,7 +415,7 @@ mkdir -p run_logs/official_tests/corsika
 build/run_corsika_trace \
   configs/official_tests/corsika_new_camera.cfg \
   /path/to/input.zst \
-  > run_logs/official_tests/corsika/camera_run.log 2>&1
+  2>&1 | tee run_logs/official_tests/corsika/camera_run.log
 ```
 
 Main outputs:

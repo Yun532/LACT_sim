@@ -50,7 +50,7 @@ cmake --build "$BUILD_DIR" -j "${LACT_BUILD_JOBS:-4}"
 ctest --test-dir "$BUILD_DIR" --output-on-failure
 
 "$BUILD_DIR/run_optical_sim" configs/official_tests/perfect_parallel_whiteboard.cfg \
-  > run_logs/official_tests/perfect_parallel/run.log 2>&1
+  2>&1 | tee run_logs/official_tests/perfect_parallel/run.log
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_spot_histogram.py \
   run_logs/official_tests/perfect_parallel/hits.csv \
@@ -58,7 +58,7 @@ python3 python/plot_spot_histogram.py \
   --max-bins 520 --dpi 350
 
 "$BUILD_DIR/run_optical_sim" configs/official_tests/perfect_point_900m_whiteboard.cfg \
-  > run_logs/official_tests/point_900m/run.log 2>&1
+  2>&1 | tee run_logs/official_tests/point_900m/run.log
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_spot_histogram.py \
   run_logs/official_tests/point_900m/hits.csv \
@@ -95,9 +95,9 @@ else
 fi
 
 "$BUILD_DIR/run_corsika_trace" configs/official_tests/corsika_whiteboard.cfg "$CORSIKA_FILE" \
-  > run_logs/official_tests/corsika/whiteboard_run.log 2>&1
+  2>&1 | tee run_logs/official_tests/corsika/whiteboard_run.log
 "$BUILD_DIR/run_corsika_trace" configs/official_tests/corsika_new_camera.cfg "$CORSIKA_FILE" \
-  > run_logs/official_tests/corsika/camera_run.log 2>&1
+  2>&1 | tee run_logs/official_tests/corsika/camera_run.log
 
 if [[ ! -s run_logs/official_tests/corsika/whiteboard_hits.csv ]]; then
   echo "Expected whiteboard CSV was not created: run_logs/official_tests/corsika/whiteboard_hits.csv" >&2
