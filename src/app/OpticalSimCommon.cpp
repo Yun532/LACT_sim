@@ -1,0 +1,1968 @@
+#include "app/OpticalSimCommon.hpp"
+
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <limits>
+#include <optional>
+#include <random>
+#include <sstream>
+#include <stdexcept>
+#include <utility>
+
+#include "geometry/MirrorFacetValidation.hpp"
+#include "io/MirrorFacetCsvReader.hpp"
+
+namespace lact {
+
+extern const double DEG_TO_RAD = 3.14159265358979323846 / 180.0;
+
+std::string trim(const std::string& s) {
+    auto first = std::find_if_not(s.begin(), s.end(), [](unsigned char c) {
+        return std::isspace(c);
+    });
+    auto last = std::find_if_not(s.rbegin(), s.rend(), [](unsigned char c) {
+        return std::isspace(c);
+    }).base();
+    if (first >= last) {
+        return "";
+    }
+    return std::string(first, last);
+}
+
+std::string lowerCopy(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return s;
+}
+
+bool startsWith(const std::string& text, const std::string& prefix) {
+    return text.rfind(prefix, 0) == 0;
+}
+
+std::string expandEnvironmentVariables(const std::string& text)
+{
+    std::string out;
+    for (std::size_t i = 0; i < text.size();) {
+        if (text[i] != '$') {
+            out.push_back(text[i++]);
+            continue;
+        }
+
+        if (i + 1 < text.size() && text[i + 1] == '{') {
+            const std::size_t close = text.find('}', i + 2);
+            if (close == std::string::npos) {
+                out.push_back(text[i++]);
+                continue;
+            }
+            const std::string name = text.substr(i + 2, close - i - 2);
+            const char* value = std::getenv(name.c_str());
+            if (!value) {
+                throw std::runtime_error("environment variable not set: " + name);
+            }
+            out += value;
+            i = close + 1;
+            continue;
+        }
+
+        std::size_t j = i + 1;
+        while (j < text.size()) {
+            const unsigned char c = static_cast<unsigned char>(text[j]);
+            if (!(std::isalnum(c) || text[j] == '_')) {
+                break;
+            }
+            ++j;
+        }
+        if (j == i + 1) {
+            out.push_back(text[i++]);
+            continue;
+        }
+        const std::string name = text.substr(i + 1, j - i - 1);
+        const char* value = std::getenv(name.c_str());
+        if (!value) {
+            throw std::runtime_error("environment variable not set: " + name);
+        }
+        out += value;
+        i = j;
+    }
+    return out;
+}
+
+std::string parentDirectory(const std::string& path) {
+    auto pos = path.find_last_of("/\\");
+    if (pos == std::string::npos) {
+        return ".";
+    }
+    if (pos == 0) {
+        return path.substr(0, 1);
+    }
+    return path.substr(0, pos);
+}
+
+bool isAbsolutePath(const std::string& path) {
+    return !path.empty() && path.front() == '/';
+}
+
+std::string resolveRelativePath(const std::string& base_config_path,
+                                const std::string& path)
+{
+    if (path.empty() || isAbsolutePath(path)) {
+        return path;
+    }
+    std::filesystem::path base(base_config_path);
+    std::filesystem::path resolved = base.parent_path() / path;
+    return std::filesystem::absolute(resolved).lexically_normal().string();
+}
+
+std::map<std::string, std::string> readKeyValueConfig(const std::string& path) {
+    std::ifstream ifs(path);
+    if (!ifs) {
+        throw std::runtime_error("failed to open config: " + path);
+    }
+
+    std::map<std::string, std::string> values;
+    std::string line;
+    int line_no = 0;
+    while (std::getline(ifs, line)) {
+        ++line_no;
+        auto comment = line.find('#');
+        if (comment != std::string::npos) {
+            line = line.substr(0, comment);
+        }
+        line = trim(line);
+        if (line.empty()) {
+            continue;
+        }
+
+        auto eq = line.find('=');
+        if (eq == std::string::npos) {
+            std::ostringstream oss;
+            oss << "config line " << line_no << " missing '='";
+            throw std::runtime_error(oss.str());
+        }
+
+        std::string key = lowerCopy(trim(line.substr(0, eq)));
+        std::string value = trim(line.substr(eq + 1));
+        if (key.empty()) {
+            std::ostringstream oss;
+            oss << "config line " << line_no << " has empty key";
+            throw std::runtime_error(oss.str());
+        }
+        values[key] = value;
+    }
+
+    return values;
+}
+
+std::string scopedComponentKey(const std::string& key, const std::string& prefix) {
+    if (startsWith(key, "telescope.") ||
+        startsWith(key, "mirror.") || startsWith(key, "source.") ||
+        startsWith(key, "output.") || startsWith(key, "camera.") ||
+        startsWith(key, "sipm.") ||
+        startsWith(key, "electronics.") ||
+        startsWith(key, "efficiency.") ||
+        startsWith(key, "error.") ||
+        startsWith(key, "dish.") ||
+        startsWith(key, "facet.")) {
+        return key;
+    }
+    return prefix + key;
+}
+
+Vec3 TelescopeFrame::rotateVector(const Vec3& local) const {
+    return x_axis * local.x + y_axis * local.y + z_axis * local.z;
+}
+
+Vec3 TelescopeFrame::pointToGlobal(const Vec3& local) const {
+    return origin + rotateVector(local);
+}
+
+Vec3 TelescopeFrame::rotateVectorToLocal(const Vec3& global) const {
+    return {global.dot(x_axis), global.dot(y_axis), global.dot(z_axis)};
+}
+
+Vec3 TelescopeFrame::pointToLocal(const Vec3& global) const {
+    return rotateVectorToLocal(global - origin);
+}
+
+bool isIncludeConfigKey(const std::string& key) {
+    return key == "mirror.config" || key == "source.config" ||
+           key == "output.config" || key == "camera.config" ||
+           key == "sipm.config" ||
+           key == "electronics.config" ||
+           key == "efficiency.config" ||
+           key == "error.config";
+}
+
+void mergeTelescopeConfig(std::map<std::string, std::string>& dst,
+                          ComponentConfigPaths& paths,
+                          const std::map<std::string, std::string>& main_cfg,
+                          const std::string& main_config_path)
+{
+    auto it = main_cfg.find("telescope.config");
+    if (it == main_cfg.end() || trim(it->second).empty()) {
+        return;
+    }
+
+    const std::string path = resolveRelativePath(main_config_path, trim(it->second));
+    auto telescope_cfg = readKeyValueConfig(path);
+    for (const auto& kv : telescope_cfg) {
+        const std::string key = scopedComponentKey(kv.first, "telescope.");
+        std::string value = kv.second;
+        if (isIncludeConfigKey(key)) {
+            value = resolveRelativePath(path, value);
+        }
+        dst[key] = value;
+    }
+    paths.telescope = path;
+}
+
+void mergeComponentConfig(std::map<std::string, std::string>& dst,
+                          ComponentConfigPaths& paths,
+                          const std::map<std::string, std::string>& assembly_cfg,
+                          const std::string& main_config_path,
+                          const std::string& include_key,
+                          const std::string& prefix)
+{
+    auto it = assembly_cfg.find(include_key);
+    if (it == assembly_cfg.end() || trim(it->second).empty()) {
+        return;
+    }
+
+    const std::string path = resolveRelativePath(main_config_path, trim(it->second));
+    auto component_cfg = readKeyValueConfig(path);
+    for (const auto& kv : component_cfg) {
+        const std::string scoped = scopedComponentKey(kv.first, prefix);
+        std::string value = kv.second;
+        if (scoped == "mirror.series_csv_path" || scoped == "mirror.series_csv_pattern") {
+            value = resolveRelativePath(path, value);
+        }
+        if (scoped == "error.structural_deformation_config") {
+            value = resolveRelativePath(path, value);
+        }
+        dst[scoped] = value;
+    }
+
+    if (include_key == "mirror.config") {
+        paths.mirror = path;
+    } else if (include_key == "source.config") {
+        paths.source = path;
+    } else if (include_key == "output.config") {
+        paths.output = path;
+    } else if (include_key == "camera.config") {
+        paths.camera = path;
+    } else if (include_key == "sipm.config") {
+        paths.sipm = path;
+    } else if (include_key == "electronics.config") {
+        paths.electronics = path;
+    } else if (include_key == "efficiency.config") {
+        paths.efficiency = path;
+    } else if (include_key == "error.config") {
+        paths.error = path;
+    }
+}
+
+std::map<std::string, std::string> expandConfig(const std::map<std::string, std::string>& main_cfg,
+                                                const std::string& main_config_path,
+                                                ComponentConfigPaths& paths)
+{
+    std::map<std::string, std::string> expanded;
+    std::map<std::string, std::string> assembly_cfg;
+    mergeTelescopeConfig(assembly_cfg, paths, main_cfg, main_config_path);
+
+    // Values in the main file intentionally override telescope defaults.
+    for (const auto& kv : main_cfg) {
+        assembly_cfg[kv.first] = kv.second;
+    }
+
+    mergeComponentConfig(expanded, paths, assembly_cfg, main_config_path,
+                         "mirror.config", "mirror.");
+    mergeComponentConfig(expanded, paths, assembly_cfg, main_config_path,
+                         "source.config", "source.");
+    mergeComponentConfig(expanded, paths, assembly_cfg, main_config_path,
+                         "output.config", "output.");
+    mergeComponentConfig(expanded, paths, assembly_cfg, main_config_path,
+                         "camera.config", "camera.");
+    mergeComponentConfig(expanded, paths, assembly_cfg, main_config_path,
+                         "sipm.config", "sipm.");
+    mergeComponentConfig(expanded, paths, assembly_cfg, main_config_path,
+                         "electronics.config", "electronics.");
+    mergeComponentConfig(expanded, paths, assembly_cfg, main_config_path,
+                         "efficiency.config", "efficiency.");
+    mergeComponentConfig(expanded, paths, assembly_cfg, main_config_path,
+                         "error.config", "error.");
+
+    // Assembly values intentionally override component defaults.
+    for (const auto& kv : assembly_cfg) {
+        expanded[kv.first] = kv.second;
+    }
+    return expanded;
+}
+
+std::string getString(const std::map<std::string, std::string>& cfg,
+                      const std::string& key,
+                      const std::string& fallback)
+{
+    auto it = cfg.find(key);
+    return expandEnvironmentVariables(it == cfg.end() ? fallback : it->second);
+}
+
+double getDouble(const std::map<std::string, std::string>& cfg,
+                 const std::string& key,
+                 double fallback)
+{
+    auto it = cfg.find(key);
+    if (it == cfg.end()) {
+        return fallback;
+    }
+    std::size_t pos = 0;
+    double value = std::stod(it->second, &pos);
+    if (pos != it->second.size()) {
+        throw std::runtime_error("invalid numeric config value for " + key + ": " + it->second);
+    }
+    return value;
+}
+
+int getInt(const std::map<std::string, std::string>& cfg,
+           const std::string& key,
+           int fallback)
+{
+    auto it = cfg.find(key);
+    if (it == cfg.end()) {
+        return fallback;
+    }
+    std::size_t pos = 0;
+    int value = std::stoi(it->second, &pos);
+    if (pos != it->second.size()) {
+        throw std::runtime_error("invalid integer config value for " + key + ": " + it->second);
+    }
+    return value;
+}
+
+std::uint64_t getUInt64(const std::map<std::string, std::string>& cfg,
+                        const std::string& key,
+                        std::uint64_t fallback)
+{
+    auto it = cfg.find(key);
+    if (it == cfg.end()) {
+        return fallback;
+    }
+    std::size_t pos = 0;
+    auto value = static_cast<std::uint64_t>(std::stoull(it->second, &pos));
+    if (pos != it->second.size()) {
+        throw std::runtime_error("invalid integer config value for " + key + ": " + it->second);
+    }
+    return value;
+}
+
+bool getBool(const std::map<std::string, std::string>& cfg,
+             const std::string& key,
+             bool fallback)
+{
+    auto it = cfg.find(key);
+    if (it == cfg.end()) {
+        return fallback;
+    }
+    std::string value = lowerCopy(trim(it->second));
+    if (value == "1" || value == "true" || value == "yes" || value == "on") {
+        return true;
+    }
+    if (value == "0" || value == "false" || value == "no" || value == "off") {
+        return false;
+    }
+    throw std::runtime_error("invalid boolean config value for " + key + ": " + it->second);
+}
+
+Vec3 parseVec3(const std::string& text, const std::string& key) {
+    std::stringstream ss(text);
+    std::string cell;
+    std::vector<double> values;
+    while (std::getline(ss, cell, ',')) {
+        cell = trim(cell);
+        if (cell.empty()) {
+            throw std::runtime_error("empty component in vector config value for " + key);
+        }
+        std::size_t pos = 0;
+        double value = std::stod(cell, &pos);
+        if (pos != cell.size()) {
+            throw std::runtime_error("invalid vector component in " + key + ": " + cell);
+        }
+        values.push_back(value);
+    }
+    if (values.size() != 3) {
+        throw std::runtime_error("vector config value for " + key + " must have 3 components");
+    }
+    return {values[0], values[1], values[2]};
+}
+
+Vec3 getVec3(const std::map<std::string, std::string>& cfg,
+             const std::string& key,
+             const Vec3& fallback)
+{
+    auto it = cfg.find(key);
+    return it == cfg.end() ? fallback : parseVec3(it->second, key);
+}
+
+DishType parseDishType(const std::string& text) {
+    std::string s = lowerCopy(trim(text));
+    if (s == "daviescotton" || s == "davies-cotton" || s == "dc") {
+        return DishType::DaviesCotton;
+    }
+    if (s == "parabolic" || s == "paraboloid") {
+        return DishType::Parabolic;
+    }
+    throw std::runtime_error("unsupported dish.type: " + text);
+}
+
+SurfaceType parseSurfaceType(const std::string& text) {
+    std::string s = lowerCopy(trim(text));
+    if (s == "spherical") return SurfaceType::Spherical;
+    if (s == "parabolic") return SurfaceType::Parabolic;
+    if (s == "planar") return SurfaceType::Planar;
+    if (s == "polynomial") return SurfaceType::Polynomial;
+    throw std::runtime_error("unsupported facet.surface_type: " + text);
+}
+
+ApertureShape parseApertureShape(const std::string& text) {
+    std::string s = lowerCopy(trim(text));
+    if (s == "circular") return ApertureShape::Circular;
+    if (s == "hexagon") return ApertureShape::Hexagon;
+    if (s == "square") return ApertureShape::Square;
+    throw std::runtime_error("unsupported facet.aperture_shape: " + text);
+}
+
+PixelShape parsePixelShape(const std::string& text) {
+    std::string s = lowerCopy(trim(text));
+    if (s == "circular" || s == "circle") return PixelShape::Circular;
+    if (s == "hexagonal" || s == "hexagon" || s == "hex") return PixelShape::Hexagonal;
+    if (s == "square") return PixelShape::Square;
+    throw std::runtime_error("unsupported camera.pixel_shape: " + text);
+}
+
+std::string pixelShapeName(PixelShape shape) {
+    switch (shape) {
+        case PixelShape::Circular: return "Circular";
+        case PixelShape::Hexagonal: return "Hexagonal";
+        case PixelShape::Square: return "Square";
+    }
+    return "Unknown";
+}
+
+SyntheticMode parseSyntheticMode(const std::string& text) {
+    std::string s = lowerCopy(trim(text));
+    if (s == "parallelbeam" || s == "parallel") {
+        return SyntheticMode::ParallelBeam;
+    }
+    if (s == "pointsource" || s == "point") {
+        return SyntheticMode::PointSource;
+    }
+    throw std::runtime_error("unsupported source.mode: " + text);
+}
+
+bool isPhotonCsvMode(const std::string& text) {
+    std::string s = lowerCopy(trim(text));
+    return s == "photoncsv" || s == "photon_csv" || s == "csv" || s == "file";
+}
+
+bool isEventIOMode(const std::string& text) {
+    std::string s = lowerCopy(trim(text));
+    return s == "eventio" || s == "corsika" || s == "corsikaeventio" ||
+           s == "corsika_eventio" || s == "iact";
+}
+
+std::string vec3ToString(const Vec3& v) {
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(6)
+        << "(" << v.x << ", " << v.y << ", " << v.z << ")";
+    return oss.str();
+}
+
+std::string sourceModeName(SyntheticMode mode) {
+    switch (mode) {
+    case SyntheticMode::ParallelBeam:
+        return "ParallelBeam";
+    case SyntheticMode::PointSource:
+        return "PointSource";
+    }
+    return "Unknown";
+}
+
+TelescopeFrame buildTelescopeFrame(const TelescopeConfig& telescope)
+{
+    // 约定本地望远镜坐标:
+    //   local +z : 望远镜指向 / 光轴方向
+    //   local +x : 水平横向
+    //   local +y : 与 x,z 构成右手系
+    // 再由 pointing_az/el 构造到全局阵列坐标的正交基。
+    const double az = telescope.pointing_az_deg * DEG_TO_RAD;
+    const double el = telescope.pointing_el_deg * DEG_TO_RAD;
+
+    Vec3 z_axis{
+        std::cos(el) * std::cos(az),
+        std::cos(el) * std::sin(az),
+        std::sin(el)
+    };
+    z_axis = z_axis.normalized();
+
+    Vec3 x_axis{-std::sin(az), std::cos(az), 0.0};
+    x_axis = x_axis.normalized();
+    Vec3 y_axis = z_axis.cross(x_axis).normalized();
+
+    TelescopeFrame frame;
+    frame.origin = telescope.position_m;
+    frame.x_axis = x_axis;
+    frame.y_axis = y_axis;
+    frame.z_axis = z_axis;
+    return frame;
+}
+
+void applyTelescopeFrame(std::vector<MirrorFacet>& facets,
+                         OutputPlane& plane,
+                         const TelescopeFrame& frame)
+{
+    // 镜片和输出面都先在本地坐标里定义，再整体转到全局坐标。
+    // 这样 source / mirror / output 的相对几何关系在不同 pointing 下保持一致。
+    for (auto& facet : facets) {
+        Vec3 local_u;
+        Vec3 local_v;
+        facet.apertureFrame(local_u, local_v);
+        facet.center = frame.pointToGlobal(facet.center);
+        facet.normal = frame.rotateVector(facet.normal).normalized();
+        facet.aperture_u_axis = frame.rotateVector(local_u).normalized();
+        facet.aperture_v_axis = frame.rotateVector(local_v).normalized();
+    }
+
+    plane.point = frame.pointToGlobal(plane.point);
+    plane.normal = frame.rotateVector(plane.normal).normalized();
+    plane.u_axis = frame.rotateVector(plane.u_axis).normalized();
+    plane.v_axis = frame.rotateVector(plane.v_axis).normalized();
+}
+
+void applyTelescopeFrame(Photon& photon, const TelescopeFrame& frame)
+{
+    // 光子源同样先在本地望远镜坐标里采样，再整体转到全局。
+    // 因此平行光撒点圆盘和点源 target plane 会随 pointing 一起转动。
+    photon.pos = frame.pointToGlobal(photon.pos);
+    photon.dir = frame.rotateVector(photon.dir).normalized();
+}
+
+double elapsedSeconds(std::chrono::steady_clock::time_point start,
+                      std::chrono::steady_clock::time_point stop)
+{
+    return std::chrono::duration<double>(stop - start).count();
+}
+
+void printSection(const std::string& title) {
+    std::cout << "\n[" << title << "]\n";
+}
+
+void printField(const std::string& label, const std::string& value) {
+    std::cout << "  " << std::left << std::setw(24) << label
+              << ": " << value << "\n" << std::right;
+}
+
+std::string doubleToString(double value, int precision) {
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(precision) << value;
+    return oss.str();
+}
+
+std::string intToString(std::uint64_t value) {
+    std::ostringstream oss;
+    oss << value;
+    return oss.str();
+}
+
+bool parseDoubleStrict(const std::string& text, double& out) {
+    std::size_t pos = 0;
+    try {
+        out = std::stod(text, &pos);
+    } catch (...) {
+        return false;
+    }
+    return pos == text.size();
+}
+
+bool isDisabledText(const std::string& text) {
+    std::string value = lowerCopy(trim(text));
+    return value.empty() || value == "none" || value == "off" ||
+           value == "false" || value == "no";
+}
+
+std::string factorDescription(const EfficiencyFactorConfig& factor) {
+    if (!factor.enabled) {
+        return "not set -> 1";
+    }
+    if (factor.use_curve) {
+        return "curve: " + factor.csv_path;
+    }
+    return "constant: " + doubleToString(factor.constant);
+}
+
+EfficiencyFactorConfig parseEfficiencyFactor(const std::map<std::string, std::string>& cfg,
+                                             const std::string& base_key)
+{
+    EfficiencyFactorConfig factor;
+    const std::string combined = getString(cfg, base_key, "");
+    const std::string legacy_csv = getString(cfg, base_key + "_csv", "");
+    const std::string constant_text = getString(cfg, base_key + "_constant", "");
+
+    std::string value;
+    if (!combined.empty()) {
+        value = combined;
+    } else if (!constant_text.empty()) {
+        value = constant_text;
+    } else if (!legacy_csv.empty()) {
+        value = legacy_csv;
+    }
+
+    if (isDisabledText(value)) {
+        return factor;
+    }
+
+    double constant = 1.0;
+    if (parseDoubleStrict(value, constant)) {
+        factor.enabled = true;
+        factor.use_curve = false;
+        factor.constant = constant;
+        return factor;
+    }
+
+    factor.enabled = true;
+    factor.use_curve = true;
+    factor.csv_path = value;
+    return factor;
+}
+
+std::vector<double> parseDoubleList(const std::string& text, const std::string& key) {
+    std::stringstream ss(text);
+    std::string cell;
+    std::vector<double> values;
+    while (std::getline(ss, cell, ',')) {
+        cell = trim(cell);
+        if (cell.empty()) {
+            throw std::runtime_error("empty component in list config value for " + key);
+        }
+        std::size_t pos = 0;
+        double value = std::stod(cell, &pos);
+        if (pos != cell.size()) {
+            throw std::runtime_error("invalid list component in " + key + ": " + cell);
+        }
+        values.push_back(value);
+    }
+    if (values.empty()) {
+        throw std::runtime_error("list config value for " + key + " is empty");
+    }
+    return values;
+}
+
+std::string formatAngleToken(double angle_deg) {
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(6) << angle_deg;
+    std::string token = oss.str();
+    while (!token.empty() && token.back() == '0') {
+        token.pop_back();
+    }
+    if (!token.empty() && token.back() == '.') {
+        token.pop_back();
+    }
+    if (token.empty()) {
+        token = "0";
+    }
+    return token;
+}
+
+std::string expandAnglePattern(const std::string& pattern, double angle_deg) {
+    const std::string token = "{angle}";
+    std::string path = pattern;
+    auto pos = path.find(token);
+    if (pos == std::string::npos) {
+        throw std::runtime_error("mirror.series_csv_pattern must contain {angle}");
+    }
+    path.replace(pos, token.size(), formatAngleToken(angle_deg));
+    return path;
+}
+
+struct Raw1229FacetState {
+    int cell_index = 0;
+    int ring_index = 0;
+    Vec3 center;
+    Vec3 normal;
+};
+
+struct SeriesFacetState {
+    int id = -1;
+    int cell_index = -1;
+    int ring_index = -1;
+    Vec3 center;
+    Vec3 normal;
+    bool has_surface_type = false;
+    SurfaceType surface_type = SurfaceType::Spherical;
+    bool has_radius_of_curvature = false;
+    double radius_of_curvature = 16.0;
+    bool has_aperture_shape = false;
+    ApertureShape aperture_shape = ApertureShape::Hexagon;
+    bool has_size1 = false;
+    double size1 = 0.8;
+    bool has_size2 = false;
+    double size2 = 0.0;
+    bool has_aperture_rotation = false;
+    double aperture_rotation_rad = 0.0;
+};
+
+std::vector<Raw1229FacetState> readRaw1229FacetStates(const std::string& path, bool swap_xy) {
+    std::ifstream ifs(path);
+    if (!ifs) {
+        throw std::runtime_error("failed to open raw 1229 mirror file: " + path);
+    }
+
+    std::vector<Raw1229FacetState> states;
+    std::string line;
+    int line_no = 0;
+    while (std::getline(ifs, line)) {
+        ++line_no;
+        line = trim(line);
+        if (line.empty()) {
+            continue;
+        }
+
+        std::stringstream ss(line);
+        std::string cell;
+        std::vector<double> values;
+        while (std::getline(ss, cell, ',')) {
+            cell = trim(cell);
+            if (cell.empty()) {
+                throw std::runtime_error("raw 1229 file has empty cell at line " +
+                                         std::to_string(line_no));
+            }
+            values.push_back(std::stod(cell));
+        }
+
+        if (values.size() != 8) {
+            throw std::runtime_error("raw 1229 file line " + std::to_string(line_no) +
+                                     " expected 8 columns, got " +
+                                     std::to_string(values.size()));
+        }
+
+        Raw1229FacetState state;
+        state.cell_index = static_cast<int>(std::lround(values[0]));
+        state.ring_index = static_cast<int>(std::lround(values[1]));
+        state.center = {values[2] * 0.001, values[3] * 0.001, values[4] * 0.001};
+        Vec3 curvature_center = {values[5] * 0.001, values[6] * 0.001, values[7] * 0.001};
+
+        if (swap_xy) {
+            std::swap(state.center.x, state.center.y);
+            std::swap(curvature_center.x, curvature_center.y);
+        }
+
+        state.normal = (curvature_center - state.center).normalized();
+        states.push_back(state);
+    }
+
+    if (states.empty()) {
+        throw std::runtime_error("raw 1229 mirror file is empty: " + path);
+    }
+    return states;
+}
+
+std::vector<std::string> splitCsvCells(const std::string& line) {
+    std::stringstream ss(line);
+    std::string cell;
+    std::vector<std::string> cells;
+    while (std::getline(ss, cell, ',')) {
+        cells.push_back(trim(cell));
+    }
+    return cells;
+}
+
+int headerIndex(const std::map<std::string, int>& header, const std::string& key)
+{
+    auto it = header.find(lowerCopy(key));
+    return it == header.end() ? -1 : it->second;
+}
+
+std::string getOptionalCell(const std::vector<std::string>& cells,
+                            const std::map<std::string, int>& header,
+                            const std::string& key)
+{
+    int idx = headerIndex(header, key);
+    if (idx < 0 || static_cast<std::size_t>(idx) >= cells.size()) {
+        return "";
+    }
+    return trim(cells[idx]);
+}
+
+std::string getRequiredCell(const std::vector<std::string>& cells,
+                            const std::map<std::string, int>& header,
+                            const std::string& key)
+{
+    std::string value = getOptionalCell(cells, header, key);
+    if (value.empty()) {
+        throw std::runtime_error("missing required CSV column: " + key);
+    }
+    return value;
+}
+
+CameraGeometry readCameraCsv(const std::string& path)
+{
+    std::ifstream ifs(path);
+    if (!ifs) {
+        throw std::runtime_error("failed to open camera CSV: " + path);
+    }
+
+    std::string line;
+    if (!std::getline(ifs, line)) {
+        throw std::runtime_error("camera CSV is empty: " + path);
+    }
+
+    auto header_cells = splitCsvCells(line);
+    std::map<std::string, int> header;
+    for (int i = 0; i < static_cast<int>(header_cells.size()); ++i) {
+        header[lowerCopy(header_cells[i])] = i;
+    }
+
+    CameraGeometry camera;
+    int line_no = 1;
+    while (std::getline(ifs, line)) {
+        ++line_no;
+        if (trim(line).empty()) {
+            continue;
+        }
+        auto cells = splitCsvCells(line);
+
+        CameraPixel pixel;
+        pixel.id = std::stoi(getRequiredCell(cells, header, "id"));
+        const std::string x_text = getOptionalCell(cells, header, "x_m").empty()
+            ? getRequiredCell(cells, header, "center_x")
+            : getOptionalCell(cells, header, "x_m");
+        const std::string y_text = getOptionalCell(cells, header, "y_m").empty()
+            ? getRequiredCell(cells, header, "center_y")
+            : getOptionalCell(cells, header, "y_m");
+        pixel.center = {std::stod(x_text), std::stod(y_text), 0.0};
+
+        const std::string shape = getOptionalCell(cells, header, "shape");
+        pixel.shape = shape.empty() ? PixelShape::Hexagonal : parsePixelShape(shape);
+
+        const std::string size = getOptionalCell(cells, header, "size_m");
+        if (size.empty()) {
+            throw std::runtime_error("camera CSV line " + std::to_string(line_no) +
+                                     " missing size_m");
+        }
+        pixel.size = std::stod(size);
+        camera.addPixel(pixel);
+    }
+
+    if (camera.empty()) {
+        throw std::runtime_error("camera CSV has no data rows: " + path);
+    }
+    return camera;
+}
+
+std::vector<std::pair<double, double>> readCollectorReflectivityCsv(const std::string& path)
+{
+    std::ifstream ifs(path);
+    if (!ifs) {
+        throw std::runtime_error("failed to open collector reflectivity CSV: " + path);
+    }
+
+    std::string line;
+    if (!std::getline(ifs, line)) {
+        throw std::runtime_error("collector reflectivity CSV is empty: " + path);
+    }
+
+    auto header_cells = splitCsvCells(line);
+    std::map<std::string, int> header;
+    for (int i = 0; i < static_cast<int>(header_cells.size()); ++i) {
+        header[lowerCopy(header_cells[i])] = i;
+    }
+
+    std::vector<std::pair<double, double>> points;
+    int line_no = 1;
+    while (std::getline(ifs, line)) {
+        ++line_no;
+        if (trim(line).empty()) {
+            continue;
+        }
+        auto cells = splitCsvCells(line);
+        std::string theta = getOptionalCell(cells, header, "theta_deg");
+        if (theta.empty()) theta = getOptionalCell(cells, header, "angle_deg");
+        if (theta.empty()) theta = getOptionalCell(cells, header, "incidence_angle_deg");
+
+        std::string reflectivity = getOptionalCell(cells, header, "reflectivity");
+        if (reflectivity.empty()) reflectivity = getOptionalCell(cells, header, "efficiency");
+
+        if (theta.empty() || reflectivity.empty()) {
+            throw std::runtime_error(
+                "collector reflectivity CSV line " + std::to_string(line_no) +
+                " must provide theta_deg/angle_deg and reflectivity/efficiency");
+        }
+        points.emplace_back(std::stod(theta), std::stod(reflectivity));
+    }
+
+    if (points.empty()) {
+        throw std::runtime_error("collector reflectivity CSV has no data rows: " + path);
+    }
+    return points;
+}
+
+CameraGeometry makeGeneratedCamera(const CameraConfig& cfg)
+{
+    if (cfg.radius_m <= 0.0 || cfg.pixel_size_m <= 0.0 || cfg.pixel_pitch_m <= 0.0) {
+        throw std::runtime_error("camera radius, pixel_size_m, and pixel_pitch_m must be > 0");
+    }
+
+    CameraGeometry camera;
+    const PixelShape shape = parsePixelShape(cfg.pixel_shape);
+    const std::string mode = lowerCopy(trim(cfg.mode));
+    int id = 0;
+
+    if (mode == "square_grid" || mode == "grid") {
+        int n = static_cast<int>(std::ceil(cfg.radius_m / cfg.pixel_pitch_m));
+        for (int iy = -n; iy <= n; ++iy) {
+            for (int ix = -n; ix <= n; ++ix) {
+                double x = ix * cfg.pixel_pitch_m;
+                double y = iy * cfg.pixel_pitch_m;
+                if (x * x + y * y > cfg.radius_m * cfg.radius_m + 1e-14) {
+                    continue;
+                }
+                CameraPixel p;
+                p.id = id++;
+                p.center = {x, y, 0.0};
+                p.shape = shape;
+                p.size = cfg.pixel_size_m;
+                camera.addPixel(p);
+            }
+        }
+        return camera;
+    }
+
+    if (mode == "hex_grid" || mode == "generated") {
+        int n = static_cast<int>(std::ceil(cfg.radius_m / cfg.pixel_pitch_m)) + 2;
+        const double y_step = cfg.pixel_pitch_m * std::sqrt(3.0) * 0.5;
+        for (int r = -n; r <= n; ++r) {
+            for (int q = -n; q <= n; ++q) {
+                double x = cfg.pixel_pitch_m * (static_cast<double>(q) + 0.5 * r);
+                double y = y_step * r;
+                if (x * x + y * y > cfg.radius_m * cfg.radius_m + 1e-14) {
+                    continue;
+                }
+                CameraPixel p;
+                p.id = id++;
+                p.center = {x, y, 0.0};
+                p.shape = shape;
+                p.size = cfg.pixel_size_m;
+                camera.addPixel(p);
+            }
+        }
+        return camera;
+    }
+
+    throw std::runtime_error("unsupported camera.mode: " + cfg.mode);
+}
+
+std::map<double, std::vector<SeriesFacetState>>
+readElevationSeriesCsv(const std::string& path)
+{
+    std::ifstream ifs(path);
+    if (!ifs) {
+        throw std::runtime_error("failed to open elevation-series CSV: " + path);
+    }
+
+    std::string line;
+    if (!std::getline(ifs, line)) {
+        throw std::runtime_error("elevation-series CSV is empty: " + path);
+    }
+
+    auto header_cells = splitCsvCells(line);
+    std::map<std::string, int> header;
+    for (int i = 0; i < static_cast<int>(header_cells.size()); ++i) {
+        header[lowerCopy(header_cells[i])] = i;
+    }
+
+    std::map<double, std::vector<SeriesFacetState>> by_angle;
+    while (std::getline(ifs, line)) {
+        line = trim(line);
+        if (line.empty()) {
+            continue;
+        }
+        auto cells = splitCsvCells(line);
+
+        SeriesFacetState state;
+        state.id = std::stoi(getRequiredCell(cells, header, "id"));
+        const double elevation_deg = std::stod(getRequiredCell(cells, header, "elevation_deg"));
+        state.center = parseVec3(
+            getRequiredCell(cells, header, "center_x") + "," +
+            getRequiredCell(cells, header, "center_y") + "," +
+            getRequiredCell(cells, header, "center_z"),
+            "series center");
+        state.normal = parseVec3(
+            getRequiredCell(cells, header, "normal_x") + "," +
+            getRequiredCell(cells, header, "normal_y") + "," +
+            getRequiredCell(cells, header, "normal_z"),
+            "series normal").normalized();
+
+        const std::string cell_index = getOptionalCell(cells, header, "cell_index");
+        const std::string ring_index = getOptionalCell(cells, header, "ring_index");
+        if (!cell_index.empty()) state.cell_index = std::stoi(cell_index);
+        if (!ring_index.empty()) state.ring_index = std::stoi(ring_index);
+
+        const std::string surface_type = getOptionalCell(cells, header, "surface_type");
+        if (!surface_type.empty()) {
+            state.has_surface_type = true;
+            state.surface_type = parseSurfaceType(surface_type);
+        }
+        const std::string radius = getOptionalCell(cells, header, "radius_of_curvature");
+        if (!radius.empty()) {
+            state.has_radius_of_curvature = true;
+            state.radius_of_curvature = std::stod(radius);
+        }
+        const std::string aperture_shape = getOptionalCell(cells, header, "aperture_shape");
+        if (!aperture_shape.empty()) {
+            state.has_aperture_shape = true;
+            state.aperture_shape = parseApertureShape(aperture_shape);
+        }
+        const std::string size1 = getOptionalCell(cells, header, "size1");
+        if (!size1.empty()) {
+            state.has_size1 = true;
+            state.size1 = std::stod(size1);
+        }
+        const std::string size2 = getOptionalCell(cells, header, "size2");
+        if (!size2.empty()) {
+            state.has_size2 = true;
+            state.size2 = std::stod(size2);
+        }
+        const std::string rotation = getOptionalCell(cells, header, "aperture_rotation_rad");
+        if (!rotation.empty()) {
+            state.has_aperture_rotation = true;
+            state.aperture_rotation_rad = std::stod(rotation);
+        }
+
+        by_angle[elevation_deg].push_back(state);
+    }
+
+    if (by_angle.empty()) {
+        throw std::runtime_error("elevation-series CSV has no data rows: " + path);
+    }
+
+    for (auto& kv : by_angle) {
+        auto& states = kv.second;
+        std::sort(states.begin(), states.end(), [](const SeriesFacetState& a, const SeriesFacetState& b) {
+            return a.id < b.id;
+        });
+    }
+    return by_angle;
+}
+
+Vec3 slerpUnitVectors(const Vec3& a_in, const Vec3& b_in, double t) {
+    Vec3 a = a_in.normalized();
+    Vec3 b = b_in.normalized();
+    double dot = std::clamp(a.dot(b), -1.0, 1.0);
+    if (dot > 0.999999) {
+        return (a * (1.0 - t) + b * t).normalized();
+    }
+    if (dot < -0.999999) {
+        return (a * (1.0 - t) - b * t).normalized();
+    }
+    double theta = std::acos(dot);
+    double s = std::sin(theta);
+    return (a * (std::sin((1.0 - t) * theta) / s) +
+            b * (std::sin(t * theta) / s)).normalized();
+}
+
+std::vector<MirrorFacet> buildElevationSeriesFacets(const std::map<std::string, std::string>& cfg) {
+    const std::string format = lowerCopy(getString(cfg, "mirror.series_format", "raw1229"));
+    if (format != "raw1229" && format != "facet_csv" && format != "csv") {
+        throw std::runtime_error("unsupported mirror.series_format: " + format);
+    }
+    const double elevation_deg =
+        getDouble(cfg, "mirror.series_elevation_deg",
+                  getDouble(cfg, "telescope.pointing_el_deg", 90.0));
+
+    SurfaceType surface_type =
+        parseSurfaceType(getString(cfg, "mirror.surface_type", "Spherical"));
+    ApertureShape aperture_shape =
+        parseApertureShape(getString(cfg, "mirror.aperture_shape", "Hexagon"));
+    const double radius_of_curvature =
+        getDouble(cfg, "mirror.radius_of_curvature", 16.0);
+    const double size1 = getDouble(cfg, "mirror.size1", 0.8);
+    const double size2 = getDouble(cfg, "mirror.size2", 0.0);
+    const double aperture_rotation_rad =
+        getDouble(cfg, "mirror.aperture_rotation_rad", 0.0);
+
+    if (format == "raw1229") {
+        const std::string pattern = getString(cfg, "mirror.series_csv_pattern", "");
+        if (pattern.empty()) {
+            throw std::runtime_error("mirror.series_csv_pattern is required when mirror.series_format=raw1229");
+        }
+
+        const std::vector<double> angles_deg =
+            parseDoubleList(getString(cfg, "mirror.series_angles_deg", ""), "mirror.series_angles_deg");
+        const bool swap_xy = getBool(cfg, "mirror.series_swap_xy", true);
+
+        std::vector<double> sorted_angles = angles_deg;
+        std::sort(sorted_angles.begin(), sorted_angles.end());
+
+        double lower_angle = sorted_angles.front();
+        double upper_angle = sorted_angles.back();
+        for (double angle : sorted_angles) {
+            if (angle <= elevation_deg) lower_angle = angle;
+            if (angle >= elevation_deg) {
+                upper_angle = angle;
+                break;
+            }
+        }
+        if (elevation_deg <= sorted_angles.front()) {
+            lower_angle = upper_angle = sorted_angles.front();
+        } else if (elevation_deg >= sorted_angles.back()) {
+            lower_angle = upper_angle = sorted_angles.back();
+        }
+
+        const auto lower_states = readRaw1229FacetStates(expandAnglePattern(pattern, lower_angle), swap_xy);
+        const auto upper_states = (upper_angle == lower_angle)
+            ? lower_states
+            : readRaw1229FacetStates(expandAnglePattern(pattern, upper_angle), swap_xy);
+
+        if (lower_states.size() != upper_states.size()) {
+            throw std::runtime_error("mirror elevation series files have mismatched facet counts");
+        }
+
+        const double t = (upper_angle == lower_angle)
+            ? 0.0
+            : (elevation_deg - lower_angle) / (upper_angle - lower_angle);
+
+        std::vector<MirrorFacet> facets;
+        facets.reserve(lower_states.size());
+        for (std::size_t i = 0; i < lower_states.size(); ++i) {
+            const auto& lo = lower_states[i];
+            const auto& hi = upper_states[i];
+            if (lo.cell_index != hi.cell_index || lo.ring_index != hi.ring_index) {
+                throw std::runtime_error("mirror elevation series files have inconsistent facet ordering");
+            }
+
+            MirrorFacet facet;
+            facet.id = static_cast<int>(i);
+            facet.center = lo.center * (1.0 - t) + hi.center * t;
+            facet.normal = slerpUnitVectors(lo.normal, hi.normal, t);
+            facet.surface_type = surface_type;
+            facet.radius_of_curvature = radius_of_curvature;
+            facet.aperture_shape = aperture_shape;
+            facet.size1 = size1;
+            facet.size2 = size2;
+            facet.aperture_rotation_rad = aperture_rotation_rad;
+            facet.reflectivity_scale = 1.0;
+            facets.push_back(facet);
+        }
+        return facets;
+    }
+
+    const std::string csv_path = getString(cfg, "mirror.series_csv_path", "");
+    if (csv_path.empty()) {
+        throw std::runtime_error("mirror.series_csv_path is required when mirror.series_format=facet_csv");
+    }
+    auto by_angle = readElevationSeriesCsv(csv_path);
+    std::vector<double> sorted_angles;
+    for (const auto& kv : by_angle) sorted_angles.push_back(kv.first);
+
+    double lower_angle = sorted_angles.front();
+    double upper_angle = sorted_angles.back();
+    for (double angle : sorted_angles) {
+        if (angle <= elevation_deg) lower_angle = angle;
+        if (angle >= elevation_deg) {
+            upper_angle = angle;
+            break;
+        }
+    }
+    if (elevation_deg <= sorted_angles.front()) {
+        lower_angle = upper_angle = sorted_angles.front();
+    } else if (elevation_deg >= sorted_angles.back()) {
+        lower_angle = upper_angle = sorted_angles.back();
+    }
+
+    const auto& lower_states = by_angle.at(lower_angle);
+    const auto& upper_states = by_angle.at(upper_angle);
+    if (lower_states.size() != upper_states.size()) {
+        throw std::runtime_error("mirror series CSV has mismatched facet counts between elevations");
+    }
+    const double t = (upper_angle == lower_angle)
+        ? 0.0
+        : (elevation_deg - lower_angle) / (upper_angle - lower_angle);
+
+    std::vector<MirrorFacet> facets;
+    facets.reserve(lower_states.size());
+    for (std::size_t i = 0; i < lower_states.size(); ++i) {
+        const auto& lo = lower_states[i];
+        const auto& hi = upper_states[i];
+        if (lo.id != hi.id) {
+            throw std::runtime_error("mirror series CSV has inconsistent facet ordering");
+        }
+
+        MirrorFacet facet;
+        facet.id = lo.id;
+        facet.center = lo.center * (1.0 - t) + hi.center * t;
+        facet.normal = slerpUnitVectors(lo.normal, hi.normal, t);
+        facet.surface_type = lo.has_surface_type ? lo.surface_type : surface_type;
+        facet.radius_of_curvature = lo.has_radius_of_curvature ? lo.radius_of_curvature : radius_of_curvature;
+        facet.aperture_shape = lo.has_aperture_shape ? lo.aperture_shape : aperture_shape;
+        facet.size1 = lo.has_size1 ? lo.size1 : size1;
+        facet.size2 = lo.has_size2 ? lo.size2 : size2;
+        facet.aperture_rotation_rad =
+            lo.has_aperture_rotation ? lo.aperture_rotation_rad : aperture_rotation_rad;
+        facet.reflectivity_scale = 1.0;
+        facets.push_back(facet);
+    }
+    return facets;
+}
+
+std::map<std::string, std::string> loadScopedMirrorConfig(const std::string& path) {
+    auto cfg = readKeyValueConfig(path);
+    std::map<std::string, std::string> scoped;
+    for (const auto& kv : cfg) {
+        scoped[scopedComponentKey(kv.first, "mirror.")] = kv.second;
+    }
+    return scoped;
+}
+
+Vec3 perturbVectorOnSphere(const Vec3& direction,
+                           double sigma_rad,
+                           std::mt19937_64& rng)
+{
+    if (sigma_rad <= 0.0) {
+        return direction.normalized();
+    }
+    Vec3 w = direction.normalized();
+    Vec3 ref = (std::abs(w.z) < 0.9) ? Vec3{0.0, 0.0, 1.0}
+                                     : Vec3{0.0, 1.0, 0.0};
+    Vec3 u = ref.cross(w).normalized();
+    Vec3 v = w.cross(u).normalized();
+    std::uniform_real_distribution<double> uniform(0.0, 1.0);
+    double theta = sigma_rad * std::sqrt(-2.0 * std::log(std::max(1e-16, 1.0 - uniform(rng))));
+    theta = std::min(theta, 3.14159265358979323846);
+    double phi = 2.0 * 3.14159265358979323846 * uniform(rng);
+    return (w * std::cos(theta) +
+            u * (std::sin(theta) * std::cos(phi)) +
+            v * (std::sin(theta) * std::sin(phi))).normalized();
+}
+
+std::vector<MirrorFacet> buildFacetsFromConfig(const std::map<std::string, std::string>& cfg) {
+    std::string mode = lowerCopy(getString(cfg, "mirror.mode", "generated"));
+    std::vector<MirrorFacet> facets;
+
+    if (mode == "generated" || mode == "auto") {
+        DishPrescription dish;
+        dish.type = parseDishType(getString(cfg, "dish.type", "DaviesCotton"));
+        dish.telescope_focal_length = getDouble(cfg, "dish.telescope_focal_length", 5.0);
+        dish.dish_shape_length = getDouble(cfg, "dish.dish_shape_length",
+                                           dish.telescope_focal_length);
+        dish.dish_radius = getDouble(cfg, "dish.dish_radius", 2.0);
+        dish.vertex = getVec3(cfg, "dish.vertex", {0.0, 0.0, 0.0});
+        dish.optical_axis = getVec3(cfg, "dish.optical_axis", {0.0, 0.0, 1.0});
+
+        FacetGridConfig grid;
+        grid.facet_spacing = getDouble(cfg, "facet.spacing", 0.55);
+        grid.facet_radius = getDouble(cfg, "facet.radius", 0.22);
+        grid.aperture_shape = parseApertureShape(getString(cfg, "facet.aperture_shape", "Circular"));
+        grid.surface_type = parseSurfaceType(getString(cfg, "facet.surface_type", "Spherical"));
+
+        facets = FacetFactory::buildFacets(dish, grid);
+    } else if (mode == "csv" || mode == "imported") {
+        std::string path = getString(cfg, "mirror.csv_path", "");
+        if (path.empty()) {
+            throw std::runtime_error("mirror.csv_path is required when mirror.mode=csv");
+        }
+        std::string error;
+        if (!readMirrorFacetsCSV(path, facets, &error)) {
+            throw std::runtime_error("failed to read mirror CSV: " + error);
+        }
+    } else if (mode == "elevation_series" || mode == "series") {
+        facets = buildElevationSeriesFacets(cfg);
+    } else {
+        throw std::runtime_error("unsupported mirror.mode: " + mode);
+    }
+
+    std::string error;
+    if (!validateMirrorFacets(facets, &error)) {
+        throw std::runtime_error("invalid mirror facets: " + error);
+    }
+    return facets;
+}
+
+SyntheticPhotonConfig buildSourceConfig(const std::map<std::string, std::string>& cfg) {
+    SyntheticPhotonConfig source;
+    const std::string mode_text = getString(cfg, "source.mode", "ParallelBeam");
+    if (!isPhotonCsvMode(mode_text)) {
+        if (!isEventIOMode(mode_text)) {
+            source.mode = parseSyntheticMode(mode_text);
+        }
+    }
+    source.n_bunches = getInt(cfg, "source.n_bunches", source.n_bunches);
+    source.multiplicity = getDouble(cfg, "source.multiplicity", source.multiplicity);
+    source.wavelength_nm = getDouble(cfg, "source.wavelength_nm", source.wavelength_nm);
+    source.time_ns = getDouble(cfg, "source.time_ns", source.time_ns);
+    source.photon_weight = getDouble(cfg, "source.photon_weight", source.photon_weight);
+
+    source.source_plane_z = getDouble(cfg, "source.source_plane_z", source.source_plane_z);
+    source.beam_radius_m = getDouble(cfg, "source.beam_radius_m", source.beam_radius_m);
+    source.beam_direction = getVec3(cfg, "source.beam_direction", source.beam_direction);
+
+    source.source_position = getVec3(cfg, "source.source_position", source.source_position);
+    source.aperture_z = getDouble(cfg, "source.aperture_z", source.aperture_z);
+    source.aperture_radius_m = getDouble(cfg, "source.aperture_radius_m",
+                                         source.aperture_radius_m);
+
+    auto theta_it = cfg.find("source.beam_theta_deg");
+    auto phi_it = cfg.find("source.beam_phi_deg");
+    if (theta_it != cfg.end() || phi_it != cfg.end()) {
+        double theta_deg = getDouble(cfg, "source.beam_theta_deg", 0.0);
+        double phi_deg = getDouble(cfg, "source.beam_phi_deg", 0.0);
+        double theta = theta_deg * DEG_TO_RAD;
+        double phi = phi_deg * DEG_TO_RAD;
+        source.beam_direction = {
+            std::sin(theta) * std::cos(phi),
+            std::sin(theta) * std::sin(phi),
+            -std::cos(theta)
+        };
+    }
+
+    source.event_id = getInt(cfg, "source.event_id", source.event_id);
+    source.telescope_id = getInt(cfg, "source.telescope_id", source.telescope_id);
+    source.random_seed = getUInt64(cfg, "source.random_seed", source.random_seed);
+    return source;
+}
+
+SourceRuntimeConfig buildSourceRuntimeConfig(const std::map<std::string, std::string>& cfg) {
+    SourceRuntimeConfig runtime;
+    const std::string mode_text = getString(cfg, "source.mode", "ParallelBeam");
+    runtime.use_photon_csv = isPhotonCsvMode(mode_text);
+    runtime.use_eventio = isEventIOMode(mode_text);
+    runtime.csv_path = getString(cfg, "source.csv_path", "");
+    runtime.eventio_path = getString(cfg, "source.eventio_path", "");
+    runtime.event_id_mode = getString(cfg, "source.event_id_mode", "event");
+    runtime.eventio_coordinate_frame =
+        getString(cfg, "source.eventio_coordinate_frame",
+                  runtime.use_eventio ? "corsika_iact" : "telescope_local");
+    runtime.use_eventio_telescope_position =
+        getBool(cfg, "source.use_eventio_telescope_position", true);
+    runtime.csv_local_telescope_frame =
+        getBool(cfg, "source.local_telescope_frame", true);
+    const std::string filter_value = getString(cfg, "source.filter_telescope_id", "");
+    if (!trim(filter_value).empty() && !isDisabledText(filter_value)) {
+        runtime.filter_telescope_id = true;
+        runtime.selected_telescope_id = std::stoi(filter_value);
+    }
+    const std::string event_filter_value = getString(cfg, "source.filter_event_id", "");
+    if (!trim(event_filter_value).empty() && !isDisabledText(event_filter_value)) {
+        runtime.filter_event_id = true;
+        runtime.selected_event_id = std::stoi(event_filter_value);
+    }
+    const std::string shower_filter_value = getString(cfg, "source.filter_shower_event_id", "");
+    if (!trim(shower_filter_value).empty() && !isDisabledText(shower_filter_value)) {
+        runtime.filter_shower_event_id = true;
+        runtime.selected_shower_event_id = std::stoi(shower_filter_value);
+    }
+    runtime.max_shower_events =
+        getInt(cfg, "source.max_shower_events",
+               getInt(cfg, "source.max_events", runtime.max_shower_events));
+    return runtime;
+}
+
+#ifdef LACT_HAS_HESSIO
+EventIOPhotonConfig buildEventIOPhotonConfig(const std::map<std::string, std::string>& cfg,
+                                             const SyntheticPhotonConfig& source_cfg,
+                                             const SourceRuntimeConfig& runtime_cfg) {
+    EventIOPhotonConfig eventio;
+    eventio.path = runtime_cfg.eventio_path;
+    eventio.local_telescope_frame = runtime_cfg.csv_local_telescope_frame;
+    eventio.event_id_mode = runtime_cfg.event_id_mode;
+    eventio.default_wavelength_nm = source_cfg.wavelength_nm;
+    eventio.default_time_ns = source_cfg.time_ns;
+    eventio.default_weight = source_cfg.photon_weight;
+    eventio.default_multiplicity = source_cfg.multiplicity;
+    eventio.default_event_id = source_cfg.event_id;
+    eventio.default_telescope_id = source_cfg.telescope_id;
+    eventio.filter_telescope_id = runtime_cfg.filter_telescope_id;
+    eventio.selected_telescope_id = runtime_cfg.selected_telescope_id;
+    eventio.filter_event_id = runtime_cfg.filter_event_id;
+    eventio.selected_event_id = runtime_cfg.selected_event_id;
+    eventio.filter_shower_event_id = runtime_cfg.filter_shower_event_id;
+    eventio.selected_shower_event_id = runtime_cfg.selected_shower_event_id;
+    eventio.max_shower_events = runtime_cfg.max_shower_events;
+    return eventio;
+}
+
+void printEventIOMetadata(const EventIOMetadata& metadata,
+                          const SourceRuntimeConfig& runtime_cfg) {
+    printSection("EventIO metadata");
+    printField("input_lines", intToString(metadata.input_lines.size()));
+    for (std::size_t i = 0; i < metadata.input_lines.size() && i < 12; ++i) {
+        printField("input[" + intToString(i) + "]", metadata.input_lines[i]);
+    }
+    if (metadata.input_lines.size() > 12) {
+        printField("input_more", intToString(metadata.input_lines.size() - 12));
+    }
+
+    printField("telescopes", intToString(metadata.telescopes.size()));
+    for (const auto& tel : metadata.telescopes) {
+        std::ostringstream label;
+        label << "tel[" << tel.telescope_id << "]";
+        std::ostringstream value;
+        value << "pos_m=(" << doubleToString(tel.x_m) << ", "
+              << doubleToString(tel.y_m) << ", "
+              << doubleToString(tel.z_m) << "), radius_m="
+              << doubleToString(tel.radius_m);
+        printField(label.str(), value.str());
+    }
+
+    if (metadata.selected_event) {
+        const auto& event = *metadata.selected_event;
+        printField("selected_shower_event",
+                   intToString(static_cast<std::uint64_t>(event.shower_event_id)));
+        printField("primary_type",
+                   intToString(static_cast<std::uint64_t>(event.primary_type)));
+        printField("energy_gev", doubleToString(event.energy_gev));
+        printField("theta_deg", doubleToString(event.theta_deg));
+        printField("phi_deg", doubleToString(event.phi_deg));
+        printField("az_north_to_east_deg",
+                   doubleToString(event.azimuth_north_to_east_deg));
+        printField("core_position_m",
+                   "(" + doubleToString(event.core_x_m) + ", " +
+                       doubleToString(event.core_y_m) + ")");
+        printField("array_rotation_deg", doubleToString(event.array_rotation_deg));
+    } else {
+        printField("selected_event", "not found");
+    }
+
+    if (metadata.selected_event_offsets) {
+        const auto& offsets = *metadata.selected_event_offsets;
+        printField("selected_array_id",
+                   intToString(static_cast<std::uint64_t>(metadata.selected_array_id)));
+        printField("array_offsets",
+                   intToString(static_cast<std::uint64_t>(offsets.x_m.size())));
+        printField("array_time_offset_ns", doubleToString(offsets.time_offset_ns));
+        for (std::size_t i = 0; i < offsets.x_m.size() && i < 20; ++i) {
+            std::ostringstream label;
+            label << "array[" << i << "]";
+            std::ostringstream value;
+            value << "offset_m=(" << doubleToString(offsets.x_m[i]) << ", "
+                  << doubleToString(offsets.y_m[i]) << ")";
+            if (i < offsets.weight.size()) {
+                value << ", weight=" << doubleToString(offsets.weight[i]);
+            }
+            printField(label.str(), value.str());
+        }
+    } else {
+        printField("array_offsets", "not found");
+    }
+
+    if (runtime_cfg.use_eventio_telescope_position) {
+        printField("position_source", "EventIO telescope table");
+    } else {
+        printField("position_source", "telescope config");
+    }
+}
+#endif
+
+
+PhotonCsvConfig buildPhotonCsvConfig(const std::map<std::string, std::string>& cfg,
+                                     const SyntheticPhotonConfig& source_cfg,
+                                     const SourceRuntimeConfig& runtime_cfg) {
+    PhotonCsvConfig csv;
+    csv.csv_path = runtime_cfg.csv_path;
+    csv.local_telescope_frame = runtime_cfg.csv_local_telescope_frame;
+    csv.default_wavelength_nm = source_cfg.wavelength_nm;
+    csv.default_time_ns = source_cfg.time_ns;
+    csv.default_weight = source_cfg.photon_weight;
+    csv.default_multiplicity = source_cfg.multiplicity;
+    csv.default_event_id = source_cfg.event_id;
+    csv.default_telescope_id = source_cfg.telescope_id;
+    csv.filter_telescope_id = runtime_cfg.filter_telescope_id;
+    csv.selected_telescope_id = runtime_cfg.selected_telescope_id;
+    csv.filter_event_id = runtime_cfg.filter_event_id;
+    csv.selected_event_id = runtime_cfg.selected_event_id;
+    return csv;
+}
+
+OutputPlane buildOutputPlane(const std::map<std::string, std::string>& cfg) {
+    OutputPlane plane;
+    plane.point = getVec3(cfg, "output.plane_point", {0.0, 0.0, 5.0});
+    plane.normal = getVec3(cfg, "output.plane_normal", {0.0, 0.0, 1.0});
+    plane.buildLocalFrame();
+    const auto u_it = cfg.find("output.plane_u_axis");
+    const auto v_it = cfg.find("output.plane_v_axis");
+    if (u_it != cfg.end() || v_it != cfg.end()) {
+        if (u_it == cfg.end() || v_it == cfg.end()) {
+            throw std::runtime_error("output.plane_u_axis and output.plane_v_axis must be set together");
+        }
+        Vec3 u = parseVec3(u_it->second, "output.plane_u_axis").normalized();
+        Vec3 v = parseVec3(v_it->second, "output.plane_v_axis").normalized();
+        const double uv_dot = std::abs(u.dot(v));
+        const double un_dot = std::abs(u.dot(plane.normal));
+        const double vn_dot = std::abs(v.dot(plane.normal));
+        if (uv_dot > 1e-6 || un_dot > 1e-6 || vn_dot > 1e-6) {
+            throw std::runtime_error(
+                "output.plane_u_axis and output.plane_v_axis must be orthogonal to each other and to output.plane_normal");
+        }
+        plane.u_axis = u;
+        plane.v_axis = v;
+    }
+    return plane;
+}
+
+CameraConfig buildCameraConfig(const std::map<std::string, std::string>& cfg) {
+    CameraConfig camera;
+    camera.enabled = getBool(cfg, "camera.enabled", false);
+    camera.mode = getString(cfg, "camera.mode", camera.enabled ? "hex_grid" : "none");
+    camera.csv_path = getString(cfg, "camera.csv_path", "");
+    camera.pixel_shape = getString(cfg, "camera.pixel_shape", camera.pixel_shape);
+    camera.pixel_size_m = getDouble(cfg, "camera.pixel_size_m", camera.pixel_size_m);
+    camera.pixel_pitch_m = getDouble(cfg, "camera.pixel_pitch_m", camera.pixel_pitch_m);
+    camera.radius_m = getDouble(cfg, "camera.radius_m", camera.radius_m);
+    camera.collector = getString(cfg, "camera.collector", camera.collector);
+    camera.collector_material =
+        getString(cfg, "camera.collector_material", camera.collector_material);
+    camera.collector_reflectivity_csv =
+        getString(cfg, "camera.collector_reflectivity_csv", "");
+    camera.collector_entrance_size_m =
+        getDouble(cfg, "camera.collector_entrance_size_m",
+                  camera.collector_entrance_size_m);
+    camera.collector_exit_size_m =
+        getDouble(cfg, "camera.collector_exit_size_m",
+                  camera.collector_exit_size_m);
+    camera.collector_height_m =
+        getDouble(cfg, "camera.collector_height_m", camera.collector_height_m);
+    if (isDisabledText(camera.mode)) {
+        camera.enabled = false;
+    }
+    if (camera.enabled) {
+        if (!std::isfinite(camera.pixel_size_m) || camera.pixel_size_m <= 0.0) {
+            throw std::runtime_error("camera.pixel_size_m must be finite and > 0");
+        }
+        if (!std::isfinite(camera.pixel_pitch_m) || camera.pixel_pitch_m <= 0.0) {
+            throw std::runtime_error("camera.pixel_pitch_m must be finite and > 0");
+        }
+        if (!std::isfinite(camera.radius_m) || camera.radius_m <= 0.0) {
+            throw std::runtime_error("camera.radius_m must be finite and > 0");
+        }
+        if (!std::isfinite(camera.collector_entrance_size_m) ||
+            camera.collector_entrance_size_m < 0.0) {
+            throw std::runtime_error("camera.collector_entrance_size_m must be finite and >= 0");
+        }
+        if (!std::isfinite(camera.collector_exit_size_m) ||
+            camera.collector_exit_size_m <= 0.0) {
+            throw std::runtime_error("camera.collector_exit_size_m must be finite and > 0");
+        }
+        if (!std::isfinite(camera.collector_height_m) ||
+            camera.collector_height_m <= 0.0) {
+            throw std::runtime_error("camera.collector_height_m must be finite and > 0");
+        }
+    }
+    return camera;
+}
+
+SipmConfig buildSipmConfig(const std::map<std::string, std::string>& cfg) {
+    SipmConfig sipm;
+    sipm.size_m = getDouble(cfg, "sipm.size_m", sipm.size_m);
+    if (!std::isfinite(sipm.size_m) || sipm.size_m <= 0.0) {
+        throw std::runtime_error("sipm.size_m must be finite and > 0");
+    }
+    return sipm;
+}
+
+ElectronicsResponse::ElectronicsResponse(const ElectronicsConfig& cfg)
+    : cfg_(cfg)
+{
+    if (cfg_.pe_conversion.enabled && cfg_.pe_conversion.use_curve) {
+        pe_conversion_curve_.loadCsv(cfg_.pe_conversion.csv_path);
+    }
+}
+
+double ElectronicsResponse::peConversion(double wavelength_nm) const
+{
+    if (!cfg_.pe_conversion.enabled) {
+        return 1.0;
+    }
+    if (cfg_.pe_conversion.use_curve) {
+        return pe_conversion_curve_.evaluate(wavelength_nm);
+    }
+    return cfg_.pe_conversion.constant;
+}
+
+ElectronicsConfig buildElectronicsConfig(const std::map<std::string, std::string>& cfg) {
+    ElectronicsConfig electronics;
+    electronics.pe_conversion = parseEfficiencyFactor(cfg, "electronics.pe_conversion");
+    if (!electronics.pe_conversion.enabled) {
+        electronics.pe_conversion = parseEfficiencyFactor(cfg, "electronics.pde");
+    }
+    if (!electronics.pe_conversion.enabled) {
+        electronics.pe_conversion = parseEfficiencyFactor(cfg, "sipm.pe_conversion");
+    }
+    return electronics;
+}
+
+CameraGeometry buildCameraGeometry(const CameraConfig& cfg) {
+    if (!cfg.enabled) {
+        return CameraGeometry{};
+    }
+    const std::string mode = lowerCopy(trim(cfg.mode));
+    if (mode == "csv" || mode == "imported") {
+        if (cfg.csv_path.empty()) {
+            throw std::runtime_error("camera.csv_path is required when camera.mode=csv");
+        }
+        return readCameraCsv(cfg.csv_path);
+    }
+    return makeGeneratedCamera(cfg);
+}
+
+double cameraPixelSizeForCollector(const CameraConfig& cfg, const CameraGeometry& camera)
+{
+    if (cfg.collector_entrance_size_m > 0.0) {
+        return cfg.collector_entrance_size_m;
+    }
+    if (!camera.empty()) {
+        return camera.pixels().front().size;
+    }
+    return cfg.pixel_size_m;
+}
+
+std::unique_ptr<Cone::SquareCone> buildLightCollector(const CameraConfig& cfg,
+                                                      const CameraGeometry& camera)
+{
+    const std::string collector = lowerCopy(trim(cfg.collector));
+    if (isDisabledText(collector)) {
+        return nullptr;
+    }
+
+    // 这里仅把 output-plane 局部坐标转换为单个 square cone 的局部坐标。
+    std::unique_ptr<Cone::SquareCone> cone;
+    const double entrance_size_m = cameraPixelSizeForCollector(cfg, camera);
+    if (collector == "bezier" || collector == "square_cone_bezier") {
+        cone.reset(Cone::create_cone_bezier_surface(
+            entrance_size_m * 1000.0,
+            cfg.collector_exit_size_m * 1000.0,
+            cfg.collector_height_m * 1000.0,
+            0.0));
+    } else if (collector == "parabolic" || collector == "square_cone_parabolic") {
+        cone.reset(Cone::create_cone_parabolic_surface());
+    } else {
+        throw std::runtime_error("unsupported camera.collector: " + cfg.collector);
+    }
+
+    if (!isDisabledText(cfg.collector_reflectivity_csv)) {
+        cone->set_material(std::make_unique<Cone::TableReflectMaterial>(
+            readCollectorReflectivityCsv(cfg.collector_reflectivity_csv)));
+        return cone;
+    }
+
+    const std::string material = lowerCopy(trim(cfg.collector_material));
+    if (material == "true_reflect") {
+        cone->set_material(std::make_unique<Cone::TrueReflectMaterial>());
+    } else if (material == "ideal" || material == "mirror_reflect" || material == "mirror") {
+        cone->set_material(std::make_unique<Cone::MirrorReflectMaterial>());
+    } else {
+        throw std::runtime_error("unsupported camera.collector_material: " +
+                                 cfg.collector_material);
+    }
+    return cone;
+}
+
+const CameraPixel* findContainingPixel(const CameraGeometry& camera, double x, double y)
+{
+    const CameraPixel* best = nullptr;
+    double best_r2 = std::numeric_limits<double>::max();
+    for (const auto& pixel : camera.pixels()) {
+        if (!CameraGeometry::contains(pixel, x, y)) {
+            continue;
+        }
+        const double dx = x - pixel.center.x;
+        const double dy = y - pixel.center.y;
+        const double r2 = dx * dx + dy * dy;
+        if (r2 < best_r2) {
+            best_r2 = r2;
+            best = &pixel;
+        }
+    }
+    return best;
+}
+
+CollectorTraceResult traceLightCollector(const Cone::SquareCone& cone,
+                                         const OutputPlane& plane,
+                                         const OpticalSurfaceHit& hit,
+                                         const CameraPixel& pixel,
+                                         const SipmConfig& sipm)
+{
+    Cone::Position pos{
+        (hit.u_m - pixel.center.x) * 1000.0,
+        (hit.v_m - pixel.center.y) * 1000.0,
+        cone.height_ + cone.height_start_
+    };
+    Cone::DirectionVecter dir{
+        hit.out_dir.dot(plane.u_axis),
+        hit.out_dir.dot(plane.v_axis),
+        -std::abs(hit.out_dir.dot(plane.normal))
+    };
+    double intensity = 1.0;
+    auto [out_intensity, exits_collector, exit_pos, exit_dir, reflections] =
+        cone.ray_trace_impl(pos, dir, intensity);
+    const double sipm_half_mm = 0.5 * sipm.size_m * 1000.0;
+    const bool hits_sipm =
+        std::abs(exit_pos.x_) <= sipm_half_mm + 1e-9 &&
+        std::abs(exit_pos.y_) <= sipm_half_mm + 1e-9;
+
+    CollectorTraceResult result;
+    result.hit_sipm = exits_collector && hits_sipm && out_intensity > 0.0;
+    result.intensity = out_intensity;
+    result.reflections = reflections;
+    result.exit_position = exit_pos;
+    result.exit_direction = exit_dir;
+    return result;
+}
+
+void applyCameraResponse(const CameraGeometry& camera,
+                         const Cone::SquareCone* light_collector,
+                         const OutputPlane& plane,
+                         const SipmConfig& sipm,
+                         const ElectronicsResponse& electronics,
+                         OpticalSurfaceHit& hit)
+{
+    hit.camera_enabled = true;
+    hit.camera_x_m = hit.u_m;
+    hit.camera_y_m = hit.v_m;
+    const CameraPixel* pixel = findContainingPixel(camera, hit.camera_x_m, hit.camera_y_m);
+    hit.pixel_id = pixel ? pixel->id : -1;
+    hit.hit_camera = pixel != nullptr;
+
+    if (pixel && light_collector) {
+        hit.collector_enabled = true;
+        auto collector_result = traceLightCollector(*light_collector, plane, hit, *pixel, sipm);
+        hit.hit_collector = collector_result.hit_sipm;
+        hit.hit_camera = collector_result.hit_sipm;
+        hit.collector_reflections = collector_result.reflections;
+        hit.collector_intensity = collector_result.intensity;
+        hit.collector_exit_x_m = collector_result.exit_position.x_ * 0.001;
+        hit.collector_exit_y_m = collector_result.exit_position.y_ * 0.001;
+        hit.collector_exit_z_m = collector_result.exit_position.z_ * 0.001;
+        hit.collector_dir_u = collector_result.exit_direction.x_;
+        hit.collector_dir_v = collector_result.exit_direction.y_;
+        hit.collector_dir_w = collector_result.exit_direction.z_;
+        hit.relative_efficiency *= collector_result.intensity;
+    }
+
+    if (hit.hit_camera) {
+        hit.relative_efficiency *= electronics.peConversion(hit.wavelength_nm);
+    }
+    hit.accepted = hit.hit_camera && hit.relative_efficiency > 0.0;
+}
+
+void accumulatePixelHit(std::map<PixelKey, PixelAccumulator>& pixels,
+                        int event_id,
+                        int telescope_id,
+                        const OpticalSurfaceHit& hit)
+{
+    if (!hit.hit_camera || hit.pixel_id < 0) {
+        return;
+    }
+    const double signal = hit.weight * hit.relative_efficiency;
+    auto& acc = pixels[{event_id, telescope_id, hit.pixel_id}];
+    acc.event_id = event_id;
+    acc.telescope_id = telescope_id;
+    acc.pixel_id = hit.pixel_id;
+    acc.photon_count += 1;
+    acc.pe += signal;
+    acc.signal += signal;
+    acc.time_sum += signal * hit.time_ns;
+    acc.time2_sum += signal * hit.time_ns * hit.time_ns;
+}
+
+void writePixelCsv(const std::string& path,
+                   const std::map<PixelKey, PixelAccumulator>& pixels)
+{
+    const std::filesystem::path out_path(path);
+    if (out_path.has_parent_path()) {
+        std::filesystem::create_directories(out_path.parent_path());
+    }
+    std::ofstream ofs(path);
+    if (!ofs) {
+        throw std::runtime_error("failed to write pixel CSV: " + path);
+    }
+    ofs << std::setprecision(10);
+    ofs << "event_id,telescope_id,pixel_id,photon_count,pe,signal,"
+        << "time_mean_ns,time_rms_ns\n";
+    for (const auto& kv : pixels) {
+        const auto& p = kv.second;
+        const double mean = p.signal > 0.0 ? p.time_sum / p.signal : 0.0;
+        const double var = p.signal > 0.0
+            ? std::max(0.0, p.time2_sum / p.signal - mean * mean)
+            : 0.0;
+        ofs << p.event_id << ","
+            << p.telescope_id << ","
+            << p.pixel_id << ","
+            << p.photon_count << ","
+            << p.pe << ","
+            << p.signal << ","
+            << mean << ","
+            << std::sqrt(var) << "\n";
+    }
+}
+
+TelescopeConfig buildTelescopeConfig(const std::map<std::string, std::string>& cfg) {
+    TelescopeConfig telescope;
+    telescope.id = getInt(cfg, "telescope.id", telescope.id);
+    telescope.name = getString(cfg, "telescope.name", telescope.name);
+    telescope.position_m = getVec3(cfg, "telescope.position_m", telescope.position_m);
+    telescope.pointing_az_deg =
+        getDouble(cfg, "telescope.pointing_az_deg", telescope.pointing_az_deg);
+    telescope.pointing_el_deg =
+        getDouble(cfg, "telescope.pointing_el_deg", telescope.pointing_el_deg);
+    telescope.focal_length_m =
+        getDouble(cfg, "telescope.focal_length_m", telescope.focal_length_m);
+    telescope.coordinate_system =
+        getString(cfg, "telescope.coordinate_system", telescope.coordinate_system);
+
+    if (!std::isfinite(telescope.pointing_az_deg) ||
+        !std::isfinite(telescope.pointing_el_deg)) {
+        throw std::runtime_error("telescope pointing angles must be finite");
+    }
+    if (!std::isfinite(telescope.focal_length_m) || telescope.focal_length_m <= 0.0) {
+        throw std::runtime_error("telescope.focal_length_m must be finite and > 0");
+    }
+    return telescope;
+}
+
+ErrorConfig buildErrorConfig(const std::map<std::string, std::string>& cfg) {
+    ErrorConfig error;
+    error.random_seed = getUInt64(cfg, "error.random_seed", error.random_seed);
+    error.facet_radial_position_sigma_m =
+        getDouble(cfg, "error.facet_radial_position_sigma_m", 0.0);
+    error.facet_normal_sigma_deg =
+        getDouble(cfg, "error.facet_normal_sigma_deg", 0.0);
+    error.reflect_direction_sigma_deg =
+        getDouble(cfg, "error.reflect_direction_sigma_deg", 0.0);
+    error.radius_of_curvature_sigma_m =
+        getDouble(cfg, "error.radius_of_curvature_sigma_m", 0.0);
+    error.reflectivity_scale_sigma =
+        getDouble(cfg, "error.reflectivity_scale_sigma", 0.0);
+    error.structural_deformation_config =
+        getString(cfg, "error.structural_deformation_config", "");
+
+    auto checkNonNegative = [](double value, const std::string& key) {
+        if (!std::isfinite(value) || value < 0.0) {
+            throw std::runtime_error(key + " must be finite and >= 0");
+        }
+    };
+    checkNonNegative(error.facet_radial_position_sigma_m,
+                     "error.facet_radial_position_sigma_m");
+    checkNonNegative(error.facet_normal_sigma_deg,
+                     "error.facet_normal_sigma_deg");
+    checkNonNegative(error.reflect_direction_sigma_deg,
+                     "error.reflect_direction_sigma_deg");
+    checkNonNegative(error.radius_of_curvature_sigma_m,
+                     "error.radius_of_curvature_sigma_m");
+    checkNonNegative(error.reflectivity_scale_sigma,
+                     "error.reflectivity_scale_sigma");
+    return error;
+}
+
+void applyStructuralDeformation(std::vector<MirrorFacet>& facets,
+                                const ErrorConfig& error,
+                                const TelescopeConfig& telescope)
+{
+    if (isDisabledText(error.structural_deformation_config)) {
+        return;
+    }
+
+    auto deformation_cfg = loadScopedMirrorConfig(error.structural_deformation_config);
+    deformation_cfg["telescope.pointing_el_deg"] = doubleToString(telescope.pointing_el_deg);
+    deformation_cfg["mirror.series_elevation_deg"] =
+        getString(deformation_cfg, "mirror.series_elevation_deg",
+                  doubleToString(telescope.pointing_el_deg));
+
+    const std::string mode = lowerCopy(getString(deformation_cfg, "mirror.mode", ""));
+    if (!(mode == "elevation_series" || mode == "series")) {
+        throw std::runtime_error(
+            "error.structural_deformation_config must point to a mirror elevation_series config");
+    }
+
+    const auto deformation_facets = buildElevationSeriesFacets(deformation_cfg);
+    if (deformation_facets.size() != facets.size()) {
+        throw std::runtime_error(
+            "structural deformation facet count does not match base mirror layout");
+    }
+
+    for (std::size_t i = 0; i < facets.size(); ++i) {
+        facets[i].center = deformation_facets[i].center;
+        facets[i].normal = deformation_facets[i].normal;
+    }
+}
+
+void applyFacetErrors(std::vector<MirrorFacet>& facets, const ErrorConfig& error) {
+    if (error.facet_radial_position_sigma_m == 0.0 &&
+        error.facet_normal_sigma_deg == 0.0 &&
+        error.radius_of_curvature_sigma_m == 0.0 &&
+        error.reflectivity_scale_sigma == 0.0) {
+        return;
+    }
+
+    std::mt19937_64 rng(error.random_seed);
+    std::normal_distribution<double> unit_normal(0.0, 1.0);
+
+    const double normal_sigma_rad = error.facet_normal_sigma_deg * DEG_TO_RAD;
+
+    for (auto& facet : facets) {
+        Vec3 ideal_normal = facet.normal.normalized();
+
+        if (error.facet_radial_position_sigma_m > 0.0) {
+            double offset = error.facet_radial_position_sigma_m * unit_normal(rng);
+            facet.center += ideal_normal * offset;
+        }
+
+        if (normal_sigma_rad > 0.0) {
+            facet.normal = perturbVectorOnSphere(ideal_normal, normal_sigma_rad, rng);
+        }
+
+        if (error.radius_of_curvature_sigma_m > 0.0 &&
+            std::isfinite(facet.radius_of_curvature)) {
+            double radius = facet.radius_of_curvature +
+                            error.radius_of_curvature_sigma_m * unit_normal(rng);
+            facet.radius_of_curvature = std::max(1e-9, radius);
+        }
+
+        if (error.reflectivity_scale_sigma > 0.0) {
+            double scale = 1.0 + error.reflectivity_scale_sigma * unit_normal(rng);
+            facet.reflectivity_scale = std::max(0.0, scale);
+        }
+    }
+}
+
+OpticalEfficiencyConfig buildEfficiencyConfig(const std::map<std::string, std::string>& cfg) {
+    OpticalEfficiencyConfig eff;
+    eff.constant_scale = getDouble(cfg, "efficiency.constant_scale", eff.constant_scale);
+
+    eff.mirror_reflectivity = parseEfficiencyFactor(cfg, "efficiency.mirror_reflectivity");
+    eff.filter_transmission = parseEfficiencyFactor(cfg, "efficiency.filter_transmission");
+    eff.sipm_pde = parseEfficiencyFactor(cfg, "efficiency.sipm_pde");
+    eff.atmosphere_transmission = parseEfficiencyFactor(cfg, "efficiency.atmosphere_transmission");
+    eff.use_funnel_acceptance =
+        getBool(cfg, "efficiency.funnel_acceptance",
+                getBool(cfg, "efficiency.use_funnel_acceptance", false));
+
+    return eff;
+}
+
+PropagationConfig buildPropagationConfig(const std::map<std::string, std::string>& cfg) {
+    PropagationConfig propagation;
+    propagation.speed_of_light_m_per_ns =
+        getDouble(cfg, "propagation.speed_of_light_m_per_ns",
+                  propagation.speed_of_light_m_per_ns);
+    if (!std::isfinite(propagation.speed_of_light_m_per_ns) ||
+        propagation.speed_of_light_m_per_ns <= 0.0) {
+        throw std::runtime_error("propagation.speed_of_light_m_per_ns must be finite and > 0");
+    }
+    return propagation;
+}
+
+} // namespace lact

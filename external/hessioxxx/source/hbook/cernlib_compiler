@@ -1,0 +1,31 @@
+#!/bin/bash
+
+CERNLIB=$(which cernlib 2>/dev/null)
+
+if [ "$CERNLIB" = "" ]; then
+   CERNLIB=$(which cernlib-gfortran 2>/dev/null)
+   if [ "$CERNLIB" = "" ]; then
+      echo "None";
+      exit 1;
+   fi
+fi
+
+cernlib_where=$(cernlib packlib | sed 's:^\(-L\)*\(/[a-zA-Z0-9_/\.-]*\) .*$:\2:')
+
+cernlib_packlib="/dev/null"
+NM="nm"
+
+if [ -f "$cernlib_where" ]; then
+   cernlib_packlib="$cernlib_where"
+else
+   if [ -d "$cernlib_where" ]; then
+      if [ -f "$cernlib_where"/libpacklib.a ]; then
+         cernlib_packlib="$cernlib_where"/libpacklib.a
+      else
+         cernlib_packlib="$cernlib_where"/libpacklib.so
+         NM="nm -D"
+      fi
+   fi
+fi
+
+($NM $cernlib_packlib 2>/dev/null | grep _gfortran > /dev/null ) && echo gfortran || echo g77

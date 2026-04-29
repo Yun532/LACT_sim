@@ -1,0 +1,481 @@
+#include "app/OpticalSimCommon.hpp"
+
+using namespace lact;
+
+int main(int argc, char** argv) {
+    if (argc != 2) {
+        std::cerr << "usage: run_optical_sim <config.txt>\n";
+        return 2;
+    }
+
+    try {
+        const auto t_start = std::chrono::steady_clock::now();
+        auto main_cfg = readKeyValueConfig(argv[1]);
+        ComponentConfigPaths component_paths;
+        auto cfg = expandConfig(main_cfg, argv[1], component_paths);
+        const auto t_config_read = std::chrono::steady_clock::now();
+
+        SyntheticPhotonConfig source_cfg = buildSourceConfig(cfg);
+        SourceRuntimeConfig source_runtime_cfg = buildSourceRuntimeConfig(cfg);
+        TelescopeConfig telescope_cfg = buildTelescopeConfig(cfg);
+#ifdef LACT_HAS_HESSIO
+        std::optional<EventIOMetadata> eventio_metadata;
+        if (source_runtime_cfg.use_eventio) {
+            auto eventio_cfg = buildEventIOPhotonConfig(cfg, source_cfg, source_runtime_cfg);
+            eventio_metadata = readEventIOMetadata(eventio_cfg);
+            if (source_runtime_cfg.use_eventio_telescope_position) {
+                auto selected_tel =
+                    eventio_metadata->telescopeById(source_runtime_cfg.selected_telescope_id);
+                if (selected_tel) {
+                    telescope_cfg.position_m =
+                        {selected_tel->x_m, selected_tel->y_m, selected_tel->z_m};
+                    telescope_cfg.coordinate_system = "eventio_array";
+                }
+            }
+        }
+#endif
+        TelescopeFrame telescope_frame = buildTelescopeFrame(telescope_cfg);
+        std::vector<MirrorFacet> facets = buildFacetsFromConfig(cfg);
+        ErrorConfig error_cfg = buildErrorConfig(cfg);
+        applyStructuralDeformation(facets, error_cfg, telescope_cfg);
+        OutputPlane plane = buildOutputPlane(cfg);
+        CameraConfig camera_cfg = buildCameraConfig(cfg);
+        SipmConfig sipm_cfg = buildSipmConfig(cfg);
+        ElectronicsConfig electronics_cfg = buildElectronicsConfig(cfg);
+        ElectronicsResponse electronics(electronics_cfg);
+        CameraGeometry camera = buildCameraGeometry(camera_cfg);
+        auto light_collector = buildLightCollector(camera_cfg, camera);
+        applyFacetErrors(facets, error_cfg);
+        applyTelescopeFrame(facets, plane, telescope_frame);
+        MirrorLayout mirrors = makeMirrorLayoutFromFacets(facets);
+        OpticalEfficiencyConfig efficiency_cfg = buildEfficiencyConfig(cfg);
+        PropagationConfig propagation_cfg = buildPropagationConfig(cfg);
+        OpticalEfficiency eff(efficiency_cfg);
+        std::string output_csv = getString(cfg, "output.csv", "surface_hits.csv");
+        std::string output_pixel_csv = getString(cfg, "output.pixel_csv", "camera_pixel_image.csv");
+        const std::string output_mode = lowerCopy(trim(getString(cfg, "output.mode", "hits")));
+        const bool save_pixel_csv = camera_cfg.enabled &&
+            (output_mode == "pixel" || output_mode == "pixels" ||
+             output_mode == "both" || cfg.find("output.pixel_csv") != cfg.end());
+        const bool save_hits_csv = !(output_mode == "pixel" || output_mode == "pixels");
+        const auto t_setup_done = std::chrono::steady_clock::now();
+
+        const std::string mirror_mode = lowerCopy(getString(cfg, "mirror.mode", "generated"));
+        const std::string mirror_csv = getString(cfg, "mirror.csv_path", "");
+
+        std::cout << std::fixed << std::setprecision(6);
+        std::cout << "========================================\n";
+        std::cout << "LACT optical simulation\n";
+        std::cout << "========================================\n";
+
+        printSection("Configuration files");
+        printField("main", argv[1]);
+        if (!component_paths.telescope.empty()) {
+            printField("telescope", component_paths.telescope);
+        }
+        if (!component_paths.mirror.empty()) {
+            printField("mirror", component_paths.mirror);
+        }
+        if (!component_paths.source.empty()) {
+            printField("source", component_paths.source);
+        }
+        if (!component_paths.output.empty()) {
+            printField("output", component_paths.output);
+        }
+        if (!component_paths.camera.empty()) {
+            printField("camera", component_paths.camera);
+        }
+        if (!component_paths.sipm.empty()) {
+            printField("sipm", component_paths.sipm);
+        }
+        if (!component_paths.electronics.empty()) {
+            printField("electronics", component_paths.electronics);
+        }
+        if (!component_paths.efficiency.empty()) {
+            printField("efficiency", component_paths.efficiency);
+        }
+        if (!component_paths.error.empty()) {
+            printField("error", component_paths.error);
+        }
+
+        printSection("Telescope");
+        printField("id", intToString(static_cast<std::uint64_t>(telescope_cfg.id)));
+        printField("name", telescope_cfg.name);
+        printField("position_m", vec3ToString(telescope_cfg.position_m));
+        printField("pointing_az_deg", doubleToString(telescope_cfg.pointing_az_deg));
+        printField("pointing_el_deg", doubleToString(telescope_cfg.pointing_el_deg));
+        printField("focal_length_m", doubleToString(telescope_cfg.focal_length_m));
+        printField("coordinate_system", telescope_cfg.coordinate_system);
+        printField("coordinate_transform", "local telescope frame -> global frame");
+        printField("frame_x_axis", vec3ToString(telescope_frame.x_axis));
+        printField("frame_y_axis", vec3ToString(telescope_frame.y_axis));
+        printField("frame_z_axis", vec3ToString(telescope_frame.z_axis));
+
+#ifdef LACT_HAS_HESSIO
+        if (eventio_metadata) {
+            printEventIOMetadata(*eventio_metadata, source_runtime_cfg);
+        }
+#endif
+
+        printSection("Mirror");
+        printField("mode", mirror_mode);
+        if (!mirror_csv.empty()) {
+            printField("csv", mirror_csv);
+        }
+        if (mirror_mode == "elevation_series" || mirror_mode == "series") {
+            printField("series_elevation_deg",
+                       doubleToString(getDouble(cfg, "mirror.series_elevation_deg",
+                                                telescope_cfg.pointing_el_deg)));
+            printField("series_angles_deg",
+                       getString(cfg, "mirror.series_angles_deg", ""));
+            printField("series_csv_pattern",
+                       getString(cfg, "mirror.series_csv_pattern", ""));
+        }
+        printField("facets", intToString(mirrors.size()));
+
+        printSection("Source");
+        printField("mode", source_runtime_cfg.use_photon_csv
+                               ? "PhotonCsv"
+                               : (source_runtime_cfg.use_eventio
+                                      ? "EventIO"
+                                      : sourceModeName(source_cfg.mode)));
+        if (!source_runtime_cfg.use_photon_csv && !source_runtime_cfg.use_eventio) {
+            printField("n_bunches",
+                       intToString(static_cast<std::uint64_t>(source_cfg.n_bunches)));
+        }
+        printField("multiplicity", doubleToString(source_cfg.multiplicity));
+        if (source_runtime_cfg.use_photon_csv || source_runtime_cfg.use_eventio) {
+            if (source_runtime_cfg.use_photon_csv) {
+                printField("csv", source_runtime_cfg.csv_path);
+            } else {
+                printField("eventio_path", source_runtime_cfg.eventio_path);
+                printField("event_id_mode", source_runtime_cfg.event_id_mode);
+            }
+            printField("local_telescope_frame",
+                       source_runtime_cfg.csv_local_telescope_frame ? "true" : "false");
+            printField("filter_telescope_id",
+                       source_runtime_cfg.filter_telescope_id
+                           ? intToString(source_runtime_cfg.selected_telescope_id)
+                           : "off");
+            printField("filter_event_id",
+                       source_runtime_cfg.filter_event_id
+                           ? intToString(source_runtime_cfg.selected_event_id)
+                           : "off");
+            printField("filter_shower_event_id",
+                       source_runtime_cfg.filter_shower_event_id
+                           ? intToString(source_runtime_cfg.selected_shower_event_id)
+                           : "off");
+            printField("max_shower_events",
+                       source_runtime_cfg.max_shower_events > 0
+                           ? intToString(source_runtime_cfg.max_shower_events)
+                           : "off");
+            printField("default_wavelength_nm", doubleToString(source_cfg.wavelength_nm));
+            printField("default_weight", doubleToString(source_cfg.photon_weight));
+        } else if (source_cfg.mode == SyntheticMode::ParallelBeam) {
+            printField("source_plane_z", doubleToString(source_cfg.source_plane_z));
+            printField("beam_radius_m", doubleToString(source_cfg.beam_radius_m));
+            if (cfg.find("source.beam_theta_deg") != cfg.end() ||
+                cfg.find("source.beam_phi_deg") != cfg.end()) {
+                printField("beam_theta_deg",
+                           getString(cfg, "source.beam_theta_deg", "0"));
+                printField("beam_phi_deg",
+                           getString(cfg, "source.beam_phi_deg", "0"));
+            }
+            printField("beam_direction", vec3ToString(source_cfg.beam_direction));
+        } else if (source_cfg.mode == SyntheticMode::PointSource) {
+            printField("source_position", vec3ToString(source_cfg.source_position));
+            printField("aperture_z", doubleToString(source_cfg.aperture_z));
+            printField("aperture_radius_m", doubleToString(source_cfg.aperture_radius_m));
+            const double ideal_entrance_plane_z = 0.0;
+            const double ideal_distance_m =
+                std::abs(source_cfg.source_position.z - ideal_entrance_plane_z);
+            const double actual_distance_m =
+                std::abs(source_cfg.source_position.z - source_cfg.aperture_z);
+            printField("ideal_entrance_plane_z", doubleToString(ideal_entrance_plane_z));
+            printField("ideal_entrance_plane_distance_m", doubleToString(ideal_distance_m));
+            printField("configured_target_plane_distance_m", doubleToString(actual_distance_m));
+            if (std::abs(actual_distance_m - ideal_distance_m) > 1e-9) {
+                printField("warning",
+                           "PointSource target plane differs from ideal local entrance plane (z=0)");
+            }
+        }
+        printField("random_seed", intToString(source_cfg.random_seed));
+
+        printSection("Output plane");
+        printField("point", vec3ToString(plane.point));
+        printField("normal", vec3ToString(plane.normal));
+        printField("mode", output_mode);
+        if (save_hits_csv) {
+            printField("hits_csv", output_csv);
+        }
+        if (save_pixel_csv) {
+            printField("pixel_csv", output_pixel_csv);
+        }
+
+        printSection("Camera");
+        printField("enabled", camera_cfg.enabled ? "true" : "false");
+        if (camera_cfg.enabled) {
+            printField("mode", camera_cfg.mode);
+            if (!camera_cfg.csv_path.empty()) {
+                printField("csv", camera_cfg.csv_path);
+            }
+            printField("pixels", intToString(static_cast<std::uint64_t>(camera.size())));
+            if (!camera.empty()) {
+                double min_size = std::numeric_limits<double>::max();
+                double max_size = 0.0;
+                for (const auto& pixel : camera.pixels()) {
+                    min_size = std::min(min_size, pixel.size);
+                    max_size = std::max(max_size, pixel.size);
+                }
+                printField("pixel_shape", pixelShapeName(camera.pixels().front().shape));
+                printField("pixel_size_range_m",
+                           doubleToString(min_size) + " .. " + doubleToString(max_size));
+            } else {
+                printField("pixel_shape", camera_cfg.pixel_shape);
+                printField("pixel_size_m", doubleToString(camera_cfg.pixel_size_m));
+            }
+            if (lowerCopy(trim(camera_cfg.mode)) != "csv") {
+                printField("pixel_pitch_m", doubleToString(camera_cfg.pixel_pitch_m));
+                printField("radius_m", doubleToString(camera_cfg.radius_m));
+            }
+            printField("coordinates", "output-plane local u/v");
+            printField("collector", light_collector ? camera_cfg.collector
+                                                    : "not set -> direct pixel containment");
+            if (light_collector) {
+                printField("collector_material", camera_cfg.collector_material);
+                if (!isDisabledText(camera_cfg.collector_reflectivity_csv)) {
+                    printField("collector_reflectivity_csv",
+                               camera_cfg.collector_reflectivity_csv);
+                }
+                printField("collector_entrance_m",
+                           doubleToString(cameraPixelSizeForCollector(camera_cfg, camera)));
+                printField("collector_exit_m",
+                           doubleToString(camera_cfg.collector_exit_size_m));
+                printField("collector_height_m",
+                           doubleToString(camera_cfg.collector_height_m));
+            }
+        } else {
+            printField("mode", "whiteboard only");
+        }
+
+        printSection("SiPM");
+        printField("size_m", doubleToString(sipm_cfg.size_m));
+
+        printSection("Electronics");
+        printField("pe_conversion", factorDescription(electronics_cfg.pe_conversion));
+
+        printSection("Efficiency");
+        printField("constant_scale", doubleToString(efficiency_cfg.constant_scale));
+        printField("mirror_reflectivity",
+                   factorDescription(efficiency_cfg.mirror_reflectivity));
+        printField("filter_transmission",
+                   factorDescription(efficiency_cfg.filter_transmission));
+        printField("sipm_pde", factorDescription(efficiency_cfg.sipm_pde));
+        printField("atmosphere",
+                   factorDescription(efficiency_cfg.atmosphere_transmission));
+        printField("funnel_acceptance",
+                   efficiency_cfg.use_funnel_acceptance ? "cos(theta)" : "not set -> 1");
+
+        printSection("Errors");
+        printField("random_seed", intToString(error_cfg.random_seed));
+        printField("structural_deformation",
+                   isDisabledText(error_cfg.structural_deformation_config) ? "off" : "on");
+        if (!isDisabledText(error_cfg.structural_deformation_config)) {
+            printField("structural_deformation_config",
+                       error_cfg.structural_deformation_config);
+            printField("structural_deformation_elevation_deg",
+                       doubleToString(telescope_cfg.pointing_el_deg));
+        }
+        printField("facet_radial_pos_sigma_m",
+                   doubleToString(error_cfg.facet_radial_position_sigma_m));
+        printField("facet_normal_sigma_deg",
+                   doubleToString(error_cfg.facet_normal_sigma_deg));
+        printField("reflect_dir_sigma_deg",
+                   doubleToString(error_cfg.reflect_direction_sigma_deg));
+        printField("radius_curvature_sigma_m",
+                   doubleToString(error_cfg.radius_of_curvature_sigma_m));
+        printField("reflectivity_scale_sigma",
+                   doubleToString(error_cfg.reflectivity_scale_sigma));
+
+        printSection("Model");
+        printField("optics", "ideal reflection only");
+        printField("speed_of_light_m/ns",
+                   doubleToString(propagation_cfg.speed_of_light_m_per_ns, 9));
+        printField("not included",
+                   light_collector
+                       ? "mirror roughness, misalignment, camera electronics"
+                       : "mirror roughness, misalignment, collector, camera electronics");
+
+        printSection("Run");
+        printField("setup_time_s", doubleToString(elapsedSeconds(t_start, t_setup_done)));
+        printField("config_read_s", doubleToString(elapsedSeconds(t_start, t_config_read)));
+        printField("status", "tracing started");
+
+        std::unique_ptr<PhotonSource> source;
+        std::size_t reserve_hits = 0;
+        if (source_runtime_cfg.use_photon_csv) {
+            auto csv_cfg = buildPhotonCsvConfig(cfg, source_cfg, source_runtime_cfg);
+            auto csv_source = std::make_unique<PhotonCsvSource>(csv_cfg);
+            reserve_hits = csv_source->size();
+            source = std::move(csv_source);
+        } else if (source_runtime_cfg.use_eventio) {
+#ifdef LACT_HAS_HESSIO
+            auto eventio_cfg = buildEventIOPhotonConfig(cfg, source_cfg, source_runtime_cfg);
+            auto eventio_source = std::make_unique<EventIOPhotonSource>(eventio_cfg);
+            reserve_hits = eventio_source->size();
+            source = std::move(eventio_source);
+#else
+            throw std::runtime_error(
+                "source.mode=EventIO requires libhessio. Build external/hessioxxx/source "
+                "and reconfigure LACT_sim.");
+#endif
+        } else {
+            reserve_hits = static_cast<std::size_t>(std::max(0, source_cfg.n_bunches));
+            source = std::make_unique<SyntheticPhotonSource>(source_cfg);
+        }
+        OpticalTracer tracer(propagation_cfg.speed_of_light_m_per_ns,
+                             error_cfg.reflect_direction_sigma_deg * DEG_TO_RAD,
+                             error_cfg.random_seed);
+
+        std::vector<OpticalSurfaceHit> hits;
+        if (save_hits_csv) {
+            hits.reserve(reserve_hits);
+        }
+        std::map<PixelKey, PixelAccumulator> pixels;
+
+        PhotonBunch bunch;
+        int n_total = 0;
+        int n_hit_mirror = 0;
+        int n_hit_surface = 0;
+        int n_hit_camera = 0;
+        int n_accepted = 0;
+        std::set<int> unique_hit_pixels;
+        double sum_w = 0.0;
+        double sum_r2 = 0.0;
+
+        const auto t_trace_start = std::chrono::steady_clock::now();
+        while (source->next(bunch)) {
+            ++n_total;
+
+            Photon photon = bunch.photon;
+            photon.normalizeDirection();
+            photon.weight *= bunch.multiplicity;
+            if ((!source_runtime_cfg.use_photon_csv && !source_runtime_cfg.use_eventio) ||
+                source_runtime_cfg.csv_local_telescope_frame) {
+                applyTelescopeFrame(photon, telescope_frame);
+            }
+
+            OpticalSurfaceHit hit = tracer.traceToPlane(photon, mirrors, plane, eff);
+            if (hit.hit_mirror) {
+                ++n_hit_mirror;
+            }
+            if (hit.hit_surface) {
+                if (camera_cfg.enabled) {
+                    applyCameraResponse(camera, light_collector.get(), plane, sipm_cfg,
+                                        electronics, hit);
+                    if (hit.hit_camera) {
+                        ++n_hit_camera;
+                        unique_hit_pixels.insert(hit.pixel_id);
+                    }
+                    if (hit.accepted) {
+                        ++n_accepted;
+                    }
+                    if (save_pixel_csv) {
+                        accumulatePixelHit(pixels, bunch.event_id, bunch.telescope_id, hit);
+                    }
+                }
+                ++n_hit_surface;
+                if (save_hits_csv) {
+                    hits.push_back(hit);
+                }
+
+                double w = hit.weight * hit.relative_efficiency;
+                double r2 = hit.u_m * hit.u_m + hit.v_m * hit.v_m;
+                sum_w += w;
+                sum_r2 += w * r2;
+            }
+        }
+        const auto t_trace_done = std::chrono::steady_clock::now();
+
+        if (save_hits_csv && !writeSurfaceHitsCSV(output_csv, hits)) {
+            throw std::runtime_error("failed to write output CSV: " + output_csv);
+        }
+        if (save_pixel_csv) {
+            writePixelCsv(output_pixel_csv, pixels);
+        }
+        const auto t_write_done = std::chrono::steady_clock::now();
+
+        const double mirror_fraction = n_total > 0
+            ? static_cast<double>(n_hit_mirror) / static_cast<double>(n_total)
+            : 0.0;
+        const double surface_fraction = n_total > 0
+            ? static_cast<double>(n_hit_surface) / static_cast<double>(n_total)
+            : 0.0;
+        const double camera_fraction = n_total > 0
+            ? static_cast<double>(n_hit_camera) / static_cast<double>(n_total)
+            : 0.0;
+        const double accepted_fraction = n_total > 0
+            ? static_cast<double>(n_accepted) / static_cast<double>(n_total)
+            : 0.0;
+        const double camera_fill_fraction = n_hit_surface > 0
+            ? static_cast<double>(n_hit_camera) / static_cast<double>(n_hit_surface)
+            : 0.0;
+        const double rms = sum_w > 0.0 ? std::sqrt(sum_r2 / sum_w) : std::nan("");
+
+        printSection("Results");
+        printField("total_photons", intToString(static_cast<std::uint64_t>(n_total)));
+        printField("hit_mirror", intToString(static_cast<std::uint64_t>(n_hit_mirror)));
+        printField("hit_output_plane", intToString(static_cast<std::uint64_t>(n_hit_surface)));
+        if (camera_cfg.enabled) {
+            printField("hit_camera", intToString(static_cast<std::uint64_t>(n_hit_camera)));
+            printField("accepted_camera", intToString(static_cast<std::uint64_t>(n_accepted)));
+            printField("lost_between_pixels",
+                       intToString(static_cast<std::uint64_t>(n_hit_surface - n_hit_camera)));
+            printField("unique_hit_pixels",
+                       intToString(static_cast<std::uint64_t>(unique_hit_pixels.size())));
+        }
+        printField("hit_mirror_fraction", doubleToString(mirror_fraction));
+        printField("hit_output_fraction", doubleToString(surface_fraction));
+        if (camera_cfg.enabled) {
+            printField("hit_camera_fraction", doubleToString(camera_fraction));
+            printField("accepted_camera_fraction", doubleToString(accepted_fraction));
+            printField("camera_fill_fraction", doubleToString(camera_fill_fraction));
+        }
+        printField("weighted_spot_rms_m", doubleToString(rms));
+        printField("weighted_spot_rms_mm", doubleToString(rms * 1000.0));
+        if (save_hits_csv) {
+            printField("output_csv", output_csv);
+        }
+        if (save_pixel_csv) {
+            printField("pixel_csv", output_pixel_csv);
+        }
+
+        printSection("Timing");
+        printField("trace_time_s", doubleToString(elapsedSeconds(t_trace_start, t_trace_done)));
+        printField("csv_write_time_s", doubleToString(elapsedSeconds(t_trace_done, t_write_done)));
+        printField("total_time_s", doubleToString(elapsedSeconds(t_start, t_write_done)));
+
+        printSection("Machine-readable summary");
+        std::cout << "mirror_facets=" << mirrors.size() << "\n";
+        std::cout << "total_photons=" << n_total << "\n";
+        std::cout << "hit_mirror=" << n_hit_mirror << "\n";
+        std::cout << "hit_output_plane=" << n_hit_surface << "\n";
+        if (camera_cfg.enabled) {
+            std::cout << "hit_camera=" << n_hit_camera << "\n";
+            std::cout << "accepted_camera=" << n_accepted << "\n";
+            std::cout << "lost_between_pixels=" << (n_hit_surface - n_hit_camera) << "\n";
+            std::cout << "unique_hit_pixels=" << unique_hit_pixels.size() << "\n";
+        }
+        std::cout << "weighted_spot_rms_m=" << rms << "\n";
+        if (save_hits_csv) {
+            std::cout << "output_csv=" << output_csv << "\n";
+        }
+        if (save_pixel_csv) {
+            std::cout << "pixel_csv=" << output_pixel_csv << "\n";
+        }
+        return 0;
+    } catch (const std::exception& ex) {
+        std::cerr << "run_optical_sim error: " << ex.what() << "\n";
+        return 1;
+    }
+}

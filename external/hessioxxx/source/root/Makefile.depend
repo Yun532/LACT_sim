@@ -1,0 +1,8 @@
+# DO NOT DELETE THIS LINE -- make  depend  depends  on  it.
+cvt3.o: cvt3.cc ../include/initial.h ../include/histogram.h \
+ ../include/io_basic.h ../include/warning.h ../include/io_histogram.h \
+ ../include/warning.h ../include/fileopen.h ../include/straux.h toroot.hh
+hdata2root.o: hdata2root.cc ../include/initial.h ../include/histogram.h \
+ ../include/io_basic.h ../include/warning.h ../include/io_histogram.h \
+ ../include/warning.h ../include/fileopen.h ../include/straux.h toroot.hh
+toroot.o: toroot.cc  ../include/initial.h  ../include/histogram.h toroot.hh

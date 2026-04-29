@@ -1,0 +1,10 @@
+# DO NOT DELETE THIS LINE -- make  depend  depends  on  it.
+cvt2.o: cvt2.c ../include/initial.h ../include/histogram.h \
+ ../include/io_basic.h ../include/warning.h tohbook.h \
+ ../include/io_histogram.h ../include/fileopen.h
+hdata2hbook.o: hdata2hbook.c ../include/initial.h ../include/histogram.h \
+ ../include/io_basic.h ../include/warning.h tohbook.h \
+ ../include/io_histogram.h ../include/fileopen.h
+tohbook.o: tohbook.c ../include/initial.h ../include/histogram.h \
+ tohbook.h
+hbookc.o hbookc.o: hbookc.F

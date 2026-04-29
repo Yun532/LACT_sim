@@ -1,0 +1,5280 @@
+2025-02-20  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* hess/io_hess.c: Properly report data produced with QGSjet-III.  With CORSIKA 7.8000 we can use QGSjet-III. This sets interaction
+	model and cross section identifier variables to new values.
+	Properly report QGSjet-III now rather than complaining about an
+	unknown QGSjet version. No functional or API changes.
+
+2025-02-03  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* Makefile: Clean export of hessioxxx.tar.gz.  When exporting the hessioxxx tar package for simulations etc., make
+	sure we start from a fresh directory tree.
+
+2025-01-31  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* Makefile, root/Makefile: If building with RPATHs, export that to
+	sub-makes.  When building with RPATHDIR set (or just WITH_RPATH enabled), the
+	resulting SOEXEFLAGS is also useful binaries build in sub-makes,
+	like in root.
+
+2025-01-31  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* common/fileopen.c, common/fileopen.h: Open path for general
+	fileopen_ function prefix.  Some of the auxiliary functions for fileopen have names that are not
+	easily associated with fileopen, like 'addpath'.  All related
+	functions, except fileopen and fileclose should now have a companion
+	function with a 'fileopen_' prefix.  In a future step we will change
+	calls from non-prefixed to prefixed function names. Calls to
+	non-prefixed function names might eventually be disabled - for now
+	that is only an option.
+
+2025-01-21  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* eventio_addon/io_histogram.h: Define (hard-coded) type number for
+	histograms.  Although internally hard-coded as type 100, add a pre-processor
+	definition for it to make it searchable like other types.
+
+2024-10-11  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* Makefile: Fix changing include path for submake.  When building ROOT or HBOOK converting tools in submakes, the
+	adapted include paths should only change relative but not absolute
+	paths.
+
+2024-10-11  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* Makefile.static.xxx: Missing dependency for read_iact static
+	build.  The static build (except for basic system libraries) for read_iact
+	was missing two dependencies which are in the normal build for quite
+	some time.
+
+2024-09-13  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* Makefile: Have the Makefile itself handle a missing HESSROOT.
+
+2024-08-13  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* hess/io_hess.c: Properly initialize asymmetric effective length.  Initialize the asymmetric effective length parameters when reading
+	from a data block version not containing them, rather than leaving
+	the previous values unchanged.
+
+2024-07-03  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* hess/camera_image.c, hess/read_hess.c: Plot camera true p.e. image
+	with mc_pesum data.  If the data file contains mc_pesum data with per-pixel number of
+	true p.e., we can use that instead of the p.e. list for plotting a
+	camera image based on true p.e.
+
+2024-07-01  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* hess/extract_simtel.c: Also extract p.e. list and particles.  Two more data block types now covered by extract_simtel (but not by
+	its companion, merge_simtel) are the MC p.e. lists and the particles
+	arriving at ground level.  For calibration events we still stop, by
+	default, with an error message, now with a hint on unwrapping them
+	before extracting, and also adding an option to ignore them, if
+	actual events follow.
+
+2024-06-26  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* hess/extract_simtel.c: Fix extract_simtel for calibration events.  Normal shower simulation data always have an MC event data block
+	preceding the simtel event data block - but calibration events,
+	produced with sim_telarray itself, don't. For those, we need to emit
+	the collected data (usually just the preceding event) when the next
+	event is seen. For normal shower simulation we still emit an error
+	message if we run into a not-yet emitted event when the next one
+	gets read.
+
+2024-04-21  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* hess/reconstruct.c: When asking for low-gain only, use LG only.  When asking to reconstruct pixel intensities from low-gain channels
+	only, make sure that high-gain never gets used.
+
+2024-04-18  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* eventio_basic/filterio.cc: Adding features to filterio tool.  Adding a number of features to the filterio tool: - Activate output only after finding a given block type.  - Stop output before or after some given block types.  - If no block types are marked to be filtered, all   blocks are valid.
+
+2024-04-17  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* common/fileopen.c, common/fileopen.h: Special verbose=-1 case not
+	activating verbose mode.  The special case with verbose=-1 should activate only a few more
+	messages than verbose=0 but not regular verbose mode.
+
+2024-04-17  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* common/fileopen.c, common/fileopen.h: Allow to set fileopen
+	dynamically to verbose.  While fileopen can be set into verbose mode through the
+	FILEOPEN_VERBOSE environment variable, it may be useful to enable
+	verbose mode dynamically just around some particular lines of code.
+
+2024-04-15  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* hess/io_hess.c: Show teltrg_pattern and teldata_pattern
+	explicitly.  Show the corresponding telescope ID for every bit set in the central
+	event teltrg_pattern and teldata_pattern.  Makes it easier to check
+	that pattern and corresponding list agree.
+
+2024-04-15  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* hess/extract_simtel.c: Fix old-style teltrg_pattern and
+	teldata_pattern.  The old-style bit patterns for telescopes triggered / with data were
+	left as zero with extract_simtel while the complete list of
+	corresponding telescope IDs were OK. HESS software still depends on
+	the bit patterns, thus better set them again.
+
+2024-03-25  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* hess/extract_simtel.c: Debugging code added but nothing wrong.  The array trigger decisions for the output are with telescope IDs as
+	used in the output. Verified that this works as intended. Also
+	explored the possibility to do it with telescope IDs as in the input
+	sticking with what we have.
+
+2024-02-29  Mathieu de Naurois <denauroi@in2p3.fr>
+
+	* : git subrepo pull (merge) hessio subrepo:   subdir:   "hessio"   merged:   "15ebd71e7" upstream:   origin:
+	  "git@gitlab.in2p3.fr:hess/softwaremodules/tools/hessio.git"
+	branch:   "master"   commit:   "ba689cf58" git-subrepo:   version:  "0.4.3"   origin:   "???"   commit:   "???"
+
+2024-02-15  Mathieu de Naurois <denauroi@in2p3.fr>
+
+	* : git subrepo pull (merge) hessio subrepo:   subdir:   "hessio"   merged:   "29ad3dce1" upstream:   origin:
+	  "git@gitlab.in2p3.fr:hess/softwaremodules/tools/hessio.git"
+	branch:   "master"   commit:   "bfa6d39ad" git-subrepo:   version:  "0.4.3"   origin:   "???"   commit:   "???"
+
+2024-02-05  Mathieu de Naurois <denauroi@pollinmdn.in2p3.fr>
+
+	* : git subrepo pull (merge) hessio subrepo:   subdir:   "hessio"   merged:   "06d96af99" upstream:   origin:
+	  "git@gitlab.in2p3.fr:hess/softwaremodules/tools/hessio.git"
+	branch:   "master"   commit:   "53ecb0c20" git-subrepo:   version:  "0.4.6"   origin:   "???"   commit:   "???"
+
+2024-02-27  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* hess/io_hess.c: Better formatting of message about data bug fix.
+
+2024-02-26  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* hess/io_hess.c: Central event trigger types mask fix and
+	extension.  Sim_telarray between 2023-07-07 and 2024-02-25 could place trigger
+	mask modifier bits, like for random mono triggers, in the wrong
+	place.  We check for that problem now and fix it where it happens.
+	For that to work, we place existing data under the assumption that
+	not more than four types of triggers have to be supported (currently
+	implemented: three, maximum in pre-processor so far: four).  Support
+	for future versions with more than four trigger types has been
+	added.  Data format falls back to old format if new one is not
+	needed.
+
+2024-02-20  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* eventio_addon/io_history.c: Fix typo in doxygen tag.
+
+2024-02-20  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* common/hconfig.c, common/hconfig.h: Add feature to iterate over
+	known items.  If an application wants to do something with every configuration
+	item, we should have a simple (even though not efficient) way to
+	iterate over them, one item at a time.
+
+2024-02-20  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* eventio_basic/eventio.c: Fix signed/unsigned comparison warning.
+
+2024-02-19  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* eventio_addon/io_histogram.c, eventio_basic/eventio.c,
+	eventio_basic/io_basic.h: More control over I/O buffer initial size.  In addition to hard-coded default and minimum sizes for I/O buffers,
+	these can now also be controlled through environment variables
+	"NEW_IO_BUFFER" and "MIN_IO_BUFFER". For histogram files there is an
+	additional "HDATA_IO_BUFFER" for a more application specific initial
+	size.
+
+2024-02-19  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* hess/read_hess.c: Short-hand single and stereo options added.  Adding short hand notation options to set both the number of images
+	and of triggered telescopes to be at least one or two, for
+	single-telescope or stereo conditions.  Also print a simple total event statistics line at the end, as the
+	'@;' run summary statistics line needs more careful reading than
+	that.
+
+2024-02-08  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* : commit a9aa60dbc6e463e0dfd1107b7cb01fd780c05363 Author: Konrad
+	BernlÃ¶hr <Konrad.Bernloehr@mpi-hd.mpg.de> Date:   Thu Feb 8
+	22:35:32 2024 +0100
+
+2024-02-08  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* hess/extract_simtel.c: Fix bugs and add trigger list option.  Incorrect use, like without an output file name, could result in a
+	core dump. Added more checks.  Array trigger rules after extraction
+	like the HESS hybrid trigger (any two telescopes, or CT5 in mono)
+	are now supported as well.
+
+2024-02-08  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* hess/camera_image.c: Fix setting of plot page title.  Make sure the '--plot-with-title' option already works on the first
+	page.
+
+2024-02-06  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* rht.cc: Add option to show the number of events.  In place of the energies with 1 percent and 1 permille of the events
+	below, the '--show-num' options replaces these columns with the
+	number of simulated and triggered events (as based on histograms
+	6/7).
+
+2024-02-06  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* common/histogram.c: Adding up the entries in add_histogram().  When adding a new histogram to an existing one, the number of
+	entries should better be added up as well, even though this could be
+	wrong.  For histograms filled with prepared content at once, that
+	number of entries would just be the number of bins, and we would get
+	a multiple of the number of bins. In the perhaps more typical case
+	of histograms filled with entries one at a time, adding them up is
+	the correct approach.
+
+2024-02-02  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* .gitignore, Makefile, Makefile.xxx, show_prepro.cc: Include
+	show_types and show_prepro in hessioxxx.  Also add a few more macros mentioned in glibc documentation to the
+	show_prepro tool. Building the C-compiled variant of show_prepro now
+	simply by 'make show_preproc_c'.
+
+2024-01-28  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* hess/io_hess.c: Fix several problems with auxiliary traces.  Auxiliary traces can be used to store the internal states of the
+	simulated traces. Not used in normal production. There were several
+	problems found in reading back both analog and digital auxiliary
+	traces, which have been fixed. Also print more information if
+	something seems wrong.
+
+2024-01-19  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* .gitignore: More files to ignore.
+
+2024-01-19  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* rht.cc: Histograms 6&7 no longer used by default.  Histograms 6 and 7, being filled without event weights, are not
+	suitable to derive the trigger rates if simulations involved
+	importance sampling.  Only use them in the calculation if
+	explicitely asked.
+
+2024-01-19  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* show_prepro.cc: Floating-point related definitions added.
+
+2023-12-19  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* hess/io_hess.c: Number of arrays = 20 may be wrong.  If the MC run header block reports that each shower is used 20
+	times, this might actually be wrong if obtained from the first
+	CORSIKA event header. That data block cannot hold more than 20
+	offsets. Add a little hint to that limitation to the print function.
+
+2023-12-12  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* show_prepro.cc: More architecture and compiler macros.
+
+2023-11-10  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* corsika/io_simtel.c: Fix missing newline in print output.
+
+2023-11-10  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* corsika/read_iact.c, eventio_basic/eventio.c,
+	eventio_basic/listio.c, hess/read_hess.c: Add optional even more
+	detailed info on I/O blocks
+
+2023-11-09  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* hess/io_hess.c: Special fix for old laser calib data with >= 32768
+	pixels.  There are simulation data files existing for cameras with >= 32768
+	pixels which exceed the limits foreseen in the laser calibration
+	data block at the time but can be recovered if the 16-bit integer
+	for the number of pixels is interpreted as unsigned (up to 65535).
+	The latest format can handle more pixels without problems.
+
+2023-11-09  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* Makefile: Large code model switch Add reminder for large code model switch if we have huge cameras
+	etc.
+
+2023-11-08  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* hess/io_hess.h, hess/split_hessio.c: Transition of data block
+	naming is complete.  The defined symbolic names for the data block type numbers handled
+	by io_hess.c and related code have been changed from
+	IO_TYPE_HESS_...  to IO_TYPE_SIMTEL_... over some time, with full
+	backward compatibility.  This should conclude these changes, still
+	retaining compatibility.
+
+2023-11-07  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* Makefile.hess2hessioxxx: Makefile for directory hessioxxx export This Makefile can, just like the normal Makefile, transform the
+	hessio directory structure (as used within HESS) into the structure
+	used with the 'hessioxxx' exported version. Without depending on
+	other Makefile components in other modules of the HESS source code
+	repository.
+
+2023-11-07  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* hess/io_hess.c: Support >= 32768 pixels in laser calibration data.  The laser calibration data block was only supporting up to 32767
+	pixels in a camera. Other data blocks which started with such a
+	limitation in the early days of sim_telarray were already changed to
+	write a 32-bit integer where appropriate. Where there was a switch
+	between versions, this switch now depends on the actual number of
+	pixels in a camera and no longer on the H_MAX_PIX preprocessor
+	definition.
+
+2023-10-27  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* hess/rec_tools.c: Add comments to avoid confusion about sin/cos
+	use.
+
+2023-10-27  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* corsika/io_simtel.c: Use run number from data block header.
+
+2023-10-20  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* hess/io_hess.h: Documentation comments only.
+
+2023-10-20  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* .gitignore: A few more generated files.
+
+2023-07-31  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* Makefile, Makefile.hessioxxx, Makefile.static.xxx, Makefile.xxx,
+	Makefile.xxx.depend, TestCases/test_history.c, common/hconfig.c,
+	common/history.h, eventio_addon/io_history.c, hess/camera_image.c,
+	hess/extract_hess.c, hess/extract_simtel.c, hess/merge_simtel.c,
+	hess/read_hess.c, hess/read_hess_nr.c, hess/rh_dl0_test.c,
+	hess/split_hessio.c: Removing redundant header file history.h This
+	header file has been redundant for many years, with io_history being
+	the actual version since 2014.
+
+2023-07-18  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* .gitignore: Yet another file to be ignored.
+
+2023-07-17  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* .gitignore, Copyright, cc-by-sa-4.0.txt: Some of the copyright
+	notices/licences were missing.
+
+2023-07-16  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* .gitignore, Makefile: More complete .gitignore file.
+
+2023-07-16  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* Makefile: Same problem with programs as with libraries.
+
+2023-07-16  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* Makefile: Get working symlinks from the libraries installed.  If a
+	symbolic link was in the way to the library installation path, the
+	symlink back to the module library directory was broken.
+
+2023-07-16  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* .gitignore: In place of .cvsignore we now need a .gitignore.
+
+2023-07-16  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* Makefile: Generate ChangeLog by git2cl instead of cvs2cl.
+
+2023-07-15  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* Makefile, Makefile.xxx.hbook, Makefile.xxx.root,
+	add_histograms.c, common/current.c, common/current.h,
+	common/dhsort.c, common/dhsort.h, common/eventio_registry.c,
+	common/eventio_registry.h, common/fileopen.c, common/fileopen.h,
+	common/hconfig.c, common/hconfig.h, common/histogram.c,
+	common/histogram.h, common/history.h, common/initial.h,
+	common/moments.c, common/straux.c, common/straux.h,
+	common/unused.h, common/warning.c, common/warning.h,
+	corsika/io_simtel.c, corsika/mc_atmprof.c, corsika/mc_atmprof.h,
+	corsika/mc_tel.h, corsika/read_iact.c, corsika/select_iact.c,
+	eventio_addon/io_hconfig.c, eventio_addon/io_histogram.c,
+	eventio_addon/io_histogram.h, eventio_addon/io_history.c,
+	eventio_addon/io_history.h, eventio_basic/EventIO.cc,
+	eventio_basic/EventIO.hh, eventio_basic/TestIO.cc,
+	eventio_basic/eventio.c, eventio_basic/filterio.cc,
+	eventio_basic/io_basic.h, eventio_basic/listio.c,
+	eventio_basic/statio.cc, eventio_basic/testio.c, fcat.c,
+	hbook/Makefile, hbook/cvt2.c, hbook/tohbook.c, hbook/tohbook.h,
+	hess/atmprof.c, hess/atmprof.h, hess/basic_ntuple.c,
+	hess/basic_ntuple.h, hess/camera_image.c, hess/camera_image.h,
+	hess/check_trgmask.c, hess/extract_hess.c, hess/extract_simtel.c,
+	hess/gen_lookup.c, hess/gen_trgmask.c, hess/io_hess.c,
+	hess/io_hess.h, hess/io_trgmask.c, hess/io_trgmask.h,
+	hess/merge_simtel.c, hess/read_hess.c, hess/read_hess_nr.c,
+	hess/rec_tools.c, hess/rec_tools.h, hess/rec_tools_nr.c,
+	hess/reconstruct.c, hess/reconstruct.h, hess/split_hessio.c,
+	hess/user_analysis.c, hess/user_analysis.h, list_histograms.c,
+	root/Makefile, root/cvt3.cc, root/toroot.cc: No point in keeping the
+	CVS tags $Date and $Revision after switching to git.
+
+2023-07-14  Konrad Bernlöhr <Konrad.Bernloehr@mpi-hd.mpg.de>
+
+	* hess/io_hess.c, hess/io_hess.h: Indicate and report bits in
+	trigger-type mask, including both already used bits and bits now
+	foreseen for additional purposes.
+
+2023-06-09  bernlohr <>
+
+	* hess/io_hess.h, hess/read_hess.c, hess/reconstruct.c: Add option
+	to read a file with lists of broken pixels for the telescopes. This
+	file can be either an EventIO file or a text file.
+
+2023-06-09  bernlohr <>
+
+	* hess/read_hess.c: Rewrite pixel disabled and laser calibration
+	data blocks if changes got applied.
+
+2023-06-07  bernlohr <>
+
+	* common/hconfig.c: Spotted a potential mutex problem in reentrant
+	version (which we have not used in decades).
+
+2023-05-31  bernlohr <>
+
+	* common/hconfig.c: For consistency, use char of proper signedness
+	in size calculation.
+
+2023-05-31  bernlohr <>
+
+	* common/unused.h, hess/merge_simtel.c, hessio.dox: The special
+	definition of the UNUSED_PAR* macros for Doxygen is useless; use
+	Doxygen's PREDEFINED setup instead.
+
+2023-05-31  bernlohr <>
+
+	* Makefile: Make sure the new unused.h header file also gets
+	exported.
+
+2023-05-31  bernlohr <>
+
+	* common/current.c, common/fileopen.c, common/hconfig.c,
+	common/histogram.c, common/unused.h, common/warning.c,
+	eventio_basic/EventIO.cc, hess/camera_image.c,
+	hess/extract_simtel.c, hess/merge_simtel.c, hess/read_hess.c,
+	hess/reconstruct.c, hess/user_analysis.c, hessio.dox: Cleaner and
+	more adaptable mark-up of intentionally unused function parameters.
+	Fix the corresponding warnings showing up when compiling with
+	'-Wextra'. Fix C code incompatible with C++ compiler.
+
+2023-05-31  bernlohr <>
+
+	* Makefile: If non-empty WITH_CXX_FOR_C, the warning options not
+	suitable for C++ are not even used when compiling C code (with a C++
+	compiler).
+
+2023-05-25  bernlohr <>
+
+	* TestCases/test_hconfig.c, common/hconfig.c, common/hconfig.h,
+	common/initial.h: Adding a "Bool" parameter type which is strict in
+	rejecting integer values other than "0" and "1" but accepts some
+	text equivalents like "false" or "YEs" plus some abbreviations).
+
+2023-05-23  bernlohr <>
+
+	* show_prepro.cc, show_types.cc: Adding C++23 feature tests.
+
+2023-05-15  bernlohr <>
+
+	* hess/io_hess.h: Remind of two variables in MCRunHeader being
+	unused.
+
+2023-05-06  bernlohr <>
+
+	* common/hconfig.c: Fix for configuration files with newline missing
+	after the last line.
+
+2023-04-13  bernlohr <>
+
+	* common/warning.c, hess/basic_ntuple.c, hess/io_hess.c,
+	hess/io_hess.h: Fix reporting of auxilliary traces (and fix the
+	spelllling as welll).
+
+2023-03-23  bernlohr <>
+
+	* corsika/read_iact.c, hess/read_hess.c, hess/read_hess_nr.c: Make
+	printf output about particles at ground level stand out more
+	clearly.
+
+2023-03-01  bernlohr <>
+
+	* common/histogram.c, common/histogram.h, list_histograms.c: With
+	printing scaled and normalized histogram contents.
+
+2023-02-17  bernlohr <>
+
+	* hess/read_hess.c, hess/user_analysis.c: Make sure aweight factor
+	from importance sampling is consistently included in event weight,
+	on top of spectral weight factor.
+
+2023-02-03  bernlohr <>
+
+	* corsika/io_simtel.c, eventio_basic/eventio.c,
+	eventio_basic/io_basic.h: With book-keeping of total number of bytes
+	written/read.  Get rid of a couple of warnings about unused
+	parameters etc.
+
+2023-01-19  bernlohr <>
+
+	* hess/io_hess.c: Print telescope event header a bit more
+	explicitely.
+
+2023-01-19  bernlohr <>
+
+	* hessio.dox: Minor doxygen tweaking.
+
+2023-01-19  bernlohr <>
+
+	* hessio.dox: Refresh doxygen configuration.
+
+2023-01-18  bernlohr <>
+
+	* corsika/io_simtel.c: Add more places where the number of elements
+	printed can be controlled through the MAX_PRINT_ARRAY environment
+	variable.
+
+2023-01-02  bernlohr <>
+
+	* common/hconfig.c, common/hconfig.h: We need a way to easily tell
+	if a config item is still in prestine state.
+
+2022-12-15  bernlohr <>
+
+	* common/hconfig.c: Be a bit more specific in warnings about items
+	where modifications get rejected.
+
+2022-12-15  bernlohr <>
+
+	* common/warning.c: Flush stdout with every Warning call.
+
+2022-12-08  bernlohr <>
+
+	* show_prepro.cc: Another definition for maximum filename lengths
+	(not from POSIX but in stdio).
+
+2022-12-08  bernlohr <>
+
+	* common/fileopen.c: Fix new warning by by GCC 12.
+
+2022-11-25  bernlohr <>
+
+	* show_prepro.cc: Show definition of a few more variable types (like
+	pid_t, ...).
+
+2022-10-24  bernlohr <>
+
+	* eventio_addon/io_history.c: Fix pointer conversion warnings when
+	compiling with C++ compiler.
+
+2022-10-20  bernlohr <>
+
+	* eventio_addon/io_history.c, eventio_addon/io_history.h: Add
+	reading function for the history blocks. Splitting the configuration
+	history by telescope has its limitations though and recovering
+	configuration parameters from it should only be considered a last
+	resort.
+
+2022-10-20  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: Add true channel delays to
+	MCPixelMonitor (IO_TYPE_SIMTEL_MC_PIXMON block) where values in
+	LasCalData (IO_TYPE_SIMTEL_LASCAL) may include some assumed
+	inaccuracy.  Also bumping the version number of
+	IO_TYPE_SIMTEL_TELEVENT to reflect the fixed global time of readout
+	start and an added value.
+
+2022-10-14  bernlohr <>
+
+	* corsika/io_simtel.c, corsika/read_iact.c, hess/extract_hess.c,
+	hess/extract_simtel.c, hess/io_hess.c, hess/io_hess.h,
+	hess/io_trgmask.c, hess/io_trgmask.h, hess/merge_simtel.c,
+	hess/read_hess.c, hess/read_hess_nr.c, hess/rh_dl0_test.c,
+	hess/split_hessio.c, hess/user_analysis.c, hess/user_analysis.h: 
+	Start refactoring by renaming all structures and functions to use
+	'simtel' rather than 'hess' - which was effectively its main use for
+	the last 20 years. User code should be transparent to that change,
+	if the proper typedef'ed names have been referred to rather than the
+	raw struct names. All function calls are aliased via pre-processor
+	defines.
+
+2022-08-11  bernlohr <>
+
+	* hess/read_hess.c: Include new '--only-type' option in '--help'
+	output.
+
+2022-08-11  bernlohr <>
+
+	* hess/read_hess.c: Allow selection of telescopes to be used in
+	analysis by telescope type, instead of or in addition to selection
+	by telescope ID.
+
+2022-07-29  bernlohr <>
+
+	* hess/io_hess.h: Forgot to add the 'IO_TYPE_SIMTEL_...' alias to
+	the new block type.
+
+2022-07-29  bernlohr <>
+
+	* EventioRegisteredNames.dat: Give a name to the type 2034 data
+	block.
+
+2022-07-29  bernlohr <>
+
+	* hess/extract_hess.c, hess/io_hess.c, hess/io_hess.h,
+	hess/read_hess.c, hess/read_hess_nr.c: Photo-electron lists from
+	internal calibration events are encapsulated in an envelope of their
+	own and can be unwrapped together with the corresponding event data.
+
+2022-07-17  bernlohr <>
+
+	* hessio.dox: Update doxygen date.
+
+2022-07-17  bernlohr <>
+
+	* hess/io_hess.h: Reduce comflicts when version variants get
+	combined.
+
+2022-07-11  bernlohr <>
+
+	* Makefile.xxx: First remove symlinks before re-creating them to
+	avoid message.
+
+2022-07-11  bernlohr <>
+
+	* hess/camera_image.c, hess/read_hess.c: Add read_hess option to not
+	draw the crosses in a camera image which indicate triggered and
+	cleaned image pixels.
+
+2022-04-06  bernlohr <>
+
+	* hess/read_hess.c, hess/reconstruct.c, hess/reconstruct.h: Maintain
+	a reconstruction-stage verbosity level.
+
+2022-04-06  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: The print_hess_tel_monitor
+	function was not properly skipping over the uninteresting 0x08 and
+	0x10 parts of the data block and then printing incorrect values for
+	the later parts.  Also maintaining now a per-sample pedestal value,
+	derived from the recorded sum pedestal value, for more convenient
+	use.
+
+2022-03-25  bernlohr <>
+
+	* hessio.dox: Date of last changes.
+
+2022-03-25  bernlohr <>
+
+	* hess/camera_image.c: Start reworking the camera image code. Images
+	of 'MC pixel monitor' data will be added later.
+
+2022-03-23  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: Allow for more than one effective
+	focal length value in case of asymmetric mirrors.
+
+2022-03-23  bernlohr <>
+
+	* hess/extract_simtel.c, hess/merge_simtel.c: Add support for MC
+	pixel monitoring with extract and merge tools.
+
+2022-03-08  bernlohr <>
+
+	* EventioRegisteredNames.dat: Register new block type 2033
+
+2022-03-04  bernlohr <>
+
+	* Makefile.xxx: Rpath-feature also on-request-only now for
+	'hessioxxx' exported version (used for CTA etc.)
+
+2022-03-04  bernlohr <>
+
+	* Makefile: Re-establish the rpath feature, but only on explicit
+	request (WITH_RPATH=1).
+
+2022-03-04  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h, hess/read_hess.c: MC Pixel Monitor
+	data
+
+2022-03-04  bernlohr <>
+
+	* Makefile: Drop support for OSF/1. We did not have such a system
+	available for a long time.
+
+2022-03-01  bernlohr <>
+
+	* corsika/io_simtel.c, hess/io_hess.c, hess/io_hess.h,
+	hess/read_hess.c: Pedestal compensation, part 1. Prepare prod-6
+	definitions, preliminary.
+
+2022-02-24  bernlohr <>
+
+	* add_histograms.c, hess/extract_hess.c, hess/extract_simtel.c,
+	hess/gen_lookup.c, hess/merge_simtel.c, hess/split_hessio.c,
+	list_histograms.c, root/cvt3.cc: Make sure the various tools show
+	not just the command line syntax but also what they are about when
+	run with '--help'.
+
+2022-02-16  bernlohr <>
+
+	* show_prepro.cc: Include macros and pathconf results for path and
+	filename lengths.
+
+2022-02-16  denauroi <>
+
+	* Makefile: removed rpath
+
+2022-01-25  bernlohr <>
+
+	* Makefile: Several auxiliary programs only to be built on explicit
+	demand.
+
+2021-12-22  bernlohr <>
+
+	* eventio_addon/io_history.c: Remove support for a test-only
+	metaparam data block version.
+
+2021-12-22  bernlohr <>
+
+	* hess/extract_hess.c: Another tool where support for block type
+	1216 (atmospheric density profile) was lacking.
+
+2021-12-20  bernlohr <>
+
+	* hess/extract_simtel.c, hess/merge_simtel.c: Include data block
+	type 1216 (atmospheric density profile) with extract and merge
+	tools.
+
+2021-12-20  bernlohr <>
+
+	* common/fileopen.c: Keep code compatible with C90 language
+	standard.
+
+2021-12-16  bernlohr <>
+
+	* common/fileopen.c: Be even more verbose if the user wants it.
+
+2021-12-10  bernlohr <>
+
+	* common/fileopen.c: Through environment variables FILEOPEN_REPORT
+	and FILEOPEN_LIST we can control if and where a list of all files
+	opened through fileopen is reported.
+
+2021-11-15  bernlohr <>
+
+	* Makefile, corsika/iact_2d-to-3d.cc, eventio_basic/EventIO.hh: A
+	tool to convert photon bunches from the traditional to the 3D
+	format, for test purposes only.
+
+2021-11-12  bernlohr <>
+
+	* corsika/select_iact.c: Bunch selection also supporting 3D bunch
+	format.
+
+2021-11-12  bernlohr <>
+
+	* corsika/read_iact.c: Include bunch3d in data types that can be
+	printed by read_iact.
+
+2021-11-12  bernlohr <>
+
+	* hess/io_hess.h: Complete the set of CTA_PROD5* definitions being
+	basically just an equivalent to the corresponding CTA_PROD4*.
+
+2021-11-12  bernlohr <>
+
+	* corsika/io_simtel.c, corsika/mc_tel.h: Bunch3d definition and I/O
+	functions.
+
+2021-11-06  bernlohr <>
+
+	* eventio_basic/eventio.c, eventio_basic/io_basic.h: Add
+	put_int16/get_int16 as alias to put_short/get_short for consistent
+	syntax.
+
+2021-10-28  bernlohr <>
+
+	* hess/io_hess.c: Report pixel IDs of disabled pixels when printing
+	the data.
+
+2021-10-27  bernlohr <>
+
+	* hessio.dox: Dates of documentation files.
+
+2021-10-27  bernlohr <>
+
+	* Makefile, Makefile.xxx, corsika/read_iact.c,
+	eventio_addon/io_history.h, hess/read_hess.c: Little bits and pieces
+	(like copyright years etc.)
+
+2021-10-12  bernlohr <>
+
+	* Makefile, corsika/read_iact.c: Add listing of history and
+	metaparameter blocks, even though they are - so far - not in CORSIKA
+	data files.
+
+2021-10-12  bernlohr <>
+
+	* eventio_addon/io_history.c, eventio_addon/io_history.h: Add
+	function to search and retrieve a specific metaparameter in a list.
+
+2021-09-17  bernlohr <>
+
+	* EventioRegisteredNames.dat, TestCases/Makefile,
+	TestCases/test_history.c, common/hconfig.c, common/hconfig.h,
+	eventio_addon/io_history.c, eventio_addon/io_history.h,
+	hess/extract_hess.c, hess/extract_simtel.c, hess/merge_simtel.c,
+	hess/read_hess.c: Add support for meta-parameters (global or
+	per-telescope, after configuration step is complete), including
+	mapping through extraction and merging utilities. Also including
+	test cases.
+
+2021-09-17  bernlohr <>
+
+	* corsika/select_iact.c: Fix for compilation with C++ compiler (up
+	to C++17, at least).
+
+2021-09-17  bernlohr <>
+
+	* Makefile: More detailed reporting about used compiler(s).
+
+2021-08-30  bernlohr <>
+
+	* show_prepro.cc: Add a few more definitions which may have been
+	set.
+
+2021-08-05  bernlohr <>
+
+	* hess/camera_image.c: Allow image scale in camera plots to be based
+	on a fraction of the most intense pixel (negative IMAGE_RANGE
+	environment variable).
+
+2021-03-10  bernlohr <>
+
+	* corsika/read_iact.c, corsika/select_iact.c,
+	eventio_addon/io_histogram.c, eventio_basic/eventio.c,
+	hess/extract_hess.c, hess/extract_simtel.c, hess/merge_simtel.c,
+	hess/read_hess.c, hess/read_hess_nr.c, hess/split_hessio.c,
+	hessio.dox: If there is an environment variable MAX_IO_BUFFER, use
+	that to preset the maximum I/O buffer length. Applications should
+	generally only enlarge from that, if they need even more.
+
+2021-02-22  bernlohr <>
+
+	* corsika/select_iact.c: Fix broken copy of selected bunch list over
+	original list.
+
+2021-02-22  bernlohr <>
+
+	* hess/read_hess.c: Add option to select by shower number, skipping
+	a few other types of blocks (like MC event) in addition to the event
+	data block itself.
+
+2021-02-19  bernlohr <>
+
+	* hess/read_hess.c: Add option to select specific events only (for
+	example to produce plots).
+
+2021-02-08  bernlohr <>
+
+	* corsika/select_iact.c: By default not so verbose.
+
+2021-02-07  bernlohr <>
+
+	* Makefile.static.xxx, Makefile.xxx: Build select_iact also with
+	exported (hessioxxx) Makefiles.
+
+2021-02-01  bernlohr <>
+
+	* Makefile: Also export the new select_iact.c file.
+
+2021-02-01  bernlohr <>
+
+	* Makefile, corsika/select_iact.c: Add a utility that can select
+	photon bunches based on emitting particle (if the extra informations
+	is stored in the file).
+
+2020-11-24  bernlohr <>
+
+	* hess/camera_image.c: Use plain names for a few more types of
+	primaries.
+
+2020-11-22  bernlohr <>
+
+	* hess/read_hess.c: Fix recently added code for counting number of
+	telescopes with an image.
+
+2020-11-21  bernlohr <>
+
+	* hess/read_hess.c: Even more specific event selection, requiring a
+	specific telescope.
+
+2020-11-21  bernlohr <>
+
+	* corsika/io_simtel.c: Trying to obtain the ARRANG value from the
+	run header element 80 is futile since that got removed againfter
+	version 7.71.
+
+2020-11-13  bernlohr <>
+
+	* corsika/io_simtel.c: Corsika versions >= 7.6 can report the array
+	rotation angle already in the run header.
+
+2020-09-04  bernlohr <>
+
+	* Makefile: Export a second copy of the hessioxxx Makefile in case
+	it gets overwritten by any cmake efforts.
+
+2020-09-04  bernlohr <>
+
+	* Makefile.xxx.depend: Refresh dependencies file for hessioxxx (in
+	case user voids to run 'make depend').
+
+2020-08-21  bernlohr <>
+
+	* common/hconfig.c: Add the TYPELIST hconfig function to show the
+	types and number of values / length of strings for each parameter.
+
+2020-08-08  bernlohr <>
+
+	* hess/io_hess.h: Use a CTA_PROD5 definition as a short-cut how
+	prod-5 was set up (i.e. CTA_PROD4 and MAXIMUM_TELESCOPES=180).
+
+2020-08-08  bernlohr <>
+
+	* hbook/tohbook.h: Get rid of gcc message about unused function.
+
+2020-08-07  bernlohr <>
+
+	* corsika/io_simtel.c: Print shower direction for every CORSIKA
+	event header block.
+
+2020-08-03  bernlohr <>
+
+	* common/hconfig.c: Need a couple of tweaks for what parameters
+	should better not be LISTed, like function parameters (no assigned
+	storage) or immutable ones.
+
+2020-08-02  bernlohr <>
+
+	* hessio.dox: Bump date.
+
+2020-07-31  bernlohr <>
+
+	* common/hconfig.c: Extending a bit the functions to print parameter
+	values and their optional limits, plus a new function to list
+	default values.
+
+2020-07-31  bernlohr <>
+
+	* corsika/io_simtel.c: Energy of particles is supposed to be printed
+	as GeV and not as eV.
+
+2020-07-11  bernlohr <>
+
+	* hessio.dox: Bring doxygen date up to last changes.
+
+2020-07-09  bernlohr <>
+
+	* corsika/io_simtel.c: Check on photon sum does not apply for
+	particle data blocks.
+
+2020-06-29  bernlohr <>
+
+	* list_histograms.c: Allow for projections of 2-D histograms in
+	listings and ratios, as in 'list_histograms -R 7.proy 6.proy
+	file.data'.
+
+2020-05-12  bernlohr <>
+
+	* corsika/mc_atmprof.c: Workaround missing strdup when compiling in
+	pure C99 language mode.
+
+2020-05-12  bernlohr <>
+
+	* show_prepro.cc: Testing a few basic C99 features if compiled by C
+	compiler.
+
+2020-04-06  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: Adding the flat-field correction
+	factors (always included in the calibration coefficients) into the
+	laser calibration data block, so that gain calibration can be
+	studied separately.
+
+2020-03-23  bernlohr <>
+
+	* show_prepro.cc: And a few additional C++17 feature tests.
+
+2020-03-23  bernlohr <>
+
+	* show_prepro.cc: More C++20 feature tests.
+
+2020-02-20  bernlohr <>
+
+	* hessio.dox: Update date in generated documentation.
+
+2020-02-19  bernlohr <>
+
+	* common/hconfig.c: Implement listing of parameters limits.
+
+2020-02-12  bernlohr <>
+
+	* corsika/io_simtel.c: Report the number of showers to be simulated
+	(CORSIKA 7.x only).
+
+2019-11-19  bernlohr <>
+
+	* doc_src/hessio_doc.h, hessio.dox: Adding a mainpage for doxygen.
+
+2019-10-30  bernlohr <>
+
+	* Makefile, rht.cc: HEGRA Crab spectrum #2 is still the CTA
+	reference spectrum.
+
+2019-10-18  bernlohr <>
+
+	* hess/read_hess.c, hess/reconstruct.c, hess/user_analysis.c,
+	hess/user_analysis.h: Can fill histograms for pixel trigger
+	efficiency versus amplitude.
+
+2019-10-05  bernlohr <>
+
+	* Makefile.xxx, build_test, hess/io_hess.c: More build tests with
+	different compiler versions. Get rid of a few harmless warnings that
+	showed up.
+
+2019-09-29  bernlohr <>
+
+	* corsika/io_simtel.c: For compiling and linking CORSIKA with IACT
+	option but without the ATMEXT option we need to get rid any calls to
+	functions of mc_atmprof.c through the same NO_EXTERNAL_ATMOSPHERES
+	dependency as in iact.c.
+
+2019-09-20  bernlohr <>
+
+	* show_prepro.cc: Check a few more preprocessor definitions, some
+	just speculation.
+
+2019-09-10  bernlohr <>
+
+	* show_prepro.cc: Switch entirely to standard C++ compiler feature
+	detection rather than trying to be compatible with older clang++
+	macros.
+
+2019-09-03  bernlohr <>
+
+	* corsika/mc_atmprof.c: Add missing copyright header and doxygen
+	file identification.
+
+2019-09-03  bernlohr <>
+
+	* show_prepro.cc: Show more of /proc/cpuinfo output.
+
+2019-08-22  bernlohr <>
+
+	* show_prepro.cc: Update compiler feature tests for more complete
+	C++17 and C++20 coverage.
+
+2019-08-08  bernlohr <>
+
+	* hess/io_hess.c: Fix typos introduced in yesterdays changes to
+	types 2009 (CentralEvent) and 2011 (TelEvtHeader) which broke
+	version backward compatibility.
+
+2019-08-08  bernlohr <>
+
+	* eventio_basic/EventIO.hh, eventio_basic/eventio.c,
+	eventio_basic/statio.cc: Add '-s' option to statio, to including
+	sub-items in the statistics.
+
+2019-08-07  bernlohr <>
+
+	* corsika/io_simtel.c: Get rid of some unused code.
+
+2019-08-06  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: PixelSetting now with configured
+	offset of readout w.r.t. trigger.  CentralEvent now with the assumed
+	direction and speed of light that entered the plane wavefront
+	correction.  The TelEvent includes the absolute time (w.r.t. CORSIKA
+	time zero point at observation level) of the begining of the readout
+	and where the trigger decision was made w.r.t. to the readout
+	window.
+
+2019-08-02  bernlohr <>
+
+	* Makefile: Add '-p' to mkdir commands: better for parallel builds.
+
+2019-08-02  bernlohr <>
+
+	* Makefile.static.xxx: Include static Makefile variant for hessioxxx
+	and sync it with normal Makefile.
+
+2019-07-25  bernlohr <>
+
+	* eventio_basic/listio.c: No point in trying to report data offsets
+	('-p' option to listio) when reading from a pipe.
+
+2019-07-25  bernlohr <>
+
+	* hess/extract_hess.c: Extract_calibevent was not copying the
+	pixel-settings data block to every extracted output file.
+
+	----------------------------------------------------------------------
+
+2019-07-24  bernlohr <>
+
+	* hess/atmprof.c, hess/atmprof.h, hess/user_analysis.c: Integrate
+	the optional AtmProf data into the read_hess analysis.
+
+2019-07-24  bernlohr <>
+
+	* corsika/mc_atmprof.c: Don't define a 'etadsn' static variable here
+	since mc_atmprof.c can be included directly in atmo.c, resulting in
+	a duplication.
+
+2019-07-24  bernlohr <>
+
+	* Makefile.xxx: Add rule to build read_iact also with hessioxxx.
+
+2019-07-23  bernlohr <>
+
+	* Makefile, corsika/io_simtel.c, corsika/mc_atmprof.c,
+	corsika/mc_atmprof.h, hess/atmprof.c: Improve consistency of
+	atmospheric profile handling in CORSIKA and sim_telarray.
+
+2019-07-22  bernlohr <>
+
+	* corsika/mc_atmprof.c: When keeping track of the 5-layer
+	atmospheric profile parameters, the datm pointer can be NULL, since
+	the values can be recovered from catm.
+
+2019-07-22  bernlohr <>
+
+	* corsika/io_simtel.c: Add newline before printing atmospheric
+	profile.
+
+2019-07-19  bernlohr <>
+
+	* Makefile: Re-establish copying of the C/C++ source files into a
+	single src/ directory together with the rest of the 'install'
+	target.
+
+2019-07-19  bernlohr <>
+
+	* corsika/io_simtel.c: Fix writing of the atmospheric profile data
+	block.
+
+2019-07-13  bernlohr <>
+
+	* EventioRegisteredNames.dat, Makefile, Makefile.hessioxxx,
+	Makefile.xxx, corsika/io_simtel.c, corsika/mc_atmprof.c,
+	corsika/mc_atmprof.h, corsika/mc_tel.h, corsika/read_iact.c,
+	hess/read_hess.c: Add a new data block type for storing the data
+	table of the given atmospheric profiles.
+
+2019-07-12  bernlohr <>
+
+	* eventio_basic/testio.c: C++ compiler compatibility.
+
+2019-06-26  bernlohr <>
+
+	* common/histogram.c, corsika/mc_tel.h, hess/reconstruct.c,
+	hess/user_analysis.c: More complete markup of unused function
+	parameters.
+
+2019-06-24  bernlohr <>
+
+	* hess/io_hess.c: In read_hess_mc_phot() fill the number of pixels
+	seen into the structure, so that the user does not depend on the
+	number given in the configuration, even though they must match.
+
+2019-05-27  bernlohr <>
+
+	* hess/split_hessio.c: Get rid of a new warnings with gcc 9.1.
+
+2019-05-23  bernlohr <>
+
+	* show_prepro.cc: Also test compiler features recommended by C++
+	standard committee.
+
+2019-05-16  bernlohr <>
+
+	* EventioRegisteredNames.dat: A few more block type numbers being
+	registered.
+
+2019-03-27  bernlohr <>
+
+	* hess/extract_hess.c: Add easier to remember options for
+	calibration event types to select.
+
+2019-03-22  bernlohr <>
+
+	* hess/rec_tools.c: Fix typo in documentation for doxygen.
+
+2019-03-12  bernlohr <>
+
+	* hess/reconstruct.c: Integration correction factor is not
+	applicable with fixed integration window because we cannot predict
+	where the pulse will be in the window.
+
+2019-02-20  bernlohr <>
+
+	* eventio_basic/eventio.c, eventio_basic/io_basic.h,
+	eventio_basic/listio.c, eventio_basic/testio.c: Include test for
+	extended length bug (and fix bug properly). Also allow to turn of
+	the 'extended by' messages produced along the way. The listio
+	program got an option added in order to be able to read the extended
+	length data blocks.
+
+2019-02-20  bernlohr <>
+
+	* eventio_basic/eventio.c: Fixing bug affecting extended item of >=
+	4 GiB. Reported by Max NÃ¶the.
+
+2019-02-04  bernlohr <>
+
+	* common/fileopen.h: Improve clang++ compatibility.
+
+2019-01-31  bernlohr <>
+
+	* hess/camera_image.c: If the pixel size is too small or too large
+	for using the same size in the intensity scale shown below the
+	camera image, use a more reasonable size for that purpose.
+
+2019-01-31  bernlohr <>
+
+	* show_prepro.cc: Include a number of numerical constants which may
+	or may not be defined.
+
+2019-01-31  bernlohr <>
+
+	* hess/rec_tools_nr.c: Fix missing M_PI when compiling with a plain
+	C language standard, e.g. -std=c99 instead of enabling POSIX.1
+	features.
+
+2019-01-15  bernlohr <>
+
+	* hessio.dox: Update date for doxygen-generated documentation.
+
+2019-01-15  bernlohr <>
+
+	* corsika/io_simtel.c: Compilation with C++ compiler failed due to
+	missing type cast after calloc.
+
+2019-01-10  bernlohr <>
+
+	* Makefile.xxx, common/fileopen.c, common/fileopen.h,
+	common/hconfig.c: Allow access to the linked list of configured
+	include paths, for testing where a given file can be found.
+
+2018-12-20  bernlohr <>
+
+	* Makefile, corsika/io_simtel.c, corsika/mc_tel.h,
+	corsika/read_iact.c, hess/read_hess.c: Added the missing
+	print_shower_longitudinal() function for the longitudinal
+	distributions in the CORSIKA data.  Although read_hess can also show
+	CORSIKA data, extracted the relevant code into a much, much simpler
+	program for only this purpose.
+
+2018-11-30  bernlohr <>
+
+	* hess/io_hess.h: Need more space for reference sample shapes now
+	that they are sub-sampled in more steps.
+
+2018-11-27  bernlohr <>
+
+	* hess/io_hess.c: Add two missing 'break' statements in recently
+	added code in print_hess_televent.
+
+2018-11-26  bernlohr <>
+
+	* common/current.c, common/hconfig.c, eventio_basic/EventIO.cc,
+	eventio_basic/EventIO.hh, hess/extract_simtel.c,
+	hess/merge_simtel.c: Killing yet more warnings that show up only
+	with -Wextra option.  And for some unused function parameters just
+	add a comment to the fact.
+
+2018-11-26  bernlohr <>
+
+	* best_of.cc, common/dhsort.c, common/fileopen.c, common/hconfig.c,
+	common/hconfig.h, common/histogram.c, common/histogram.h,
+	common/initial.h, common/straux.c, common/warning.c,
+	corsika/io_simtel.c, eventio_addon/io_hconfig.c,
+	eventio_addon/io_histogram.c, eventio_basic/TestIO.cc,
+	eventio_basic/eventio.c, eventio_basic/listio.c,
+	eventio_basic/testio.c, hbook/tohbook.c, hess/atmprof.c,
+	hess/camera_image.c, hess/check_trgmask.c, hess/extract_hess.c,
+	hess/extract_simtel.c, hess/gen_lookup.c, hess/gen_trgmask.c,
+	hess/io_hess.c, hess/io_hess.h, hess/lpdist.c, hess/merge_simtel.c,
+	hess/read_hess.c, hess/read_hess_nr.c, hess/rec_tools.c,
+	hess/rec_tools_nr.c, hess/reconstruct.c, hess/rh_dl0_test.c,
+	hess/split_hessio.c, hess/user_analysis.c, rh3.cc, rht.cc,
+	root/convertTH.cc, root/cvt3.cc, root/toroot.cc, root/toroot.hh: 
+	Expanding tab stop characters.
+
+2018-11-25  bernlohr <>
+
+	* hess/io_hess.c, hess/read_hess.c, hess/user_analysis.c: More
+	warnings (when compiling C code as C++) eliminated.
+
+2018-11-25  bernlohr <>
+
+	* eventio_basic/TestIO.cc, hess/user_analysis.c, show_prepro.cc: Get
+	rid of compiler warnings with new C/C++ language standards.
+
+2018-11-17  bernlohr <>
+
+	* rht.cc: Minor clean-up.
+
+2018-11-16  bernlohr <>
+
+	* corsika/io_simtel.c, rht.cc: One 'print' place forgotten to adjust
+	with MAX_PRINT_ARRAY variable.
+
+2018-11-16  bernlohr <>
+
+	* rh3.cc: Avoid crash when asking for more telescopes than used.
+
+2018-10-31  bernlohr <>
+
+	* common/fileopen.c: Trying to add fallback mode if compression
+	program does not exist but it does not take effect. Will have to add
+	a more explicit check before the popen() for that.
+
+2018-10-25  bernlohr <>
+
+	* fcat.c: Add '-o' and '-a' options to set an output file.
+
+2018-10-25  bernlohr <>
+
+	* add_histograms.c, common/fileopen.c, rht.cc: Add a missing case
+	for "w" mode of fileopen().
+
+2018-09-19  bernlohr <>
+
+	* common/eventio_registry.c, common/histogram.c, corsika/mc_tel.h,
+	eventio_addon/io_histogram.c, eventio_basic/eventio.c,
+	eventio_basic/io_basic.h, hess/basic_ntuple.c: Replacing C++ style
+	comments (//) with classic C style comments in files where there a
+	just a few of them. In other files where there are lots of them, and
+	this will not change, so better use a compiler / language version
+	that can cope with it.
+
+2018-09-18  bernlohr <>
+
+	* hess/camera_image.c, hess/read_hess.c: Fix loop-variable
+	declaration for pre-C90 compiler.
+
+2018-09-15  bernlohr <>
+
+	* hess/read_hess_nr.c: Need a dummy function to make the linker
+	happy.
+
+2018-09-13  bernlohr <>
+
+	* hess/camera_image.c, hess/camera_image.h, hess/read_hess.c: New
+	feature to add up pixel intensities for all telescopes of the same
+	type into a single image.
+
+2018-09-13  bernlohr <>
+
+	* rht.cc: Options for alternate spectra.
+
+2018-09-11  bernlohr <>
+
+	* hess/io_hess.h: Increase the default maximum number of FADC slices
+	that can be handled from 128 to 160 for prod4, to allow for more
+	room to place traces.
+
+2018-09-07  bernlohr <>
+
+	* corsika/io_simtel.c: Additional bit in flag for
+	write_photo_electrons() etc. can hint that the numbers of photons
+	are actually for the 300-550 nm (or similar) restricted wavelength
+	range.
+
+2018-09-07  bernlohr <>
+
+	* list_histograms.c: Add option to print the ratio of the contents
+	of two histograms.
+
+2018-08-28  bernlohr <>
+
+	* common/fileopen.h: Adding the C++ string overlay for fileopen()
+	did not go as smoothly as expected.
+
+2018-08-22  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: Add pixel trigger time recording.
+
+2018-08-22  bernlohr <>
+
+	* common/fileopen.h: When compiling as C++ we can also use
+	fileopen() with a std::string filename.
+
+2018-08-03  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: Record auxilliary traces on
+	request.  Prepare for fourth trigger type in data.
+
+2018-08-03  bernlohr <>
+
+	* corsika/io_simtel.c: Actual bunch size is fabs() of data value, in
+	case negative values are used as to mark a specific class of photon
+	bunches (e.g. fluorescence or scattered, ...)
+
+2018-05-11  bernlohr <>
+
+	* common/current.c, common/hconfig.c: Avoid a few new warnings shown
+	by gcc 8.1.
+
+2018-05-04  bernlohr <>
+
+	* corsika/io_simtel.c: More detailed error message if the temporary
+	bunches file(s) cannot be read back before writing the actual
+	output.
+
+2018-05-04  bernlohr <>
+
+	* common/fileopen.c: All diagnostic output, including reports of
+	success, go to stderr now to make sure that data output to stdout
+	will not be corrupted.
+
+2018-04-16  denauroi <>
+
+	* Makefile, hbook/Makefile, root/Makefile, root/toroot.cc: merged
+	the scons-muliplatform-branch into the HEAD
+
+2018-04-09  bernlohr <>
+
+	* corsika/io_simtel.c: Print muon additional information in its
+	proper way.
+
+2018-03-27  bernlohr <>
+
+	* hess/read_hess.c: Use %g for printing sum of event weights because
+	this could be an awful number with LightEmission data.
+
+2018-03-27  bernlohr <>
+
+	* corsika/io_simtel.c: Fix printing particle ID for IACTEXT particle
+	output.
+
+2018-03-22  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: Add optional effective focal
+	length to camera settings, with fall-back to old format if zero.
+
+2018-03-21  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h, hess/read_hess.c: Add a couple of
+	the missing print_... functions.
+
+2018-03-21  bernlohr <>
+
+	* common/dhsort.h: Another properly commented '@file' to make
+	doxygen happy.
+
+2018-02-28  bernlohr <>
+
+	* eventio_addon/io_histogram.c, list_histograms.c: Avoid non-comment
+	('#') auxilliary text output when printing histogram contents
+	(list_histograms -H nnn).
+
+2018-02-28  bernlohr <>
+
+	* common/fileopen.c: For programs that do not set a list of path to
+	search files there is the FILEOPEN_DEFAULT_PATH environment variable
+	as a fallback.
+
+2018-02-23  bernlohr <>
+
+	* common/straux.h: Remove ANSI_C ifdef.
+
+2018-01-04  bernlohr <>
+
+	* hess/io_hess.h, hessio.dox: Prepare limits for prod-4 data with
+	SCTs.
+
+2017-12-06  bernlohr <>
+
+	* Makefile: Same NOCXX11 rules as in other places.
+
+2017-11-26  bernlohr <>
+
+	* hess/read_hess.c: Show new CTA_PROD4 and CTA_MINI4 if defined.
+
+2017-11-26  bernlohr <>
+
+	* show_prepro.cc: Include examples to explain output in border
+	cases.
+
+2017-11-26  bernlohr <>
+
+	* hess/io_hess.h: Compiling with -DCTA_PROD4 results in limits
+	consistent with baseline layouts.
+
+2017-10-14  bernlohr <>
+
+	* hess/user_analysis.c: There is no guarantee that PATH_MAX is
+	defined.
+
+2017-10-10  bernlohr <>
+
+	* hess/extract_simtel.c: Write histograms 1, 3, and 6 from incoming
+	histogram blocks. Other histograms will no longer correspond to
+	remapped data.
+
+2017-10-06  bernlohr <>
+
+	* Makefile, hess/user_analysis.c: Fix gcc 7.2 compiler warnings.
+
+2017-09-25  bernlohr <>
+
+	* Makefile: Can export xz compressed hessioxxx package as well as
+	gzip compressed one.
+
+2017-09-25  bernlohr <>
+
+	* common/fileopen.c: Support "zstd" (zstandard) compression scheme
+	on file names ending in ".zst" or ".zst.tar".
+
+2017-08-21  bernlohr <>
+
+	* hess/camera_image.c: Use smaller text for values shown inside
+	pixels if camera has many pixels.
+
+2017-08-07  bernlohr <>
+
+	* hess/camera_image.c, hess/io_hess.c: An even better fix for p.e.
+	lists with ignored telescopes is to fix the index when reading the
+	data rather than when plotting it.
+
+2017-08-07  bernlohr <>
+
+	* hess/camera_image.c: Show true p.e. counts for proper telescope
+	even if the simulation was ignoring some telescopes.
+
+2017-08-02  bernlohr <>
+
+	* common/hconfig.h: More complete NULL_CONFIG_ITEM should give no
+	warning when compiled with -Wextra or -Wmissing-field-initializers.
+	The result has always been correct.
+
+2017-07-21  bernlohr <>
+
+	* Makefile, Makefile.xxx: Allow for static and sem-static binaries
+	also in exported version.
+
+2017-07-21  bernlohr <>
+
+	* corsika/io_simtel.c: Add end-of-event info and configurable number
+	of photon bunches shown in print functions (e.g. with read_hess -s).
+
+2017-06-07  bernlohr <>
+
+	* hess/read_hess.c, hess/reconstruct.c, hess/user_analysis.c,
+	hess/user_analysis.h: Allow overriding the telescope effective focal
+	length in the reconstruction.
+
+2017-05-16  bernlohr <>
+
+	* common/eventio_registry.c, hess/extract_simtel.c,
+	hess/merge_simtel.c, hess/read_hess.c, hess/reconstruct.c,
+	hess/split_hessio.c: Re-establish full C++ compiler compatibility
+	(multiple g++ versions, also clang++) with multiple language
+	standard versions (C++98, C++11, C++14).
+
+2017-05-15  bernlohr <>
+
+	* hess/camera_image.c, hess/read_hess.c: Adding more command line
+	options for plot output.
+
+2017-03-23  bernlohr <>
+
+	* corsika/io_simtel.c: Properly print info on particle emitting the
+	Cherenkov photon bunch (as produced when IACT interface build with
+	IACTEXT and STORE_EMITTER).
+
+2017-03-21  bernlohr <>
+
+	* hess/io_hess.c: Sign of first interaction height not an indicator
+	of CORSIKA TSTART setting anymore since 2004. Drop corresponding
+	printf in print_hess_mc_shower.
+
+2017-03-09  bernlohr <>
+
+	* hess/read_hess.c: Add option to specify a (single) subset of
+	telescopes which are only accepted if at least two of them were
+	triggered (hardware stereo).
+
+2017-03-08  bernlohr <>
+
+	* best_of.cc: Add an option '-d' to make the default optimisation by
+	differential sensitivity as explicit as the other schemes.
+
+2017-03-04  bernlohr <>
+
+	* hess/io_hess.c: One number shown incorrectly in
+	print_hess_mcrunheader function.
+
+2017-02-21  bernlohr <>
+
+	* hess/read_hess.c: Applying an integration scheme for any telescope
+	type implies redoing reconstruction.
+
+2017-02-21  bernlohr <>
+
+	* hess/io_hess.c: Working on limitations of zero-suppressed and
+	data-reduced modes with too many pixels.
+
+2017-01-05  bernlohr <>
+
+	* Makefile: Same version file processing as adapted for
+	sim_telarray.
+
+2017-01-05  bernlohr <>
+
+	* Makefile.xxx: Add distclean target to remove also generated
+	Makefile.depend
+
+2016-12-02  bernlohr <>
+
+	* hess/extract_simtel.c: Fix extract_simtel program which was not
+	really working so far.
+
+2016-12-02  bernlohr <>
+
+	* eventio_addon/io_histogram.c: Silence two compilations warnings by
+	setting (portable) unused attribute (where possible).
+
+2016-11-24  bernlohr <>
+
+	* common/initial.h: Try to fix a rootcint issue triggered by include
+	'strings.h' as well.
+
+2016-11-22  bernlohr <>
+
+	* common/initial.h: On Scientific Linux 7.2 (gcc 4.8.5) the
+	declaration of 'strcasecmp()' was not always known.  Make sure
+	<strings.h> is included with an POSIX.1 system.
+
+2016-11-18  bernlohr <>
+
+	* eventio_basic/EventIO.cc, eventio_basic/EventIO.hh: Experimental
+	support for 16-bit floating point numbers (IEEE 754-2008) also via
+	the 'half.hpp' package, if available, with automatic detection by
+	preprocessor for newer compilers.
+
+2016-11-18  bernlohr <>
+
+	* hess/camera_image.c: Warn when encountering data which have pixel
+	shape types given but the reported shape does not match the
+	orientation of neighbour pixels.  Because of older data not
+	including the pixel shape, the camera images were generated by
+	guessing the shape from the neighbours.
+
+2016-11-10  bernlohr <>
+
+	* eventio_basic/eventio.c: Add alternate system macro for infinity
+	in sfloat to double conversion, in case the first one is not
+	defined.
+
+2016-11-02  bernlohr <>
+
+	* hess/reconstruct.c: Fill Hillas parameters also when original data
+	had no Hillas parameter blocks.
+
+2016-10-21  bernlohr <>
+
+	* Makefile.xxx: The extract_simtel program also needs io_trgmask.
+
+2016-10-21  bernlohr <>
+
+	* root/cvt3.cc: Allow conversion of larger histogram files to ROOT
+	format.
+
+2016-10-13  bernlohr <>
+
+	* corsika/io_simtel.c: Print a few more parameters from CORSIKA
+	event header blocks.
+
+2016-10-13  bernlohr <>
+
+	* hess/camera_image.c: Stop showing the unreliable per-sample image
+	intensity; just keep the integral.
+
+2016-10-11  bernlohr <>
+
+	* hessio.dox: Update version string in documentation.
+
+2016-10-11  bernlohr <>
+
+	* Makefile, Makefile.xxx: Make target 'extract_simtel' was
+	inconsistent between HESS-internal Makefile and exported (hessioxxx)
+	version, and program 'extract_simtel' is different from
+	'extract_hess'.
+
+2016-09-23  bernlohr <>
+
+	* hess/camera_image.c, hessio.dox: Allow printing pixel amplitude or
+	true p.e. number on top of pixels in camera image, depending on
+	environment variables.
+
+2016-09-21  bernlohr <>
+
+	* corsika/io_simtel.c: Print a bit more information on MC run
+	headers.
+
+2016-09-09  bernlohr <>
+
+	* hess/camera_image.c, hess/read_hess.c: Optionally include plot of
+	true number of photo-electron in Postscript file output, if
+	true-p.e. data (data block type 1204) is available.
+
+2016-09-08  bernlohr <>
+
+	* hess/camera_image.c, hess/read_hess.c, hess/reconstruct.c,
+	hess/user_analysis.c, hess/user_analysis.h: Pulse integration with
+	FlashCam-style pulse shaping now working (integration scheme 7).
+
+2016-07-12  bernlohr <>
+
+	* hess/reconstruct.c: Same debugging message mark-up as in other
+	places.
+
+2016-07-12  bernlohr <>
+
+	* show_prepro.cc: Add other system-related information than only
+	preprocessor settings.
+
+2016-07-06  bernlohr <>
+
+	* hess/read_hess.c: Add --min-true-energy option, useful for example
+	to select some large events for nice images together with the '-p'
+	option.
+
+2016-07-04  bernlohr <>
+
+	* show_prepro.cc: Add more compiler and system dependent
+	preprocessor definitions to show.
+
+2016-07-04  bernlohr <>
+
+	* hess/read_hess.c: Use preprocessor tricks to simplify what
+	definitions are in use.
+
+2016-06-24  bernlohr <>
+
+	* common/fileopen.c: If the FILEOPEN_PARALLEL evironment variable is
+	set, any .gz files are open through pigz rather than gzip and any
+	.bz2 files through pbzip2 rather than bzip2.
+
+2016-06-24  bernlohr <>
+
+	* best_of.cc: Alternate combined best choice with '-C' option.
+
+2016-06-24  bernlohr <>
+
+	* hess/user_analysis.c: Fix typo in one booked histogram ID.
+
+2016-05-25  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h, hess/read_hess.c,
+	hess/reconstruct.c: Fix bad use of zero_sup_mode bit 0x20 which
+	waswhich was resulting in some empty images when both pulse
+	integration and data cleaning are activated.
+
+2016-05-24  bernlohr <>
+
+	* hess/reconstruct.c: Make sure neighbour finding was done and that
+	we don't try to access unknown neighbour lists.
+
+2016-05-24  bernlohr <>
+
+	* hess/reconstruct.c: Data cleaning also taking effect for
+	PixelTiming and PixelCalibrated data.
+
+2016-05-23  bernlohr <>
+
+	* hess/read_hess.c, hess/reconstruct.c: More fine-grained data
+	cleaning options (--cleaning 1 to 5).
+
+2016-05-20  bernlohr <>
+
+	* hess/io_hess.c, hess/read_hess.c, hess/reconstruct.c,
+	hess/reconstruct.h: First working implementation of the data
+	cleaning in read_hess.  Now disabling the use of pixel significance
+	from the 'pixel timing', which was only used for prod1s data, as it
+	is too noisy.
+
+2016-05-20  bernlohr <>
+
+	* hess/rh_dl0_test.c: What if the raw data traces were not summed up
+	automatically?
+
+2016-05-17  bernlohr <>
+
+	* hess/user_analysis.c: Avoid warning with gcc 6.1
+
+2016-05-17  bernlohr <>
+
+	* eventio_basic/EventIO.hh: Avoid warnings with g++ 6.1
+
+2016-05-17  bernlohr <>
+
+	* EventioRegisteredNames.dat: Add more block type numbers with
+	telescope event and tracking data.
+
+2016-05-03  bernlohr <>
+
+	* hess/merge_simtel.c: Report which events get ignored because
+	triggered telescope are not distinct.
+
+2016-05-03  bernlohr <>
+
+	* hess/merge_simtel.c: Stereo triggers must by default be from
+	distinct telescopes.
+
+2016-04-29  bernlohr <>
+
+	* hess/merge_simtel.c: Add options to get rid of some duplicated MC
+	data.
+
+2016-04-29  bernlohr <>
+
+	* hess/user_analysis.c: Add lots of histograms to see in which areas
+	events get triggered in different energy ranges.
+
+2016-04-29  bernlohr <>
+
+	* hess/merge_simtel.c: Cleaning of history also for merge_simtel,
+	plus allowing to keep some of the first history blocks, for example
+	with multi-step merging.
+
+2016-04-29  bernlohr <>
+
+	* hess/read_hess.c: Option was advertised as '--clean-history' but
+	accepted only as '--clear-history'.  Accepting both now.
+
+2016-04-29  bernlohr <>
+
+	* rht.cc: Allow calculation of threshold based on other analysis
+	histograms.
+
+2016-04-11  bernlohr <>
+
+	* eventio_basic/eventio.c: Should fix reported problems with I/O
+	blocks greater than 2 GB.
+
+2016-03-18  bernlohr <>
+
+	* hess/split_hessio.c: Also write the tracking data along the
+	telescope event data in '-x' mode of split_hessio.
+
+2016-03-17  bernlohr <>
+
+	* hess/read_hess.c: Read stand-alone central/tracking/telescope
+	event data and plot telescope image if requested.
+
+2016-03-17  bernlohr <>
+
+	* hess/read_hess.c: Start with larger I/O buffer, more appropriate
+	for the typical CTA case, so we do not need to enlarge it afterwards
+	again and again.
+
+2016-03-17  bernlohr <>
+
+	* hess/split_hessio.c: By default drop the compression for output
+	files as this would launch more than 100 gzip pipes for the typical
+	CTA case.
+
+2016-03-14  bernlohr <>
+
+	* common/initial.h, hess/read_hess.c: Fix new portability problem
+	for snprintf and strcasecmp.
+
+2016-03-14  bernlohr <>
+
+	* eventio_basic/eventio.c, eventio_basic/io_basic.h, hess/io_hess.c: 
+	Playing with further bulk data speed improvements.
+
+2016-03-09  bernlohr <>
+
+	* common/initial.h: strings.h is not actually needed in initial.h as
+	it is already included where functions like strncasecmp etc. get
+	used.
+
+2016-03-08  bernlohr <>
+
+	* corsika/io_simtel.c, corsika/mc_tel.h, hess/io_hess.c,
+	hess/io_hess.h, hess/read_hess.c: Add option to store number of
+	photons hitting each pixel along with the list of photo-electrons
+	(not activated by default for efficiency reasons).
+
+2016-03-08  bernlohr <>
+
+	* eventio_basic/eventio.c: Hard to tell with normal data which
+	byteswapping method is more efficient when it is not normally needed
+	as long as staying on architectures with the same byte order. Use
+	-DNO_BYTESWAP if you want to turn off the new way.
+
+2016-03-08  bernlohr <>
+
+	* hess/io_hess.c: Use consistent ifdef OLD_CODE for timing
+	comparison of new optimized raw data reading with the old way.
+
+2016-03-07  bernlohr <>
+
+	* hess/io_hess.c: Fix missing allocation/re-allocation of amplitudes
+	array for the per-pixel photo-electron lists (the amplitudes never
+	been used so far).
+
+2016-03-04  bernlohr <>
+
+	* eventio_basic/eventio.c: Restrict use of bswap functions to glibc
+	systems (gcc >= 4.3 or clang compatible).
+
+2016-03-03  bernlohr <>
+
+	* eventio_basic/eventio.c, eventio_basic/io_basic.h, hess/io_hess.c: 
+	Optimize reading some of the very frequent data types, in particular
+	the differential ADC samples and ADC sums.
+
+2016-03-03  bernlohr <>
+
+	* hess/rh_dl0_test.c: More flexible for producing also the requested
+	histograms for MSTs etc.
+
+2016-03-03  bernlohr <>
+
+	* hess/read_hess.c: Get rid of dummy timezone structure (which may
+	or may not have been necessary on some historical systems).
+
+2016-03-03  bernlohr <>
+
+	* common/fileopen.c, common/hconfig.c, common/initial.h: Use of the
+	swab() function for optimized copying and byte-swapping of vectors
+	of 16-bit data required a few changes in includes.  Not sure if this
+	breaks compatibility with historical systems like VAX/VMS or OS/9.
+	If so, nobody is likely to complain.
+
+2016-03-03  bernlohr <>
+
+	* show_types.cc: Show a few more data types.
+
+2016-03-03  bernlohr <>
+
+	* eventio_basic/TestIO.cc, eventio_basic/testio.c: Use exit(1) for
+	all cases of data mismatch, not just read errors.
+
+2016-02-24  bernlohr <>
+
+	* EventioRegisteredNames.dat, hess/io_hess.c, hess/read_hess.c,
+	hess/split_hessio.c: Writing central-trigger data to a separate file
+	in split_hessio may be useful for re-merging events later-on.
+	Read_hess initialising basic MC shower/event data in case of a mix
+	of runs with and without MC data.  Documentation typos fixed in
+	io_hess.c
+
+2016-02-24  bernlohr <>
+
+	* hess/split_hessio.c: Create two auxilliary data files instead of
+	one. The 'telaux' file should be the same for each run with same
+	setup, only the second one would differ (with disabled pixels,
+	pedestals, calibration coefficients).
+
+2016-02-24  bernlohr <>
+
+	* hess/read_hess.c: Do not report maximum sizes with '-q' option.
+
+2016-02-18  bernlohr <>
+
+	* hess/rh_dl0_test.c: Add a few comments in code.
+
+2016-02-17  bernlohr <>
+
+	* hess/cam2sky.c, hess/extract_simtel.c, hess/lpdist.c,
+	hess/rh_dl0_test.c: Add a couple of unused or test programs to CVS.
+
+2016-02-17  bernlohr <>
+
+	* Makefile, Makefile.xxx, eventio_basic/io_basic.h, hess/io_hess.h,
+	hess/read_hess.c, hess/split_hessio.c: In addition to '--dst-level'
+	option and '--raw-level' and associated options to read_hess, for
+	rewriting raw data (optionally reducing the amounts of other types
+	of data).
+
+2016-02-05  bernlohr <>
+
+	* hessio.dox: Excludes some test and other programs from generated
+	doxygen documentation.
+
+2016-02-05  bernlohr <>
+
+	* EventioRegisteredNames.dat: Add more documented data types.
+
+2016-01-25  bernlohr <>
+
+	* corsika/io_simtel.c, hess/io_trgmask.c: Get rid of two compiler
+	warnings (clang only, no problem).
+
+2015-12-21  bernlohr <>
+
+	* hessio.dox: Update version and file list for doxygen generated
+	documentation.
+
+2015-12-15  bernlohr <>
+
+	* hess/read_hess.c: Finish with checking for memory leaks (none
+	found) and keep de-allocation code as optional.
+
+2015-12-15  bernlohr <>
+
+	* hess/read_hess.c, hess/reconstruct.c, hess/reconstruct.h,
+	hess/user_analysis.c: For checking that there are no memory leaks
+	(with valgrind), release (almost) everything at the end. No leaks
+	found.
+
+2015-12-09  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h, hess/read_hess.c,
+	hess/reconstruct.c, hess/user_analysis.c: - Fix reading of event data if current library supports fewer
+	  sectors per telescope than in recorded data.    The CTA_MAX version now supports 23310 sectors.  - New flexible pixel neighbour finding (needed for zero suppression)   re-activated after fixing a segmentation fault.  - Telescope type assignment without telescope ID (i.e. using mirror
+	  area, focal length, pixels) was broken with prod-3 Paranal merged
+	  data because the order of data blocks is less strict than in single   simulation data. Telescope types are now re-assigned when needed.  - Even when told to save memory the maximum number of slices can   be as big as 96 (instead of 80) in CTA prod2/prod3/max settings.
+
+2015-10-30  bernlohr <>
+
+	* common/fileopen.c: Avoid the fflush before pclose in fileclose
+	function for non-glibc-based systems since we do not know if it is
+	an input or output pipe.
+
+2015-10-16  bernlohr <>
+
+	* hess/io_hess.h: Allow overriding maximum no. of telescopes,
+	pixels, sectors, drawers, slices to tailor specific versions at
+	compile-time without need for code modifications.
+
+2015-07-20  bernlohr <>
+
+	* hess/io_hess.h: The final change for prod-3, or hoping so.
+
+2015-07-20  bernlohr <>
+
+	* common/fileopen.c: fileopen handlers for tar and zip files (all
+	content files to be read sequentially) working now.
+
+2015-07-15  bernlohr <>
+
+	* common/fileopen.c: Input files to fileopen (for reading) can have
+	'.tar.gz' extension, in which case every file in the tar archive is
+	read one after the other (assumed to be not compressed inside the
+	archive).
+
+2015-07-13  bernlohr <>
+
+	* hess/io_hess.h: We need a version adapted to merging prod-3 data
+	without SCTs.
+
+2015-06-25  bernlohr <>
+
+	* common/hconfig.c: Extend hconfig internal command 'LIST'.
+
+2015-06-15  bernlohr <>
+
+	* hess/io_hess.h: Updating maximum number of trigger groups to
+	actual values needed for ASTRI and SCTs.
+
+2015-06-15  bernlohr <>
+
+	* common/hconfig.c: Show actual values when configuration values
+	exceed bounds.
+
+2015-05-31  bernlohr <>
+
+	* show_prepro.cc: And yet another little tool which sits around
+	here.
+
+2015-05-31  bernlohr <>
+
+	* rh3.cc, rht.cc, show_types.cc: Add more tools.
+
+2015-05-31  bernlohr <>
+
+	* root/convertTH.cc: Add tool for ROOT histogram to ASCII text
+	conversion.
+
+2015-05-31  bernlohr <>
+
+	* rh_sens_comp.cc: Tool for sensitivity comparisons from 'best_of'
+	performance files.
+
+2015-05-31  bernlohr <>
+
+	* hess/merge_simtel.c: Fix typo with '--min-trg-tel' option.
+
+2015-05-31  bernlohr <>
+
+	* hess/merge_simtel.c: Check library limits and against output to
+	stdout.
+
+2015-05-27  bernlohr <>
+
+	* Makefile.xxx, Makefile.xxx.root: Make sure that debugging flags
+	for the link stage can be passed down to the 'root' sub-directory
+	Makefile.
+
+2015-05-27  bernlohr <>
+
+	* hess/reconstruct.c: Due to problem with latest version temporarily
+	revert to copy of older version.
+
+2015-05-26  bernlohr <>
+
+	* hess/io_hess.h: More fine-tuning of memory use for prod-3.
+
+2015-05-20  bernlohr <>
+
+	* Makefile, hess/io_hess.h: Increase maximum number of telescopes
+	for -DCTA_MAX_SC compilation.
+
+2015-05-05  bernlohr <>
+
+	* common/fileopen.c: Make filename '-' to mean stdin or stdout, for
+	the sloppy user.
+
+2015-05-05  bernlohr <>
+
+	* hess/reconstruct.c: Little fix for code not used yet.
+
+2015-04-30  bernlohr <>
+
+	* hess/io_hess.h: No need for 150 SCTs in prod-3.
+
+2015-04-30  bernlohr <>
+
+	* hess/io_hess.h, hess/read_hess.c, hess/reconstruct.c,
+	hess/user_analysis.c, hess/user_analysis.h: Start with more flexible
+	image cleaning and data reduction. Incomplete at this time.
+
+2015-04-27  bernlohr <>
+
+	* hessio.dox: Regenerated with  doxywizard for newer format.
+
+2015-04-27  bernlohr <>
+
+	* Makefile, Makefile.xxx: Add a cmake build hook for hessioxxx which
+	does not mess up the provided Makefile.
+
+2015-04-27  bernlohr <>
+
+	* corsika/io_simtel.c: Fix a possible loss of the last reported
+	CORSIKA inputs line (usually a comment) when reading and re-writing
+	the inputs (e.g. in extract_corsika_tel or extra_corsika_multi).
+
+2015-03-13  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: Amending names and meaning of
+	pixel inclination variables.
+
+2015-02-23  bernlohr <>
+
+	* hess/read_hess.c: Add an option for random pixel calibration
+	errors.
+
+2015-02-23  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h, hess/read_hess.c: Change format of
+	CameraSettings data block new version before anybody is using it.
+
+2015-02-20  bernlohr <>
+
+	* hess/read_hess.c: Deadtime fraction was only applied when at least
+	one of --only-telescopes or --not-telescopes was used in addition.
+	Fixing that.
+
+2015-02-05  bernlohr <>
+
+	* hess/io_hess.h, hess/read_hess.c: Add preliminary settings for
+	prod-3.
+
+2015-01-20  bernlohr <>
+
+	* hess/camera_image.c: Run-time option to print the pixel IDs on top
+	of each pixel in the camera images.
+
+2015-01-20  bernlohr <>
+
+	* common/fileopen.c: Add lz4 compression as a known method and
+	filename extension.
+
+2014-11-17  bernlohr <>
+
+	* Makefile.xxx, eventio_basic/EventIO.cc, eventio_basic/EventIO.hh,
+	eventio_basic/TestIO.cc, eventio_basic/filterio.cc,
+	eventio_basic/statio.cc: Improved MacOS compatibility: everything
+	compiles but C++ programs still not running.
+
+2014-11-17  bernlohr <>
+
+	* common/fileopen.c: Conditional compilation for glibc-specific line
+	of code.
+
+2014-11-14  bernlohr <>
+
+	* corsika/io_simtel.c: CORSIKA header does not actually contain how
+	often a shower gets used.  So do not report this with 'read_hess -s'
+	etc.
+
+2014-11-14  bernlohr <>
+
+	* eventio_basic/eventio.c: Change the name of a variable expf to
+	avoid a compiler warning on some systems.
+
+2014-10-28  bernlohr <>
+
+	* hess/extract_hess.c: Increase the I/O buffer size and add an
+	option to adjust it further if needed.
+
+2014-10-28  bernlohr <>
+
+	* best_of.cc: Add an empty line for each gap in the energy coverage.
+
+2014-09-02  bernlohr <>
+
+	* hess/camera_image.c, hess/io_hess.c, hess/io_hess.h,
+	hess/read_hess.c, hess/reconstruct.c, hess/reconstruct.h,
+	hess/split_hessio.c: Add calibrated pixel intensities as an optional
+	representation instead of or in addition to raw data. With a single
+	gain channel per pixel it will never save space, compared to summed
+	raw data. Some space saving for two channels per pixel. The new
+	structure is allocated and filled only if requested with the
+	'--calibrate' option (or such data is encountered on input).
+
+2014-08-20  bernlohr <>
+
+	* best_of.cc: Re-calculate the integral sensitivity corresponding to
+	the selected performance by re-summation of event counts and
+	applying Li&Ma etc.
+
+2014-08-13  bernlohr <>
+
+	* common/fileopen.c: Modify some messages for verbose reporting of
+	files opened and closed.
+
+2014-08-04  bernlohr <>
+
+	* eventio_basic/TestIO.cc, eventio_basic/eventio.c,
+	eventio_basic/io_basic.h, eventio_basic/testio.c: Extend dynamic
+	range of short floats by using de-normalized numbers where
+	necessary. Also include tests of short floats into test programs.
+
+2014-08-01  bernlohr <>
+
+	* Makefile: Build the split_hessio program by default.
+
+2014-08-01  bernlohr <>
+
+	* best_of.cc: More flexibility in PPUT calculation for cases where
+	the sensitivity does not cover the full range as required.
+
+2014-07-29  bernlohr <>
+
+	* Makefile, Makefile.xxx, Makefile.xxx.depend, hess/split_hessio.c: 
+	Add a tool which splits a sim_telarray output file into - a file with run header material - a file with run end material (typically just the histograms) - a file with the true MC data - per telescope a file with config, setupand calib data - per telescope a file with event data.  The latter file can be in
+	the original format (an 'Event' containing a CentralEvent and a
+	TelEvent and a TrackEvent) or the TelEvent only unwrapped, or the
+	raw data inside the TelEvent unwrapped.
+
+2014-07-18  bernlohr <>
+
+	* doc_src/eventio_en.tex: Documentation update.
+
+2014-06-25  bernlohr <>
+
+	* hess/merge_simtel.c: Also show available options with
+	'merge_simtel --help'.
+
+2014-06-25  bernlohr <>
+
+	* Makefile: Makefile was messing up EventioRegisteredNames.dat file.
+
+2014-06-25  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: Recover basic central trigger
+	sub-block data if missing.
+
+2014-06-25  bernlohr <>
+
+	* EventioRegisteredNames.dat: Restore data file which was messed up.
+
+2014-06-24  bernlohr <>
+
+	* add_histograms.c, best_of.cc, doc_src/hessio_doc.h,
+	eventio_basic/filterio.cc, eventio_basic/statio.cc, fcat.c,
+	hess/check_trgmask.c, hess/gen_trgmask.c, hessio.dox: Updates for
+	source code documentation (doxygen markup).
+
+2014-06-23  bernlohr <>
+
+	* EventioRegisteredNames.dat, Makefile, hessio.dox: Add more
+	documentation to exported tar packages.
+
+2014-06-23  bernlohr <>
+
+	* common/fileopen.c, common/fileopen.h: Allow general pipes as input
+	or output file names (following '|') if permissive usage of pipes is
+	allowed or the pipe command is in a list of acceptable paths. By
+	default, permissive is off and no paths are pre-defined.
+
+2014-06-12  bernlohr <>
+
+	* Makefile.xxx.depend, Makefile.xxx.hbook.depend,
+	Makefile.xxx.root.depend: Regenerate dependencies for hessioxxx
+	package.
+
+2014-06-11  bernlohr <>
+
+	* Makefile, Makefile.hessioxxx, Makefile.xxx,
+	eventio_basic/filterio.cc: Add the filterio block to extract or
+	discard certain block types.
+
+2014-06-11  bernlohr <>
+
+	* eventio_basic/eventio.c: Set the top-level item length in
+	skip_io_block to -1 instead of 0, to avoid any attempts on writing a
+	skipped I/O block.
+
+2014-06-11  bernlohr <>
+
+	* eventio_basic/statio.cc: Input from standard input indicated as
+	'-'.
+
+2014-06-11  bernlohr <>
+
+	* hess/io_hess.c, hess/io_trgmask.c: Improve robustness in case of
+	corrupted files.
+
+2014-06-03  bernlohr <>
+
+	* common/eventio_registry.c, eventio_basic/eventio.c,
+	eventio_basic/io_basic.h: Registry function pointer should be
+	static.
+
+2014-06-01  bernlohr <>
+
+	* common/eventio_registry.c, common/eventio_registry.h,
+	eventio_basic/eventio.c, eventio_basic/io_basic.h,
+	eventio_basic/listio.c, eventio_basic/statio.cc: Turn the registry
+	into an optional feature which is automatically used when linked
+	again the hessio library (and that was compiled with GCC). For the
+	bare-bone eventio functionality available with the CORSIKA IACT
+	interface, this feature is not needed and not available. For other
+	compilers than GCC, use of the registry with the listio and statio
+	programs requires compiling with -DALWAYS_WITH_REGISTRY.
+
+2014-05-30  bernlohr <>
+
+	* Makefile: Include the list of registered item types also in the
+	hessioxxx.tar.gz package.
+
+2014-05-30  bernlohr <>
+
+	* EventioRegisteredNames.dat, eventio_basic/EventIO.cc,
+	eventio_basic/EventIO.hh, eventio_basic/eventio.c,
+	eventio_basic/io_basic.h, eventio_basic/listio.c,
+	eventio_basic/statio.cc: Extend the use of registered type names
+	also to the listio program.
+
+2014-05-28  bernlohr <>
+
+	* Makefile, Makefile.hessioxxx, Makefile.xxx,
+	common/eventio_registry.c, common/eventio_registry.h,
+	eventio_basic/statio.cc: Add lookup of names and descriptions for
+	well-known I/O block types, for now only used by the statio program.
+
+2014-05-07  bernlohr <>
+
+	* corsika/io_simtel.c, eventio_basic/eventio.c, hess/io_trgmask.c,
+	hess/merge_simtel.c, hess/rec_tools.c, hess/reconstruct.c,
+	hess/user_analysis.c: Enhance robustness against corrupted input
+	data and get rid of some false positives from cppcheck static code
+	analysis.
+
+2014-04-29  bernlohr <>
+
+	* hess/user_analysis.c: More histograms on triggered telescopes.
+
+2014-04-22  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: Clarify unusual units of viewcone
+	values (always were in degrees, despite source code comment telling
+	otherwise).
+
+2014-04-22  bernlohr <>
+
+	* hess/io_hess.h, hess/merge_simtel.c, hess/read_hess.c,
+	hess/user_analysis.c: Fix bugs in event merging tool: a) incomplete
+	merging of some events, b) missing histograms, c) trgmask bit pattern fixing.  Also add a
+	few extra histograms in DST production step.
+
+2014-03-28  bernlohr <>
+
+	* Makefile: Add the merge_simtel program to the list of those build
+	by default.
+
+2014-03-28  bernlohr <>
+
+	* eventio_basic/TestIO.cc, eventio_basic/eventio.c,
+	eventio_basic/io_basic.h, eventio_basic/testio.c: Adding the data
+	length of I/O blocks to the item header, for convenient access also
+	with C functions. The actual length is nevertheless maintained in
+	the I/O buffer and not in the item header. The get_item_begin and
+	the put_item_end calls will copy the actual length to the header.
+
+2014-03-28  bernlohr <>
+
+	* doc_src/eventio_en.tex: Updating the eventio documentation.
+
+2014-03-24  bernlohr <>
+
+	* eventio_basic/EventIO.cc, eventio_basic/EventIO.hh: In addition to
+	the PutSCount/GetSCount methods, there is now a corresponding set of
+	PutDiffSCount/GetDiffSCount methods which store the second and
+	subsequent elements as differences to the preceding one.
+
+2014-03-11  bernlohr <>
+
+	* Makefile, Makefile.hessioxxx, Makefile.xxx, hess/io_hess.c,
+	hess/io_hess.h, hess/merge_simtel.c: Utility program for merging two
+	telescope simulation files into a common file added.
+
+2014-02-20  bernlohr <>
+
+	* common/hconfig.c, common/hconfig.h, common/history.h,
+	eventio_addon/io_history.c, eventio_addon/io_history.h: Changing
+	some 'char *' to 'const char *'.
+
+2014-02-20  bernlohr <>
+
+	* Makefile, common/fileopen.c, common/hconfig.c, common/hconfig.h,
+	common/histogram.c, common/warning.c, corsika/io_simtel.c,
+	corsika/mc_tel.h, eventio_addon/io_history.c, hbook/Makefile,
+	hbook/cvt2.c, hbook/tohbook.c, hbook/tohbook.h,
+	hess/check_trgmask.c, hess/gen_trgmask.c, hess/io_hess.c,
+	hess/io_trgmask.c, hess/read_hess.c, hess/reconstruct.c,
+	hess/user_analysis.c, hess/user_analysis.h: All C code can be
+	compiled once again also with C++ compilers (although that is not
+	what you normally do).
+
+2013-12-20  bernlohr <>
+
+	* eventio_basic/eventio.c: Fixed missing variable initialization.
+
+2013-12-13  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: Can now report more trigger groups
+	(sectors) associated to a pixel and has more robust handling when
+	reading data with too many of them.  Reading new data with old
+	io_hess code may cause problems though because the old code had a
+	smaller limit and would not tolerate to exceed that limit.
+
+2013-12-13  bernlohr <>
+
+	* hess/read_hess.c: Preparing for two additional command-line
+	options - but the corresponding event selection is not yet
+	implemented.
+
+2013-12-13  bernlohr <>
+
+	* best_of.cc: Allow selection of performance just satisfying
+	requirements in either sensitivity, or angular resolution, or energy
+	resolution.
+
+2013-10-30  bernlohr <>
+
+	* best_of.cc: Add some extra options, including --no-zero-protons to
+	see the impact of insufficient proton statistics after cuts.
+
+2013-10-21  bernlohr <>
+
+	* Makefile, Makefile.xxx, add_histograms.c, common/histogram.c,
+	common/histogram.h, eventio_addon/io_histogram.c,
+	eventio_addon/io_histogram.h, list_histograms.c: Adding a
+	add_histograms utility for adding up matching histograms, with the
+	option to replace rather than add up specific histograms (e.g. those
+	actually containing analysis parameters).  Extending the
+	list_histograms utility such that it can extract the contents of a
+	histogram in gnuplot-compatible format.
+
+2013-10-10  bernlohr <>
+
+	* hess/user_analysis.c: Take care of possible rounding errors
+	resulting in negative sqrt argument.
+
+2013-10-02  bernlohr <>
+
+	* hess/io_hess.c: Simplify the print_hess_camorgan() function and
+	clarify what gets printed by it.
+
+2013-08-15  bernlohr <>
+
+	* hess/user_analysis.c: ... and copied&pasted error message adapted.
+
+2013-08-15  bernlohr <>
+
+	* hess/user_analysis.c: If both the USER_ANALYSIS variable and the
+	--histogram-file command line option are present, the command line
+	has preference.
+
+2013-08-15  bernlohr <>
+
+	* hess/read_hess.c, hess/user_analysis.c, hess/user_analysis.h: Add
+	a few more histograms. Add option to set histogram file name (the
+	existing method via the USER_ANALYSIS environment variable is
+	considered deprecated now).
+
+2013-08-14  bernlohr <>
+
+	* hess/read_hess.c: Offer some extra explanations on available
+	integration schemes.
+
+2013-08-14  bernlohr <>
+
+	* hess/camera_image.c, hess/reconstruct.c: More consistent plotting
+	of Hillas ellipses of very low intensity images in Postscript
+	output.
+
+2013-08-08  balzer <>
+
+	* include/.cvsignore: ignore fix
+
+2013-08-07  bernlohr <>
+
+	* hess/read_hess.c, hess/reconstruct.c: Add another integration
+	scheme where the integration window is only or mainly determined by
+	the peak in neighbour pixels.
+
+2013-08-07  bernlohr <>
+
+	* hess/user_analysis.c: Add extra histograms for more fine-grained
+	effective area calculations, not changing binning of already used
+	histograms.
+
+2013-08-07  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: Add transit delay calibration to
+	laser calibration block.
+
+2013-08-07  bernlohr <>
+
+	* common/fileopen.c: Also support the xz file compression.
+
+2013-08-07  bernlohr <>
+
+	* common/histogram.c, common/histogram.h: Add a function for easier
+	booking of 1-D histograms.
+
+2013-07-23  bernlohr <>
+
+	* hess/read_hess.c: Checking fread return value from /dev/urandom.
+
+2013-07-22  bernlohr <>
+
+	* Makefile, Makefile.xxx, hess/check_trgmask.c, hess/io_trgmask.c: 
+	Add a little program for checking the trgmask files, also serving as
+	an example how to read and process the trgmask data sequentially.
+
+2013-07-19  bernlohr <>
+
+	* Makefile, Makefile.xxx, Makefile.xxx.depend, hess/read_hess.c: 
+	Report version and release similar to sim_telarray.
+
+2013-07-08  bernlohr <>
+
+	* hess/user_analysis.c: Add a couple of histograms which were
+	available versus reconstructed energy but not versus true energy.
+	Also renumber histograms from the 19500 to 19510 range to the 19530
+	to 19540 ID range because of conflicts at ID 19501, 19502, and
+	19503.
+
+2013-07-08  bernlohr <>
+
+	* hess/read_hess.c: Add option for a user-defined path where trgmask
+	files can be found.
+
+2013-06-25  bernlohr <>
+
+	* hess/gen_trgmask.c, hess/io_trgmask.c, hess/io_trgmask.h: ... and
+	commit also the new files for extracting the trigger bit pattern
+	from log files, storing them, loading them again and looking events
+	up.
+
+2013-06-25  bernlohr <>
+
+	* Makefile, Makefile.xxx, hess/read_hess.c, hess/user_analysis.c,
+	hess/user_analysis.h: Use the trgmask.gz files as generated by
+	gen_trgmask in processing prod2 data sets with read_hess.
+
+2013-06-19  bernlohr <>
+
+	* eventio_basic/eventio.c: If a synchronization error is detected,
+	show more information about the data block.
+
+2013-06-19  bernlohr <>
+
+	* hess/io_hess.c: More detailed display of central trigger block
+	data (with read_hess -s etc.)
+
+2013-05-02  bernlohr <>
+
+	* Makefile: Second attempt to fix CERN_LEVEL
+
+2013-05-02  bernlohr <>
+
+	* Makefile: Fix CERN_LEVEL detection (CERNLIB library to be used for
+	hdata2hbook).
+
+2013-04-25  bernlohr <>
+
+	* hess/camera_image.c: Better control over image color scale with
+	IMAGE_RANGE and IMAGE_OFFSET environment variables.
+
+2013-04-25  bernlohr <>
+
+	* common/fileopen.c: Allow verbose reporting of files actually
+	opened (useful if order of include paths not clear).  This verbose
+	reporting is activated through the environment variable
+	FILEOPEN_VERBOSE.
+
+2013-04-24  bernlohr <>
+
+	* common/hconfig.c: Take care of configuration files with semicolons
+	in comments.
+
+2013-04-17  bernlohr <>
+
+	* hess/camera_image.c, hess/io_hess.c, hess/read_hess.c,
+	hess/reconstruct.c, hess/user_analysis.c, hess/user_analysis.h: 
+	Implementing first integrator schemes for sample-mode data, which
+	can now be stored as sum data by selecting DST level 0.
+
+2013-04-17  bernlohr <>
+
+	* hess/io_hess.h: Adding two more sub-configurations for CTA_SC:
+	CTA_SC=3 is like CTA_SC=2 now (for prod-2, 11328 pixels, 1 gain) but
+	up to 111 telescopes. CTA_SC=4 is what CTA_SC=2 was for HYBRID-1
+	(11328 pixels but 2 gains).
+
+2013-04-17  bernlohr <>
+
+	* Makefile, build_test: Add automated build tests for all common
+	configurations.
+
+2013-02-27  bernlohr <>
+
+	* hess/read_hess.c: The remaining data block types from a CORSIKA
+	output file are also shown with 'read_hess -s'.
+
+2013-02-27  bernlohr <>
+
+	* eventio_basic/eventio.c: Skipping an I/O block of length zero
+	could fail on input from a pipe.
+
+2013-02-26  bernlohr <>
+
+	* corsika/io_simtel.c, corsika/mc_tel.h, hess/read_hess.c: Show a
+	few more block types from CORSIKA output with 'read_hess -s'.
+
+2013-02-22  bernlohr <>
+
+	* hess/io_hess.h: Rewrite definition of limits for different CTA
+	simulations.
+
+2013-02-15  bernlohr <>
+
+	* hess/read_hess.c: When reading multiple DST files make sure that
+	the configuration parameter histogram 99 is never added up.
+
+2013-02-13  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h, hess/read_hess.c: The data format
+	had problems when more than 32k pixels or sectors were used. Fixing
+	the data format, using the new version only when needed. When pixel
+	and sector numbers fit into 16-bit int, we continue to use the old
+	format. Also adding a few more print statements for 'read_hess -s'.
+
+2013-02-13  bernlohr <>
+
+	* eventio_addon/io_histogram.c: Fix compiler warning
+
+2013-02-13  bernlohr <>
+
+	* Makefile, Makefile.xxx, Makefile.xxx.depend, best_of.cc: Proper
+	dependencies for hessioxxx package
+
+2013-02-13  bernlohr <>
+
+	* hess/io_hess.h: Add configuration variant with a huge number of
+	pixels for a few telescopes.  Unfortunately, the linker comes with
+	relocation errors when using more than some 200+x thousand pixels.
+
+2013-02-11  bernlohr <>
+
+	* Makefile, Makefile.xxx, common/histogram.c,
+	eventio_addon/io_histogram.c, list_histograms.c: Fix histogram
+	listings for histograms with more than 2^31-1 entries (alhough
+	format still limited to 2^32-1).  Adding a utility program to list
+	histograms without dependency on PAW (CERNLIB) or ROOT.
+
+2013-02-01  bernlohr <>
+
+	* Makefile.xxx.hbook.depend, Makefile.xxx.root.depend: And these
+	files as well ...
+
+2013-02-01  bernlohr <>
+
+	* Makefile.xxx, Makefile.xxx.hbook, Makefile.xxx.root: Put the
+	distinct Makefiles for the 'hessioxxx' package also under CVS.
+
+2013-02-01  bernlohr <>
+
+	* best_of.cc: Rate values are optional.
+
+2013-02-01  bernlohr <>
+
+	* Makefile: Still be able to export stuff when connection to CVS
+	server is not available.
+
+2013-01-18  bernlohr <>
+
+	* .cvsignore, Makefile: Put the different Makefiles for the public
+	(in particular: CTA) distribution package into the same CVS
+	repository and add automatic building of that 'hessioxxx'
+	distribution package.
+
+2012-12-17  bernlohr <>
+
+	* hess/io_hess.h: Increasing the number of telescopes acceptable for
+	CTA prod-2.
+
+2012-12-14  bernlohr <>
+
+	* hess/io_hess.h: Allow four more telescopes for CTA Prod-2.
+
+2012-12-07  bernlohr <>
+
+	* hess/io_hess.h: Allow a few more telescope in CTA prod-2.
+
+2012-11-23  bernlohr <>
+
+	* corsika/io_simtel.c: Fix typo in printf to stdout.
+
+2012-11-16  bernlohr <>
+
+	* corsika/io_simtel.c: Read as many telescopes as possible if the
+	CORSIKA output contains too many.
+
+2012-11-16  bernlohr <>
+
+	* hess/io_hess.c: A newline was missing in standard output.
+
+2012-11-13  bernlohr <>
+
+	* common/initial.h: Fix C++ compatibility for eventio.c (just in
+	case anybody wanted to compile the C file with the C++ compiler).
+
+2012-11-09  bernlohr <>
+
+	* Makefile, hbook/Makefile: Installation of hdata2hbook on x86_64
+	fixed.
+
+2012-10-17  bernlohr <>
+
+	* hess/camera_image.c, hess/read_hess.c, hess/reconstruct.c: Better
+	compatibility between sample-mode data and local or global peak
+	charges from the pixel timing data.
+
+2012-10-17  bernlohr <>
+
+	* hess/io_hess.h: Maximum number of pixels for CTA prod-2 is 2048.
+
+2012-10-17  bernlohr <>
+
+	* Makefile: Install to HESSUSER rather than HESSROOT sub-directories
+	if HESSUSER is defined.
+
+2012-10-09  bernlohr <>
+
+	* hess/read_hess.c, hess/rec_tools.c, hess/reconstruct.c,
+	hess/reconstruct.h: Allow for random dead pixels and busy telescopes
+	in analysis of the data.
+
+2012-08-21  bernlohr <>
+
+	* hess/camera_image.c, hess/io_hess.c, hess/io_hess.h,
+	hess/rec_tools.c, hess/reconstruct.c: Add camera rotation feature.
+
+2012-08-03  bernlohr <>
+
+	* Makefile: Add rule for generating ChangeLog (for HEAD version
+	only).
+
+2012-08-01  bernlohr <>
+
+	* eventio_addon/io_histogram.c: No longer warn about every
+	non-histogram data block, just show summary.
+
+2012-06-27  bernlohr <>
+
+	* hess/io_hess.h: Start preparation of compile-time options for CTA
+	prod-2.
+
+2012-06-12  bernlohr <>
+
+	* eventio_basic/eventio.c: Fix underflows in conversion to 16-bit
+	float numbers (sfloat).
+
+2012-06-11  bernlohr <>
+
+	* hess/read_hess.c: Add an option to check for events where photo
+	electron lists are missing (conditionally compiled).
+
+2012-06-06  bernlohr <>
+
+	* hess/read_hess.c: Explicit initialisation of the 'not_run' range
+	list since apparently people are actually using Run number zero.
+
+2012-06-06  bernlohr <>
+
+	* eventio_basic/statio.cc: Include version number in statio output.
+
+2012-05-21  bernlohr <>
+
+	* corsika/io_simtel.c, hess/io_hess.c, hess/reconstruct.c: Adding a
+	few more lines of error output and safety checks even though no bug
+	could be confirmed.
+
+2012-05-11  bernlohr <>
+
+	* best_of.cc: Also get rid of lines with zero angular resolution.
+
+2012-05-11  bernlohr <>
+
+	* best_of.cc: Fixing bug in selecting the relevant column with '-e'
+	in case of available Ebias.
+
+2012-05-11  bernlohr <>
+
+	* hess/gen_lookup.c, hess/user_analysis.c: Include energy bias
+	correction in analysis (needs three passes with --auto-lookup now
+	before final analysis).
+
+2012-05-06  bernlohr <>
+
+	* best_of.cc: Add support for latest format with yet another column.
+
+2012-05-04  bernlohr <>
+
+	* hess/gen_lookup.c, hess/user_analysis.c: Add additional histograms
+	for angular and energy resolutions for other combinations of cuts
+	applied.
+
+2012-05-04  bernlohr <>
+
+	* hess/io_hess.h: Respect a -DH_MAX_SLICES=... given to the
+	compiler.
+
+2012-05-02  bernlohr <>
+
+	* hess/read_hess.c: In case of user analysis and/or reconstruction
+	options active, handle these before printing any auxialliary
+	per-event output to stdout.
+
+2012-04-20  bernlohr <>
+
+	* hess/read_hess.c: Fixing a minor bug for reading the
+	'--lookup-file' option from the command line.
+
+2012-04-12  bernlohr <>
+
+	* eventio_basic/TestIO.cc, eventio_basic/statio.cc,
+	eventio_basic/testio.c: Proper handling of "--help" command line
+	option.
+
+2012-04-12  bernlohr <>
+
+	* Makefile.hessioxxx: Keep the Makefile for the CTA variant
+	(hessioxxx) also here in this repository.
+
+2012-04-12  bernlohr <>
+
+	* hess/io_hess.c: Insert additional newline in print_hess_mc_phot().
+
+2012-03-07  bernlohr <>
+
+	* hess/read_hess.c: Add an option for a maximum number of triggered
+	telescopes.
+
+2012-02-24  bernlohr <>
+
+	* best_of.cc: Post- (read_hess) analysis utility for finding the
+	best sets of cuts.
+
+2012-02-02  bernlohr <>
+
+	* common/histogram.c: If a histogram allocation fails, show more
+	details now.
+
+2011-11-22  bernlohr <>
+
+	* hess/io_hess.c: Proper printing of latest version of pixel
+	parameter settings.
+
+2011-11-14  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h, hess/reconstruct.c: Fixing
+	zero-suppressed sample mode, using significance from timing
+	analysis, if available.
+
+2011-10-31  bernlohr <>
+
+	* hbook/cvt2.c, root/cvt3.cc: Add '-L' option to hdata2hbook and
+	hdata2root programs.
+
+2011-10-31  bernlohr <>
+
+	* eventio_addon/io_histogram.c, eventio_addon/io_histogram.h,
+	hbook/Makefile, hbook/cvt2.c: Add options to list histograms as they
+	are read from input file.
+
+2011-10-18  bernlohr <>
+
+	* hess/io_hess.c: Fill in zero values for thresholds when reading an
+	old version of camera organisation.
+
+2011-09-22  bernlohr <>
+
+	* hess/user_analysis.c, hess/user_analysis.h: Fixing compilation
+	problem.
+
+2011-09-22  bernlohr <>
+
+	* Makefile, hess/read_hess.c, hess/user_analysis.c: Add analysis of
+	diffuse gamma simulations for off-axis performance.
+
+2011-08-11  bernlohr <>
+
+	* hess/read_hess.c, hess/reconstruct.c, hess/reconstruct.h: Allow
+	calibration/reconstruction using only the low-gain or high-gain
+	channels.
+
+2011-08-11  bernlohr <>
+
+	* common/hconfig.c: Enforce strict configuration value limits
+	(resulting in an error condition rather than setting the value to
+	the upper/lower limit).
+
+2011-07-21  bernlohr <>
+
+	* chkhist.c: Add a little tool for checking what histograms are in a
+	file.
+
+2011-07-21  bernlohr <>
+
+	* hess/camera_image.c, hess/camera_image.h, hess/io_hess.c,
+	hess/io_hess.h, hess/read_hess.c, hess/read_hess_nr.c,
+	hess/reconstruct.c, hess/reconstruct.h, hess/user_analysis.c,
+	hess/user_analysis.h: Add the optional clipping of pixel amplitudes
+	in the calibration step as a means to check the effect of saturation
+	on available raw data. Can be part of the read_hess DST production
+	step.
+
+2011-07-07  bernlohr <>
+
+	* corsika/io_simtel.c, corsika/mc_tel.h, hess/io_hess.c,
+	hess/io_hess.h: Prepare for extended photo-electron storage (may
+	include amplitude, NSB).
+
+2011-05-31  bernlohr <>
+
+	* common/histogram.c, hess/io_hess.c, hess/io_hess.h,
+	hess/reconstruct.c, hess/user_analysis.c: Fix handling of data with
+	just one gain channel per pixel.
+
+2011-05-31  bernlohr <>
+
+	* eventio_basic/EventIO.hh: Fix GetInt16 method.
+
+2011-05-31  bernlohr <>
+
+	* common/fileopen.c: When adding include paths, they can now be a
+	colon-separated list of paths, just like in the initialisation.
+
+2011-05-11  bernlohr <>
+
+	* hess/io_hess.h: Up to 61 telescopes for CTA_SC.
+
+2011-05-05  bernlohr <>
+
+	* hess/io_hess.h: With -DCTA_SC or -DCTA_SC=2 we can define numbers
+	of pixels and telescopes appropriate for data from the many pixels
+	in an array of SC optics telescope.
+
+2011-04-29  bernlohr <>
+
+	* hess/io_hess.h: In the CTA_MAX version allow for 3 different
+	trigger types at the same time (more sectors).
+
+2011-04-28  bernlohr <>
+
+	* hess/camera_image.c, hess/read_hess.c, hess/reconstruct.c,
+	hess/reconstruct.h, hess/user_analysis.c: The read_hess program can
+	create sample-mode images (movies) now, just like sim_telarray.
+
+2011-04-28  bernlohr <>
+
+	* hess/io_hess.c: Fix bug in read_hess_televent()
+
+2011-04-27  bernlohr <>
+
+	* include/.cvsignore: Empty include directory (empty except for
+	.cvsignore).
+
+2011-04-15  bernlohr <>
+
+	* common/histogram.c, eventio_addon/io_histogram.c,
+	hess/camera_image.c, hess/extract_hess.c, hess/gen_lookup.c,
+	hess/io_hess.c, hess/io_hess.h, hess/read_hess.c,
+	hess/reconstruct.c, hess/user_analysis.c, root/toroot.cc: Next set
+	of changes for simulations with multiple trigger types.  In addition
+	there are a number of small changes to please GCC 4.6.
+
+2011-03-11  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: The telescope events can now
+	contain both sum and sample mode data. The sample mode data can be
+	zero-suppressed so as to record samples only for 'significant'
+	pixels.
+
+2011-02-28  bernlohr <>
+
+	* common/moments.c: A couple of '--' in a comment broke doxygen
+	production of PDF documentation.
+
+2011-02-27  balzer <>
+
+	* .cvsignore: Fixed .cvsignore, declared char array const to avoid
+	warnings
+
+2011-02-27  bernlohr <>
+
+	* .cvsignore: Reverting unauthorized changes
+
+2011-02-21  lopatin <>
+
+	* .cvsignore: fixed cvsignore files, ignoring *.rootmap dependencies
+	bin lib out *Dict.*
+
+2011-02-15  bernlohr <>
+
+	* hess/gen_lookup.c: Fix cppcheck warning.
+
+2011-02-15  bernlohr <>
+
+	* corsika/io_simtel.c: Get rid of warning by cppcheck.
+
+2011-02-15  bernlohr <>
+
+	* corsika/io_simtel.c, hess/io_hess.c: Get rid of a couple of
+	compiler warnings at -Wextra level.
+
+2011-02-15  bernlohr <>
+
+	* hess/read_hess.c: Add options to restrict which runs get
+	processed.
+
+2011-01-31  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: First round of data format changes
+	for multiple trigger schemes.
+
+2011-01-31  bernlohr <>
+
+	* corsika/io_simtel.c, hess/read_hess.c, hess/read_hess_nr.c: Show
+	more details of CORSIKA data files if run with '-s' option.
+
+2011-01-18  bernlohr <>
+
+	* corsika/io_simtel.c, corsika/mc_tel.h: Add a function for printing
+	also the contents of CORSIKA data blocks embedded in eventio data
+	(e.g. used in read_hess).
+
+2011-01-18  bernlohr <>
+
+	* eventio_basic/eventio.c, eventio_basic/io_basic.h: Provide storing
+	and retrieval of int arrays to/from SCount data also for the C
+	interface.
+
+2011-01-18  bernlohr <>
+
+	* hbook/Makefile, hbook/cernlib_compiler: If shared cernlib
+	libraries are installed, you don't need the static ones.
+
+2010-11-17  bernlohr <>
+
+	* eventio_basic/EventIO.hh: Fix recently introduced compilation
+	problem on 64-bit systems.
+
+2010-11-17  bernlohr <>
+
+	* hess/rec_tools.c: Share rec_tools with sim_telarray.
+
+2010-11-15  bernlohr <>
+
+	* eventio_basic/EventIO.hh, eventio_basic/TestIO.cc,
+	eventio_basic/testio.c: Include specific test cases for count32 and
+	scount32 elements.
+
+2010-11-15  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: Changing data format for (F)ADC
+	raw data to use scount32 instead of uint16 for ADC sums, allowing
+	for sums exceeding 64K and at the same time saving 10% space after
+	compression for the more typical cases. Similarly the sample mode
+	data is now stored as scount16, again saving disk space and allowing
+	for extension to more than 16-bit ADCs.
+
+2010-11-15  bernlohr <>
+
+	* hess/rec_tools.c, hess/rec_tools_nr.c: More accurate
+	transformation at large off-axis angles.
+
+2010-11-03  bernlohr <>
+
+	* fcat.c: Write include such that it also works after a fresh
+	check-out.
+
+2010-10-22  bernlohr <>
+
+	* hess/camera_image.c: Change bounding box of PS page to standard
+	A4.
+
+2010-09-08  bernlohr <>
+
+	* hess/camera_image.c, hess/reconstruct.c, hess/reconstruct.h: 
+	Shifting the pixel shape guessing function to avoid introducing
+	additional dependencies for read_hess_nr.
+
+2010-09-08  bernlohr <>
+
+	* hess/camera_image.c, hess/reconstruct.c, hess/reconstruct.h: For
+	camera image produced with read_hess, we have to guess the pixel
+	shape based on the direction of displacements between neighbour
+	pixels.
+
+2010-09-08  bernlohr <>
+
+	* eventio_basic/EventIO.cc: Fix g++ 4.5 incompatibility.
+
+2010-08-11  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h, hess/read_hess.c: Get rid of 4095
+	pixel limitation in raw data. Add sector trigger times to output
+	data.
+
+2010-08-11  bernlohr <>
+
+	* eventio_basic/listio.c: Indentation.
+
+2010-08-06  bernlohr <>
+
+	* common/fileopen.c: Get rid of some of the shells in pipes for
+	compressing/decompressing files on the fly. This may save a bit of
+	main memory. In addition, set errno to EBADMSG if closing a file
+	failed but the underlying fclose/pclose did not set the errno
+	variable.
+
+2010-08-06  bernlohr <>
+
+	* Makefile, fcat.c: Adding a little test and utility program for the
+	fileopen/fileclose functions.
+
+2010-08-05  bernlohr <>
+
+	* hessio.dox: Update to newer doxygen version.
+
+2010-07-20  bernlohr <>
+
+	* Makefile, common/current.c, common/current.h, common/dhsort.c,
+	common/dhsort.h, common/fileopen.c, common/fileopen.h,
+	common/hconfig.c, common/hconfig.h, common/histogram.c,
+	common/histogram.h, common/history.h, common/initial.h,
+	common/moments.c, common/straux.c, common/straux.h,
+	common/warning.c, common/warning.h, corsika/io_simtel.c,
+	corsika/mc_tel.h, doc_src/hessio_doc.h, eventio_addon/io_hconfig.c,
+	eventio_addon/io_histogram.c, eventio_addon/io_histogram.h,
+	eventio_addon/io_history.c, eventio_addon/io_history.h,
+	eventio_basic/EventIO.cc, eventio_basic/EventIO.hh,
+	eventio_basic/TestIO.cc, eventio_basic/eventio.c,
+	eventio_basic/io_basic.h, eventio_basic/listio.c,
+	eventio_basic/statio.cc, eventio_basic/testio.c, gpl.txt,
+	hbook/cvt2.c, hbook/tohbook.c, hbook/tohbook.h, hess/atmprof.c,
+	hess/atmprof.h, hess/basic_ntuple.c, hess/basic_ntuple.h,
+	hess/camera_image.c, hess/camera_image.h, hess/extract_hess.c,
+	hess/gen_lookup.c, hess/io_hess.c, hess/io_hess.h,
+	hess/read_hess.c, hess/read_hess_nr.c, hess/rec_tools.c,
+	hess/rec_tools.h, hess/rec_tools_nr.c, hess/reconstruct.c,
+	hess/reconstruct.h, hess/user_analysis.c, hess/user_analysis.h,
+	lgpl-2.1.txt, lgpl-3.txt, root/cvt3.cc, root/toroot.cc,
+	root/toroot.hh: (L)GPLification
+
+2010-06-18  bernlohr <>
+
+	* root/cvt3.cc: Allow for conversion of selected histograms only.
+
+2010-06-15  bernlohr <>
+
+	* common/warning.h: Let's see if old g++ compilers are happy if the
+	problematic functions are explicitly declared as inline.
+
+2010-06-14  bernlohr <>
+
+	* common/initial.h, common/warning.h, eventio_basic/TestIO.cc,
+	eventio_basic/eventio.c, eventio_basic/io_basic.h, hess/atmprof.c,
+	hess/extract_hess.c, hess/gen_lookup.c, hess/io_hess.c,
+	hess/read_hess_nr.c, hess/user_analysis.c: Every .c file can now be
+	compiled either by C or by C++ compiler.
+
+2010-06-14  bernlohr <>
+
+	* hess/atmprof.h, hess/read_hess.c, hess/reconstruct.h,
+	hess/user_analysis.h: Adding some C++ compiler compatibility to the
+	old C code.
+
+2010-03-19  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h, hess/read_hess.c,
+	hess/read_hess_nr.c: For DST processing, the telescope configuration
+	data may appear only once and not for every run. If the first run
+	has no triggered event, the configuration may get reset before the
+	user analysis of the read_hess program is initialized. Use the new
+	'--dst-process' flag to avoid that, keeping the configuration from
+	run to run.
+
+2009-12-16  bernlohr <>
+
+	* corsika/io_simtel.c, corsika/mc_tel.h, hess/io_hess.c,
+	hess/io_hess.h: Allow further per-shower parameters (at this time
+	for shower pre-selection in CORSIKA but being rather generic) to be
+	obtained from CORSIKA and placed into the MCShower block. When no
+	use of these parameters is made, the data format is left untouched.
+
+2009-12-07  bernlohr <>
+
+	* common/fileopen.c, common/fileopen.h, common/initial.h,
+	common/straux.c, common/warning.c, corsika/io_simtel.c,
+	corsika/mc_tel.h, eventio_addon/io_histogram.c,
+	eventio_addon/io_histogram.h, eventio_addon/io_history.c,
+	eventio_basic/eventio.c, eventio_basic/io_basic.h,
+	eventio_basic/listio.c, eventio_basic/testio.c, hbook/cvt2.c,
+	hess/atmprof.c, hess/camera_image.c, hess/extract_hess.c,
+	hess/gen_lookup.c, hess/io_hess.c, hess/io_hess.h,
+	hess/read_hess.c, hess/read_hess_nr.c, hess/rec_tools.c,
+	hess/rec_tools_nr.c, hess/reconstruct.c, hess/user_analysis.c,
+	root/cvt3.cc, root/toroot.cc: Documentation: doxygen handling of CVS
+	tags better done in verbatim environment.
+
+2009-09-21  bernlohr <>
+
+	* hess/user_analysis.c: Add a few histograms to evaluate the
+	performance also without shape cuts applied.
+
+2009-09-07  bernlohr <>
+
+	* hess/reconstruct.c: Catch rounding errors in second moments
+	calculation just as it is in sim_telarray for quite a while.
+
+2009-09-07  bernlohr <>
+
+	* hess/reconstruct.c: When reducing the field of view or otherwise
+	disabling pixels, get rid of those events which certainly cannot
+	trigger a telescope any more (for DST production). Some events will
+	survive which would not have triggered if the pixels were disabled
+	already in the telescope simulation.
+
+2009-09-06  bernlohr <>
+
+	* hbook/cvt2.c: Forgot to support the '-A' variant in addition to
+	'-a' for the new '-e' option.
+
+2009-09-06  bernlohr <>
+
+	* hbook/cvt2.c: Allow writing added histograms also in the original
+	EventIO format, instead of the normal HBOOK format.
+
+2009-09-03  bernlohr <>
+
+	* hess/user_analysis.c: Put filling of triggered telescopes
+	histograms at the proper place.
+
+2009-07-21  bernlohr <>
+
+	* hess/read_hess.c: Fix handling of linked list of file names.
+
+2009-07-21  bernlohr <>
+
+	* .cvsignore, doc_src/.cvsignore, hess/.cvsignore: Ignore more
+	non-CVS files
+
+2009-07-20  bernlohr <>
+
+	* hess/user_analysis.c: Add a few more histograms.
+
+2009-07-20  bernlohr <>
+
+	* hess/read_hess.c: The 12000 histogram axes ranges were not
+	extended like for the other 120xx ones.
+
+2009-07-20  bernlohr <>
+
+	* hess/gen_lookup.c: More histograms to be cleared first if already
+	existing.
+
+2009-07-20  bernlohr <>
+
+	* hess/atmprof.c: Add one more path for search for atmospheric
+	profile table.
+
+2009-07-12  bernlohr <>
+
+	* hess/read_hess_nr.c: Fix typo.
+
+2009-07-08  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: Keep more details about CORSIKA
+	interaction models.
+
+2009-07-08  bernlohr <>
+
+	* hess/read_hess.c, hess/read_hess_nr.c: More DST levels and some
+	minor fixes.  History blocks not so easily printed because they can
+	add up to several ten thousand lines for CTA-Ultra simulations.
+
+2009-07-08  bernlohr <>
+
+	* root/cvt3.cc: Allow for larger histogram blocks.
+
+2009-07-06  bernlohr <>
+
+	* hess/rec_tools.c: Bug fixed in transformation of core position to
+	ground system.
+
+2009-06-27  bernlohr <>
+
+	* Makefile: Automatic build of simple programs.
+
+2009-06-22  bernlohr <>
+
+	* corsika/io_simtel.c, corsika/mc_tel.h, hess/basic_ntuple.c,
+	hess/basic_ntuple.h, hess/gen_lookup.c, hess/io_hess.c,
+	hess/io_hess.h, hess/read_hess.c, hess/user_analysis.c,
+	hess/user_analysis.h: The angle cut can now have an additional
+	energy-dependent part (in addition to its multiplicity dependence).
+	Extend basic n-tuples by true MC data (may have to be stripped-off
+	for learning).  Add optional lookup histograms for the probability
+	that a telescope should have triggered or seen a suitable signal in
+	a gamma-ray event.  Add printing of the contents of photon/p.e. data
+	blocks in case of '-s' or '-S' options of read_hess{_nr}.
+
+2009-06-09  bernlohr <>
+
+	* hess/read_hess.c: Explicitly close output files before program is
+	finished.
+
+2009-05-18  bernlohr <>
+
+	* hess/io_hess.c: Fix inconsistent loop variable which, under some
+	conditions, could lead to an infinite loop.
+
+2009-05-04  bernlohr <>
+
+	* hess/user_analysis.c: Extending the Hmax range upwards and at
+	energies above a TeV.
+
+2009-05-04  bernlohr <>
+
+	* hess/user_analysis.c: Changes in the weighting of individual
+	telescopes for the energy error and consistency (dE and dE2)
+	evaluation and the dE2 cuts.
+
+2009-05-01  bernlohr <>
+
+	* Makefile, hess/basic_ntuple.c, hess/basic_ntuple.h,
+	hess/io_hess.c, hess/io_hess.h, hess/read_hess.c, hess/rec_tools.c,
+	hess/rec_tools.h, hess/reconstruct.c, hess/user_analysis.c,
+	hess/user_analysis.h: Improvements in shower reconstruction. Start
+	filling a basic selection n-tuple suitable for external event
+	selection schemes.
+
+2009-04-16  bernlohr <>
+
+	* eventio_basic/eventio.c, eventio_basic/io_basic.h: Add
+	user-definable limit on synchronization errors. This could be useful
+	with some truncated or corrupted gzipped data files.
+
+2009-04-07  bernlohr <>
+
+	* hess/read_hess_nr.c: Bring syntax of the simplified version of
+	calibrate_pixel_amplitude into sync with the full version.
+
+2009-04-07  bernlohr <>
+
+	* hess/read_hess_nr.c: Fix missing argument.
+
+2009-04-06  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: Fix up ID in raw data block (5
+	bits only) from ID in parent block.  Provide a list of telescopes
+	for which we actually have data in an event.
+
+2009-04-03  bernlohr <>
+
+	* eventio_basic/eventio.c: Enlarging an array which may now get
+	filled with extraneous bytes.
+
+2009-04-02  bernlohr <>
+
+	* eventio_basic/eventio.c: Fixing small problems with the 16-bit
+	floats, like negative zeroes etc ...
+
+2009-04-02  bernlohr <>
+
+	* eventio_basic/EventIO.cc, eventio_basic/EventIO.hh: Add support
+	for the 16-bit floats also to the C++ interface.
+
+2009-04-02  bernlohr <>
+
+	* eventio_basic/eventio.c, eventio_basic/io_basic.h: Adding 16-bit
+	floats (as specified in OpenGL 3.1) as another primitive data type.
+
+2009-04-01  bernlohr <>
+
+	* Makefile, hess/camera_image.c, hess/camera_image.h,
+	hess/io_hess.c, hess/io_hess.h, hess/read_hess.c,
+	hess/read_hess_nr.c, hess/reconstruct.c, hess/reconstruct.h,
+	hess/user_analysis.c: Image analysis can also be based on the pulse
+	sums from the 'on-line' pulse shape analysis (either around the
+	global peak position or around local peaks in individual pixels).
+
+2009-03-27  bernlohr <>
+
+	* hess/user_analysis.c: Increase the core distance and energy ranges
+	of several histograms to fully accommodate CTA-ULTRA3 generated
+	events.
+
+2009-03-27  bernlohr <>
+
+	* Makefile: Add a rule to install any program into the local bin
+	sub-directory.
+
+2009-03-27  bernlohr <>
+
+	* hess/read_hess.c, hess/read_hess_nr.c: Increase the maximum buffer
+	size to accommodate large histogram blocks.
+
+2009-03-09  bernlohr <>
+
+	* hess/user_analysis.c: Run the gen_lookup program from the same
+	path as the current program (read_hess).
+
+2009-03-06  bernlohr <>
+
+	* hess/user_analysis.c: Adding histograms for the timing analysis.
+
+2009-03-06  bernlohr <>
+
+	* hess/read_hess.c, hess/user_analysis.c: A couple of parameters are
+	not used yet in a telescope-type specific way but could be set as
+	type-specific. Depending on the order of command line options, they
+	might have been ignored.
+
+2009-03-05  bernlohr <>
+
+	* hess/read_hess.c: Allow ranges in the --only-telescope(s) and
+	--not-telescope(s) options.
+
+2009-02-23  bernlohr <>
+
+	* hess/atmprof.c: A common user problem was the failure to set up a
+	symbolic link to the atmospheric profile data file. Now trying a
+	couple of locations where the file might be found in one of the
+	usual sim_telarray configuration sub-directories.
+
+2009-02-19  bernlohr <>
+
+	* hess/user_analysis.c: Fixed booking of histograms for the fifth
+	type of telescopes (only relevant for CTA-Ultra* simulations).
+
+2009-02-19  bernlohr <>
+
+	* hess/io_hess.c, hess/reconstruct.c: The effective camera radius
+	was mis-calculated when the new --clip-camera-...  options were
+	used, resulting in too few images used for the shower
+	reconstruction. In addition, the list of telescopes participating in
+	the shower reconstruction is saved in the output now.
+
+2009-02-18  bernlohr <>
+
+	* hess/read_hess.c: Got confused myself whether --clip-camera is on
+	the radius or the diameter of the reduced fov, so made this more
+	explicit.
+
+2009-02-13  bernlohr <>
+
+	* hess/gen_lookup.c, hess/user_analysis.c: Adding a few more
+	histograms.
+
+2009-02-04  bernlohr <>
+
+	* hess/user_analysis.c: Fixing the production of lookup tables which
+	got messed up by the recent reorganisation of multiple telescope
+	types support.
+
+2009-02-03  bernlohr <>
+
+	* hess/io_hess.c: Fill in the list of telescopes triggered / with
+	data from older data where this list was not yet available.
+
+2009-02-03  bernlohr <>
+
+	* hess/camera_image.c, hess/read_hess.c, hess/reconstruct.c,
+	hess/reconstruct.h, hess/user_analysis.c, hess/user_analysis.h: 
+	Allow clipping of cameras to effectively smaller diameters in the
+	reconstruction in a type-specific way.
+
+2009-01-30  bernlohr <>
+
+	* hess/read_hess.c: Allow reading the list of input file names from
+	a file since there are still systems around with rather strict
+	limits on the maximum length of the command line (like Linux before
+	kernel 2.6.23) and/or the maximum number of command line arguments
+	(POSIX only requires 4096).
+
+2009-01-30  bernlohr <>
+
+	* common/fileopen.c: Also read files from remote SSH servers
+	(ssh://user@host:file syntax).
+
+2009-01-29  bernlohr <>
+
+	* hbook/cvt2.c, root/cvt3.cc: When too many histograms are available
+	to fit onto the command line, you can pass them by standard input,
+	as in "find -name 'gamma*.hdata.gz | hdata2hbook -A -o gamma.hbook"
+
+2009-01-29  bernlohr <>
+
+	* hbook/cernlib_compiler: In Fedora RPMS of the cernlib, the
+	'cernlib' script is called 'cernlib-gfortran'.
+
+2009-01-27  bernlohr <>
+
+	* Makefile: Help linking simple programs which make use of the
+	iactio library.
+
+2009-01-22  bernlohr <>
+
+	* hess/reconstruct.c: Fix a bug preventing proper compilation.
+
+2009-01-21  bernlohr <>
+
+	* hess/gen_lookup.c, hess/read_hess.c, hess/rec_tools.c,
+	hess/reconstruct.c, hess/reconstruct.h, hess/user_analysis.c,
+	hess/user_analysis.h: A number of reconstruction and cut parameters
+	can now be telescope-type specific. That means you can now write
+	even longer command lines for reconstruction with read_hess ;)
+
+2008-12-11  bernlohr <>
+
+	* .cvsignore: More things to be ignored by CVS.
+
+2008-12-05  bernlohr <>
+
+	* Makefile, hess/io_hess.h, hess/read_hess.c, hess/read_hess_nr.c,
+	hess/user_analysis.c: Fix bug in mean reduced scaled width and
+	length stored in DST files.  Minor documentation fixes. Remove
+	unused options from read_hess_nr.  Add rules to Makefile for
+	building read_hess_nr (although not building it by default).
+
+2008-11-27  bernlohr <>
+
+	* common/histogram.c, eventio_addon/io_histogram.c: Increase the
+	limit on histogram sizes as they were not really adequate anymore
+	for current computers.
+
+2008-11-21  bernlohr <>
+
+	* Makefile, hess/atmprof.c, hess/atmprof.h, hess/user_analysis.c: 
+	Include atmospheric density profile in the analysis.
+
+2008-11-12  bernlohr <>
+
+	* Makefile: Take the EXTRA_... variables into account for compiler
+	options.
+
+2008-10-28  bernlohr <>
+
+	* hess/reconstruct.c: Minor cleanup in pixel timing analysis.
+
+2008-10-27  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h, hess/read_hess.c,
+	hess/read_hess_nr.c, hess/reconstruct.c: When claiming that the time
+	analysis results are in units of nanoseconds, we should better make
+	sure that they are.
+
+2008-10-27  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h, hess/read_hess.c,
+	hess/reconstruct.c, hess/reconstruct.h: Including pixel timing
+	results together with Hillas parameters etc. into the DST-level
+	data.
+
+2008-10-06  bernlohr <>
+
+	* corsika/io_simtel.c, corsika/mc_tel.h: Optional mode where photon
+	bunch data is not written in one block for a whole array but in
+	blocks for individual telescopes (enclosed by a header and trailer
+	block). This can save memory for large arrays but chances of getting
+	incomplete data will rise, and overhead in sequential mode will be
+	more severe.
+
+2008-09-12  bernlohr <>
+
+	* hess/io_hess.c, hess/read_hess.c, hess/read_hess_nr.c: Take care
+	of telescope IDs above 255 in a number of data block types.
+
+2008-08-13  bernlohr <>
+
+	* hess/io_hess.h: Fix little typo.
+
+2008-08-13  bernlohr <>
+
+	* hess/io_hess.h: Enlarge maximum number of telescopes for really
+	big CTA simulations when compiled with -DCTA_ULTRA.
+
+2008-07-07  bernlohr <>
+
+	* hess/rec_tools_nr.c: Add stripped-down version of rec_tools.c as
+	rec_tools_nr.c.
+
+2008-06-11  bernlohr <>
+
+	* Makefile: In old versions of the Makefile, the binaries were built
+	in the module's top level directory and these were not removed by
+	'make clean' of a newer Makefile. Remove them each time. Use
+	symlinks to the bin directory if you need them in the top level.
+
+2008-06-06  bernlohr <>
+
+	* Makefile: Improve handling of bin, lib, out, ... when they exist
+	as symbolic links.
+
+2008-05-25  denauroi <>
+
+	* .cvsignore: [no log message]
+
+2008-05-24  bernlohr <>
+
+	* common/fileopen.c: Supporting now input from URLs with the help of
+	the curl program.
+
+2008-05-24  bernlohr <>
+
+	* hess/io_hess.c, hess/read_hess.c: For DST production in level 2
+	write neither pulse shape timing nor tracking data of non-triggered
+	telescopes.
+
+2008-05-19  bernlohr <>
+
+	* eventio_basic/EventIO.cc, eventio_basic/EventIO.hh: Since the C++
+	interface, in contrast to the C interface, has a properly
+	initialized item version number which we are prepared to handle, we
+	can warn always about a larger than expected version number, even
+	when the item's read function would fail to check explicitly.
+
+2008-05-15  bernlohr <>
+
+	* hess/read_hess_nr.c: Adding the 'no-reconstruction' version of
+	read_hess to CVS.
+
+2008-05-14  bernlohr <>
+
+	* eventio_basic/EventIO.cc, eventio_basic/EventIO.hh: Adding an
+	explicit Write() method which is useful for writing filter programs
+	looking just on the top-level block header.
+
+2008-05-14  bernlohr <>
+
+	* hess/io_hess.c: Fix reading back local pulse sums.
+
+2008-05-07  bernlohr <>
+
+	* hess/io_hess.c: Initalize list sizes to zero when reading older
+	central trigger data format.
+
+2008-04-13  bernlohr <>
+
+	* hess/io_hess.h: Start times and widths from pulse analysis can
+	come in two variants (above fraction of peak and above absolute
+	threshold).
+
+2008-04-05  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: Bug fix and extensions for pixel
+	timing data.
+
+2008-04-04  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: Minor changes in the pulse shape
+	timing data, but probably still buggy.
+
+2008-04-01  bernlohr <>
+
+	* hbook/Makefile: File type extension for shared library got lost.
+
+2008-03-31  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h, hess/read_hess.c: Added timing
+	information from pulse shape and from central trigger timing.
+
+2008-03-12  bernlohr <>
+
+	* Makefile, Makefile.doxygen, doc_src/eventio_de.tex,
+	doc_src/eventio_en.tex: Adapting the documention to the TeXlive
+	system - which made it quite hard to produce PS files.
+
+2008-03-12  bernlohr <>
+
+	* eventio_basic/eventio.c: Better check for NULL arguments in
+	(put|get)_item_begin after having managed to produce segmentation
+	violations myself.
+
+2008-03-12  bernlohr <>
+
+	* hbook/cernlib_compiler: Fix shell script.
+
+2008-03-07  bernlohr <>
+
+	* Makefile, common/initial.h, hbook/Makefile, root/Makefile: 
+	Improving portability for Mac OS X.
+
+2008-02-15  bernlohr <>
+
+	* hbook/Makefile, hbook/cernlib_compiler: We may have to adopt the
+	Fortran compiler to what was used to compile the available CERN
+	library. Choices so far: gfortran or g77.
+
+2008-02-12  bernlohr <>
+
+	* doc_src/eventio_en.tex: Use USenglish for figure captions.
+
+2008-02-11  bernlohr <>
+
+	* common/fileopen.c, common/fileopen.h, common/hconfig.c,
+	common/histogram.c, common/warning.c, eventio_basic/eventio.c,
+	eventio_basic/testio.c, hess/camera_image.c, hess/io_hess.c,
+	hess/read_hess.c, hess/reconstruct.c, hess/user_analysis.c: Get rid
+	of some warnings that show up when compiling with -Wextra and
+	others.
+
+2008-02-01  bernlohr <>
+
+	* hess/camera_image.c, hess/read_hess.c, hess/rec_tools.c,
+	hess/rec_tools.h, hess/reconstruct.c: Minor cleanups and additions.
+
+2008-01-30  bernlohr <>
+
+	* hess/camera_image.c, hess/io_hess.c, hess/io_hess.h: Optional
+	'CTA' instead of 'H.E.S.S.' on camera images.  Add printing of
+	tracking data.
+
+2008-01-16  bernlohr <>
+
+	* Makefile, hbook/Makefile: Using now gfortran (if available) as the
+	FORTRAN compiler for the HBOOK interface. Note that this requires a
+	compatible CERNLIB (i.e. compiled with gfortran) to work. If it
+	doesn't work you are not loosing much, since building the
+	hdata2hbook program is optional.
+
+2008-01-11  bernlohr <>
+
+	* corsika/io_simtel.c: Use fileopen/fileclose instead of explicitly
+	opening large files with fopen64.  Optionally check the sum of
+	photon bunches, taking into account that with the EXTENDED_TELOUT
+	option to CORSIKA/IACT there are 'bunches' that refer to the
+	emitting particles and not to the photons emitted.
+
+2008-01-04  bernlohr <>
+
+	* eventio_basic/EventIO.hh: Fix for GCC 4.3.
+
+2007-11-13  bernlohr <>
+
+	* eventio_basic/EventIO.cc, eventio_basic/EventIO.hh: Adding a copy
+	constructor and copy assignment operator of the EventIO::Item class
+	for formal reasons which through exceptions if they get actually
+	used.
+
+2007-10-08  bernlohr <>
+
+	* hess/io_hess.c: Fix a typo in the units printed for the B field.
+
+2007-09-21  bernlohr <>
+
+	* eventio_basic/eventio.c: Avoid possible use of uninitialized
+	variable and add more inline-comments about data format.
+
+2007-09-07  bernlohr <>
+
+	* eventio_basic/EventIO.cc, eventio_basic/EventIO.hh: Documentation
+	additions plus two additional methods and a few minor fixes.
+
+2007-09-07  bernlohr <>
+
+	* eventio_basic/eventio.c: When putting new sub-items into an I/O
+	buffer and their headers would not fit immediately into the buffer,
+	that's no reason to give up since we can almost always extend the
+	buffer.
+
+2007-09-04  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h, hess/read_hess.c: Minor
+	documentation-related changes
+
+2007-09-04  bernlohr <>
+
+	* common/fileopen.c, eventio_basic/TestIO.cc,
+	eventio_basic/testio.c: Adding two additional file name extensions
+	.lzo and .lzma for on-the-fly compression/decompression with lzop
+	(very fast) and lzma (best compression ratio), respectively. Allow
+	for automatic compression also with the test programs.
+
+2007-08-21  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: Add another print_... function.
+
+2007-08-20  bernlohr <>
+
+	* eventio_basic/EventIO.cc, eventio_basic/EventIO.hh: Add another
+	constructor for easier mixing of C and C++ code.
+
+2007-08-14  bernlohr <>
+
+	* Makefile, common/dhsort.c, common/dhsort.h,
+	eventio_addon/io_histogram.h, hess/gen_lookup.c, hess/io_hess.c,
+	hess/io_hess.h, hess/read_hess.c, hess/rec_tools.c,
+	hess/rec_tools.h, hess/reconstruct.c, hess/reconstruct.h,
+	hess/user_analysis.c, hess/user_analysis.h, root/toroot.cc: 
+	Reverting personal changes by Andre-Claude that he committed by
+	mistake.
+
+2007-08-14  clapson <>
+
+	* Makefile, common/dhsort.c, common/dhsort.h,
+	eventio_addon/io_histogram.h, hess/gen_lookup.c, hess/io_hess.h,
+	hess/read_hess.c, hess/rec_tools.c, hess/rec_tools.h,
+	hess/reconstruct.c, hess/reconstruct.h, hess/user_analysis.c,
+	hess/user_analysis.h, root/toroot.cc: 
+	calibrationmakers/src/TelMergeCalibMaker.C
+
+2007-08-01  bernlohr <>
+
+	* hess/read_hess.c, hess/reconstruct.c, hess/reconstruct.h: Extend
+	the image cleaning algorithm.
+
+2007-07-25  bernlohr <>
+
+	* eventio_basic/eventio.c, eventio_basic/io_basic.h: Add an explicit
+	get_uint16() function avoiding possible sign propagation as with
+	get_short().
+
+2007-07-16  bernlohr <>
+
+	* Makefile: More accurate wildcards for hessio2 sources.
+
+2007-07-16  bernlohr <>
+
+	* eventio_basic/EventIO.cc, eventio_basic/EventIO.hh: More robust
+	handling of (repeated use of) nested items.
+
+2007-07-16  bernlohr <>
+
+	* root/toroot.cc: Another GCC 4.2 deprecated syntax warning fix.
+
+2007-07-10  bernlohr <>
+
+	* eventio_addon/io_histogram.c, eventio_addon/io_histogram.h,
+	hess/io_hess.h: Get rid of a couple of more GCC 4.2 warnings.
+
+2007-07-10  bernlohr <>
+
+	* common/current.c, common/current.h, common/hconfig.c,
+	common/hconfig.h, common/histogram.c, common/histogram.h,
+	common/history.h, common/warning.c, common/warning.h,
+	corsika/mc_tel.h, eventio_addon/io_histogram.c,
+	eventio_addon/io_histogram.h, eventio_addon/io_history.c,
+	eventio_addon/io_history.h, eventio_basic/EventIO.cc,
+	eventio_basic/EventIO.hh, eventio_basic/TestIO.cc,
+	eventio_basic/eventio.c, eventio_basic/io_basic.h,
+	eventio_basic/listio.c, eventio_basic/testio.c, hbook/cvt2.c,
+	hbook/tohbook.c, hbook/tohbook.h, hess/io_hess.c, hess/io_hess.h,
+	root/cvt3.cc: Here comes a rather big set of changes: - This includes the first change to the eventio data format for more
+	than a decade. It provides an optional extension field to item
+	headers of which so far 12 bits have been assigned for extending the
+	length field from 30 bits (1 GByte) to 42 bits (4 TByte) on 64-bit
+	systems. On 32-bit systems no I/O blocks of more than 2 GByte can be
+	handled. By default, all data is written in the old format, without
+	extension field. Therefore, all existing software should continue to
+	work as before and writing data that can be read with older eventio
+	versions. Automatic insertion of the extension field, which is
+	possible though extremely inefficient, is not implemented yet. To
+	take advantage of the extension field, one has to set the 'extended'
+	flag in the I/O buffer once or use the put_item_begin_with_flags
+	function with the corresponding flag set for each item that might
+	exceed the GByte barrier.  - Another (minor) change to the data format is setting aside a
+	previously reserved bit in the type/version field for a
+	user-controlled flag bit.  If data with this flag set is read by
+	older software, the flag will simply be ignored. Again, by default,
+	everything is written as it used to be.  - The testio and TestIO programs have been extended for a more
+	complete coverage of the eventio functionality. Both of them can
+	write and read their data in the old format as well as the extended
+	format.  - The C++ interface has been extended to cover the same level of
+	functionality as the C interface, without need to call the C
+	functions directly.  - The remaining support for pre-ANSI-C compilers has been dropped.
+
+2007-06-15  bernlohr <>
+
+	* common/initial.h: Avoid warnings about redefined
+	__STDC_LIMIT_MACROS if defined elsewhere.
+
+2007-06-15  bernlohr <>
+
+	* common/initial.h: We need the C limit macros also in C++ in order
+	to tell if we have 64-bit integers.
+
+2007-05-15  bernlohr <>
+
+	* hess/user_analysis.c: Two histograms allocated and filled
+	differently.
+
+2007-05-11  bernlohr <>
+
+	* hess/read_hess.c: Avoid segfault when running with wrong
+	(non-simhessarray) data file.
+
+2007-05-03  bernlohr <>
+
+	* Makefile: Building in 'sub-directory' also for autoscheduler
+	module. Cleanups for other makefiles.
+
+2007-04-30  bernlohr <>
+
+	* Makefile, hbook/Makefile, root/Makefile: Compiling and building of
+	libraries and programs now in a 'out' directory which may have been
+	installed beforehand as a link to a architecture-dependent
+	directory.
+
+2007-04-16  bernlohr <>
+
+	* hess/read_hess.c: Clean-up of the code for the new histograms with
+	telescope participation.
+
+2007-04-13  bernlohr <>
+
+	* hess/read_hess.c: I should better first try to compile my code
+	before committing - even for trivial changes.
+
+2007-04-13  bernlohr <>
+
+	* hess/read_hess.c: New option did not match its --help
+	documentation.
+
+2007-04-13  bernlohr <>
+
+	* hess/read_hess.c: Adding a '--min-trg-tel' option.
+
+2007-03-19  bernlohr <>
+
+	* hess/read_hess.c, hess/user_analysis.c, hess/user_analysis.h: 
+	Minor modifications to edge and angular cuts.
+
+2007-02-13  bernlohr <>
+
+	* hess/read_hess.c, hess/user_analysis.c, hess/user_analysis.h: 
+	Allow subsets of telescopes to be accepted when fewer images are
+	available than normally required. This is useful with arrays of
+	different telescope types.
+
+2007-02-02  bernlohr <>
+
+	* hess/read_hess.c, hess/user_analysis.c, hess/user_analysis.h: 
+	Allow for energy-dependent shape cuts.
+
+2007-01-11  bernlohr <>
+
+	* hess/read_hess.c, hess/reconstruct.c, hess/user_analysis.c,
+	hess/user_analysis.h: Various bugs (mostly related to recently added
+	read_hess command line parameters) were fixed.
+
+2007-01-11  bernlohr <>
+
+	* hess/gen_lookup.c: Adding histograms of angular resolution versus
+	energy.
+
+2007-01-08  bernlohr <>
+
+	* eventio_basic/EventIO.cc, eventio_basic/EventIO.hh: Still had a
+	couple of explicit 32-bit versions of Put[S]Count for 64-bit systems
+	missing.
+
+2007-01-08  bernlohr <>
+
+	* Makefile, common/moments.c, hess/read_hess.c,
+	hess/user_analysis.c, hess/user_analysis.h: Add more command line
+	parameters to read_hess for optimizing cuts.
+
+2007-01-05  bernlohr <>
+
+	* eventio_basic/EventIO.cc, eventio_basic/EventIO.hh,
+	eventio_basic/TestIO.cc, eventio_basic/eventio.c,
+	eventio_basic/io_basic.h, eventio_basic/testio.c: On 64-bit systems
+	provide additional explicit 32-bit versions for GetCount/PutCount
+	and friends.
+
+2006-12-22  bernlohr <>
+
+	* hess/reconstruct.c, hess/reconstruct.h: Add a function to
+	calibrate single pixel amplitudes rather than all pixels in one go.
+
+2006-12-20  bernlohr <>
+
+	* hess/io_hess.c: If in the older image format (version 1) no number
+	of pixels is available, we can still get this from the image pixel
+	list.
+
+2006-12-15  bernlohr <>
+
+	* hess/read_hess.c, hess/user_analysis.c, hess/user_analysis.h: 
+	Fixing DST level 3 production. Adding a '--auto-lookup' option.
+
+2006-12-07  bernlohr <>
+
+	* hess/read_hess.c, hess/user_analysis.c, hess/user_analysis.h: Add
+	a command line option to configure the dE2 cut parameter.
+
+2006-12-06  bernlohr <>
+
+	* root/toroot.cc: We might even want to fill some content into the
+	1-D histograms.
+
+2006-11-29  bernlohr <>
+
+	* hess/read_hess.c: Fix option processing which was broken in last
+	revision.
+
+2006-11-28  bernlohr <>
+
+	* hess/user_analysis.c: Force theta-cut scale factor to 1 for
+	point-source gammas.
+
+2006-11-28  bernlohr <>
+
+	* hess/user_analysis.c: Startup output shows which telescopes are
+	active and which are not.
+
+2006-11-28  bernlohr <>
+
+	* hess/read_hess.c: Run summary output for each run in multi-run DST
+	files.
+
+2006-11-28  bernlohr <>
+
+	* hess/read_hess.c, hess/user_analysis.c, hess/user_analysis.h: The
+	HESS standard analysis cuts are now a command-line option and not a
+	compile-time flag anymore.
+
+2006-11-27  bernlohr <>
+
+	* hess/read_hess.c, hess/user_analysis.c: Changes in the hmax and dE
+	cuts.
+
+2006-11-26  bernlohr <>
+
+	* hess/read_hess.c, hess/reconstruct.c, hess/reconstruct.h,
+	hess/user_analysis.c, hess/user_analysis.h: Add writing of DST-level
+	data with the read_hess program.
+
+2006-11-23  bernlohr <>
+
+	* Makefile, eventio_basic/statio.cc: A little tool counting how many
+	blocks of the different types there are in eventio file and how many
+	bytes they accumulate.
+
+2006-11-14  bernlohr <>
+
+	* hess/gen_lookup.c: Remove debugging output
+
+2006-11-14  bernlohr <>
+
+	* hess/gen_lookup.c: Interpolate within bin for angular resolution
+	determination.
+
+2006-11-14  bernlohr <>
+
+	* hess/user_analysis.c: Include gamma-ray source offset in nominal
+	system into the analysis parameters saved in a histogram.
+
+2006-11-14  bernlohr <>
+
+	* eventio_addon/io_histogram.c: For reading and writing histograms
+	start with a larger buffer size so that we don't that so many
+	messages about extending the buffer size.
+
+2006-11-14  bernlohr <>
+
+	* hess/gen_lookup.c, hess/read_hess.c, hess/user_analysis.c,
+	hess/user_analysis.h: More command line options for read_hess, save
+	the user analysis parameters in a histogram for later checks.
+
+2006-11-13  bernlohr <>
+
+	* hess/gen_lookup.c, hess/read_hess.c, hess/user_analysis.c,
+	hess/user_analysis.h: Various changes in the analysis like
+	multiplicity-dependent angular cuts etc.
+
+2006-11-12  bernlohr <>
+
+	* hess/user_analysis.c: Fix missing braces for filling histogram
+	12059.
+
+2006-11-12  bernlohr <>
+
+	* Makefile: Prepare Makefile for building optional hessio2 library.
+
+2006-11-12  bernlohr <>
+
+	* common/hconfig.c, eventio_addon/io_histogram.c,
+	eventio_basic/TestIO.cc, eventio_basic/testio.c: Get rid of a few
+	irrelevant compiler warnings.
+
+2006-11-12  bernlohr <>
+
+	* common/histogram.c, common/histogram.h: Separate function for
+	checking if two histograms match.
+
+2006-11-05  bernlohr <>
+
+	* Makefile: There used to be a mkdirhier command. Use 'mkdir -p'
+	instead.
+
+2006-11-05  bernlohr <>
+
+	* hess/gen_lookup.c, hess/user_analysis.c: Extending lookup scheme
+	to multiple telescope types.
+
+2006-11-02  bernlohr <>
+
+	* hess/user_analysis.c: Get the name of the user analysis histogram
+	file (without .hdata.gz) from the USER_ANALYSIS environment
+	variable, so that we can run different analyses at the same time in
+	the same directory.
+
+2006-10-30  bernlohr <>
+
+	* Makefile: With the old GCC 3.3.6 compiler, no -march=opteron
+	possible.
+
+2006-10-30  bernlohr <>
+
+	* Makefile: Improving compatibility with 32bit and 64bit environment
+	on 64bit systems.
+
+2006-10-30  bernlohr <>
+
+	* hess/gen_lookup.c, hess/io_hess.h, hess/read_hess.c,
+	hess/reconstruct.c, hess/reconstruct.h, hess/user_analysis.c,
+	hess/user_analysis.h: Even more user analysis code. A few additional
+	reconstruction parameters were added as function parameters.
+
+2006-10-30  bernlohr <>
+
+	* hess/camera_image.c: More control over appearance of images (value
+	range, gamma coefficient) via environment variables.
+
+2006-10-12  bernlohr <>
+
+	* eventio_basic/TestIO.cc: Get rid of some printf format warnings in
+	64-bit mode.
+
+2006-09-05  bernlohr <>
+
+	* hess/user_analysis.c: The user_init function should be called
+	already on the first MC shower block and not on the first triggered
+	event.
+
+2006-09-05  bernlohr <>
+
+	* hess/gen_lookup.c: Utility for generating the loookup tables.
+
+2006-09-05  bernlohr <>
+
+	* Makefile, eventio_addon/io_histogram.c,
+	eventio_addon/io_histogram.h, hbook/cvt2.c, hess/read_hess.c,
+	hess/reconstruct.c, hess/reconstruct.h, hess/user_analysis.c,
+	hess/user_analysis.h: Including cuts in user analysis and generation
+	of lookup tables.
+
+2006-09-04  bernlohr <>
+
+	* hess/read_hess.c, hess/rec_tools.c, hess/reconstruct.c,
+	hess/user_analysis.c, hess/user_analysis.h: More user analysis code.
+
+2006-09-01  bernlohr <>
+
+	* Makefile: Improving Makefile behaviour for clean and distclean
+	targets.
+
+2006-08-31  bernlohr <>
+
+	* hess/rec_tools.c: The number of telescopes that the reconstruction
+	tools can handle should at least match the number handled in the
+	other tools.
+
+2006-08-22  bernlohr <>
+
+	* Makefile, hess/read_hess.c, hess/reconstruct.h,
+	hess/user_analysis.c, hess/user_analysis.h: Adding skeleton user
+	analysis code to read_hess program.
+
+2006-08-17  bernlohr <>
+
+	* hess/io_hess.h, hess/read_hess.c, hess/rec_tools.c,
+	hess/rec_tools.h, hess/reconstruct.c: Adding more options to control
+	shower reconstruction in read_hess.
+
+2006-08-17  bernlohr <>
+
+	* hess/io_hess.c: Adding the number of pixels passing tail-cuts to
+	the image parameters stored although in existing data with only one
+	image per telescope it can be recovered from the image_pixels
+	structure.
+
+2006-08-15  bernlohr <>
+
+	* hess/read_hess.c: Include the more complete description of command
+	line options also in the documentation.
+
+2006-08-15  bernlohr <>
+
+	* Makefile, hbook/Makefile: In case the -D_REENTRANT flag is set for
+	compiling the programs (which normally is not the case), we have to
+	link with multithreading libraries.
+
+2006-08-07  bernlohr <>
+
+	* hess/read_hess.c, hess/reconstruct.c: Include the simple
+	geometrical shower reconstruction in read_hess.
+
+2006-08-07  bernlohr <>
+
+	* hbook/hbookc.F, hbook/tohbook.c, hbook/tohbook.h: Completing the
+	half-way done changes started a few weeks ago.
+
+2006-08-02  bernlohr <>
+
+	* hess/io_hess.c: Allow optional printing of raw ADC values (e.g. in
+	read_hess program) when the PRINT_VERBOSE environment variable is
+	set.
+
+2006-07-09  bernlohr <>
+
+	* root/cvt3.cc: Add '--verbose/-V/-VV options also for conversion to
+	ROOT format.
+
+2006-07-09  bernlohr <>
+
+	* hbook/cvt2.c: Adding '--verbose/-V/-VV' options to see what
+	histograms are available (including the empty ones that will not be
+	converted).
+
+2006-07-09  bernlohr <>
+
+	* common/histogram.c: Fixing a bug in ASCII-display of histograms
+	wider than 78 bins.
+
+2006-07-05  bernlohr <>
+
+	* eventio_basic/EventIO.cc, eventio_basic/EventIO.hh: Allow also
+	writing and reading of valarrays of strings in one call.
+
+2006-07-05  bernlohr <>
+
+	* common/fileopen.c: Fix counting of remaining buffer length in
+	listpath function.
+
+2006-06-12  bernlohr <>
+
+	* eventio_basic/EventIO.cc, eventio_basic/EventIO.hh: Allow storing
+	also vectors of strings in one call.
+
+2006-05-30  bernlohr <>
+
+	* Makefile: Take LaTeX rules from makefiles/Makefile.LaTeX
+
+2006-05-13  bernlohr <>
+
+	* eventio_basic/EventIO.hh: Fixing typo.
+
+2006-05-12  bernlohr <>
+
+	* eventio_basic/EventIO.cc, eventio_basic/EventIO.hh: Allow easier
+	opening of output files in append mode.
+
+2006-03-08  bernlohr <>
+
+	* eventio_basic/EventIO.cc, eventio_basic/EventIO.hh: Still had a
+	couple of size_t/uintmax_t overloadings overlooked.
+
+2006-03-08  bernlohr <>
+
+	* eventio_basic/EventIO.cc, eventio_basic/EventIO.hh: Had identical
+	methods overloaded on 64 bit machines where [u]intmax_t is also just
+	64 bits large.
+
+2006-03-07  bernlohr <>
+
+	* Makefile, hbook/Makefile, hbook/hbookc.F: Hbook conversion now
+	working also on the Opteron cluster in 64 bit mode.
+
+2006-03-07  bernlohr <>
+
+	* eventio_basic/TestIO.cc: Compiler warning fixed.
+
+2006-02-27  bernlohr <>
+
+	* common/initial.h, common/warning.c, eventio_basic/EventIO.cc,
+	eventio_basic/EventIO.hh, eventio_basic/TestIO.cc,
+	eventio_basic/eventio.c, eventio_basic/io_basic.h,
+	eventio_basic/testio.c: Extended the count/scount functions and the
+	tests for them. The format for negative scount numbers was changed
+	to achieve portability across platforms with different sizes of the
+	largest integer. No need to worry though since this data type is
+	nowhere in production code.
+
+2006-01-13  bernlohr <>
+
+	* hess/read_hess.c, hess/reconstruct.c: Add image centre positions
+	to optional ASCII output.
+
+2006-01-11  bernlohr <>
+
+	* hess/io_hess.h: Comment did not agree with following definition.
+
+2006-01-10  bernlohr <>
+
+	* eventio_basic/eventio.c: Documentation spelling fix.
+
+2006-01-05  bernlohr <>
+
+	* common/warning.c: We must make sure that warn_func_once is called
+	once.
+
+2005-11-22  bernlohr <>
+
+	* hess/io_hess.h: For the HESS phase 3 study allow up to 100
+	telescopes.
+
+2005-11-22  bernlohr <>
+
+	* eventio_basic/EventIO.cc, eventio_basic/EventIO.hh,
+	eventio_basic/TestIO.cc: Adding a few more functions to the C++
+	interface.
+
+2005-11-21  bernlohr <>
+
+	* Makefile.doxygen: A few fixes to get latex (or rather latexnoetex,
+	if that's what we have) running through the generated documentation.
+
+2005-11-21  bernlohr <>
+
+	* doc_src/hessio_doc.h: A documentation-only file that was forgotten
+	and didn't make it into CVS.
+
+2005-11-09  bernlohr <>
+
+	* Makefile, hbook/Makefile, root/Makefile: Use the compiler to
+	generate dependencies instead of the old makedepend tool.
+
+2005-10-14  bernlohr <>
+
+	* Makefile, hbook/Makefile, root/Makefile: Not building (and not
+	using) the static libraries anymore by default.
+
+2005-10-13  bernlohr <>
+
+	* hess/io_hess.h: When compiled with -DHESS_PHASE_3 more telescopes
+	are provided.
+
+2005-08-26  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h, hess/read_hess.c: Now with a large
+	fraction of the print_... functions in place.
+
+2005-08-24  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h, hess/read_hess.c: Begin
+	implementing verbose listing of data block contents.
+
+2005-08-23  bernlohr <>
+
+	* Makefile, hbook/hbookc.F: Use SAVE statement so that we don't need
+	the -fno-automatic option.
+
+2005-08-23  bernlohr <>
+
+	* hess/read_hess.c: When reading a CORSIKA file rather than a
+	sim_hessarray file, the program would segfault at the end.
+
+2005-05-26  bernlohr <>
+
+	* eventio_basic/EventIO.cc: Cosmetic change.
+
+2005-05-10  bernlohr <>
+
+	* hess/read_hess.c, hess/reconstruct.c: Include orientation and
+	direction in ASCII output of image parameters.
+
+2005-05-04  bernlohr <>
+
+	* hess/io_hess.c, root/toroot.cc: Minor changes due to more strict
+	type checking in GCC 4.0.
+
+2005-05-04  bernlohr <>
+
+	* eventio_basic/TestIO.cc: Using more modern printf length modifiers
+	for size_t and uintmax_t variables.
+
+2005-04-06  bernlohr <>
+
+	* corsika/io_simtel.c: If a disk was temporarily full or quota
+	exceeded and temporary files got truncated, we can still check for
+	indications of that in the final CORSIKA output.
+
+2005-04-04  bernlohr <>
+
+	* hbook/cvt2.c: Better error recovery in case there are corrupted
+	files in a list of input files.
+
+2005-04-01  bernlohr <>
+
+	* Makefile: Duplicate generated dependencies also for .ro .lo and
+	.rlo object files.
+
+2005-04-01  bernlohr <>
+
+	* eventio_basic/EventIO.hh: Adding size() methods.
+
+2005-04-01  bernlohr <>
+
+	* Makefile: Cannot build a 64-bit version of the hdata2hbook
+	converter on AMD.  There is a CERN library available but only in a
+	32 bit version.
+
+2005-03-22  bernlohr <>
+
+	* doc_src/eventio_de.tex, doc_src/eventio_en.tex,
+	eventio_basic/EventIO.cc, eventio_basic/EventIO.hh: Add handling of
+	user-defined I/O functions and a couple of other things to the C++
+	interface.
+
+2005-03-21  bernlohr <>
+
+	* Makefile: Force rebuild of generated dependencies also when source
+	files change.
+
+2005-03-21  bernlohr <>
+
+	* eventio_basic/EventIO.cc, eventio_basic/EventIO.hh,
+	eventio_basic/io_basic.h: Integrate user-defined I/O functions into
+	the normal C++ interface.
+
+2005-03-21  bernlohr <>
+
+	* eventio_addon/io_history.c: Okay, better make it ISO 8601
+	compliant when changing the date format.
+
+2005-03-21  bernlohr <>
+
+	* eventio_addon/io_history.c: Found some on-Y2K-compliant output in
+	that old code.
+
+2004-07-15  bernlohr <>
+
+	* Makefile: Cannot use the C{XX}FLAGS as generated in
+	Makefile.Common here because they mess up the multi-/single-threaded
+	library variants.
+
+2004-07-15  bernlohr <>
+
+	* Makefile, common/initial.h, eventio_basic/EventIO.cc,
+	eventio_basic/EventIO.hh, eventio_basic/TestIO.cc,
+	eventio_basic/eventio.c, eventio_basic/testio.c: Porting mainly to
+	AMD 64. Limited success on DEC Unix but who cares.
+
+2004-06-29  bernlohr <>
+
+	* hess/io_hess.c: I have to reassign a bit in order to be able to
+	handle a 2048 pixel camera.
+
+2004-06-15  bernlohr <>
+
+	* common/hconfig.c: Even in this old file, valgrind found a variable
+	that, possibly, may be used unitialized.
+
+2004-06-09  bernlohr <>
+
+	* Makefile, eventio_basic/EventIO.hh: Fixing a number of issues with
+	GCC version 3.4.
+
+2004-02-16  bernlohr <>
+
+	* hess/read_hess.c, hess/reconstruct.c: Print raw photo-electron
+	numbers with '-r 1' and up and of total reconstructed [peak p.e.]
+	numbers without tailcuts with '-r 3' and up.
+
+2004-02-12  bernlohr <>
+
+	* hbook/cvt2.c, root/cvt3.cc: Avoid warning about an unused
+	variable.
+
+2004-02-09  bernlohr <>
+
+	* hbook/Makefile, hbook/cvt2.c, root/Makefile, root/cvt3.cc: Better
+	input name to output name translation for compressed input files.
+
+2004-01-12  bernlohr <>
+
+	* eventio_basic/EventIO.cc, eventio_basic/EventIO.hh,
+	eventio_basic/TestIO.cc, eventio_basic/testio.c: Added functions for
+	vectors and valarrays of bools. The C language test program writes
+	and reads identical data packed in bytes.
+
+2004-01-11  bernlohr <>
+
+	* eventio_basic/EventIO.cc, eventio_basic/EventIO.hh: Optionally
+	throwing exceptions on some problems that are usually due to bad
+	usage.
+
+2003-12-08  bernlohr <>
+
+	* hbook/Makefile, root/Makefile, root/toroot.cc: Take more care here
+	which version of the library to link with, even when it makes no
+	practical difference since CONFIG_ITEM (where it matters) is not
+	used in the hdata2hbook and hdata2root converters.
+
+2003-12-07  bernlohr <>
+
+	* Makefile, common/initial.h, doc_src/eventio_de.tex,
+	doc_src/eventio_en.tex, eventio_basic/EventIO.cc,
+	eventio_basic/EventIO.hh, eventio_basic/TestIO.cc,
+	eventio_basic/eventio.c, eventio_basic/io_basic.h,
+	eventio_basic/testio.c: Implementation of Count type variables
+	extended to support 64-bit numbers. A new basic type SCount was
+	added which is a signed number complement to the Count variables. An
+	SCount between -63 and 63 requires one byte of storage, other
+	SCounts between -8191 and 8191 need 2 bytes and so on.
+
+2003-11-19  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: Add the area weight needed for
+	importance sampling also to the sim_hessarray output in a format
+	that is compatible with older software, where possible.
+
+2003-11-12  bernlohr <>
+
+	* corsika/io_simtel.c, corsika/mc_tel.h: Preparing data format in
+	back- and forward-compatible way for a possible importance sampling
+	of core positions.
+
+2003-11-12  bernlohr <>
+
+	* hess/camera_image.c, hess/read_hess.c, hess/reconstruct.c: When
+	reconstructing the images again, plot these images and not the
+	original ones.
+
+2003-11-03  bernlohr <>
+
+	* Makefile: Also disabling '-O3 -fPIC' here with old binutils
+	although I haven't seen any problems with C code.
+
+2003-10-11  bernlohr <>
+
+	* hess/camera_image.c, hess/extract_hess.c: LED events treated and
+	displayed as separate calibration event type.
+
+2003-10-09  bernlohr <>
+
+	* Makefile, hess/extract_hess.c: Added a new program to extract
+	calibration events of a certain type (pedestal/LED/Laser) from sim_hessarray output (unwrapping them into
+	normal events) while skipping all shower events.
+
+2003-10-08  bernlohr <>
+
+	* Makefile, common/current.c, common/histogram.c,
+	common/histogram.h, eventio_basic/EventIO.hh,
+	eventio_basic/TestIO.cc, eventio_basic/eventio.c,
+	eventio_basic/listio.c, eventio_basic/testio.c, hbook/cvt2.c,
+	hessio.dox, root/cvt3.cc: Only minor documentation changes.
+
+2003-10-08  bernlohr <>
+
+	* hess/camera_image.c, hess/read_hess.c: Include unpacking and
+	plotting of calibration events.
+
+2003-10-08  bernlohr <>
+
+	* hess/io_hess.c: By a preprocessor definition one can avoid the
+	wrapping of calibration events, thus writing them as normal events.
+
+2003-09-24  bernlohr <>
+
+	* doc_src/eventio_de.tex, doc_src/eventio_en.tex: Documentation
+	update, now including also the C++ API.
+
+2003-09-24  bernlohr <>
+
+	* eventio_basic/TestIO.cc: Use the same file contents again as the C
+	language testio program.
+
+2003-09-24  bernlohr <>
+
+	* Makefile: Get rid of the -Wnested-externs flag for C++ code.
+
+2003-09-24  bernlohr <>
+
+	* eventio_basic/EventIO.cc, eventio_basic/EventIO.hh,
+	eventio_basic/TestIO.cc, eventio_basic/eventio.c,
+	eventio_basic/io_basic.h, eventio_basic/testio.c: A new basic data
+	type 'count' was added which is stored with variable length, like in
+	UTF-8 character encoding. This also allows to make C++ interfaces
+	for vectors, valarrays, and string simpler than before.
+
+2003-09-23  bernlohr <>
+
+	* eventio_basic/listio.c, hess/io_hess.c: Allow also listings of
+	compressed files.
+
+2003-09-15  bernlohr <>
+
+	* Makefile, common/hconfig.h, hbook/tohbook.c: A few more
+	documentation fixes.
+
+2003-09-12  bernlohr <>
+
+	* Makefile, common/current.c, common/dhsort.c, common/fileopen.c,
+	common/hconfig.c, common/histogram.c, common/histogram.h,
+	common/straux.c, eventio_addon/io_hconfig.c,
+	eventio_addon/io_histogram.c, eventio_basic/EventIO.cc,
+	eventio_basic/listio.c, hbook/cvt2.c, hess/read_hess.c,
+	hess/reconstruct.c, hessio.dox, root/cvt3.cc: Mainly documentation
+	updates and fixes (e.g. doxygen cannot parse K&R style function
+	definitions). The stat_histogram was extended to handle also 2-D and
+	weighted histograms.
+
+2003-08-11  bernlohr <>
+
+	* eventio_basic/EventIO.hh: Added methods to look into item headers.
+
+2003-08-08  bernlohr <>
+
+	* eventio_basic/TestIO.cc: Let test program also catch the exception
+	that we throw.
+
+2003-08-08  bernlohr <>
+
+	* eventio_basic/EventIO.hh: More precise error message.
+
+2003-08-08  bernlohr <>
+
+	* eventio_basic/EventIO.cc, eventio_basic/EventIO.hh: More vector /
+	valarray methods.
+
+2003-08-08  bernlohr <>
+
+	* Makefile: All shared libraries were built with the same soname. As
+	a result always libhessio.so was loaded.
+
+2003-08-01  bernlohr <>
+
+	* hess/read_hess.c: Minor change of output format for parameter
+	listing.
+
+2003-07-22  bernlohr <>
+
+	* hbook/cvt2.c, root/cvt3.cc: Histogram conversion utilities can now
+	process compressed histogram files.
+
+2003-07-22  bernlohr <>
+
+	* hess/read_hess.c, hess/reconstruct.c: Even more output from
+	read_hess, including now 5 hottest pixels.
+
+2003-07-22  bernlohr <>
+
+	* hess/io_hess.h: Change 'p.e.' to 'mean p.e.' in comments.
+
+2003-07-21  bernlohr <>
+
+	* hess/read_hess.c: Added additional log output per shower (also
+	non-triggered) in reconstruction mode in order to be able to get
+	effective areas later.
+
+2003-06-21  bernlohr <>
+
+	* eventio_basic/TestIO.cc, eventio_basic/testio.c: GCC 3.3 is more
+	picky about how an integer constant assigned to a long long should
+	look like.
+
+2003-05-08  bernlohr <>
+
+	* common/hconfig.c, common/hconfig.h: Make the is_..._number()
+	functions public.
+
+2003-05-08  bernlohr <>
+
+	* corsika/io_simtel.c: More verbose message for one error condition.
+
+2003-04-30  bernlohr <>
+
+	* common/fileopen.h, common/histogram.h, common/history.h,
+	eventio_addon/io_history.h: Enclose function prototypes in 'extern
+	"C" { .... }' for C++.
+
+2003-04-30  bernlohr <>
+
+	* eventio_addon/io_histogram.c, eventio_addon/io_histogram.h: Add a
+	function for easy writing of all available histograms.  ANSIfy
+	functions.
+
+2003-04-30  bernlohr <>
+
+	* hbook/hbookc.F: ubstantial increas in the limits for histograms to
+	be converted.
+
+2003-04-30  bernlohr <>
+
+	* hbook/cvt2.c, root/cvt3.cc: Substantial increase in the limits for
+	histograms to can be converted.
+
+2003-04-30  bernlohr <>
+
+	* Makefile, hbook/Makefile, root/Makefile: Use hdata2hbook and
+	hdata2root instead of cvt2 and cvt3 as names for the histogram
+	conversion utility programs.
+
+2003-04-26  bernlohr <>
+
+	* eventio_basic/EventIO.hh: The header files vector, valarray, and
+	string of g++ 2.96 set non-standard macros to indicate that they
+	were included.
+
+2003-04-24  bernlohr <>
+
+	* eventio_basic/EventIO.hh: Fixing little typo.
+
+2003-04-23  bernlohr <>
+
+	* Makefile, eventio_basic/EventIO.cc, eventio_basic/EventIO.hh,
+	eventio_basic/TestIO.cc, hessio.dox: C++ interface to eventio data
+	format added. Major Makefile overhaul.
+
+2003-04-14  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h, hess/read_hess.c: Save the CORSIKA
+	input file and the sim_hessarray configuration into the output file
+	produced. Always list them with read_hess.
+
+2003-04-07  bernlohr <>
+
+	* hess/reconstruct.c: Another bug fix. This one for a typo resulting
+	in wrong impact parameters.
+
+2003-04-07  bernlohr <>
+
+	* hess/reconstruct.c: Fixed bug in image cleaning.
+
+2003-03-30  bernlohr <>
+
+	* hess/reconstruct.c: Fixing the failed fix of yesterday.
+
+2003-03-29  bernlohr <>
+
+	* hess/reconstruct.c: Fixed C++ style declaration not compatible
+	with gcc <= 2.96.
+
+2003-03-28  bernlohr <>
+
+	* Makefile, hess/io_hess.h, hess/read_hess.c, hess/reconstruct.c: 
+	Add optional output of simple image analysis with normal tailcuts.
+
+2003-03-20  bernlohr <>
+
+	* hessio.dox: More complete output should be generated with doxygen.
+
+2003-03-20  bernlohr <>
+
+	* Makefile, corsika/mc_tel.h, hessio.dox: Fix for doxygen producing
+	broken LaTeX code.
+
+2003-03-03  bernlohr <>
+
+	* common/histogram.c: Fixed a bug where a variable in the histogram
+	extension was not properly initialized.
+
+2003-02-26  bernlohr <>
+
+	* eventio_basic/io_basic.h, root/cvt3.cc: Automatically including
+	warning.h is now disabled from C++.
+
+2003-01-30  bernlohr <>
+
+	* common/current.c, common/fileopen.h, common/hconfig.c,
+	common/histogram.c, common/histogram.h, common/warning.c,
+	corsika/io_simtel.c, corsika/mc_tel.h,
+	eventio_addon/io_histogram.c, eventio_basic/eventio.c,
+	eventio_basic/io_basic.h, eventio_basic/testio.c, hessio.dox: Make
+	doxygen more happy with the inline documentation.
+
+2003-01-30  bernlohr <>
+
+	* Makefile, common/fileopen.c: Moved updated fileopen.c from
+	sim_telarray to hessio. Now supports reading and writing gzip or
+	bzip2 compressed files on the fly.
+
+2003-01-29  bernlohr <>
+
+	* .cvsignore, hbook/.cvsignore, root/.cvsignore: And still a few
+	more.
+
+2003-01-29  bernlohr <>
+
+	* .cvsignore: Also add executable programs generated.
+
+2003-01-29  bernlohr <>
+
+	* .cvsignore: Add more locally generated files to list.
+
+2003-01-17  bernlohr <>
+
+	* common/initial.h, eventio_basic/eventio.c,
+	eventio_basic/io_basic.h, hess/camera_image.c, hess/io_hess.c,
+	hess/io_hess.h, hess/read_hess.c: Telescope event data now includes
+	lists of triggered pixels and pixels in selected image.  The
+	read_hess program will show these pixels if available (i.e. with new
+	data).
+
+2003-01-13  bernlohr <>
+
+	* hbook/cvt2.c, root/cvt3.cc: No output file opened if no input
+	histograms available.
+
+2003-01-02  bernlohr <>
+
+	* eventio_basic/eventio.c: A bug introduced with the last revision
+	(1.7) that could lead to memory corruption has been fixed now.
+
+2002-12-16  bernlohr <>
+
+	* Makefile, hess/io_hess.c, hess/io_hess.h: Adding a photon number
+	around 400 nm wavelength to the MC data.
+
+2002-12-04  bernlohr <>
+
+	* root/toroot.cc: Includes for ROOT header files were wrong and only
+	working where ROOT was installed under /usr.
+
+2002-11-08  bernlohr <>
+
+	* root/toroot.cc: Documentation fixes.
+
+2002-11-08  bernlohr <>
+
+	* root/cvt3.cc: Quick fix in documentation.
+
+2002-11-08  bernlohr <>
+
+	* Makefile, root/Makefile, root/cvt3.cc, root/toroot.cc,
+	root/toroot.hh: Added direct conversion of histograms to ROOT
+	format.
+
+2002-10-28  bernlohr <>
+
+	* common/histogram.c, eventio_addon/io_histogram.c, hbook/cvt2.c: 
+	Histograms can be added up. Use this in cvt2 program.
+
+2002-10-28  bernlohr <>
+
+	* eventio_basic/eventio.c: Buffers now extended by at least one 8th
+	their prior size.
+
+2002-10-01  bernlohr <>
+
+	* hess/camera_image.c, hess/io_hess.c, hess/io_hess.h,
+	hess/read_hess.c: More details on photons hitting a telescope.
+	read_hess.c shows how to read end-of-job histograms.
+
+2002-08-11  bernlohr <>
+
+	* Makefile.doxygen: Minor fix.
+
+2002-08-08  bernlohr <>
+
+	* Makefile, Makefile.doxygen: Doxygen 1.2.17 does not generate PS
+	file any more with its generated Makefile.  Use our own Makefile for
+	it.
+
+2002-07-31  bernlohr <>
+
+	* hbook/cvt2.c, hess/read_hess.c: Minor changes.
+
+2002-07-02  bernlohr <>
+
+	* .cvsignore, common/.cvsignore, corsika/.cvsignore,
+	eventio_addon/.cvsignore, eventio_basic/.cvsignore,
+	hbook/.cvsignore, hess/.cvsignore: Adding .cvsignore for all
+	subdirectories.
+
+2002-07-02  bernlohr <>
+
+	* common/hconfig.c: Added 'echo', 'warning', and 'error' built-in
+	configuration functions to help tracking the path taken by the
+	configuration preprocessor.
+
+2002-06-07  bernlohr <>
+
+	* Makefile: Symbolic links to libhessio.so.0 etc. were not created
+	by make install.
+
+2002-05-08  bernlohr <>
+
+	* corsika/io_simtel.c, corsika/mc_tel.h: Temporary storage on disk
+	now enabled for long photon bunches as for compact ones.
+
+2002-05-08  bernlohr <>
+
+	* common/initial.h: Optional support for memory debugging tools.
+
+2002-04-26  bernlohr <>
+
+	* eventio_basic/eventio.c: A potential problem with lseek fixed
+	(relevant only when compiling with -D_FILE_OFFSETBITS=64 and at the
+	same time without -D_LARGEFILE64_SOURCE on 32-bit glibc systems
+	(like Linux x86). A few other places, where the compiler (with every
+	possible warning turned on) might warn, have been commented as
+	expected and irrelevant warnings.
+
+2002-04-25  bernlohr <>
+
+	* eventio_basic/listio.c: 'listio -s' should now work with data
+	blocks up to 128 MB.
+
+2002-04-24  bernlohr <>
+
+	* Makefile: Now includes Makefile.Common in order to use the same
+	compiler etc. as other modules.
+
+2002-04-17  bernlohr <>
+
+	* Makefile, hess/io_hess.h: Now using larger limits by default,
+	unless HESS_PHASE_1 is defined.
+
+2002-04-17  bernlohr <>
+
+	* Makefile, common/hconfig.c: Cosmetic changes in hconfig
+	configuration listings.
+
+2002-04-17  bernlohr <>
+
+	* Makefile, corsika/io_simtel.c, eventio_basic/listio.c,
+	hess/camera_image.c, hess/io_hess.c, hess/io_hess.h, hessio.dox: 
+	Several features available via compile-time options are made
+	available by default now. This includes large file (>2 GB) support
+	via the transition method '-D_LARGEFILE64_SOURCE' that should be
+	compatible with ROOT. Also activated by default are now larger
+	limits on the number of pixels and telescopes etc.
+
+2002-03-15  bernlohr <>
+
+	* hess/io_hess.h: Allow for more pixels etc. when compiled with
+	-DLARGE_TELESCOPE.
+
+2002-02-26  bernlohr <>
+
+	* hess/io_hess.h: Allow to override numbers of pixels, sectors,
+	drawers to simulate larger cameras.
+
+2001-09-20  bernlohr <>
+
+	* eventio_basic/testio.c, hess/io_hess.h: Fixed typo in text output.
+	Minor changes to documentation.
+
+2001-09-14  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: Replaced 'conv_height' [m] by
+	'conv_depth' [g/cm^2] because that is the physically relevant
+	variable.
+
+2001-09-14  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: Add mirror area including
+	projection factor to camera settings.
+
+2001-08-28  bernlohr <>
+
+	* hess/io_hess.h: Modified comments which, by accident, contained
+	characters interpreted as trigraphs.
+
+2001-08-23  bernlohr <>
+
+	* Makefile: Should be LIBDIR instead of LIBPATH.
+
+2001-08-17  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: Added a few variables that were
+	still missing. New sim_hessarray is required to actually fill them
+	(e.g. maximum of Cherenkov emission).
+
+2001-08-17  bernlohr <>
+
+	* Makefile, hessio.dox: Little modifications in how the
+	documentation is generated.
+
+2001-08-16  bernlohr <>
+
+	* eventio_basic/eventio.c: Fixed a bug each in next_subitem_type and
+	next_subitem_length.  Both functions are only relevant for reading
+	data. Writing was O.K.  While the later function has never been
+	used, the former (next_subitem_type) has lead to NaN in the
+	reconstructed core position.
+
+2001-08-15  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: Minor documentation improvements.
+	Variable event.shower.img_pattern was missing in the data.
+
+2001-08-14  bernlohr <>
+
+	* hess/io_hess.c, hess/io_hess.h: The former 'normal_flag' variable
+	in the run header had never been set. This is fixed now. The
+	variable has also been renamed to make its meaning clearer.
+	Documentation has been made a bit clearer.
+
+2001-08-13  bernlohr <>
+
+	* hess/io_hess.c: The MC event number was not read properly.
+
+2001-07-13  bernlohr <>
+
+	* eventio_basic/eventio.c, hessio.dox: Documentation updates for
+	doxygen compatibility.
+
+2001-07-12  bernlohr <>
+
+	* eventio_basic/eventio.c: A few source code comments were not
+	converted from 'comments' to 'doxygen' format.
+
+2001-07-10  bernlohr <>
+
+	* common/histogram.c, common/histogram.h: Moved include <pthread.h>
+	from histogram.c to histogram.h
+
+2001-07-06  bernlohr <>
+
+	* Makefile, common/current.c, common/dhsort.c, common/hconfig.c,
+	common/histogram.c, common/histogram.h, common/initial.h,
+	eventio_addon/io_histogram.c, eventio_basic/eventio.c,
+	eventio_basic/listio.c, hess/camera_image.c, hess/read_hess.c: 
+	Multithreading issues in histograms and other small changes.
+
+2001-06-28  bernlohr <>
+
+	* hess/camera_image.c, hess/io_hess.c: Fixed bug in reading summed
+	raw data with zero-suppression mode 2.
+
+2001-06-27  bernlohr <>
+
+	* eventio_basic/listio.c, eventio_basic/testio.c: Get rid of minor
+	warnings.
+
+2001-06-18  bernlohr <>
+
+	* hess/read_hess.c: Fixed segmentation fault in case of missing
+	arguments.
+
+2001-06-18  bernlohr <>
+
+	* hess/io_hess.c: Use zero_suppression=3 now for automatic
+	determination of optimum mode.
+
+2001-06-18  bernlohr <>
+
+	* hess/camera_image.c, hess/io_hess.c, hess/io_hess.h: Fixed bug
+	with raw data using zero-suppression or data reduction, where
+	low-gain and high-gain channels were mixed up.
+
+2001-06-08  bernlohr <>
+
+	* Makefile, hbook/tohbook.h: More fine-tuning in Makefile.
+
+2001-06-07  bernlohr <>
+
+	* Makefile: Replace some '$(wildcard ...' with '$(shell ls ...'
+	because $(wildcard is evaluated immidately on Mandrake 8.0.
+
+2001-06-07  bernlohr <>
+
+	* Makefile: Warning about 'traditional' things are too boring with
+	gcc 2.96.
+
+2001-06-06  bernlohr <>
+
+	* hbook/Makefile: One more.
+
+2001-06-06  bernlohr <>
+
+	* hbook/Makefile: Next attempt
+
+2001-06-06  bernlohr <>
+
+	* Makefile, hbook/Makefile: Next attempt on fixing the 'missing
+	FORTRAN compiler problem'.
+
+2001-06-06  bernlohr <>
+
+	* Makefile, hbook/Makefile, hbook/cvt2.c, hbook/tohbook.c: Fixed
+	Makefile for passing CFLAGS to hbook/Makefiles.  Fixed a couple of
+	compiler warnings in cvt2.c and tohbook.c.
+
+2001-06-06  bernlohr <>
+
+	* Makefile, hbook/Makefile: Better handling of missing FORTRAN
+	compiler and/or CERN libraries.
+
+2001-06-05  bernlohr <>
+
+	* Makefile, hbook/Makefile: Both the existence of a FORTRAN compiler
+	and of CERN libraries are optional now.
+
+2001-05-31  bernlohr <>
+
+	* common/hconfig.c: Extended maximum length of preprocessor string.
+	After all, we are no longer working under DOS.
+
+2001-05-30  bernlohr <>
+
+	* hbook/tohbook.c, hess/hess_defaults.h: hess/hess_defaults.h is not
+	needed here
+
+2001-05-30  bernlohr <>
+
+	* Makefile, hbook/Makefile, hbook/cvt2.c, hbook/hbookc.F,
+	hbook/tohbook.h: Added the 'cvt2' program needed to convert
+	histograms to HBOOK format.
+
+2001-05-29  bernlohr <>
+
+	* Makefile: Create symbolic links in $(HESSROOT)/lib
+
+2001-05-14  bernlohr <>
+
+	* hess/rec_tools.h: Added one more file that was needed.
+
+2001-05-14  bernlohr <>
+
+	* hess/camera_image.c, hess/rec_tools.c: Added files needed for
+	drawing images from read_hess.
+
+2001-05-07  bernlohr <>
+
+	* Makefile, hess/io_hess.c, hess/read_hess.c: Fixed bugs in raw data
+	I/O with zero-suppression + data-reduction.
+
+2001-04-23  bernlohr <>
+
+	* Makefile, eventio_basic/listio.c: Added the good old listio
+	program to the CVS tree.
+
+2001-04-23  bernlohr <>
+
+	* Makefile: PREFIX was wrong in Makefile
+
+2001-04-22  bernlohr <>
+
+	* Makefile: Made definitions mode similar to those in sim_telarray's
+	Makefile.
+
+2001-04-18  bernlohr <>
+
+	* Makefile, common/current.h, doc_src/eventio_de.tex,
+	doc_src/eventio_en.tex, eventio_basic/testio.c, hess/Makefile.hess,
+	hess/io_hess.c: Makefile modified to compile also on DEC UNIX
+	(requiring GNU make).  Newer basic data types and new functions
+	added to the EVENTIO format description.  Test program 'testio'
+	added to CVS sources.  Remaining bug fixes to io_hess which were
+	forgotten to check out earlier.
+
+2001-04-04  bernlohr <>
+
+	* hess/read_hess.c: Minor fixes.
+
+2001-03-15  bernlohr <>
+
+	* hess/io_hess.h: Fixed type in maximum numbers of drawers and
+	sectors.
+
+2001-03-14  bernlohr <>
+
+	* Makefile: Rule for generating ps files should not depend on
+	default output destination configured for dvips.
+
+2001-03-14  bernlohr <>
+
+	* Makefile: Fixed rule for making pdf files from tex files.
+
+2001-03-14  bernlohr <>
+
+	* Makefile, doc_src/eventio_de.tex, doc_src/eventio_en.tex: 
+	Additional eventio documentation.
+
+2001-03-08  bernlohr <>
+
+	* Makefile, hessio.dox: Cleaner export and documentation rules in
+	the Makefile.
+
+2001-03-07  bernlohr <>
+
+	* : Removing object files which by mistake made it into CVS.
+
+2001-03-07  bernlohr <>
+
+	* First installation of hessio into Berlin CVS
+
