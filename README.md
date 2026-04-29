@@ -351,7 +351,8 @@ configuration. See `docs/coordinate_systems.md` for the full convention.
 
 ### Whiteboard Output
 
-Run the CORSIKA whiteboard trace:
+Run the CORSIKA whiteboard trace. This official whiteboard config intentionally
+uses CSV because it saves per-photon hit positions for spot inspection:
 
 ```bash
 mkdir -p run_logs/official_tests/corsika
@@ -367,6 +368,15 @@ Main outputs:
 run_logs/official_tests/corsika/whiteboard_hits.csv
 run_logs/official_tests/corsika/whiteboard_summary.csv
 run_logs/official_tests/corsika/whiteboard_run.log
+```
+
+The required setting is already in
+`configs/official_tests/corsika_whiteboard.cfg`:
+
+```ini
+output.format=csv
+output.hits_csv=run_logs/official_tests/corsika/whiteboard_hits.csv
+output.summary_csv=run_logs/official_tests/corsika/whiteboard_summary.csv
 ```
 
 Plot by CORSIKA shower-event order and array id:
@@ -413,6 +423,15 @@ Main outputs:
 ```text
 run_logs/official_tests/corsika/camera_dense.h5
 run_logs/official_tests/corsika/camera_run.log
+```
+
+The required setting is already in
+`configs/official_tests/corsika_new_camera.cfg`:
+
+```ini
+output.format=hdf5
+output.hdf5_path=run_logs/official_tests/corsika/camera_dense.h5
+output.hdf5_storage=dense
 ```
 
 The dense HDF5 camera image is already after pixel entrance, light collector,

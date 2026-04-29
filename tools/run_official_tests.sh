@@ -99,6 +99,17 @@ fi
 "$BUILD_DIR/run_corsika_trace" configs/official_tests/corsika_new_camera.cfg "$CORSIKA_FILE" \
   > run_logs/official_tests/corsika/camera_run.log 2>&1
 
+if [[ ! -s run_logs/official_tests/corsika/whiteboard_hits.csv ]]; then
+  echo "Expected whiteboard CSV was not created: run_logs/official_tests/corsika/whiteboard_hits.csv" >&2
+  echo "Check run_logs/official_tests/corsika/whiteboard_run.log" >&2
+  exit 1
+fi
+if [[ ! -s run_logs/official_tests/corsika/camera_dense.h5 ]]; then
+  echo "Expected dense camera HDF5 was not created: run_logs/official_tests/corsika/camera_dense.h5" >&2
+  echo "Check run_logs/official_tests/corsika/camera_run.log" >&2
+  exit 1
+fi
+
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_corsika_trace_output.py \
   run_logs/official_tests/corsika/whiteboard_hits.csv \
