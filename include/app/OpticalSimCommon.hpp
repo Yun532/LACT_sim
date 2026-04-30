@@ -40,6 +40,8 @@ struct ComponentConfigPaths {
     std::string electronics;
     std::string efficiency;
     std::string atmosphere;
+    std::string nsb;
+    std::string trigger;
     std::string error;
 };
 
@@ -101,6 +103,22 @@ struct SipmConfig {
 
 struct ElectronicsConfig {
     EfficiencyFactorConfig pe_conversion;
+};
+
+struct NsbConfig {
+    bool enabled = false;
+    std::string model = "constant_rate";
+    double rate_pe_per_ns_per_pixel = 0.0;
+    double window_ns = 16.0;
+    std::uint64_t seed = 12345ULL;
+};
+
+struct TriggerConfig {
+    bool enabled = false;
+    double pixel_threshold_pe = 5.0;
+    int camera_multiplicity = 3;
+    int array_multiplicity = 2;
+    double coincidence_window_ns = 50.0;
 };
 
 class ElectronicsResponse {
@@ -228,6 +246,8 @@ OutputPlane buildOutputPlane(const std::map<std::string, std::string>& cfg);
 CameraConfig buildCameraConfig(const std::map<std::string, std::string>& cfg);
 SipmConfig buildSipmConfig(const std::map<std::string, std::string>& cfg);
 ElectronicsConfig buildElectronicsConfig(const std::map<std::string, std::string>& cfg);
+NsbConfig buildNsbConfig(const std::map<std::string, std::string>& cfg);
+TriggerConfig buildTriggerConfig(const std::map<std::string, std::string>& cfg);
 CameraGeometry buildCameraGeometry(const CameraConfig& cfg);
 double cameraPixelSizeForCollector(const CameraConfig& cfg, const CameraGeometry& camera);
 std::unique_ptr<Cone::SquareCone> buildLightCollector(const CameraConfig& cfg,

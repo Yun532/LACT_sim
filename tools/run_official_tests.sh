@@ -38,6 +38,8 @@ mkdir -p run_logs/official_tests/point_900m
 mkdir -p run_logs/official_tests/deformation_scan
 mkdir -p run_logs/official_tests/corsika/plots/shower1_array0_whiteboard
 mkdir -p run_logs/official_tests/corsika/plots/shower1_array0_camera
+mkdir -p run_logs/official_tests/corsika/plots/shower1_array0_nsb_trigger
+mkdir -p run_logs/official_tests/collector_angular_response
 
 if [[ "$RUN_CORSIKA" -eq 0 ]]; then
   cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DLACT_ENABLE_HESSIO=OFF
@@ -73,6 +75,18 @@ python3 python/run_elevation_parallel_scan.py \
   --n-bunches 100000 \
   --output-dir run_logs/official_tests/deformation_scan
 
+"$BUILD_DIR/scan_light_collector_angular_response" \
+  --photons-per-angle 2000 \
+  --angle-step-deg 1 \
+  --max-angle-deg 90 \
+  --output run_logs/official_tests/collector_angular_response/collector_angular_response.csv \
+  2>&1 | tee run_logs/official_tests/collector_angular_response/run.log
+MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
+python3 python/plot_collector_angular_response.py \
+  run_logs/official_tests/collector_angular_response/collector_angular_response.csv \
+  --output run_logs/official_tests/collector_angular_response/collector_angular_response.png \
+  --dpi 350
+
 if [[ "$RUN_CORSIKA" -eq 0 ]]; then
   echo "Skipping CORSIKA/EventIO tests (--no-corsika)."
   exit 0
@@ -98,6 +112,8 @@ fi
   2>&1 | tee run_logs/official_tests/corsika/whiteboard_run.log
 "$BUILD_DIR/run_corsika_trace" configs/official_tests/corsika_new_camera.cfg "$CORSIKA_FILE" \
   2>&1 | tee run_logs/official_tests/corsika/camera_run.log
+"$BUILD_DIR/run_corsika_trace" configs/official_tests/corsika_nsb_trigger_camera.cfg "$CORSIKA_FILE" \
+  2>&1 | tee run_logs/official_tests/corsika/camera_nsb_trigger_run.log
 
 if [[ ! -s run_logs/official_tests/corsika/whiteboard_hits.csv ]]; then
   echo "Expected whiteboard CSV was not created: run_logs/official_tests/corsika/whiteboard_hits.csv" >&2
@@ -107,6 +123,11 @@ fi
 if [[ ! -s run_logs/official_tests/corsika/camera_dense.h5 ]]; then
   echo "Expected dense camera HDF5 was not created: run_logs/official_tests/corsika/camera_dense.h5" >&2
   echo "Check run_logs/official_tests/corsika/camera_run.log" >&2
+  exit 1
+fi
+if [[ ! -s run_logs/official_tests/corsika/camera_nsb_trigger_dense.h5 ]]; then
+  echo "Expected NSB+trigger HDF5 was not created: run_logs/official_tests/corsika/camera_nsb_trigger_dense.h5" >&2
+  echo "Check run_logs/official_tests/corsika/camera_nsb_trigger_run.log" >&2
   exit 1
 fi
 
@@ -126,5 +147,14 @@ python3 python/plot_hdf5_camera.py \
   --telescope-id "${LACT_PLOT_TELESCOPE_ID:-7}" \
   --quantity pe \
   --output run_logs/official_tests/corsika/plots/shower1_array0_camera/telescope_${LACT_PLOT_TELESCOPE_ID:-7}_pe.png
+
+MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
+python3 python/plot_hdf5_camera.py \
+  run_logs/official_tests/corsika/camera_nsb_trigger_dense.h5 \
+  --shower-event-number 1 \
+  --array-id 0 \
+  --telescope-id "${LACT_PLOT_TELESCOPE_ID:-7}" \
+  --quantity pe \
+  --output run_logs/official_tests/corsika/plots/shower1_array0_nsb_trigger/telescope_${LACT_PLOT_TELESCOPE_ID:-7}_pe.png
 
 echo "Official tests completed. See run_logs/official_tests/ for outputs and README.md for commands."

@@ -51,6 +51,15 @@ for `new_camera`.
     source_text
     ...
 
+/metadata/electronics
+  attrs: placeholder model and pe_conversion
+
+/metadata/nsb
+  attrs: enabled, model, rate_pe_per_ns_per_pixel, window_ns, seed
+
+/metadata/trigger
+  attrs: enabled, simple multiplicity thresholds
+
 /telescopes/table
   telescope_id
   x_m, y_m, z_m
@@ -100,6 +109,23 @@ for `new_camera`.
 /images/dense/pe
 /images/dense/photon_count
 /images/dense/pixel_id_axis
+
+# optional when output.hdf5_write_components=true
+/images/dense/cherenkov_pe
+/images/dense/nsb_pe
+
+/trigger/telescope
+  event_id
+  telescope_id
+  triggered
+  n_pixels_above_threshold
+  total_pe
+  trigger_time_ns
+
+/trigger/array
+  event_id
+  array_triggered
+  n_triggered_telescopes
 ```
 
 `/camera`, `/mirrors`, `/telescopes`, and `/config` are static for the file and
@@ -135,6 +161,17 @@ pixel_ids = h5["images/dense/pixel_id_axis"][:]
 This is the recommended production format. It is preferable after
 NSB/background/electronics noise is added, when every pixel has a baseline
 value, and it also avoids needing an external pixel CSV when reading images.
+
+`/images/dense/pe` is the final integrated p.e. image. If NSB is enabled, it
+already includes the Poisson NSB contribution. Set
+`output.hdf5_write_components=true` to also save the Cherenkov-only and NSB-only
+components for debugging.
+
+## Trigger Tables
+
+The first trigger implementation is a simple multiplicity model. Telescope rows
+record the number of pixels above `trigger.pixel_threshold_pe`; array rows
+record how many telescopes triggered for the same `event_id`.
 
 ## Plotting
 
