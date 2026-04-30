@@ -572,6 +572,7 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             {"sipm", component_paths.sipm},
             {"electronics", component_paths.electronics},
             {"efficiency", component_paths.efficiency},
+            {"atmosphere", component_paths.atmosphere},
             {"error", component_paths.error},
         };
         for (const auto& item : component_items) {
@@ -821,8 +822,6 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         struct EventRow {
             std::int32_t event_index;
             std::int64_t event_id;
-            std::int64_t shower_event_id;
-            std::int32_t array_id;
         };
         std::vector<EventRow> event_rows;
         std::set<int> event_ids;
@@ -834,19 +833,12 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             event_rows.push_back(EventRow{
                 event_index++,
                 static_cast<std::int64_t>(event_id),
-                static_cast<std::int64_t>(
-                    showerEventFromOutputEvent(event_id, source_runtime_cfg.event_id_mode)),
-                static_cast<std::int32_t>(
-                    arrayIdFromOutputEvent(event_id, source_runtime_cfg.event_id_mode)),
             });
         }
         hid_t events_group = H5Gcreate2(file, "events", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
         hid_t event_type = H5Tcreate(H5T_COMPOUND, sizeof(EventRow));
         H5Tinsert(event_type, "event_index", HOFFSET(EventRow, event_index), H5T_NATIVE_INT32);
         H5Tinsert(event_type, "event_id", HOFFSET(EventRow, event_id), H5T_NATIVE_INT64);
-        H5Tinsert(event_type, "shower_event_id",
-                  HOFFSET(EventRow, shower_event_id), H5T_NATIVE_INT64);
-        H5Tinsert(event_type, "array_id", HOFFSET(EventRow, array_id), H5T_NATIVE_INT32);
         writeCompound1D(events_group, "table", event_type, event_rows);
         H5Tclose(event_type);
         H5Gclose(events_group);
@@ -1417,6 +1409,7 @@ int main(int argc, char** argv) {
         if (!component_paths.sipm.empty()) printField("sipm", component_paths.sipm);
         if (!component_paths.electronics.empty()) printField("electronics", component_paths.electronics);
         if (!component_paths.efficiency.empty()) printField("efficiency", component_paths.efficiency);
+        if (!component_paths.atmosphere.empty()) printField("atmosphere", component_paths.atmosphere);
         if (!component_paths.error.empty()) printField("error", component_paths.error);
         if (component_paths.source.empty()) printField("source", "inline EventIO settings");
 

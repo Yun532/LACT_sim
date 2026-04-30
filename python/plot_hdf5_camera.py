@@ -15,6 +15,12 @@ def event_id_from_shower_number(h5, shower_event_number, array_id):
     if "events/table" not in h5:
         raise SystemExit("This HDF5 file has no events/table; use --event-id or --image-index.")
     events = h5["events/table"][:]
+    if "shower_event_id" not in events.dtype.names:
+        if shower_event_number < 1 or shower_event_number > len(events):
+            raise SystemExit(
+                f"--shower-event-number must be 1..{len(events)} for this file."
+            )
+        return int(events[shower_event_number - 1]["event_id"])
     shower_ids = []
     seen = set()
     for row in events:
@@ -66,7 +72,7 @@ def main():
         "--shower-event-number",
         type=int,
         default=None,
-        help="1-based shower-event order inside the HDF5 file",
+        help="1-based event order inside events/table; legacy files use shower-event order",
     )
     parser.add_argument("--array-id", type=int, default=0)
     parser.add_argument("--telescope-id", type=int, default=None)

@@ -169,8 +169,14 @@ The azimuth convention is the hessio/sim_telarray-compatible one documented in
 `docs/coordinate_systems.md`: `0 deg` points along array `+X` / North, and
 `90 deg` points toward East, represented as array `-Y` in the CORSIKA frame.
 
-For quick user runs, copy this file and edit only pointing, input/output paths,
-and optional camera/electronics settings:
+For the smallest normal CORSIKA camera run, copy this template and edit only
+pointing plus input/output paths:
+
+```text
+configs/templates/minimal_corsika_camera.cfg
+```
+
+For a more verbose example with all important sections visible, copy:
 
 ```text
 configs/examples/corsika_new_user_full.cfg
@@ -190,6 +196,20 @@ telescope.pointing_el_deg=...
 output.format=hdf5
 output.hdf5_path=run_logs/my_corsika_run/corsika_trace.h5
 ```
+
+Optional atmosphere transmission is configured as an extra factor after the
+CORSIKA photons arrive at the telescope plane:
+
+```ini
+atmosphere.transmission=none
+atmosphere.transmission=0.92
+atmosphere.transmission=configs/atmosphere/my_transmission.csv
+```
+
+The SiPM/electronics block is currently an interface layer. It converts collected
+photons into integrated p.e. through `electronics.pe_conversion`; detailed
+waveform, saturation, crosstalk, afterpulse, and trigger electronics are reserved
+for later replacement with the real implementation.
 
 Run:
 
@@ -444,7 +464,7 @@ Inside the file:
 /images/dense/photon_count  [n_images, 1616]
 /camera/pixels              camera geometry
 /telescopes/table           telescope metadata
-/events/table               event_id, shower_event_id, array_id
+/events/table               event_index, event_id
 ```
 
 Plot one telescope by CORSIKA shower-event order:

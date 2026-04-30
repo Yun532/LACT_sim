@@ -90,6 +90,30 @@ int main()
     auto collector = buildLightCollector(collector_cfg, camera);
     ElectronicsResponse ideal_electronics;
 
+    auto normal = makeHit(0.0, 0.0, {0.0, 0.0, 1.0});
+    applyCameraResponse(camera, collector.get(), plane, sipm, ideal_electronics, normal);
+    ok &= check(normal.hit_camera, "normal center ray should reach the SiPM");
+    ok &= check(normal.collector_enabled, "normal center ray should use collector");
+    ok &= check(normal.collector_reflections == 0,
+                "normal center ray should pass through without wall reflections");
+    ok &= check(std::abs(normal.collector_intensity - 1.0) < 1e-12,
+                "normal center ray should keep full collector weight");
+
+    auto angled = makeHit(0.010, 0.0, {0.35, 0.0, 1.0});
+    applyCameraResponse(camera, collector.get(), plane, sipm, ideal_electronics, angled);
+    ok &= check(angled.hit_camera, "angled ray should still reach the SiPM");
+    ok &= check(angled.collector_reflections > 0,
+                "angled ray should reflect inside the collector");
+    ok &= check(angled.collector_intensity < normal.collector_intensity,
+                "true_reflect material should reduce angled-ray collector weight");
+
+    std::cout << "collector normal ray: reflections="
+              << normal.collector_reflections
+              << " weight=" << normal.collector_intensity << "\n";
+    std::cout << "collector angled ray: reflections="
+              << angled.collector_reflections
+              << " weight=" << angled.collector_intensity << "\n";
+
     int tried = 0;
     int accepted = 0;
     for (double u = -0.010; u <= 0.010; u += 0.0025) {

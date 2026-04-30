@@ -94,6 +94,9 @@ int main(int argc, char** argv) {
         if (!component_paths.efficiency.empty()) {
             printField("efficiency", component_paths.efficiency);
         }
+        if (!component_paths.atmosphere.empty()) {
+            printField("atmosphere", component_paths.atmosphere);
+        }
         if (!component_paths.error.empty()) {
             printField("error", component_paths.error);
         }

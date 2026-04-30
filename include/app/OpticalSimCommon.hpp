@@ -39,6 +39,7 @@ struct ComponentConfigPaths {
     std::string sipm;
     std::string electronics;
     std::string efficiency;
+    std::string atmosphere;
     std::string error;
 };
 

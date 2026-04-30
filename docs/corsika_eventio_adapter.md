@@ -255,10 +255,10 @@ they are not preloaded as one full-file vector. During streaming, the log prints
 the recommended path for large server-side CORSIKA files.
 
 Each trace log also contains a `Per-event summary` and a `Per-stream summary`.
-A stream is one
-`(event_id, telescope_id)` pair. In the default `event_array100` mode,
-`event_id = shower_event * 100 + array_id`, so the summary keeps the original
-shower number, array offset id, and telescope id together. The summary includes
+A stream is one `(event_id, telescope_id)` pair. In the default
+`event_array100` mode, `event_id = shower_event * 100 + array_id`, so the
+single `event_id` is enough to select a simulated event stream later. The
+summary includes
 input bunches, input photon multiplicity, output-plane hits, weighted signal,
 and time mean/RMS. Pixel-camera runs additionally include camera hits,
 accepted hits, and the number of unique hit pixels. These fields are intended

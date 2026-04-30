@@ -137,6 +137,11 @@ add_executable(test_light_collector_response
 target_link_libraries(test_light_collector_response PRIVATE simlite_core)
 add_test(NAME test_light_collector_response COMMAND test_light_collector_response)
 
+add_executable(scan_light_collector_angular_response
+    apps/scan_light_collector_angular_response.cpp
+)
+target_link_libraries(scan_light_collector_angular_response PRIVATE simlite_core)
+
 add_test(NAME run_optical_sim_generated
          COMMAND run_optical_sim ${CMAKE_CURRENT_SOURCE_DIR}/configs/test_generated.cfg)
 set_tests_properties(run_optical_sim_generated PROPERTIES

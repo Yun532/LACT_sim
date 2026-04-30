@@ -75,8 +75,6 @@ for `new_camera`.
 /events/table
   event_index
   event_id
-  shower_event_id
-  array_id
 
 /images/index
   image_index
@@ -106,7 +104,9 @@ for `new_camera`.
 
 `/camera`, `/mirrors`, `/telescopes`, and `/config` are static for the file and
 are stored once. Event/telescope images only reference them by `event_id` and
-`telescope_id`.
+`telescope_id`. The formal output intentionally uses one event identifier.
+When `source.event_id_mode=event_array100`, that `event_id` is already the
+combined CORSIKA shower/array stream id used by LACT_sim.
 
 ## Sparse Images
 

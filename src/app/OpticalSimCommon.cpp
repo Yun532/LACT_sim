@@ -167,6 +167,7 @@ std::string scopedComponentKey(const std::string& key, const std::string& prefix
         startsWith(key, "sipm.") ||
         startsWith(key, "electronics.") ||
         startsWith(key, "efficiency.") ||
+        startsWith(key, "atmosphere.") ||
         startsWith(key, "error.") ||
         startsWith(key, "dish.") ||
         startsWith(key, "facet.")) {
@@ -197,6 +198,7 @@ bool isIncludeConfigKey(const std::string& key) {
            key == "sipm.config" ||
            key == "electronics.config" ||
            key == "efficiency.config" ||
+           key == "atmosphere.config" ||
            key == "error.config";
 }
 
@@ -263,6 +265,8 @@ void mergeComponentConfig(std::map<std::string, std::string>& dst,
         paths.electronics = path;
     } else if (include_key == "efficiency.config") {
         paths.efficiency = path;
+    } else if (include_key == "atmosphere.config") {
+        paths.atmosphere = path;
     } else if (include_key == "error.config") {
         paths.error = path;
     }
@@ -295,6 +299,8 @@ std::map<std::string, std::string> expandConfig(const std::map<std::string, std:
                          "electronics.config", "electronics.");
     mergeComponentConfig(expanded, paths, assembly_cfg, main_config_path,
                          "efficiency.config", "efficiency.");
+    mergeComponentConfig(expanded, paths, assembly_cfg, main_config_path,
+                         "atmosphere.config", "atmosphere.");
     mergeComponentConfig(expanded, paths, assembly_cfg, main_config_path,
                          "error.config", "error.");
 
@@ -1946,6 +1952,9 @@ OpticalEfficiencyConfig buildEfficiencyConfig(const std::map<std::string, std::s
     eff.filter_transmission = parseEfficiencyFactor(cfg, "efficiency.filter_transmission");
     eff.sipm_pde = parseEfficiencyFactor(cfg, "efficiency.sipm_pde");
     eff.atmosphere_transmission = parseEfficiencyFactor(cfg, "efficiency.atmosphere_transmission");
+    if (!eff.atmosphere_transmission.enabled) {
+        eff.atmosphere_transmission = parseEfficiencyFactor(cfg, "atmosphere.transmission");
+    }
     eff.use_funnel_acceptance =
         getBool(cfg, "efficiency.funnel_acceptance",
                 getBool(cfg, "efficiency.use_funnel_acceptance", false));
