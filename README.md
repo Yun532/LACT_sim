@@ -465,6 +465,10 @@ Inside the file:
 /camera/pixels              camera geometry
 /telescopes/table           telescope metadata
 /events/table               event_index, event_id
+/metadata/nsb               NSB settings
+/metadata/trigger           trigger settings
+/trigger/telescope          telescope trigger rows
+/trigger/array              array trigger rows
 ```
 
 Plot one telescope by CORSIKA shower-event order:
@@ -494,6 +498,19 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
 
 For CORSIKA text debugging, set `output.format=csv` or `output.format=both` and
 provide `output.pixel_csv`/`output.summary_csv`.
+
+To run the official NSB + simple-trigger smoke test, use:
+
+```bash
+build/run_corsika_trace \
+  configs/official_tests/corsika_nsb_trigger_camera.cfg \
+  /path/to/input.zst \
+  2>&1 | tee run_logs/official_tests/corsika/camera_nsb_trigger_run.log
+```
+
+This writes `camera_nsb_trigger_dense.h5`, where `/images/dense/pe` includes
+Cherenkov plus Poisson NSB. With `output.hdf5_write_components=true`, the file
+also contains `/images/dense/cherenkov_pe` and `/images/dense/nsb_pe`.
 
 For synthetic sources, `run_optical_sim` also supports compact camera output:
 
@@ -559,6 +576,7 @@ configs/official_tests/perfect_point_900m_whiteboard.cfg
 configs/official_tests/deformation_parallel_whiteboard.cfg
 configs/official_tests/corsika_whiteboard.cfg
 configs/official_tests/corsika_new_camera.cfg
+configs/official_tests/corsika_nsb_trigger_camera.cfg
 ```
 
 Core shared components:
@@ -572,6 +590,9 @@ configs/cameras/new_camera.cfg
 configs/cameras/new_camera_pixels.csv
 configs/sipm/new_camera_sipm.cfg
 configs/electronics/new_camera_pe.cfg
+configs/atmosphere/ideal.cfg
+configs/nsb/ideal.cfg
+configs/trigger/disabled.cfg
 ```
 
 Reusable starting templates:
@@ -580,6 +601,7 @@ Reusable starting templates:
 configs/templates/perfect_whiteboard.cfg
 configs/templates/real_camera_pixel.cfg
 configs/templates/corsika_camera.cfg
+configs/templates/minimal_corsika_camera.cfg
 ```
 
 ## Coordinate Notes

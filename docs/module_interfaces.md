@@ -75,3 +75,37 @@ Detailed waveform, saturation, crosstalk, afterpulse, dark count, gain
 fluctuation, and trigger electronics should be implemented behind this boundary
 later. The HDF5 format already keeps integrated `pe`, `signal`, `photon_count`,
 and timing summaries per event/telescope image.
+
+## NSB
+
+The first NSB implementation is a constant-rate Poisson model:
+
+```ini
+nsb.enabled=false
+nsb.model=constant_rate
+nsb.rate_pe_per_ns_per_pixel=0.05
+nsb.window_ns=16
+nsb.seed=12345
+```
+
+It applies only to dense pixel-camera HDF5 output. The final
+`/images/dense/pe` includes the NSB p.e. contribution. Use
+`output.hdf5_write_components=true` to additionally write `cherenkov_pe` and
+`nsb_pe`.
+
+## Trigger
+
+The first trigger implementation is intentionally simple:
+
+```ini
+trigger.enabled=false
+trigger.pixel_threshold_pe=5
+trigger.camera_multiplicity=3
+trigger.array_multiplicity=2
+trigger.coincidence_window_ns=50
+```
+
+Camera trigger counts pixels above threshold in one telescope image. Array
+trigger counts triggered telescopes for the same `event_id`. Neighbor topology,
+waveform thresholding, and hardware-specific trigger logic are reserved for the
+future electronics implementation.

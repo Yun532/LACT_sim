@@ -168,6 +168,8 @@ std::string scopedComponentKey(const std::string& key, const std::string& prefix
         startsWith(key, "electronics.") ||
         startsWith(key, "efficiency.") ||
         startsWith(key, "atmosphere.") ||
+        startsWith(key, "nsb.") ||
+        startsWith(key, "trigger.") ||
         startsWith(key, "error.") ||
         startsWith(key, "dish.") ||
         startsWith(key, "facet.")) {
@@ -199,6 +201,8 @@ bool isIncludeConfigKey(const std::string& key) {
            key == "electronics.config" ||
            key == "efficiency.config" ||
            key == "atmosphere.config" ||
+           key == "nsb.config" ||
+           key == "trigger.config" ||
            key == "error.config";
 }
 
@@ -267,6 +271,10 @@ void mergeComponentConfig(std::map<std::string, std::string>& dst,
         paths.efficiency = path;
     } else if (include_key == "atmosphere.config") {
         paths.atmosphere = path;
+    } else if (include_key == "nsb.config") {
+        paths.nsb = path;
+    } else if (include_key == "trigger.config") {
+        paths.trigger = path;
     } else if (include_key == "error.config") {
         paths.error = path;
     }
@@ -301,6 +309,10 @@ std::map<std::string, std::string> expandConfig(const std::map<std::string, std:
                          "efficiency.config", "efficiency.");
     mergeComponentConfig(expanded, paths, assembly_cfg, main_config_path,
                          "atmosphere.config", "atmosphere.");
+    mergeComponentConfig(expanded, paths, assembly_cfg, main_config_path,
+                         "nsb.config", "nsb.");
+    mergeComponentConfig(expanded, paths, assembly_cfg, main_config_path,
+                         "trigger.config", "trigger.");
     mergeComponentConfig(expanded, paths, assembly_cfg, main_config_path,
                          "error.config", "error.");
 
@@ -1608,6 +1620,59 @@ ElectronicsConfig buildElectronicsConfig(const std::map<std::string, std::string
         electronics.pe_conversion = parseEfficiencyFactor(cfg, "sipm.pe_conversion");
     }
     return electronics;
+}
+
+NsbConfig buildNsbConfig(const std::map<std::string, std::string>& cfg) {
+    NsbConfig nsb;
+    nsb.enabled = getBool(cfg, "nsb.enabled", nsb.enabled);
+    nsb.model = lowerCopy(trim(getString(cfg, "nsb.model", nsb.model)));
+    nsb.rate_pe_per_ns_per_pixel =
+        getDouble(cfg, "nsb.rate_pe_per_ns_per_pixel", nsb.rate_pe_per_ns_per_pixel);
+    nsb.window_ns = getDouble(cfg, "nsb.window_ns", nsb.window_ns);
+    nsb.seed = getUInt64(cfg, "nsb.seed", nsb.seed);
+
+    if (!(nsb.model == "constant_rate" || nsb.model == "none" || nsb.model == "off")) {
+        throw std::runtime_error("nsb.model must be constant_rate or none");
+    }
+    if (!std::isfinite(nsb.rate_pe_per_ns_per_pixel) ||
+        nsb.rate_pe_per_ns_per_pixel < 0.0) {
+        throw std::runtime_error("nsb.rate_pe_per_ns_per_pixel must be finite and >= 0");
+    }
+    if (!std::isfinite(nsb.window_ns) || nsb.window_ns < 0.0) {
+        throw std::runtime_error("nsb.window_ns must be finite and >= 0");
+    }
+    if (isDisabledText(nsb.model)) {
+        nsb.enabled = false;
+    }
+    return nsb;
+}
+
+TriggerConfig buildTriggerConfig(const std::map<std::string, std::string>& cfg) {
+    TriggerConfig trigger;
+    trigger.enabled = getBool(cfg, "trigger.enabled", trigger.enabled);
+    trigger.pixel_threshold_pe =
+        getDouble(cfg, "trigger.pixel_threshold_pe", trigger.pixel_threshold_pe);
+    trigger.camera_multiplicity =
+        getInt(cfg, "trigger.camera_multiplicity", trigger.camera_multiplicity);
+    trigger.array_multiplicity =
+        getInt(cfg, "trigger.array_multiplicity", trigger.array_multiplicity);
+    trigger.coincidence_window_ns =
+        getDouble(cfg, "trigger.coincidence_window_ns", trigger.coincidence_window_ns);
+
+    if (!std::isfinite(trigger.pixel_threshold_pe) || trigger.pixel_threshold_pe < 0.0) {
+        throw std::runtime_error("trigger.pixel_threshold_pe must be finite and >= 0");
+    }
+    if (trigger.camera_multiplicity <= 0) {
+        throw std::runtime_error("trigger.camera_multiplicity must be > 0");
+    }
+    if (trigger.array_multiplicity <= 0) {
+        throw std::runtime_error("trigger.array_multiplicity must be > 0");
+    }
+    if (!std::isfinite(trigger.coincidence_window_ns) ||
+        trigger.coincidence_window_ns < 0.0) {
+        throw std::runtime_error("trigger.coincidence_window_ns must be finite and >= 0");
+    }
+    return trigger;
 }
 
 CameraGeometry buildCameraGeometry(const CameraConfig& cfg) {

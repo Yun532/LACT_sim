@@ -6,6 +6,7 @@
 
 #include <cstring>
 #include <filesystem>
+#include <random>
 #include <tuple>
 
 using namespace lact;
@@ -19,6 +20,8 @@ struct CorsikaTraceOutputConfig {
     std::string hdf5_path = "corsika_trace.h5";
     std::string format = "hdf5";
     std::string hdf5_storage = "dense";
+    bool hdf5_write_components = false;
+    bool save_only_triggered = false;
 };
 
 struct TraceSummary {
@@ -222,6 +225,10 @@ CorsikaTraceOutputConfig buildCorsikaTraceOutputConfig(
     out.format = lowerCopy(trim(getString(cfg, "output.format", out.format)));
     out.hdf5_storage =
         lowerCopy(trim(getString(cfg, "output.hdf5_storage", out.hdf5_storage)));
+    out.hdf5_write_components =
+        getBool(cfg, "output.hdf5_write_components", out.hdf5_write_components);
+    out.save_only_triggered =
+        getBool(cfg, "output.save_only_triggered", out.save_only_triggered);
     if (out.format.empty()) {
         out.format = "hdf5";
     }
@@ -525,6 +532,9 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                           const EventIOMetadata& metadata,
                           const CameraGeometry& camera,
                           const std::vector<MirrorFacet>& facets,
+                          const ElectronicsConfig& electronics_cfg,
+                          const NsbConfig& nsb_cfg,
+                          const TriggerConfig& trigger_cfg,
                           const std::map<SummaryKey, TraceSummary>& summaries,
                           const std::map<PixelKey, PixelAccumulator>& pixels,
                           const std::vector<WhiteboardHdf5Row>& whiteboard_hits)
@@ -549,6 +559,10 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         writeStringAttribute(file, "format", "LACT_sim trace HDF5");
         writeStringAttribute(file, "format_version", "0.1-cpp");
         writeStringAttribute(file, "image_storage", output_cfg.hdf5_storage);
+        writeStringAttribute(file, "hdf5_write_components",
+                             output_cfg.hdf5_write_components ? "true" : "false");
+        writeStringAttribute(file, "save_only_triggered",
+                             output_cfg.save_only_triggered ? "true" : "false");
         writeStringAttribute(file, "event_id_mode", source_runtime_cfg.event_id_mode);
         writeStringAttribute(file, "source_eventio_path", source_runtime_cfg.eventio_path);
 
@@ -587,6 +601,41 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         }
         H5Gclose(components);
         H5Gclose(config_group);
+
+        hid_t metadata_group = H5Gcreate2(file, "metadata",
+                                          H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        hid_t electronics_group = H5Gcreate2(metadata_group, "electronics",
+                                             H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        writeStringAttribute(electronics_group, "model", "integrated_pe_placeholder");
+        writeStringAttribute(electronics_group, "pe_conversion",
+                             factorDescription(electronics_cfg.pe_conversion));
+        H5Gclose(electronics_group);
+
+        hid_t nsb_group = H5Gcreate2(metadata_group, "nsb",
+                                     H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        writeStringAttribute(nsb_group, "enabled", nsb_cfg.enabled ? "true" : "false");
+        writeStringAttribute(nsb_group, "model", nsb_cfg.model);
+        writeStringAttribute(nsb_group, "rate_pe_per_ns_per_pixel",
+                             doubleToString(nsb_cfg.rate_pe_per_ns_per_pixel));
+        writeStringAttribute(nsb_group, "window_ns", doubleToString(nsb_cfg.window_ns));
+        writeStringAttribute(nsb_group, "seed", intToString(nsb_cfg.seed));
+        H5Gclose(nsb_group);
+
+        hid_t trigger_group_meta = H5Gcreate2(metadata_group, "trigger",
+                                              H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        writeStringAttribute(trigger_group_meta, "enabled",
+                             trigger_cfg.enabled ? "true" : "false");
+        writeStringAttribute(trigger_group_meta, "model", "simple_multiplicity");
+        writeStringAttribute(trigger_group_meta, "pixel_threshold_pe",
+                             doubleToString(trigger_cfg.pixel_threshold_pe));
+        writeStringAttribute(trigger_group_meta, "camera_multiplicity",
+                             intToString(trigger_cfg.camera_multiplicity));
+        writeStringAttribute(trigger_group_meta, "array_multiplicity",
+                             intToString(trigger_cfg.array_multiplicity));
+        writeStringAttribute(trigger_group_meta, "coincidence_window_ns",
+                             doubleToString(trigger_cfg.coincidence_window_ns));
+        H5Gclose(trigger_group_meta);
+        H5Gclose(metadata_group);
 
         struct CameraRow {
             std::int32_t pixel_id;
@@ -819,6 +868,142 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             });
         }
 
+        std::vector<std::int32_t> pixel_id_axis;
+        std::map<std::int32_t, std::size_t> pixel_to_col;
+        std::vector<float> dense_signal;
+        std::vector<float> dense_pe;
+        std::vector<float> dense_cherenkov_pe;
+        std::vector<float> dense_nsb_pe;
+        std::vector<std::int32_t> dense_photon_count;
+        const bool have_dense_images = write_dense && !camera_rows.empty();
+        if (have_dense_images) {
+            pixel_id_axis.reserve(camera_rows.size());
+            for (std::size_t i = 0; i < camera_rows.size(); ++i) {
+                pixel_id_axis.push_back(camera_rows[i].pixel_id);
+                pixel_to_col[camera_rows[i].pixel_id] = i;
+            }
+
+            const std::size_t n_images = image_rows.size();
+            const std::size_t n_pixels = camera_rows.size();
+            dense_signal.assign(n_images * n_pixels, 0.0f);
+            dense_pe.assign(n_images * n_pixels, 0.0f);
+            dense_photon_count.assign(n_images * n_pixels, 0);
+            for (const auto& image : image_rows) {
+                const std::size_t row = static_cast<std::size_t>(image.image_index);
+                const std::int64_t begin = image.start;
+                const std::int64_t end = image.start + image.count;
+                for (std::int64_t i = begin; i < end; ++i) {
+                    const auto& pixel = sparse_rows[static_cast<std::size_t>(i)];
+                    const auto col_it = pixel_to_col.find(pixel.pixel_id);
+                    if (col_it == pixel_to_col.end()) {
+                        continue;
+                    }
+                    const std::size_t index = row * n_pixels + col_it->second;
+                    dense_signal[index] = pixel.signal;
+                    dense_pe[index] = pixel.pe;
+                    dense_photon_count[index] = pixel.photon_count;
+                }
+            }
+
+            dense_cherenkov_pe = dense_pe;
+            dense_nsb_pe.assign(n_images * n_pixels, 0.0f);
+            if (nsb_cfg.enabled && nsb_cfg.rate_pe_per_ns_per_pixel > 0.0 &&
+                nsb_cfg.window_ns > 0.0) {
+                std::mt19937_64 rng(nsb_cfg.seed);
+                std::poisson_distribution<int> poisson(
+                    nsb_cfg.rate_pe_per_ns_per_pixel * nsb_cfg.window_ns);
+                for (std::size_t i = 0; i < dense_nsb_pe.size(); ++i) {
+                    const float nsb_pe = static_cast<float>(poisson(rng));
+                    dense_nsb_pe[i] = nsb_pe;
+                    dense_pe[i] += nsb_pe;
+                    dense_signal[i] += nsb_pe;
+                }
+            }
+
+            for (auto& image : image_rows) {
+                const std::size_t row = static_cast<std::size_t>(image.image_index);
+                double total_pe = 0.0;
+                double total_signal = 0.0;
+                for (std::size_t col = 0; col < n_pixels; ++col) {
+                    const std::size_t index = row * n_pixels + col;
+                    total_pe += dense_pe[index];
+                    total_signal += dense_signal[index];
+                }
+                image.total_pe = total_pe;
+                image.total_signal = total_signal;
+            }
+        }
+
+        struct TelescopeTriggerRow {
+            std::int64_t event_id;
+            std::int32_t telescope_id;
+            std::int8_t triggered;
+            std::int32_t n_pixels_above_threshold;
+            double total_pe;
+            float trigger_time_ns;
+        };
+        struct ArrayTriggerRow {
+            std::int64_t event_id;
+            std::int8_t array_triggered;
+            std::int32_t n_triggered_telescopes;
+        };
+        std::vector<TelescopeTriggerRow> telescope_trigger_rows;
+        std::map<int, int> triggered_telescopes_by_event;
+        telescope_trigger_rows.reserve(image_rows.size());
+        for (const auto& image : image_rows) {
+            int above_threshold = 0;
+            double total_pe = image.total_pe;
+            if (have_dense_images) {
+                const std::size_t row = static_cast<std::size_t>(image.image_index);
+                const std::size_t n_pixels = camera_rows.size();
+                total_pe = 0.0;
+                for (std::size_t col = 0; col < n_pixels; ++col) {
+                    const double pe = dense_pe[row * n_pixels + col];
+                    total_pe += pe;
+                    if (pe >= trigger_cfg.pixel_threshold_pe) {
+                        ++above_threshold;
+                    }
+                }
+            } else {
+                const std::int64_t begin = image.start;
+                const std::int64_t end = image.start + image.count;
+                for (std::int64_t i = begin; i < end; ++i) {
+                    if (sparse_rows[static_cast<std::size_t>(i)].pe >=
+                        trigger_cfg.pixel_threshold_pe) {
+                        ++above_threshold;
+                    }
+                }
+            }
+            const bool telescope_triggered =
+                trigger_cfg.enabled && above_threshold >= trigger_cfg.camera_multiplicity;
+            if (telescope_triggered) {
+                triggered_telescopes_by_event[static_cast<int>(image.event_id)] += 1;
+            }
+            telescope_trigger_rows.push_back(TelescopeTriggerRow{
+                image.event_id,
+                image.telescope_id,
+                static_cast<std::int8_t>(telescope_triggered ? 1 : 0),
+                static_cast<std::int32_t>(above_threshold),
+                total_pe,
+                image.time_mean_ns,
+            });
+        }
+        std::set<int> trigger_event_ids;
+        for (const auto& key : image_keys) {
+            trigger_event_ids.insert(key.first);
+        }
+        std::vector<ArrayTriggerRow> array_trigger_rows;
+        array_trigger_rows.reserve(trigger_event_ids.size());
+        for (const int event_id : trigger_event_ids) {
+            const int n_triggered = triggered_telescopes_by_event[event_id];
+            array_trigger_rows.push_back(ArrayTriggerRow{
+                static_cast<std::int64_t>(event_id),
+                static_cast<std::int8_t>(
+                    trigger_cfg.enabled && n_triggered >= trigger_cfg.array_multiplicity ? 1 : 0),
+                static_cast<std::int32_t>(n_triggered),
+            });
+        }
+
         struct EventRow {
             std::int32_t event_index;
             std::int64_t event_id;
@@ -883,37 +1068,9 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             H5Gclose(sparse_group);
         }
 
-        if (write_dense && !camera_rows.empty()) {
-            std::vector<std::int32_t> pixel_id_axis;
-            pixel_id_axis.reserve(camera_rows.size());
-            std::map<std::int32_t, std::size_t> pixel_to_col;
-            for (std::size_t i = 0; i < camera_rows.size(); ++i) {
-                pixel_id_axis.push_back(camera_rows[i].pixel_id);
-                pixel_to_col[camera_rows[i].pixel_id] = i;
-            }
-
+        if (have_dense_images) {
             const std::size_t n_images = image_rows.size();
             const std::size_t n_pixels = camera_rows.size();
-            std::vector<float> dense_signal(n_images * n_pixels, 0.0f);
-            std::vector<float> dense_pe(n_images * n_pixels, 0.0f);
-            std::vector<std::int32_t> dense_photon_count(n_images * n_pixels, 0);
-            for (const auto& image : image_rows) {
-                const std::size_t row = static_cast<std::size_t>(image.image_index);
-                const std::int64_t begin = image.start;
-                const std::int64_t end = image.start + image.count;
-                for (std::int64_t i = begin; i < end; ++i) {
-                    const auto& pixel = sparse_rows[static_cast<std::size_t>(i)];
-                    const auto col_it = pixel_to_col.find(pixel.pixel_id);
-                    if (col_it == pixel_to_col.end()) {
-                        continue;
-                    }
-                    const std::size_t index = row * n_pixels + col_it->second;
-                    dense_signal[index] = pixel.signal;
-                    dense_pe[index] = pixel.pe;
-                    dense_photon_count[index] = pixel.photon_count;
-                }
-            }
-
             hid_t dense_group = H5Gcreate2(images_group, "dense",
                                            H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
             writePlain1D(dense_group, "pixel_id_axis", H5T_NATIVE_INT32, pixel_id_axis);
@@ -935,9 +1092,55 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                          dense_photon_count,
                          static_cast<hsize_t>(n_images),
                          static_cast<hsize_t>(n_pixels));
+            if (output_cfg.hdf5_write_components) {
+                writePlain2D(dense_group,
+                             "cherenkov_pe",
+                             H5T_NATIVE_FLOAT,
+                             dense_cherenkov_pe,
+                             static_cast<hsize_t>(n_images),
+                             static_cast<hsize_t>(n_pixels));
+                writePlain2D(dense_group,
+                             "nsb_pe",
+                             H5T_NATIVE_FLOAT,
+                             dense_nsb_pe,
+                             static_cast<hsize_t>(n_images),
+                             static_cast<hsize_t>(n_pixels));
+            }
             H5Gclose(dense_group);
         }
         H5Gclose(images_group);
+
+        hid_t trigger_group = H5Gcreate2(file, "trigger",
+                                         H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        hid_t telescope_trigger_type =
+            H5Tcreate(H5T_COMPOUND, sizeof(TelescopeTriggerRow));
+        H5Tinsert(telescope_trigger_type, "event_id",
+                  HOFFSET(TelescopeTriggerRow, event_id), H5T_NATIVE_INT64);
+        H5Tinsert(telescope_trigger_type, "telescope_id",
+                  HOFFSET(TelescopeTriggerRow, telescope_id), H5T_NATIVE_INT32);
+        H5Tinsert(telescope_trigger_type, "triggered",
+                  HOFFSET(TelescopeTriggerRow, triggered), H5T_NATIVE_SCHAR);
+        H5Tinsert(telescope_trigger_type, "n_pixels_above_threshold",
+                  HOFFSET(TelescopeTriggerRow, n_pixels_above_threshold),
+                  H5T_NATIVE_INT32);
+        H5Tinsert(telescope_trigger_type, "total_pe",
+                  HOFFSET(TelescopeTriggerRow, total_pe), H5T_NATIVE_DOUBLE);
+        H5Tinsert(telescope_trigger_type, "trigger_time_ns",
+                  HOFFSET(TelescopeTriggerRow, trigger_time_ns), H5T_NATIVE_FLOAT);
+        writeCompound1D(trigger_group, "telescope", telescope_trigger_type,
+                        telescope_trigger_rows);
+        H5Tclose(telescope_trigger_type);
+
+        hid_t array_trigger_type = H5Tcreate(H5T_COMPOUND, sizeof(ArrayTriggerRow));
+        H5Tinsert(array_trigger_type, "event_id",
+                  HOFFSET(ArrayTriggerRow, event_id), H5T_NATIVE_INT64);
+        H5Tinsert(array_trigger_type, "array_triggered",
+                  HOFFSET(ArrayTriggerRow, array_triggered), H5T_NATIVE_SCHAR);
+        H5Tinsert(array_trigger_type, "n_triggered_telescopes",
+                  HOFFSET(ArrayTriggerRow, n_triggered_telescopes), H5T_NATIVE_INT32);
+        writeCompound1D(trigger_group, "array", array_trigger_type, array_trigger_rows);
+        H5Tclose(array_trigger_type);
+        H5Gclose(trigger_group);
 
         if (!whiteboard_hits.empty()) {
             hid_t whiteboard_group = H5Gcreate2(file, "whiteboard",
@@ -1151,6 +1354,8 @@ void printCorsikaOpticalConfiguration(
     const std::unique_ptr<Cone::SquareCone>& light_collector,
     const SipmConfig& sipm_cfg,
     const ElectronicsConfig& electronics_cfg,
+    const NsbConfig& nsb_cfg,
+    const TriggerConfig& trigger_cfg,
     const OpticalEfficiencyConfig& efficiency_cfg,
     const ErrorConfig& error_cfg,
     const PropagationConfig& propagation_cfg)
@@ -1281,6 +1486,23 @@ void printCorsikaOpticalConfiguration(
 
     printSection("Electronics");
     printField("pe_conversion", factorDescription(electronics_cfg.pe_conversion));
+    printField("model", "integrated_pe_placeholder");
+
+    printSection("NSB");
+    printField("enabled", nsb_cfg.enabled ? "true" : "false");
+    printField("model", nsb_cfg.model);
+    printField("rate_pe_per_ns_per_pixel",
+               doubleToString(nsb_cfg.rate_pe_per_ns_per_pixel));
+    printField("window_ns", doubleToString(nsb_cfg.window_ns));
+    printField("seed", intToString(nsb_cfg.seed));
+
+    printSection("Trigger");
+    printField("enabled", trigger_cfg.enabled ? "true" : "false");
+    printField("model", "simple_multiplicity");
+    printField("pixel_threshold_pe", doubleToString(trigger_cfg.pixel_threshold_pe));
+    printField("camera_multiplicity", intToString(trigger_cfg.camera_multiplicity));
+    printField("array_multiplicity", intToString(trigger_cfg.array_multiplicity));
+    printField("coincidence_window_ns", doubleToString(trigger_cfg.coincidence_window_ns));
 
     printSection("Efficiency");
     printField("constant_scale", doubleToString(efficiency_cfg.constant_scale));
@@ -1319,8 +1541,8 @@ void printCorsikaOpticalConfiguration(
                doubleToString(propagation_cfg.speed_of_light_m_per_ns, 9));
     printField("not included",
                light_collector
-                   ? "mirror roughness, misalignment, trigger/electronics noise"
-                   : "mirror roughness, misalignment, collector, trigger/electronics noise");
+                   ? "waveforms, SiPM saturation, crosstalk, afterpulse, dark count, hardware trigger board"
+                   : "collector, waveforms, SiPM saturation, crosstalk, afterpulse, dark count, hardware trigger board");
 }
 
 } // namespace
@@ -1376,6 +1598,8 @@ int main(int argc, char** argv) {
         SipmConfig sipm_cfg = buildSipmConfig(cfg);
         ElectronicsConfig electronics_cfg = buildElectronicsConfig(cfg);
         ElectronicsResponse electronics(electronics_cfg);
+        NsbConfig nsb_cfg = buildNsbConfig(cfg);
+        TriggerConfig trigger_cfg = buildTriggerConfig(cfg);
         CameraGeometry camera = buildCameraGeometry(camera_cfg);
         auto light_collector = buildLightCollector(camera_cfg, camera);
         MirrorLayout mirrors = makeMirrorLayoutFromFacets(facets);
@@ -1410,6 +1634,8 @@ int main(int argc, char** argv) {
         if (!component_paths.electronics.empty()) printField("electronics", component_paths.electronics);
         if (!component_paths.efficiency.empty()) printField("efficiency", component_paths.efficiency);
         if (!component_paths.atmosphere.empty()) printField("atmosphere", component_paths.atmosphere);
+        if (!component_paths.nsb.empty()) printField("nsb", component_paths.nsb);
+        if (!component_paths.trigger.empty()) printField("trigger", component_paths.trigger);
         if (!component_paths.error.empty()) printField("error", component_paths.error);
         if (component_paths.source.empty()) printField("source", "inline EventIO settings");
 
@@ -1426,6 +1652,8 @@ int main(int argc, char** argv) {
                                          light_collector,
                                          sipm_cfg,
                                          electronics_cfg,
+                                         nsb_cfg,
+                                         trigger_cfg,
                                          efficiency_cfg,
                                          error_cfg,
                                          propagation_cfg);
@@ -1626,6 +1854,9 @@ int main(int argc, char** argv) {
                                  metadata,
                                  camera,
                                  facets,
+                                 electronics_cfg,
+                                 nsb_cfg,
+                                 trigger_cfg,
                                  summaries,
                                  pixels,
                                  whiteboard_hits);

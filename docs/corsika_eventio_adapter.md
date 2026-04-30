@@ -215,12 +215,23 @@ build/run_corsika_trace configs/official_tests/corsika_new_camera.cfg \
   2>&1 | tee run_logs/official_tests/corsika/camera_run.log
 ```
 
+Dense HDF5 pixel-camera trace with constant-rate NSB and simple multiplicity
+trigger:
+
+```bash
+DYLD_LIBRARY_PATH=$PWD/external/hessioxxx/source/lib \
+build/run_corsika_trace configs/official_tests/corsika_nsb_trigger_camera.cfg \
+  /path/to/photon_E500_th0_run000001.zst \
+  2>&1 | tee run_logs/official_tests/corsika/camera_nsb_trigger_run.log
+```
+
 These write:
 
 ```text
 run_logs/official_tests/corsika/whiteboard_hits.csv
 run_logs/official_tests/corsika/whiteboard_summary.csv
 run_logs/official_tests/corsika/camera_dense.h5
+run_logs/official_tests/corsika/camera_nsb_trigger_dense.h5
 ```
 
 Plot one dense camera image by CORSIKA shower-event order:

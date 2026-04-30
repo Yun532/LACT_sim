@@ -27,7 +27,11 @@ def _scoped_key(key, prefix):
         "output.",
         "camera.",
         "sipm.",
+        "electronics.",
         "efficiency.",
+        "atmosphere.",
+        "nsb.",
+        "trigger.",
         "error.",
         "dish.",
         "facet.",
@@ -51,7 +55,11 @@ def _is_include_config_key(key):
         "output.config",
         "camera.config",
         "sipm.config",
+        "electronics.config",
         "efficiency.config",
+        "atmosphere.config",
+        "nsb.config",
+        "trigger.config",
         "error.config",
     }
 
@@ -82,7 +90,11 @@ def expand_component_config(main_config_path):
         ("output.config", "output.", "output"),
         ("camera.config", "camera.", "camera"),
         ("sipm.config", "sipm.", "sipm"),
+        ("electronics.config", "electronics.", "electronics"),
         ("efficiency.config", "efficiency.", "efficiency"),
+        ("atmosphere.config", "atmosphere.", "atmosphere"),
+        ("nsb.config", "nsb.", "nsb"),
+        ("trigger.config", "trigger.", "trigger"),
         ("error.config", "error.", "error"),
     ):
         include = assembly_cfg.get(include_key)
