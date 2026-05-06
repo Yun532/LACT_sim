@@ -77,7 +77,12 @@ def main():
     parser.add_argument("--array-id", type=int, default=0)
     parser.add_argument("--telescope-id", type=int, default=None)
     parser.add_argument("--image-index", type=int, default=None)
-    parser.add_argument("--quantity", choices=("signal", "pe", "photon_count"), default="signal")
+    parser.add_argument(
+        "--quantity",
+        choices=("signal", "pe", "photon_count", "cherenkov_pe", "nsb_pe"),
+        default="signal",
+        help="Dense image quantity to plot. Component quantities require output.hdf5_write_components=true.",
+    )
     parser.add_argument("--output", default="hdf5_camera.png")
     parser.add_argument("--dpi", type=int, default=350)
     args = parser.parse_args()
@@ -101,6 +106,11 @@ def main():
             values = h5[f"images/dense/{args.quantity}"][int(image["image_index"]), :]
             values_by_pixel = {int(pid): float(v) for pid, v in zip(pixel_axis, values)}
         else:
+            if args.quantity in ("cherenkov_pe", "nsb_pe"):
+                raise SystemExit(
+                    f"{args.quantity} is only available for dense HDF5 files written with "
+                    "output.hdf5_write_components=true."
+                )
             start = int(image["start"])
             count = int(image["count"])
             rows = h5["images/sparse/pixels"][start:start + count]

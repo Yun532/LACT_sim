@@ -477,10 +477,10 @@ Plot one telescope by CORSIKA shower-event order:
 MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
   run_logs/official_tests/corsika/camera_dense.h5 \
   --shower-event-number 1 \
-  --array-id 0 \
-  --telescope-id 7 \
+  --array-id 2 \
+  --telescope-id 3 \
   --quantity pe \
-  --output run_logs/official_tests/corsika/camera_shower1_array0_tel7_pe.png \
+  --output run_logs/official_tests/corsika/camera_shower1_array2_tel3_pe.png \
   --dpi 350
 ```
 
@@ -493,6 +493,41 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
   --telescope-id 7 \
   --quantity pe \
   --output run_logs/official_tests/corsika/camera_event_id_tel7_pe.png \
+  --dpi 350
+```
+
+Plot the full telescope array layout, with North up and East right:
+
+```bash
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_array_layout.py \
+  run_logs/official_tests/corsika/camera_dense.h5 \
+  --output run_logs/official_tests/corsika/array_layout.png \
+  --dpi 350
+```
+
+Plot one event with total p.e. per telescope shown by colorbar. For CORSIKA
+HDF5 files written by the current `run_corsika_trace`, the script also marks
+the core position and draws the horizontal arrival-direction arrow from
+`/events/corsika`. The telescope labels are one-based (`T1`, `T2`, ...), while
+the stored telescope IDs remain zero-based:
+
+```bash
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_array_layout.py \
+  run_logs/official_tests/corsika/camera_dense.h5 \
+  --event-id 46889802 \
+  --quantity pe \
+  --output run_logs/official_tests/corsika/array_event46889802_pe.png \
+  --dpi 350
+```
+
+To inspect several shower cores near the array center, use:
+
+```bash
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_array_layout.py \
+  run_logs/official_tests/corsika/camera_dense.h5 \
+  --show-nearby-cores 6 \
+  --array-only-limits \
+  --output run_logs/official_tests/corsika/array_nearby_cores.png \
   --dpi 350
 ```
 
@@ -511,6 +546,11 @@ build/run_corsika_trace \
 This writes `camera_nsb_trigger_dense.h5`, where `/images/dense/pe` includes
 Cherenkov plus Poisson NSB. With `output.hdf5_write_components=true`, the file
 also contains `/images/dense/cherenkov_pe` and `/images/dense/nsb_pe`.
+For the benchmark file used in development,
+`lact_prod1_corsika_particle_gamma_energy_1000.0_10000.0_zenith_20.0_azimuth_0.0_run_2418_event_468898.zst`,
+`array-id=2, telescope-id=3` is a useful default plot target for the first
+shower event because it has a strong Cherenkov camera signal after pointing the
+telescope to the CORSIKA shower direction.
 
 For synthetic sources, `run_optical_sim` also supports compact camera output:
 

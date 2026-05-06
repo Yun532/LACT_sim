@@ -42,6 +42,11 @@ CSV tables use:
 wavelength_nm,transmission
 ```
 
+For formal production, this CSV should come from the same atmospheric profile
+used in the CORSIKA run, or from a clearly documented site measurement/model.
+Until that source is fixed, the recommended benchmark setting is
+`atmosphere.transmission=none` to avoid adding uncalibrated physics.
+
 Atmospheric refractive-index timing is reserved but disabled by default:
 
 ```ini
@@ -75,6 +80,23 @@ Detailed waveform, saturation, crosstalk, afterpulse, dark count, gain
 fluctuation, and trigger electronics should be implemented behind this boundary
 later. The HDF5 format already keeps integrated `pe`, `signal`, `photon_count`,
 and timing summaries per event/telescope image.
+
+For each collected Cherenkov photon or photon bunch, the integrated weight is
+handled multiplicatively:
+
+```text
+p.e. contribution =
+  CORSIKA bunch multiplicity
+  * optical photon weight
+  * mirror/filter/atmosphere efficiency factors
+  * light-collector acceptance and reflection weight
+  * electronics.pe_conversion
+```
+
+`electronics.pe_conversion` can be disabled, a constant, or a wavelength table.
+The current output is an integrated p.e. image. It is not yet a waveform and it
+does not model SiPM saturation, crosstalk, afterpulse, dark count, or gain
+fluctuations.
 
 ## NSB
 

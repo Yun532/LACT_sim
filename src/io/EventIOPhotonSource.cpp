@@ -225,6 +225,7 @@ int readArrayOffsetsMetadata(IO_BUFFER* iobuf,
         offsets.y_m.push_back(y[static_cast<std::size_t>(i)] * 0.01);
         offsets.weight.push_back(w[static_cast<std::size_t>(i)]);
     }
+    metadata.array_offsets_by_shower[current_event_id] = offsets;
     if (current_event_id == selected_shower_event_id) {
         metadata.selected_event_offsets = offsets;
     }
@@ -429,6 +430,15 @@ EventIOMetadata::telescopeById(int telescope_id) const {
         }
     }
     return std::nullopt;
+}
+
+std::optional<EventIOArrayOffsets>
+EventIOMetadata::arrayOffsetsForShower(int shower_event_id) const {
+    const auto it = array_offsets_by_shower.find(shower_event_id);
+    if (it == array_offsets_by_shower.end()) {
+        return std::nullopt;
+    }
+    return it->second;
 }
 
 EventIOMetadata readEventIOMetadata(const EventIOPhotonConfig& cfg) {

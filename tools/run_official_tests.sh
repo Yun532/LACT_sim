@@ -5,6 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${LACT_BUILD_DIR:-$ROOT_DIR/build}"
 RUN_CORSIKA=1
 CORSIKA_FILE=""
+DEFAULT_CORSIKA_FILE="${LACT_DEFAULT_CORSIKA_FILE:-}"
+PLOT_ARRAY_ID="${LACT_PLOT_ARRAY_ID:-2}"
+PLOT_TELESCOPE_ID="${LACT_PLOT_TELESCOPE_ID:-3}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -37,8 +40,8 @@ mkdir -p run_logs/official_tests/perfect_parallel
 mkdir -p run_logs/official_tests/point_900m
 mkdir -p run_logs/official_tests/deformation_scan
 mkdir -p run_logs/official_tests/corsika/plots/shower1_array0_whiteboard
-mkdir -p run_logs/official_tests/corsika/plots/shower1_array0_camera
-mkdir -p run_logs/official_tests/corsika/plots/shower1_array0_nsb_trigger
+mkdir -p "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_camera"
+mkdir -p "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_nsb_trigger"
 mkdir -p run_logs/official_tests/collector_angular_response
 
 if [[ "$RUN_CORSIKA" -eq 0 ]]; then
@@ -93,9 +96,15 @@ if [[ "$RUN_CORSIKA" -eq 0 ]]; then
 fi
 
 if [[ -z "$CORSIKA_FILE" ]]; then
-  echo "A CORSIKA/EventIO file is required for CORSIKA tests." >&2
-  echo "usage: tools/run_official_tests.sh --corsika-file /path/to/input.zst" >&2
-  exit 2
+  if [[ -s "$DEFAULT_CORSIKA_FILE" ]]; then
+    CORSIKA_FILE="$DEFAULT_CORSIKA_FILE"
+    echo "Using default CORSIKA/EventIO test file: $CORSIKA_FILE"
+  else
+    echo "A CORSIKA/EventIO file is required for CORSIKA tests." >&2
+    echo "usage: tools/run_official_tests.sh --corsika-file /path/to/input.zst" >&2
+    echo "or set LACT_DEFAULT_CORSIKA_FILE=/path/to/input.zst" >&2
+    exit 2
+  fi
 fi
 if [[ ! -x "$BUILD_DIR/run_corsika_trace" ]]; then
   echo "run_corsika_trace was not built. Build external/hessioxxx/source first." >&2
@@ -143,18 +152,36 @@ MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_hdf5_camera.py \
   run_logs/official_tests/corsika/camera_dense.h5 \
   --shower-event-number 1 \
-  --array-id 0 \
-  --telescope-id "${LACT_PLOT_TELESCOPE_ID:-7}" \
+  --array-id "$PLOT_ARRAY_ID" \
+  --telescope-id "$PLOT_TELESCOPE_ID" \
   --quantity pe \
-  --output run_logs/official_tests/corsika/plots/shower1_array0_camera/telescope_${LACT_PLOT_TELESCOPE_ID:-7}_pe.png
+  --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_camera/telescope_${PLOT_TELESCOPE_ID}_pe.png"
 
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_hdf5_camera.py \
   run_logs/official_tests/corsika/camera_nsb_trigger_dense.h5 \
   --shower-event-number 1 \
-  --array-id 0 \
-  --telescope-id "${LACT_PLOT_TELESCOPE_ID:-7}" \
+  --array-id "$PLOT_ARRAY_ID" \
+  --telescope-id "$PLOT_TELESCOPE_ID" \
+  --quantity cherenkov_pe \
+  --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_nsb_trigger/telescope_${PLOT_TELESCOPE_ID}_cherenkov_pe.png"
+
+MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
+python3 python/plot_hdf5_camera.py \
+  run_logs/official_tests/corsika/camera_nsb_trigger_dense.h5 \
+  --shower-event-number 1 \
+  --array-id "$PLOT_ARRAY_ID" \
+  --telescope-id "$PLOT_TELESCOPE_ID" \
+  --quantity nsb_pe \
+  --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_nsb_trigger/telescope_${PLOT_TELESCOPE_ID}_nsb_pe.png"
+
+MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
+python3 python/plot_hdf5_camera.py \
+  run_logs/official_tests/corsika/camera_nsb_trigger_dense.h5 \
+  --shower-event-number 1 \
+  --array-id "$PLOT_ARRAY_ID" \
+  --telescope-id "$PLOT_TELESCOPE_ID" \
   --quantity pe \
-  --output run_logs/official_tests/corsika/plots/shower1_array0_nsb_trigger/telescope_${LACT_PLOT_TELESCOPE_ID:-7}_pe.png
+  --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_nsb_trigger/telescope_${PLOT_TELESCOPE_ID}_final_pe.png"
 
 echo "Official tests completed. See run_logs/official_tests/ for outputs and README.md for commands."

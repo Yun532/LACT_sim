@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -60,9 +61,11 @@ struct EventIOMetadata {
     std::vector<EventIOEventHeader> events;
     std::optional<EventIOEventHeader> selected_event;
     std::optional<EventIOArrayOffsets> selected_event_offsets;
+    std::map<int, EventIOArrayOffsets> array_offsets_by_shower;
     int selected_array_id = 0;
 
     std::optional<EventIOTelescopePosition> telescopeById(int telescope_id) const;
+    std::optional<EventIOArrayOffsets> arrayOffsetsForShower(int shower_event_id) const;
 };
 
 EventIOMetadata readEventIOMetadata(const EventIOPhotonConfig& cfg);

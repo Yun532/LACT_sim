@@ -4,6 +4,7 @@
 #include <hdf5.h>
 #endif
 
+#include <algorithm>
 #include <cstring>
 #include <filesystem>
 #include <random>
@@ -167,6 +168,57 @@ int arrayIdFromOutputEvent(int event_id, const std::string& event_id_mode)
         return event_id % 100;
     }
     return 0;
+}
+
+struct OutputEventMetadata {
+    int event_id = 0;
+    int shower_event = 0;
+    int array_id = 0;
+    double energy_gev = 0.0;
+    double core_x_north_m = 0.0;
+    double core_y_west_m = 0.0;
+    double azimuth_north_to_east_deg = 0.0;
+    bool found = false;
+    bool used_array_offset = false;
+};
+
+OutputEventMetadata outputEventMetadata(int event_id,
+                                        const std::string& event_id_mode,
+                                        const EventIOMetadata& metadata)
+{
+    OutputEventMetadata out;
+    out.event_id = event_id;
+    out.shower_event = showerEventFromOutputEvent(event_id, event_id_mode);
+    out.array_id = arrayIdFromOutputEvent(event_id, event_id_mode);
+
+    auto event_it = std::find_if(
+        metadata.events.begin(), metadata.events.end(),
+        [&out](const EventIOEventHeader& event) {
+            return event.shower_event_id == out.shower_event;
+        });
+    if (event_it == metadata.events.end()) {
+        return out;
+    }
+
+    out.found = true;
+    out.energy_gev = event_it->energy_gev;
+    out.core_x_north_m = event_it->core_x_m;
+    out.core_y_west_m = event_it->core_y_m;
+    out.azimuth_north_to_east_deg = event_it->azimuth_north_to_east_deg;
+
+    if (auto offsets = metadata.arrayOffsetsForShower(out.shower_event)) {
+        const std::size_t offset_index = static_cast<std::size_t>(out.array_id);
+        if (out.array_id >= 0 && offset_index < offsets->x_m.size() &&
+            offset_index < offsets->y_m.size()) {
+            // MC_TELOFF stores the offset of the detector array with respect
+            // to the shower core.  The core position in the telescope/input
+            // array frame is therefore the opposite vector.
+            out.core_x_north_m = -offsets->x_m[offset_index];
+            out.core_y_west_m = -offsets->y_m[offset_index];
+            out.used_array_offset = true;
+        }
+    }
+    return out;
 }
 
 bool shouldHideInputCardLine(const std::string& line)
@@ -604,6 +656,32 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
 
         hid_t metadata_group = H5Gcreate2(file, "metadata",
                                           H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        hid_t coordinates_group = H5Gcreate2(metadata_group, "coordinates",
+                                             H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        writeStringAttribute(coordinates_group, "array_position_frame",
+                             "CORSIKA IACT NWU horizontal frame");
+        writeStringAttribute(coordinates_group, "array_x_m",
+                             "CORSIKA magnetic-North-positive telescope position coordinate");
+        writeStringAttribute(coordinates_group, "array_y_m",
+                             "West-positive telescope position coordinate");
+        writeStringAttribute(coordinates_group, "array_z_m",
+                             "Up-positive telescope position coordinate");
+        writeStringAttribute(coordinates_group, "pointing_az_deg",
+                             "CORSIKA magnetic-North-to-East azimuth; 0=+array_x, 90=East/-array_y");
+        writeStringAttribute(coordinates_group, "pointing_el_deg",
+                             "Elevation above local horizon; zenith angle = 90 - elevation");
+        writeStringAttribute(coordinates_group, "eventio_photon_frame",
+                             source_runtime_cfg.eventio_coordinate_frame);
+        writeStringAttribute(coordinates_group, "eventio_corsika_iact_positions",
+                             "Photon bunch x/y/z are telescope-relative CORSIKA IACT coordinates before rotation to telescope-local optics");
+        writeStringAttribute(coordinates_group, "eventio_teloff_core_note",
+                             "MC_TELOFF is detector-array offset with respect to shower core; /events/corsika stores core = -MC_TELOFF in NWU coordinates");
+        writeStringAttribute(coordinates_group, "eventio_telpos_note",
+                             "Telescope positions are hessio MC_TELPOS detector coordinates; array_z_up_m may include the detector sphere/radius convention used by the producer");
+        writeStringAttribute(coordinates_group, "camera_plane_coordinates",
+                             "camera x/y are output-plane u/v coordinates, normally u=local +x and v=local +y");
+        H5Gclose(coordinates_group);
+
         hid_t electronics_group = H5Gcreate2(metadata_group, "electronics",
                                              H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
         writeStringAttribute(electronics_group, "model", "integrated_pe_placeholder");
@@ -727,6 +805,10 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             double x_m;
             double y_m;
             double z_m;
+            double array_x_north_m;
+            double array_y_west_m;
+            double array_z_up_m;
+            double radius_m;
             double pointing_az_deg;
             double pointing_el_deg;
             double focal_length_m;
@@ -740,6 +822,10 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                     tel.x_m,
                     tel.y_m,
                     tel.z_m,
+                    tel.x_m,
+                    tel.y_m,
+                    tel.z_m,
+                    tel.radius_m,
                     telescope_cfg.pointing_az_deg,
                     telescope_cfg.pointing_el_deg,
                     telescope_cfg.focal_length_m,
@@ -751,6 +837,10 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                 telescope_cfg.position_m.x,
                 telescope_cfg.position_m.y,
                 telescope_cfg.position_m.z,
+                telescope_cfg.position_m.x,
+                telescope_cfg.position_m.y,
+                telescope_cfg.position_m.z,
+                0.0,
                 telescope_cfg.pointing_az_deg,
                 telescope_cfg.pointing_el_deg,
                 telescope_cfg.focal_length_m,
@@ -758,12 +848,30 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         }
         hid_t telescope_group = H5Gcreate2(file, "telescopes",
                                           H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        writeStringAttribute(telescope_group, "coordinate_frame",
+                             "CORSIKA IACT horizontal frame");
+        writeStringAttribute(telescope_group, "x_m_compat",
+                             "same as array_x_north_m; kept for compatibility");
+        writeStringAttribute(telescope_group, "y_m_compat",
+                             "same as array_y_west_m; kept for compatibility");
+        writeStringAttribute(telescope_group, "z_m_compat",
+                             "same as array_z_up_m; kept for compatibility");
+        writeStringAttribute(telescope_group, "pointing_convention",
+                             "azimuth North-to-East, elevation above horizon");
         hid_t telescope_type = H5Tcreate(H5T_COMPOUND, sizeof(TelescopeRow));
         H5Tinsert(telescope_type, "telescope_id",
                   HOFFSET(TelescopeRow, telescope_id), H5T_NATIVE_INT32);
         H5Tinsert(telescope_type, "x_m", HOFFSET(TelescopeRow, x_m), H5T_NATIVE_DOUBLE);
         H5Tinsert(telescope_type, "y_m", HOFFSET(TelescopeRow, y_m), H5T_NATIVE_DOUBLE);
         H5Tinsert(telescope_type, "z_m", HOFFSET(TelescopeRow, z_m), H5T_NATIVE_DOUBLE);
+        H5Tinsert(telescope_type, "array_x_north_m",
+                  HOFFSET(TelescopeRow, array_x_north_m), H5T_NATIVE_DOUBLE);
+        H5Tinsert(telescope_type, "array_y_west_m",
+                  HOFFSET(TelescopeRow, array_y_west_m), H5T_NATIVE_DOUBLE);
+        H5Tinsert(telescope_type, "array_z_up_m",
+                  HOFFSET(TelescopeRow, array_z_up_m), H5T_NATIVE_DOUBLE);
+        H5Tinsert(telescope_type, "radius_m",
+                  HOFFSET(TelescopeRow, radius_m), H5T_NATIVE_DOUBLE);
         H5Tinsert(telescope_type, "pointing_az_deg",
                   HOFFSET(TelescopeRow, pointing_az_deg), H5T_NATIVE_DOUBLE);
         H5Tinsert(telescope_type, "pointing_el_deg",
@@ -1008,7 +1116,32 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             std::int32_t event_index;
             std::int64_t event_id;
         };
+        struct CorsikaEventRow {
+            std::int64_t event_id;
+            std::int32_t shower_event_id;
+            std::int32_t array_id;
+            std::int32_t primary_type;
+            double energy_gev;
+            double theta_deg;
+            double phi_deg;
+            double azimuth_north_to_east_deg;
+            double core_x_north_m;
+            double core_y_west_m;
+            double array_rotation_deg;
+        };
+        struct CorsikaShowerRow {
+            std::int32_t shower_event_id;
+            std::int32_t primary_type;
+            double energy_gev;
+            double theta_deg;
+            double phi_deg;
+            double azimuth_north_to_east_deg;
+            double core_x_north_m;
+            double core_y_west_m;
+            double array_rotation_deg;
+        };
         std::vector<EventRow> event_rows;
+        std::vector<CorsikaEventRow> corsika_event_rows;
         std::set<int> event_ids;
         for (const auto& key : image_keys) {
             event_ids.insert(key.first);
@@ -1019,6 +1152,34 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                 event_index++,
                 static_cast<std::int64_t>(event_id),
             });
+            const int shower_event =
+                showerEventFromOutputEvent(event_id, source_runtime_cfg.event_id_mode);
+            const int array_id =
+                arrayIdFromOutputEvent(event_id, source_runtime_cfg.event_id_mode);
+            auto event_it = std::find_if(
+                metadata.events.begin(), metadata.events.end(),
+                [shower_event](const EventIOEventHeader& event) {
+                    return event.shower_event_id == shower_event;
+                });
+            if (event_it != metadata.events.end()) {
+                const OutputEventMetadata event_meta =
+                    outputEventMetadata(event_id,
+                                        source_runtime_cfg.event_id_mode,
+                                        metadata);
+                corsika_event_rows.push_back(CorsikaEventRow{
+                    static_cast<std::int64_t>(event_id),
+                    static_cast<std::int32_t>(shower_event),
+                    static_cast<std::int32_t>(array_id),
+                    static_cast<std::int32_t>(event_it->primary_type),
+                    event_it->energy_gev,
+                    event_it->theta_deg,
+                    event_it->phi_deg,
+                    event_it->azimuth_north_to_east_deg,
+                    event_meta.core_x_north_m,
+                    event_meta.core_y_west_m,
+                    event_it->array_rotation_deg,
+                });
+            }
         }
         hid_t events_group = H5Gcreate2(file, "events", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
         hid_t event_type = H5Tcreate(H5T_COMPOUND, sizeof(EventRow));
@@ -1026,6 +1187,77 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         H5Tinsert(event_type, "event_id", HOFFSET(EventRow, event_id), H5T_NATIVE_INT64);
         writeCompound1D(events_group, "table", event_type, event_rows);
         H5Tclose(event_type);
+        if (!corsika_event_rows.empty()) {
+            hid_t corsika_event_type =
+                H5Tcreate(H5T_COMPOUND, sizeof(CorsikaEventRow));
+            H5Tinsert(corsika_event_type, "event_id",
+                      HOFFSET(CorsikaEventRow, event_id), H5T_NATIVE_INT64);
+            H5Tinsert(corsika_event_type, "shower_event_id",
+                      HOFFSET(CorsikaEventRow, shower_event_id), H5T_NATIVE_INT32);
+            H5Tinsert(corsika_event_type, "array_id",
+                      HOFFSET(CorsikaEventRow, array_id), H5T_NATIVE_INT32);
+            H5Tinsert(corsika_event_type, "primary_type",
+                      HOFFSET(CorsikaEventRow, primary_type), H5T_NATIVE_INT32);
+            H5Tinsert(corsika_event_type, "energy_gev",
+                      HOFFSET(CorsikaEventRow, energy_gev), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "theta_deg",
+                      HOFFSET(CorsikaEventRow, theta_deg), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "phi_deg",
+                      HOFFSET(CorsikaEventRow, phi_deg), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "azimuth_north_to_east_deg",
+                      HOFFSET(CorsikaEventRow, azimuth_north_to_east_deg),
+                      H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "core_x_north_m",
+                      HOFFSET(CorsikaEventRow, core_x_north_m), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "core_y_west_m",
+                      HOFFSET(CorsikaEventRow, core_y_west_m), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "array_rotation_deg",
+                      HOFFSET(CorsikaEventRow, array_rotation_deg), H5T_NATIVE_DOUBLE);
+            writeCompound1D(events_group, "corsika", corsika_event_type,
+                            corsika_event_rows);
+            H5Tclose(corsika_event_type);
+        }
+        if (!metadata.events.empty()) {
+            std::vector<CorsikaShowerRow> corsika_shower_rows;
+            corsika_shower_rows.reserve(metadata.events.size());
+            for (const auto& event : metadata.events) {
+                corsika_shower_rows.push_back(CorsikaShowerRow{
+                    static_cast<std::int32_t>(event.shower_event_id),
+                    static_cast<std::int32_t>(event.primary_type),
+                    event.energy_gev,
+                    event.theta_deg,
+                    event.phi_deg,
+                    event.azimuth_north_to_east_deg,
+                    event.core_x_m,
+                    event.core_y_m,
+                    event.array_rotation_deg,
+                });
+            }
+            hid_t corsika_shower_type =
+                H5Tcreate(H5T_COMPOUND, sizeof(CorsikaShowerRow));
+            H5Tinsert(corsika_shower_type, "shower_event_id",
+                      HOFFSET(CorsikaShowerRow, shower_event_id), H5T_NATIVE_INT32);
+            H5Tinsert(corsika_shower_type, "primary_type",
+                      HOFFSET(CorsikaShowerRow, primary_type), H5T_NATIVE_INT32);
+            H5Tinsert(corsika_shower_type, "energy_gev",
+                      HOFFSET(CorsikaShowerRow, energy_gev), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_shower_type, "theta_deg",
+                      HOFFSET(CorsikaShowerRow, theta_deg), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_shower_type, "phi_deg",
+                      HOFFSET(CorsikaShowerRow, phi_deg), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_shower_type, "azimuth_north_to_east_deg",
+                      HOFFSET(CorsikaShowerRow, azimuth_north_to_east_deg),
+                      H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_shower_type, "core_x_north_m",
+                      HOFFSET(CorsikaShowerRow, core_x_north_m), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_shower_type, "core_y_west_m",
+                      HOFFSET(CorsikaShowerRow, core_y_west_m), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_shower_type, "array_rotation_deg",
+                      HOFFSET(CorsikaShowerRow, array_rotation_deg), H5T_NATIVE_DOUBLE);
+            writeCompound1D(events_group, "corsika_showers", corsika_shower_type,
+                            corsika_shower_rows);
+            H5Tclose(corsika_shower_type);
+        }
         H5Gclose(events_group);
 
         hid_t images_group = H5Gcreate2(file, "images", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
@@ -1274,10 +1506,13 @@ void printTraceStreamSummary(const std::map<SummaryKey, TraceSummary>& summaries
 
 void printEventSummary(const std::map<SummaryKey, TraceSummary>& summaries,
                        bool camera_enabled,
-                       const std::string& event_id_mode)
+                       const std::string& event_id_mode,
+                       const EventIOMetadata& metadata)
 {
     struct EventAggregate {
+        int event_id = 0;
         int shower_event = 0;
+        int array_id = 0;
         std::set<int> output_events;
         std::set<int> telescopes;
         std::uint64_t input_bunches = 0;
@@ -1294,8 +1529,11 @@ void printEventSummary(const std::map<SummaryKey, TraceSummary>& summaries,
     for (const auto& kv : summaries) {
         const auto& s = kv.second;
         const int shower_event = showerEventFromOutputEvent(s.event_id, event_id_mode);
-        auto& e = events[shower_event];
+        const int array_id = arrayIdFromOutputEvent(s.event_id, event_id_mode);
+        auto& e = events[s.event_id];
+        e.event_id = s.event_id;
         e.shower_event = shower_event;
+        e.array_id = array_id;
         e.output_events.insert(s.event_id);
         e.telescopes.insert(s.telescope_id);
         e.input_bunches += s.input_bunches;
@@ -1311,10 +1549,11 @@ void printEventSummary(const std::map<SummaryKey, TraceSummary>& summaries,
     printSection("Per-event summary");
     printField("columns",
                camera_enabled
-                   ? "shower_event output_events telescopes input_bunches input_photons hit_output hit_camera accepted pe time_mean_ns time_rms_ns"
-                   : "shower_event output_events telescopes input_bunches input_photons hit_output signal time_mean_ns time_rms_ns");
+                   ? "event_id shower_event array_id energy_gev core_N_m core_E_m core_source telescopes input_bunches input_photons hit_output hit_camera accepted pe time_mean_ns time_rms_ns"
+                   : "event_id shower_event array_id energy_gev core_N_m core_E_m core_source telescopes input_bunches input_photons hit_output signal time_mean_ns time_rms_ns");
     for (const auto& kv : events) {
         const auto& e = kv.second;
+        const OutputEventMetadata meta = outputEventMetadata(e.event_id, event_id_mode, metadata);
         const double mean = e.weighted_signal > 0.0
             ? e.weighted_time_sum / e.weighted_signal
             : 0.0;
@@ -1322,8 +1561,21 @@ void printEventSummary(const std::map<SummaryKey, TraceSummary>& summaries,
             ? std::max(0.0, e.weighted_time2_sum / e.weighted_signal - mean * mean)
             : 0.0;
         std::ostringstream value;
-        value << "shower_event=" << e.shower_event
-              << " output_events=" << e.output_events.size()
+        value << "event_id=" << e.event_id
+              << " shower_event=" << e.shower_event
+              << " array_id=" << e.array_id;
+        if (meta.found) {
+            value << " energy_gev=" << doubleToString(meta.energy_gev, 6)
+                  << " core_N_m=" << doubleToString(meta.core_x_north_m, 3)
+                  << " core_E_m=" << doubleToString(-meta.core_y_west_m, 3)
+                  << " core_source="
+                  << (meta.used_array_offset ? "negative_MC_TELOFF_array_offset"
+                                              : "shower_header");
+        } else {
+            value << " energy_gev=unknown core_N_m=unknown core_E_m=unknown"
+                  << " core_source=missing_metadata";
+        }
+        value << " output_events=" << e.output_events.size()
               << " telescopes=" << e.telescopes.size()
               << " input_bunches=" << e.input_bunches
               << " input_photons=" << doubleToString(e.input_photons, 3)
@@ -1886,7 +2138,10 @@ int main(int argc, char** argv) {
                   << doubleToString(tel.radius_m);
             printField(label.str(), value.str());
         }
-        printEventSummary(summaries, camera_cfg.enabled, source_runtime_cfg.event_id_mode);
+        printEventSummary(summaries,
+                          camera_cfg.enabled,
+                          source_runtime_cfg.event_id_mode,
+                          metadata);
         printSection("Detailed stream summary");
         if (save_hdf5) {
             printField("hdf5_path", output_cfg.hdf5_path);
