@@ -33,11 +33,29 @@ From the repository root:
 cd /path/to/LACT_sim
 ```
 
+For a normal server build with CORSIKA/EventIO support:
+
+```bash
+make
+make test
+```
+
+This builds the vendored hessioxxx library first, configures CMake in `build/`,
+builds LACT_sim, and runs the CTest suite. The generated executables are linked
+with a build-tree runtime path pointing at:
+
+```text
+external/hessioxxx/source/lib
+```
+
+so in the normal in-place build you do not need to re-export `LD_LIBRARY_PATH`
+in every new terminal. If you move the compiled `build/` directory to another
+location, rebuild from the repository root.
+
 For optical tests that do not need CORSIKA/EventIO:
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DLACT_ENABLE_HESSIO=OFF
-cmake --build build -j4
+make no-hessio
 ctest --test-dir build --output-on-failure
 ```
 
@@ -52,7 +70,7 @@ sudo apt-get install cmake g++ make zlib1g-dev libhdf5-dev
 sudo yum install cmake gcc-c++ make zlib-devel hdf5-devel
 ```
 
-Then build hessioxxx and LACT_sim:
+The `make` command above is equivalent to:
 
 ```bash
 tools/build_hessio.sh
@@ -79,7 +97,8 @@ mkdir -p external/hessioxxx/source/out \
 make -C external/hessioxxx/source
 ```
 
-Before running EventIO executables, set the runtime library path.
+If a system strips or ignores executable RPATHs, set the runtime library path
+manually before running EventIO executables.
 
 Linux:
 
@@ -91,6 +110,20 @@ macOS:
 
 ```bash
 export DYLD_LIBRARY_PATH="$PWD/external/hessioxxx/source/lib:${DYLD_LIBRARY_PATH:-}"
+```
+
+To rebuild from scratch:
+
+```bash
+make clean      # remove the LACT_sim CMake build directory
+make            # configure and build again
+```
+
+To also remove hessioxxx build products:
+
+```bash
+make distclean
+make
 ```
 
 For server plotting without a display, use:
