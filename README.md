@@ -714,6 +714,7 @@ configs/mirrors/mirror_1229_imported.cfg
 configs/mirror_1229_facets.csv
 configs/mirror_1229_elevation_series.csv
 configs/outputs/whiteboard_f8.cfg
+configs/outputs/focal_plane_f8.cfg
 configs/cameras/new_camera.cfg
 configs/cameras/new_camera_pixels.csv
 configs/sipm/new_camera_sipm.cfg

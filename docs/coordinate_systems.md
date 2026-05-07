@@ -285,6 +285,11 @@ output.plane_u_axis=1,0,0
 output.plane_v_axis=0,1,0
 ```
 
+Camera configs normally include `configs/outputs/focal_plane_f8.cfg`; whiteboard
+tests normally include `configs/outputs/whiteboard_f8.cfg`. They define the
+same 8 m plane, but the names distinguish whether the plane is being used as a
+real camera face or as a virtual diagnostic whiteboard.
+
 The normal defines the camera front-face direction. Ray-plane intersection is
 two-sided, and optical incidence uses `abs(dot(ray, normal))`, so changing only
 the normal sign does not by itself change whether photons hit the plane.
