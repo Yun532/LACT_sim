@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <random>
 #include <tuple>
 
@@ -922,11 +923,14 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             double total_signal = 0.0;
             double total_pe = 0.0;
             double total_photons = 0.0;
-            for (const auto& kv : pixels) {
-                if (std::get<0>(kv.first) != event_id ||
-                    std::get<1>(kv.first) != telescope_id) {
-                    continue;
-                }
+            const PixelKey pixel_begin{
+                event_id, telescope_id, std::numeric_limits<int>::min()};
+            const PixelKey pixel_end{
+                event_id, telescope_id, std::numeric_limits<int>::max()};
+            for (auto it = pixels.lower_bound(pixel_begin);
+                 it != pixels.end() && it->first <= pixel_end;
+                 ++it) {
+                const auto& kv = *it;
                 const auto& p = kv.second;
                 const double mean = p.signal > 0.0 ? p.time_sum / p.signal : 0.0;
                 const double var = p.signal > 0.0
@@ -2191,6 +2195,9 @@ int main(int argc, char** argv) {
         }
 #ifdef LACT_HAS_HDF5
         if (save_hdf5) {
+            printSection("HDF5 output");
+            printField("status", "writing HDF5 trace file");
+            printField("path", output_cfg.hdf5_path);
             writeNativeTraceHdf5(output_cfg,
                                  argv[1],
                                  cfg,
@@ -2206,6 +2213,7 @@ int main(int argc, char** argv) {
                                  summaries,
                                  pixels,
                                  whiteboard_hits);
+            printField("status", "HDF5 trace file written");
         }
 #endif
         if (save_csv) {
