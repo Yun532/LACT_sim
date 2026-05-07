@@ -7,7 +7,6 @@ RUN_CORSIKA=1
 CORSIKA_FILE=""
 DEFAULT_CORSIKA_FILE="${LACT_DEFAULT_CORSIKA_FILE:-}"
 PLOT_ARRAY_ID="${LACT_PLOT_ARRAY_ID:-2}"
-PLOT_TELESCOPE_ID="${LACT_PLOT_TELESCOPE_ID:-3}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -153,35 +152,31 @@ python3 python/plot_hdf5_camera.py \
   run_logs/official_tests/corsika/camera_dense.h5 \
   --shower-event-number 1 \
   --array-id "$PLOT_ARRAY_ID" \
-  --telescope-id "$PLOT_TELESCOPE_ID" \
   --quantity pe \
-  --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_camera/telescope_${PLOT_TELESCOPE_ID}_pe.png"
+  --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_camera/all_tel_pe.png"
 
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_hdf5_camera.py \
   run_logs/official_tests/corsika/camera_nsb_trigger_dense.h5 \
   --shower-event-number 1 \
   --array-id "$PLOT_ARRAY_ID" \
-  --telescope-id "$PLOT_TELESCOPE_ID" \
   --quantity cherenkov_pe \
-  --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_nsb_trigger/telescope_${PLOT_TELESCOPE_ID}_cherenkov_pe.png"
+  --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_nsb_trigger/all_tel_cherenkov_pe.png"
 
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_hdf5_camera.py \
   run_logs/official_tests/corsika/camera_nsb_trigger_dense.h5 \
   --shower-event-number 1 \
   --array-id "$PLOT_ARRAY_ID" \
-  --telescope-id "$PLOT_TELESCOPE_ID" \
   --quantity nsb_pe \
-  --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_nsb_trigger/telescope_${PLOT_TELESCOPE_ID}_nsb_pe.png"
+  --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_nsb_trigger/all_tel_nsb_pe.png"
 
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_hdf5_camera.py \
   run_logs/official_tests/corsika/camera_nsb_trigger_dense.h5 \
   --shower-event-number 1 \
   --array-id "$PLOT_ARRAY_ID" \
-  --telescope-id "$PLOT_TELESCOPE_ID" \
   --quantity pe \
-  --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_nsb_trigger/telescope_${PLOT_TELESCOPE_ID}_final_pe.png"
+  --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_nsb_trigger/all_tel_final_pe.png"
 
 echo "Official tests completed. See run_logs/official_tests/ for outputs and README.md for commands."

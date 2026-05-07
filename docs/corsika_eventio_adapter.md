@@ -234,25 +234,24 @@ run_logs/official_tests/corsika/camera_dense.h5
 run_logs/official_tests/corsika/camera_nsb_trigger_dense.h5
 ```
 
-Plot one dense camera image by CORSIKA shower-event order:
+Plot all dense camera images for one CORSIKA shower-event order:
 
 ```bash
 python3 python/plot_hdf5_camera.py \
   run_logs/official_tests/corsika/camera_dense.h5 \
   --shower-event-number 1 \
   --array-id 0 \
-  --telescope-id 7 \
   --quantity pe \
-  --output run_logs/official_tests/corsika/camera_shower1_array0_tel7_pe.png
+  --output run_logs/official_tests/corsika/camera_shower1_array0_all_tel.png
 ```
 
-Plot one whiteboard event for one telescope:
+Plot all whiteboard images for one CORSIKA event:
 
 ```bash
 python3 python/plot_corsika_trace_output.py \
   run_logs/official_tests/corsika/whiteboard_hits.csv \
   --event-id 100 \
-  --telescope-id 0
+  --output-dir run_logs/official_tests/corsika/plots/whiteboard_event100
 ```
 
 CORSIKA input-card lines and telescope positions are printed in the trace log.
