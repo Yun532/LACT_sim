@@ -399,7 +399,15 @@ output.hits_csv=run_logs/official_tests/corsika/whiteboard_hits.csv
 output.summary_csv=run_logs/official_tests/corsika/whiteboard_summary.csv
 ```
 
-Plot by CORSIKA shower-event order and array id:
+Plot by CORSIKA shower-event order and array id. Here `--array-id` is the
+CORSIKA `CSCAT` / `MC_TELOFF` array-use index, not the telescope ID. With
+`source.event_id_mode=event_array100`, output `event_id` is encoded as:
+
+```text
+event_id = shower_event * 100 + array_id
+```
+
+For a file with `CSCAT 10 ...`, the valid array IDs are normally `0..9`.
 
 ```bash
 MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_corsika_trace_output.py \
@@ -471,7 +479,9 @@ Inside the file:
 /trigger/array              array trigger rows
 ```
 
-Plot one telescope by CORSIKA shower-event order:
+Plot one telescope by CORSIKA shower-event order. Again, `--array-id` selects
+which CORSIKA array reuse / core offset to draw; `--telescope-id` selects the
+camera/telescope image within that event.
 
 ```bash
 MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
@@ -605,6 +615,10 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
   --quantity pe \
   --output run_logs/official_tests/corsika/camera_from_h5.png
 ```
+
+In these HDF5 plotting commands, `--array-id` has the same meaning: it selects
+the CORSIKA array-use/core-offset stream for the chosen original shower event.
+It is separate from `--telescope-id`.
 
 See `docs/hdf5_output_format.md` for the file layout.
 

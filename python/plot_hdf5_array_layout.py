@@ -182,7 +182,15 @@ def main():
     parser.add_argument("h5", help="HDF5 file from run_corsika_trace")
     parser.add_argument("--event-id", type=int, default=None)
     parser.add_argument("--shower-event-number", type=int, default=None)
-    parser.add_argument("--array-id", type=int, default=0)
+    parser.add_argument(
+        "--array-id",
+        type=int,
+        default=0,
+        help=(
+            "CORSIKA CSCAT/MC_TELOFF array-use index for the selected shower event; "
+            "not the telescope ID."
+        ),
+    )
     parser.add_argument(
         "--quantity",
         choices=("pe", "signal", "photon_count", "cherenkov_pe", "nsb_pe"),

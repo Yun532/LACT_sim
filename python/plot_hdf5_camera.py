@@ -74,7 +74,15 @@ def main():
         default=None,
         help="1-based event order inside events/table; legacy files use shower-event order",
     )
-    parser.add_argument("--array-id", type=int, default=0)
+    parser.add_argument(
+        "--array-id",
+        type=int,
+        default=0,
+        help=(
+            "CORSIKA CSCAT/MC_TELOFF array-use index for the selected shower event; "
+            "not the telescope ID."
+        ),
+    )
     parser.add_argument("--telescope-id", type=int, default=None)
     parser.add_argument("--image-index", type=int, default=None)
     parser.add_argument(
