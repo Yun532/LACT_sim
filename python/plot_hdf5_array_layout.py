@@ -227,6 +227,17 @@ def total_quantity_label(quantity):
     return f"Total {quantity}"
 
 
+def event_title(event_id, event_meta):
+    if event_id is None:
+        return "LACT telescope array layout"
+    if event_meta is not None:
+        return (
+            f"LACT array event_id={event_id} "
+            f"(shower={int(event_meta['shower_event_id'])}, array={int(event_meta['array_id'])})"
+        )
+    return f"LACT array event_id={event_id}"
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Plot telescope array layout and optional event-level p.e. totals."
@@ -415,7 +426,8 @@ def main():
             zorder=3,
         )
         cbar = fig.colorbar(sc, ax=ax, fraction=0.046, pad=0.04)
-        cbar.set_label(total_quantity_label(args.quantity))
+        cbar.set_label(total_quantity_label(args.quantity), fontsize=11)
+        cbar.ax.tick_params(labelsize=9, direction="in")
         if not use_log_color:
             cbar.ax.yaxis.set_major_locator(MaxNLocator(nbins=6))
 
@@ -533,10 +545,8 @@ def main():
 
     if args.title is not None:
         title = args.title
-    elif event_id is None:
-        title = "LACT telescope array layout"
     else:
-        title = total_quantity_label(args.quantity)
+        title = event_title(event_id, event_meta)
     ax.set_title(title)
 
     if attrs:
