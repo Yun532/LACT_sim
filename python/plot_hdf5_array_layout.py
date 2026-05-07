@@ -166,13 +166,13 @@ def nearby_core_rows(h5, n_cores, center_east, center_north):
     return [rows[i] for i in np.argsort(distance2)[:n_cores]]
 
 
-def add_compass(ax, x0, y0, span):
-    length = 0.12 * span
+def add_compass(ax, x0, y0, length):
     ax.annotate(
         "",
         xy=(x0, y0 + length),
         xytext=(x0, y0),
         arrowprops=dict(arrowstyle="-|>", lw=1.2, color="0.08"),
+        zorder=8,
     )
     ax.text(x0, y0 + length * 1.12, "N", ha="center", va="bottom", fontsize=11, weight="bold")
     ax.text(x0, y0 - length * 0.18, "S", ha="center", va="top", fontsize=9, color="0.35")
@@ -181,6 +181,7 @@ def add_compass(ax, x0, y0, span):
         xy=(x0 + length, y0),
         xytext=(x0, y0),
         arrowprops=dict(arrowstyle="-|>", lw=1.0, color="0.35"),
+        zorder=8,
     )
     ax.text(x0 + length * 1.12, y0, "E", ha="left", va="center", fontsize=9, color="0.35")
     ax.text(x0 - length * 0.18, y0, "W", ha="right", va="center", fontsize=9, color="0.35")
@@ -212,6 +213,18 @@ def format_event_info(event_id, core_x, core_y, arrival_az):
     if arrival_az is not None:
         lines.append(f"arrival azimuth = {arrival_az:.2f} deg")
     return "\n".join(lines)
+
+
+def total_quantity_label(quantity):
+    if quantity == "pe":
+        return "Total p.e."
+    if quantity == "photon_count":
+        return "Total photon count"
+    if quantity == "cherenkov_pe":
+        return "Total Cherenkov p.e."
+    if quantity == "nsb_pe":
+        return "Total NSB p.e."
+    return f"Total {quantity}"
 
 
 def main():
@@ -274,6 +287,11 @@ def main():
         "--log-color",
         action="store_true",
         help="Use logarithmic color normalization for event quantities.",
+    )
+    parser.add_argument(
+        "--linear-color",
+        action="store_true",
+        help="Use linear color normalization. By default, p.e. maps use log color.",
     )
     parser.add_argument(
         "--show-nearby-cores",
@@ -362,7 +380,8 @@ def main():
         positive = values[values > 0]
         vmax = float(np.percentile(positive, args.vmax_percentile)) if positive.size else 1.0
         vmax = max(vmax, float(positive.max()) if positive.size and positive.max() < vmax else vmax, 1.0)
-        if args.log_color:
+        use_log_color = args.log_color or (args.quantity == "pe" and not args.linear_color)
+        if use_log_color:
             zero_mask = values <= 0.0
             if np.any(zero_mask):
                 ax.scatter(
@@ -396,9 +415,8 @@ def main():
             zorder=3,
         )
         cbar = fig.colorbar(sc, ax=ax, fraction=0.046, pad=0.04)
-        scale = "log " if args.log_color else ""
-        cbar.set_label(f"Total {args.quantity} ({scale}scale)")
-        if not args.log_color:
+        cbar.set_label(total_quantity_label(args.quantity))
+        if not use_log_color:
             cbar.ax.yaxis.set_major_locator(MaxNLocator(nbins=6))
 
     if not args.no_labels:
@@ -505,24 +523,30 @@ def main():
     ax.grid(True, alpha=0.25, linewidth=0.55)
     ax.tick_params(direction="in", top=True, right=True)
 
-    compass_x = float(np.min(east)) + 0.09 * span
-    compass_y = float(np.min(north)) + 0.09 * span
-    add_compass(ax, compass_x, compass_y, span)
+    x_min, x_max = ax.get_xlim()
+    y_min, y_max = ax.get_ylim()
+    axis_span = min(x_max - x_min, y_max - y_min)
+    compass_length = 0.075 * axis_span
+    compass_x = x_min + 0.070 * (x_max - x_min)
+    compass_y = y_min + 0.085 * (y_max - y_min)
+    add_compass(ax, compass_x, compass_y, compass_length)
 
     if args.title is not None:
         title = args.title
     elif event_id is None:
         title = "LACT telescope array layout"
     else:
-        title = f"Array PE map, event_id={event_id}"
+        title = total_quantity_label(args.quantity)
     ax.set_title(title)
 
     if attrs:
         ax.text(
             0.01,
-            0.01,
+            0.99,
             "HDF5 positions: x=N, y=W; plotted as East vs North",
             transform=ax.transAxes,
+            ha="left",
+            va="top",
             fontsize=8.2,
             color="0.25",
             bbox=dict(boxstyle="round,pad=0.24", facecolor="white", edgecolor="0.82", alpha=0.9),

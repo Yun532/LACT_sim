@@ -575,11 +575,11 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_array_layout.py \
   --dpi 350
 ```
 
-Plot one event with total p.e. per telescope shown by colorbar. For CORSIKA
-HDF5 files written by the current `run_corsika_trace`, the script also marks
-the core position and draws the horizontal arrival-direction arrow from
-`/events/corsika`. The telescope labels are one-based (`T1`, `T2`, ...), while
-the stored telescope IDs remain zero-based:
+Plot one event with total p.e. per telescope shown by a logarithmic colorbar.
+For CORSIKA HDF5 files written by the current `run_corsika_trace`, the script
+also marks the core position and draws the horizontal arrival-direction arrow
+from `/events/corsika`. The telescope labels are one-based (`T1`, `T2`, ...),
+while the stored telescope IDs remain zero-based:
 
 ```bash
 MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_array_layout.py \

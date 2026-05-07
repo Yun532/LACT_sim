@@ -322,3 +322,6 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_array_layout.py \
   --quantity pe \
   --output run_logs/official_tests/corsika/array_event46889802_pe.png
 ```
+
+For p.e. maps, the colorbar is logarithmic by default. Add `--linear-color` for
+a linear p.e. colorbar during debugging.
