@@ -278,6 +278,27 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
   --output run_logs/half_mirror_50m/hdf5_camera.png
 ```
 
+For CORSIKA/EventIO HDF5 files, camera and array plots support the same event
+selection forms:
+
+```text
+--event-id 46889802
+--shower-event-id 468898 --array-id 2
+--shower-event-number 1 --array-id 2
+```
+
+With the recommended `source.event_id_mode=event_array100`, these identify the
+same output event because:
+
+```text
+event_id = shower_event * 100 + array_id
+```
+
+The original CORSIKA shower id may therefore look like the HDF5 event id with
+the last two digits removed. Omit `--telescope-id` in
+`python/plot_hdf5_camera.py` to write one camera image for every telescope in
+the selected event.
+
 Plot the telescope distribution only:
 
 ```bash

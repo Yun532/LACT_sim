@@ -17,9 +17,37 @@ def decode_attr(value):
     return str(value)
 
 
-def event_id_from_shower_number(h5, shower_event_number, array_id):
+def event_table(h5):
     if "events/corsika" in h5:
-        rows = h5["events/corsika"][:]
+        return h5["events/corsika"][:]
+    if "events/table" in h5:
+        return h5["events/table"][:]
+    raise SystemExit("This HDF5 file has no events table.")
+
+
+def event_id_from_shower_id(h5, shower_event_id, array_id):
+    rows = event_table(h5)
+    names = rows.dtype.names or ()
+    if "shower_event_id" not in names or "array_id" not in names:
+        raise SystemExit(
+            "--shower-event-id requires events/corsika metadata. "
+            "Use --event-id for this file."
+        )
+    matches = rows[
+        (rows["shower_event_id"] == shower_event_id) & (rows["array_id"] == array_id)
+    ]
+    if len(matches) == 0:
+        raise SystemExit(
+            f"No event found for shower_event_id={shower_event_id} and array_id={array_id}."
+        )
+    if len(matches) > 1:
+        raise SystemExit("Internal error: multiple event rows match shower/array selection.")
+    return int(matches[0]["event_id"])
+
+
+def event_id_from_shower_number(h5, shower_event_number, array_id):
+    rows = event_table(h5)
+    if "shower_event_id" in (rows.dtype.names or ()):
         shower_ids = []
         seen = set()
         for row in rows:
@@ -32,20 +60,31 @@ def event_id_from_shower_number(h5, shower_event_number, array_id):
                 f"--shower-event-number must be 1..{len(shower_ids)} for this file."
             )
         shower = shower_ids[shower_event_number - 1]
-        matches = rows[
-            (rows["shower_event_id"] == shower) & (rows["array_id"] == array_id)
-        ]
-        if len(matches) == 0:
-            raise SystemExit(
-                f"No event found for shower_event_number={shower_event_number} "
-                f"(shower_event_id={shower}) and array_id={array_id}."
-            )
-        return int(matches[0]["event_id"])
+        return event_id_from_shower_id(h5, shower, array_id)
 
-    events = h5["events/table"][:]
-    if shower_event_number < 1 or shower_event_number > len(events):
-        raise SystemExit(f"--shower-event-number must be 1..{len(events)} for this file.")
-    return int(events[shower_event_number - 1]["event_id"])
+    if shower_event_number < 1 or shower_event_number > len(rows):
+        raise SystemExit(f"--shower-event-number must be 1..{len(rows)} for this file.")
+    return int(rows[shower_event_number - 1]["event_id"])
+
+
+def resolve_event_id(h5, event_id=None, shower_event_id=None, shower_event_number=None, array_id=0):
+    choices = [
+        event_id is not None,
+        shower_event_id is not None,
+        shower_event_number is not None,
+    ]
+    if sum(choices) > 1:
+        raise SystemExit(
+            "Use only one event selector: --event-id, --shower-event-id, "
+            "or --shower-event-number."
+        )
+    if event_id is not None:
+        return int(event_id)
+    if shower_event_id is not None:
+        return event_id_from_shower_id(h5, shower_event_id, array_id)
+    if shower_event_number is not None:
+        return event_id_from_shower_number(h5, shower_event_number, array_id)
+    return None
 
 
 def get_telescope_positions(telescopes):
@@ -181,7 +220,20 @@ def main():
     )
     parser.add_argument("h5", help="HDF5 file from run_corsika_trace")
     parser.add_argument("--event-id", type=int, default=None)
-    parser.add_argument("--shower-event-number", type=int, default=None)
+    parser.add_argument(
+        "--shower-event-number",
+        "--event-number",
+        dest="shower_event_number",
+        type=int,
+        default=None,
+        help="1-based original CORSIKA shower-event order in the HDF5 file.",
+    )
+    parser.add_argument(
+        "--shower-event-id",
+        type=int,
+        default=None,
+        help="Original CORSIKA shower event id. Use with --array-id to select one output event.",
+    )
     parser.add_argument(
         "--array-id",
         type=int,
@@ -246,11 +298,13 @@ def main():
         tel_ids = telescopes["telescope_id"].astype(int)
         east, north = get_telescope_positions(telescopes)
 
-        if args.event_id is not None and args.shower_event_number is not None:
-            raise SystemExit("Use either --event-id or --shower-event-number, not both.")
-        event_id = args.event_id
-        if args.shower_event_number is not None:
-            event_id = event_id_from_shower_number(h5, args.shower_event_number, args.array_id)
+        event_id = resolve_event_id(
+            h5,
+            event_id=args.event_id,
+            shower_event_id=args.shower_event_id,
+            shower_event_number=args.shower_event_number,
+            array_id=args.array_id,
+        )
 
         values = None
         event_meta = None

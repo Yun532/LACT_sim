@@ -22,6 +22,11 @@ The HDF5 output stores only `event_id` in `/events/table` and `/images/index`.
 Intermediate logs may still print decoded shower/array information for human
 debugging, but downstream analysis should use `event_id`.
 
+For example, original CORSIKA shower `468898` with `array_id=0` is stored as
+`event_id=46889800`; with `array_id=2` it is stored as `event_id=46889802`.
+Those trailing two digits are the array/core-offset stream, not an extra shower
+number.
+
 ## Atmosphere
 
 CORSIKA photons are interpreted as photons already at the telescope plane. The

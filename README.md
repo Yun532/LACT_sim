@@ -494,6 +494,20 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
   --dpi 350
 ```
 
+If `--telescope-id` is omitted, the script writes one camera PNG for every
+telescope image in the selected event. If `--output` is a filename, a directory
+with the same stem is created:
+
+```bash
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
+  run_logs/official_tests/corsika/camera_dense.h5 \
+  --shower-event-number 1 \
+  --array-id 2 \
+  --quantity pe \
+  --output run_logs/official_tests/corsika/camera_shower1_array2_all_tel.png \
+  --dpi 350
+```
+
 If you already know the output event id, select it directly:
 
 ```bash
@@ -503,6 +517,20 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
   --telescope-id 7 \
   --quantity pe \
   --output run_logs/official_tests/corsika/camera_event_id_tel7_pe.png \
+  --dpi 350
+```
+
+You can also select by the original CORSIKA shower event id, which is often the
+number printed in the EventIO log:
+
+```bash
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
+  run_logs/official_tests/corsika/camera_dense.h5 \
+  --shower-event-id 468898 \
+  --array-id 2 \
+  --telescope-id 3 \
+  --quantity pe \
+  --output run_logs/official_tests/corsika/camera_shower468898_array2_tel3_pe.png \
   --dpi 350
 ```
 
@@ -524,11 +552,19 @@ the stored telescope IDs remain zero-based:
 ```bash
 MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_array_layout.py \
   run_logs/official_tests/corsika/camera_dense.h5 \
-  --event-id 46889802 \
+  --shower-event-id 468898 \
+  --array-id 2 \
   --quantity pe \
   --output run_logs/official_tests/corsika/array_event46889802_pe.png \
   --dpi 350
 ```
+
+For the same event, `--event-id 46889802` is equivalent to
+`--shower-event-id 468898 --array-id 2` because the default CORSIKA setting uses
+`event_id = shower_event * 100 + array_id`. So `46889800` is not a different
+shower from `468898`; it is shower `468898` with array/core-offset stream `0`.
+This is why HDF5 event IDs can look like the log shower ID with two extra
+digits appended.
 
 To inspect several shower cores near the array center, use:
 
@@ -611,14 +647,15 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
   run_logs/official_tests/corsika/camera_dense.h5 \
   --shower-event-number 1 \
   --array-id 0 \
-  --telescope-id 7 \
   --quantity pe \
   --output run_logs/official_tests/corsika/camera_from_h5.png
 ```
 
-In these HDF5 plotting commands, `--array-id` has the same meaning: it selects
-the CORSIKA array-use/core-offset stream for the chosen original shower event.
-It is separate from `--telescope-id`.
+Omit `--telescope-id` to plot all telescope images for that event. Add
+`--telescope-id N` when you want one camera only. In these HDF5 plotting
+commands, `--array-id` has the same meaning: it selects the CORSIKA
+array-use/core-offset stream for the chosen original shower event. It is
+separate from `--telescope-id`.
 
 See `docs/hdf5_output_format.md` for the file layout.
 
