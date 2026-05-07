@@ -136,3 +136,14 @@ Camera trigger counts pixels above threshold in one telescope image. Array
 trigger counts triggered telescopes for the same `event_id`. Neighbor topology,
 waveform thresholding, and hardware-specific trigger logic are reserved for the
 future electronics implementation.
+
+If HDF5 output sets:
+
+```ini
+output.save_only_triggered=true
+```
+
+then `/images/index` and `/images/dense/*` keep only telescope images that pass
+the camera trigger. The trigger decision tables still keep the evaluated
+telescope and array trigger rows, so excluded telescope images can be audited
+without storing their full 1616-pixel vectors.

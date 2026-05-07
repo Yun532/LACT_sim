@@ -266,6 +266,10 @@ The first trigger implementation is a simple multiplicity model. Telescope rows
 record the number of pixels above `trigger.pixel_threshold_pe`; array rows
 record how many telescopes triggered for the same `event_id`.
 
+When `output.save_only_triggered=true`, only triggered telescope images are
+written under `/images`. The `/trigger` tables remain complete and should be
+used to inspect non-triggered telescope decisions.
+
 ## Plotting
 
 The HDF5 plotter reads camera geometry from the same file:

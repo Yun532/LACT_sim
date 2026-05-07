@@ -1112,6 +1112,96 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             });
         }
 
+        if (output_cfg.save_only_triggered && trigger_cfg.enabled) {
+            std::set<SummaryKey> triggered_image_keys;
+            for (const auto& row : telescope_trigger_rows) {
+                if (row.triggered) {
+                    triggered_image_keys.insert({
+                        static_cast<int>(row.event_id),
+                        static_cast<int>(row.telescope_id),
+                    });
+                }
+            }
+
+            std::vector<ImageIndexRow> filtered_image_rows;
+            std::vector<SparsePixelRow> filtered_sparse_rows;
+            std::vector<float> filtered_dense_signal;
+            std::vector<float> filtered_dense_pe;
+            std::vector<float> filtered_dense_cherenkov_pe;
+            std::vector<float> filtered_dense_nsb_pe;
+            std::vector<std::int32_t> filtered_dense_photon_count;
+
+            const std::size_t n_pixels = camera_rows.size();
+            if (have_dense_images) {
+                filtered_dense_signal.reserve(triggered_image_keys.size() * n_pixels);
+                filtered_dense_pe.reserve(triggered_image_keys.size() * n_pixels);
+                filtered_dense_photon_count.reserve(triggered_image_keys.size() * n_pixels);
+                if (output_cfg.hdf5_write_components) {
+                    filtered_dense_cherenkov_pe.reserve(triggered_image_keys.size() * n_pixels);
+                    filtered_dense_nsb_pe.reserve(triggered_image_keys.size() * n_pixels);
+                }
+            }
+
+            for (const auto& image : image_rows) {
+                const SummaryKey key{
+                    static_cast<int>(image.event_id),
+                    static_cast<int>(image.telescope_id),
+                };
+                if (triggered_image_keys.find(key) == triggered_image_keys.end()) {
+                    continue;
+                }
+
+                ImageIndexRow filtered = image;
+                filtered.image_index = static_cast<std::int32_t>(filtered_image_rows.size());
+                filtered.start = static_cast<std::int64_t>(filtered_sparse_rows.size());
+
+                const std::int64_t begin = image.start;
+                const std::int64_t end = image.start + image.count;
+                for (std::int64_t i = begin; i < end; ++i) {
+                    filtered_sparse_rows.push_back(sparse_rows[static_cast<std::size_t>(i)]);
+                }
+                filtered.count = static_cast<std::int32_t>(
+                    static_cast<std::int64_t>(filtered_sparse_rows.size()) - filtered.start);
+
+                if (have_dense_images) {
+                    const std::size_t old_row = static_cast<std::size_t>(image.image_index);
+                    const std::size_t old_begin = old_row * n_pixels;
+                    const std::size_t old_end = old_begin + n_pixels;
+                    filtered_dense_signal.insert(filtered_dense_signal.end(),
+                                                 dense_signal.begin() + old_begin,
+                                                 dense_signal.begin() + old_end);
+                    filtered_dense_pe.insert(filtered_dense_pe.end(),
+                                             dense_pe.begin() + old_begin,
+                                             dense_pe.begin() + old_end);
+                    filtered_dense_photon_count.insert(filtered_dense_photon_count.end(),
+                                                       dense_photon_count.begin() + old_begin,
+                                                       dense_photon_count.begin() + old_end);
+                    if (output_cfg.hdf5_write_components) {
+                        filtered_dense_cherenkov_pe.insert(filtered_dense_cherenkov_pe.end(),
+                                                           dense_cherenkov_pe.begin() + old_begin,
+                                                           dense_cherenkov_pe.begin() + old_end);
+                        filtered_dense_nsb_pe.insert(filtered_dense_nsb_pe.end(),
+                                                     dense_nsb_pe.begin() + old_begin,
+                                                     dense_nsb_pe.begin() + old_end);
+                    }
+                }
+
+                filtered_image_rows.push_back(filtered);
+            }
+
+            image_rows.swap(filtered_image_rows);
+            sparse_rows.swap(filtered_sparse_rows);
+            if (have_dense_images) {
+                dense_signal.swap(filtered_dense_signal);
+                dense_pe.swap(filtered_dense_pe);
+                dense_photon_count.swap(filtered_dense_photon_count);
+                if (output_cfg.hdf5_write_components) {
+                    dense_cherenkov_pe.swap(filtered_dense_cherenkov_pe);
+                    dense_nsb_pe.swap(filtered_dense_nsb_pe);
+                }
+            }
+        }
+
         struct EventRow {
             std::int32_t event_index;
             std::int64_t event_id;
@@ -1143,8 +1233,8 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         std::vector<EventRow> event_rows;
         std::vector<CorsikaEventRow> corsika_event_rows;
         std::set<int> event_ids;
-        for (const auto& key : image_keys) {
-            event_ids.insert(key.first);
+        for (const auto& image : image_rows) {
+            event_ids.insert(static_cast<int>(image.event_id));
         }
         int event_index = 0;
         for (const int event_id : event_ids) {
@@ -1679,6 +1769,10 @@ void printCorsikaOpticalConfiguration(
     if (outputWantsHdf5(output_cfg)) {
         printField("hdf5_path", output_cfg.hdf5_path);
         printField("hdf5_storage", output_cfg.hdf5_storage);
+        printField("hdf5_write_components",
+                   output_cfg.hdf5_write_components ? "true" : "false");
+        printField("save_only_triggered",
+                   output_cfg.save_only_triggered ? "true" : "false");
     }
     if (camera_cfg.enabled && outputWantsCsv(output_cfg)) {
         printField("pixel_csv", output_cfg.pixel_csv);
