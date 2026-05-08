@@ -235,9 +235,11 @@ build/run_corsika_trace configs/official_tests/corsika_full_response_camera.cfg 
 ```
 
 This full-response smoke test enables support deformation, small random optical
-errors, mirror reflectivity, filter transmission, SiPM PDE, and the
-`new_camera` light collector. The electronics conversion is disabled in this
-cfg so the SiPM PDE is applied only once through the efficiency module.
+errors, mirror reflectivity, filter transmission, SiPM PDE, the `new_camera`
+light collector, and the simple multiplicity trigger. It saves only triggered
+telescope images under `/images`; complete trigger decisions are kept under
+`/trigger`. The electronics conversion is disabled in this cfg so the SiPM PDE
+is applied only once through the efficiency module.
 
 These write:
 

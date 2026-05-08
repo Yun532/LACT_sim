@@ -645,12 +645,16 @@ build/run_corsika_trace \
 ```
 
 This writes `camera_full_response_dense.h5`. It enables the current optical
-error paths plus the wavelength-dependent mirror reflectivity, filter
-transmission, and SiPM PDE curves. The electronics config is intentionally
-`configs/electronics/ideal_pe.cfg`, because the SiPM PDE is already applied by
-`configs/efficiency/curves_all.cfg`; this avoids counting PDE twice. The
-official one-command script also plots all camera images and the array layout
-for `shower-event-number=1, array-id=${LACT_PLOT_ARRAY_ID:-2}`:
+error paths, the wavelength-dependent mirror reflectivity, filter transmission,
+SiPM PDE curves, and the simple multiplicity trigger. The electronics config is
+intentionally `configs/electronics/ideal_pe.cfg`, because the SiPM PDE is
+already applied by `configs/efficiency/curves_all.cfg`; this avoids counting PDE
+twice. This test uses `output.save_only_triggered=true`, so `/images/dense/*`
+contains only telescope images that pass the trigger. The complete trigger
+decision tables remain in `/trigger/telescope` and `/trigger/array`.
+
+The official one-command script also plots the triggered camera images and the
+array layout for `shower-event-number=1, array-id=${LACT_PLOT_ARRAY_ID:-2}`:
 
 ```text
 run_logs/official_tests/corsika/plots/shower1_array2_full_response/all_tel_pe.png
