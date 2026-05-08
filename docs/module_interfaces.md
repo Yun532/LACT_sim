@@ -67,9 +67,28 @@ propagation.speed_of_light_m_per_ns=0.299792458
 
 ## Obstruction
 
-The obstruction module is a first-order support-shadow model. It checks whether
-a photon crosses a blocked cell in a configured plane before mirror
-intersection:
+The obstruction module supports two levels.
+
+The recommended model is a simplified 3D primitive description of the camera
+support structure:
+
+```ini
+obstruction.config=configs/obstructions/lact_camera_support_primitives.cfg
+obstruction.enabled=true
+obstruction.mode=primitives
+obstruction.primitives_csv=configs/obstructions/lact_camera_support_primitives.csv
+obstruction.check_incoming=true
+obstruction.check_reflected=true
+```
+
+The primitives CSV currently supports `cylinder` and axis-aligned `box` rows in
+LACT telescope-local coordinates. Cylinders are used for support tubes. The
+code tests both the incoming segment before mirror intersection and the
+reflected segment from mirror to output plane, so the shadow depends on source
+direction and telescope pointing.
+
+The older diagnostic model checks whether a photon crosses a blocked cell in a
+single configured plane before mirror intersection:
 
 ```ini
 obstruction.config=configs/obstructions/lact_zz_asm_shadow.cfg
@@ -88,15 +107,15 @@ Runtime configuration:
 
 ```ini
 obstruction.enabled=true
+obstruction.mode=mask
 obstruction.mask_csv=configs/obstructions/lact_zz_asm_shadow_mask.csv
 obstruction.plane_z_m=-16.0
 ```
 
 The mask CSV stores blocked grid cells and metadata comments for grid origin,
-cell size, grid dimensions, and plane position. This approach is portable and
-fast because it does not require a CAD kernel on the server. It is suitable for
-on-axis and near-on-axis shadow studies. It is not a full 3D CAD ray-solid
-intersection model.
+cell size, grid dimensions, and plane position. This 2D mask is fast but should
+not be used as the formal off-axis obstruction model because it does not change
+projection with ray direction and it does not block reflected rays.
 
 ## SiPM And Electronics
 

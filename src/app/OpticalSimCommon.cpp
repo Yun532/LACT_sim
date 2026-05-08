@@ -255,7 +255,8 @@ void mergeComponentConfig(std::map<std::string, std::string>& dst,
         if (scoped == "error.structural_deformation_config") {
             value = resolveRelativePath(path, value);
         }
-        if (scoped == "obstruction.mask_csv") {
+        if (scoped == "obstruction.mask_csv" ||
+            scoped == "obstruction.primitives_csv") {
             value = resolveRelativePath(path, value);
         }
         dst[scoped] = value;
@@ -1969,14 +1970,182 @@ bool ObstructionMask::contains(double x_m, double y_m) const
     return blocked[static_cast<std::size_t>(iy * nx + ix)] != 0;
 }
 
+namespace {
+
+bool segmentIntersectsCylinder(const Vec3& a,
+                               const Vec3& b,
+                               const Vec3& c0,
+                               const Vec3& c1,
+                               double radius)
+{
+    if (radius <= 0.0) {
+        return false;
+    }
+    const Vec3 u = b - a;
+    const Vec3 v = c1 - c0;
+    const Vec3 w0 = a - c0;
+    const double uu = u.dot(u);
+    const double vv = v.dot(v);
+    if (uu <= 0.0 || vv <= 0.0) {
+        return false;
+    }
+    const double uv = u.dot(v);
+    const double uw = u.dot(w0);
+    const double vw = v.dot(w0);
+    const double ww = w0.dot(w0);
+    const double denom = uu * vv - uv * uv;
+
+    auto distance2 = [&](double s, double t) {
+        const Vec3 d = w0 + u * s - v * t;
+        return d.dot(d);
+    };
+
+    double best = std::numeric_limits<double>::max();
+    if (std::abs(denom) > 1e-14) {
+        const double s = std::clamp((uv * vw - vv * uw) / denom, 0.0, 1.0);
+        const double t = std::clamp((uu * vw - uv * uw) / denom, 0.0, 1.0);
+        best = std::min(best, distance2(s, t));
+    }
+
+    const double candidates_s[] = {0.0, 1.0};
+    for (double s : candidates_s) {
+        const double t = std::clamp((vw + uv * s) / vv, 0.0, 1.0);
+        best = std::min(best, distance2(s, t));
+    }
+    const double candidates_t[] = {0.0, 1.0};
+    for (double t : candidates_t) {
+        const double s = std::clamp((uv * t - uw) / uu, 0.0, 1.0);
+        best = std::min(best, distance2(s, t));
+    }
+
+    // Include spherical end caps. This intentionally models a solid tube with
+    // rounded ends, which is conservative for simplified telescope struts.
+    return best <= radius * radius;
+}
+
+bool segmentIntersectsAabb(const Vec3& a,
+                           const Vec3& b,
+                           const Vec3& center,
+                           const Vec3& half)
+{
+    const Vec3 d = b - a;
+    double tmin = 0.0;
+    double tmax = 1.0;
+    const double amin[3] = {center.x - half.x, center.y - half.y, center.z - half.z};
+    const double amax[3] = {center.x + half.x, center.y + half.y, center.z + half.z};
+    const double p[3] = {a.x, a.y, a.z};
+    const double dir[3] = {d.x, d.y, d.z};
+    for (int i = 0; i < 3; ++i) {
+        if (std::abs(dir[i]) < 1e-14) {
+            if (p[i] < amin[i] || p[i] > amax[i]) {
+                return false;
+            }
+            continue;
+        }
+        double t1 = (amin[i] - p[i]) / dir[i];
+        double t2 = (amax[i] - p[i]) / dir[i];
+        if (t1 > t2) {
+            std::swap(t1, t2);
+        }
+        tmin = std::max(tmin, t1);
+        tmax = std::min(tmax, t2);
+        if (tmin > tmax) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool segmentBlockedLocal(const Vec3& a,
+                         const Vec3& b,
+                         const ObstructionMask& obstruction)
+{
+    if (!obstruction.enabled) {
+        return false;
+    }
+    if (lowerCopy(obstruction.mode) == "primitives") {
+        for (const auto& primitive : obstruction.primitives) {
+            const std::string type = lowerCopy(primitive.type);
+            if (type == "cylinder") {
+                if (segmentIntersectsCylinder(a, b, primitive.p0, primitive.p1,
+                                              primitive.radius_m)) {
+                    return true;
+                }
+            } else if (type == "box" || type == "aabb") {
+                if (segmentIntersectsAabb(a, b, primitive.p0, primitive.half_size)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    const Vec3 d = b - a;
+    if (std::abs(d.z) < 1e-12) {
+        return false;
+    }
+    const double s = (obstruction.plane_z_m - a.z) / d.z;
+    if (s < 0.0 || s > 1.0) {
+        return false;
+    }
+    const Vec3 q = a + d * s;
+    return obstruction.contains(q.x, q.y);
+}
+
+} // namespace
+
 ObstructionMask buildObstructionMask(const std::map<std::string, std::string>& cfg)
 {
     ObstructionMask obstruction;
     obstruction.enabled = getBool(cfg, "obstruction.enabled", false);
+    obstruction.mode = lowerCopy(getString(cfg, "obstruction.mode", "mask"));
     obstruction.mask_csv = getString(cfg, "obstruction.mask_csv", "");
+    obstruction.primitives_csv = getString(cfg, "obstruction.primitives_csv", "");
+    obstruction.check_incoming = getBool(cfg, "obstruction.check_incoming", true);
+    obstruction.check_reflected = getBool(cfg, "obstruction.check_reflected",
+                                          obstruction.mode == "primitives");
     obstruction.plane_z_m = getDouble(cfg, "obstruction.plane_z_m", obstruction.plane_z_m);
 
     if (!obstruction.enabled) {
+        return obstruction;
+    }
+    if (obstruction.mode == "primitives") {
+        if (isDisabledText(obstruction.primitives_csv)) {
+            throw std::runtime_error(
+                "obstruction.mode=primitives requires obstruction.primitives_csv");
+        }
+        std::ifstream in(obstruction.primitives_csv);
+        if (!in) {
+            throw std::runtime_error("failed to read obstruction primitives CSV: " +
+                                     obstruction.primitives_csv);
+        }
+        std::string line;
+        bool saw_header = false;
+        while (std::getline(in, line)) {
+            line = trim(line);
+            if (line.empty() || line[0] == '#') {
+                continue;
+            }
+            const auto cells = splitCsvCells(line);
+            if (!saw_header) {
+                saw_header = true;
+                continue;
+            }
+            if (cells.size() < 12) {
+                continue;
+            }
+            ObstructionMask::Primitive p;
+            p.type = lowerCopy(cells[0]);
+            p.name = cells[1];
+            p.p0 = {std::stod(cells[2]), std::stod(cells[3]), std::stod(cells[4])};
+            p.p1 = {std::stod(cells[5]), std::stod(cells[6]), std::stod(cells[7])};
+            p.radius_m = std::stod(cells[8]);
+            p.half_size = {std::stod(cells[9]), std::stod(cells[10]), std::stod(cells[11])};
+            obstruction.primitives.push_back(p);
+        }
+        if (obstruction.primitives.empty()) {
+            throw std::runtime_error("obstruction primitives CSV has no primitives: " +
+                                     obstruction.primitives_csv);
+        }
         return obstruction;
     }
     if (isDisabledText(obstruction.mask_csv)) {
@@ -2064,7 +2233,7 @@ bool photonBlockedByObstruction(const Photon& photon,
                                 const ObstructionMask& obstruction,
                                 const TelescopeFrame* trace_to_local_frame)
 {
-    if (!obstruction.enabled) {
+    if (!obstruction.enabled || !obstruction.check_incoming) {
         return false;
     }
     Vec3 p = photon.pos;
@@ -2073,15 +2242,24 @@ bool photonBlockedByObstruction(const Photon& photon,
         p = trace_to_local_frame->pointToLocal(photon.pos);
         d = trace_to_local_frame->rotateVectorToLocal(photon.dir).normalized();
     }
-    if (std::abs(d.z) < 1e-12) {
+    return segmentBlockedLocal(p, p + d * 1.0e4, obstruction);
+}
+
+bool segmentBlockedByObstruction(const Vec3& a,
+                                 const Vec3& b,
+                                 const ObstructionMask& obstruction,
+                                 const TelescopeFrame* trace_to_local_frame)
+{
+    if (!obstruction.enabled || !obstruction.check_reflected) {
         return false;
     }
-    const double t = (obstruction.plane_z_m - p.z) / d.z;
-    if (t < 0.0) {
-        return false;
+    Vec3 p0 = a;
+    Vec3 p1 = b;
+    if (trace_to_local_frame) {
+        p0 = trace_to_local_frame->pointToLocal(a);
+        p1 = trace_to_local_frame->pointToLocal(b);
     }
-    const Vec3 q = p + d * t;
-    return obstruction.contains(q.x, q.y);
+    return segmentBlockedLocal(p0, p1, obstruction);
 }
 
 void applyStructuralDeformation(std::vector<MirrorFacet>& facets,

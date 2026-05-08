@@ -297,60 +297,53 @@ run_logs/official_tests/perfect_parallel/spot.png
 ### Parallel Light With Support Obstruction
 
 This test uses the same ideal parallel-light optical setup, but adds a
-simplified support shadow mask extracted from `lact-zz_asm.stp`. The full STEP
-file is not read at runtime; it is projected once into a portable 2D obstruction
-mask in the local mirror-support plane.
+simplified 3D camera-support obstruction model. The support is represented by
+cylindrical tubes and a camera-edge frame in telescope-local coordinates. This
+3D model is checked for both incoming rays and reflected rays, so off-axis
+sources get direction-dependent shadows.
 
 Run ray tracing:
 
 ```bash
-mkdir -p run_logs/official_tests/obstruction_parallel
-build/run_optical_sim configs/official_tests/perfect_parallel_obstructed_whiteboard.cfg \
-  2>&1 | tee run_logs/official_tests/obstruction_parallel/run.log
+mkdir -p run_logs/official_tests/obstruction_3d_parallel
+build/run_optical_sim configs/official_tests/perfect_parallel_3d_obstructed_whiteboard.cfg \
+  2>&1 | tee run_logs/official_tests/obstruction_3d_parallel/run.log
 ```
 
 Plot the whiteboard spot:
 
 ```bash
 MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_spot_histogram.py \
-  run_logs/official_tests/obstruction_parallel/hits.csv \
-  --output run_logs/official_tests/obstruction_parallel/spot.png \
+  run_logs/official_tests/obstruction_3d_parallel/hits.csv \
+  --output run_logs/official_tests/obstruction_3d_parallel/spot.png \
   --max-bins 520 \
   --dpi 350 \
-  --title "Perfect optics: on-axis parallel light with support obstruction"
+  --title "Perfect optics: 3D camera support obstruction"
+```
+
+Plot the 3D layout with the obstruction model:
+
+```bash
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_optical_layout_3d.py \
+  --config configs/official_tests/perfect_parallel_3d_obstructed_whiteboard.cfg \
+  --show-obstruction \
+  --output run_logs/official_tests/obstruction_3d_parallel/layout_3d.png \
+  --ray-stride 12 \
+  --dpi 300
 ```
 
 Main outputs:
 
 ```text
-run_logs/official_tests/obstruction_parallel/hits.csv
-run_logs/official_tests/obstruction_parallel/run.log
-run_logs/official_tests/obstruction_parallel/spot.png
+run_logs/official_tests/obstruction_3d_parallel/hits.csv
+run_logs/official_tests/obstruction_3d_parallel/run.log
+run_logs/official_tests/obstruction_3d_parallel/spot.png
+run_logs/official_tests/obstruction_3d_parallel/layout_3d.png
 ```
 
-The current extracted mask is:
-
-```text
-configs/obstructions/lact_zz_asm_shadow.cfg
-configs/obstructions/lact_zz_asm_shadow_mask.csv
-```
-
-To regenerate the mask from the original STEP file:
-
-```bash
-python3 tools/extract_step_shadow_mask.py /path/to/lact-zz_asm.stp \
-  --output configs/obstructions/lact_zz_asm_shadow_mask.csv \
-  --preview run_logs/obstruction_parallel/obstruction_mask_preview.png \
-  --extent-m 4.5 \
-  --cell-size-m 0.02 \
-  --dilate-cells 2 \
-  --plane-z-m -16.0
-```
-
-The adopted CAD-to-LACT local mapping is documented in
-`configs/obstructions/lact_zz_asm_shadow.cfg`. For the current mask and 1M
-on-axis photons, the obstruction blocks about 12% of generated photons before
-mirror intersection.
+The 2D STEP projection mask under `configs/obstructions/lact_zz_asm_shadow.cfg`
+is kept only as a diagnostic helper. It should not be used as the formal
+off-axis obstruction model.
 
 ### 900 m Point Source
 
@@ -789,6 +782,7 @@ See `docs/hdf5_output_format.md` for the file layout.
 ```text
 configs/official_tests/perfect_parallel_whiteboard.cfg
 configs/official_tests/perfect_parallel_obstructed_whiteboard.cfg
+configs/official_tests/perfect_parallel_3d_obstructed_whiteboard.cfg
 configs/official_tests/perfect_point_900m_whiteboard.cfg
 configs/official_tests/deformation_parallel_whiteboard.cfg
 configs/official_tests/corsika_whiteboard.cfg
@@ -811,6 +805,8 @@ configs/sipm/ideal_sipm.cfg
 configs/sipm/new_camera_sipm.cfg
 configs/electronics/ideal_pe.cfg
 configs/efficiency/curves_all.cfg
+configs/obstructions/lact_camera_support_primitives.cfg
+configs/obstructions/lact_camera_support_primitives.csv
 configs/obstructions/lact_zz_asm_shadow.cfg
 configs/obstructions/lact_zz_asm_shadow_mask.csv
 configs/errors/full_response_1229.cfg

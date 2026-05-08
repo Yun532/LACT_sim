@@ -1920,13 +1920,22 @@ void printCorsikaOpticalConfiguration(
     printSection("Obstruction");
     printField("enabled", obstruction.enabled ? "true" : "false");
     if (obstruction.enabled) {
-        printField("mask_csv", obstruction.mask_csv);
-        printField("plane_z_m", doubleToString(obstruction.plane_z_m));
-        printField("grid",
-                   intToString(static_cast<std::uint64_t>(obstruction.nx)) +
-                   " x " +
-                   intToString(static_cast<std::uint64_t>(obstruction.ny)));
-        printField("cell_size_m", doubleToString(obstruction.cell_size_m));
+        printField("mode", obstruction.mode);
+        printField("check_incoming", obstruction.check_incoming ? "true" : "false");
+        printField("check_reflected", obstruction.check_reflected ? "true" : "false");
+        if (obstruction.mode == "primitives") {
+            printField("primitives_csv", obstruction.primitives_csv);
+            printField("primitive_count",
+                       intToString(static_cast<std::uint64_t>(obstruction.primitives.size())));
+        } else {
+            printField("mask_csv", obstruction.mask_csv);
+            printField("plane_z_m", doubleToString(obstruction.plane_z_m));
+            printField("grid",
+                       intToString(static_cast<std::uint64_t>(obstruction.nx)) +
+                       " x " +
+                       intToString(static_cast<std::uint64_t>(obstruction.ny)));
+            printField("cell_size_m", doubleToString(obstruction.cell_size_m));
+        }
     }
 
     printSection("Model");
@@ -2196,6 +2205,11 @@ int main(int argc, char** argv) {
                 summary.hit_mirror += 1;
             }
             if (!hit.hit_surface) {
+                return;
+            }
+            if (segmentBlockedByObstruction(hit.mirror_point, hit.surface_point,
+                                            obstruction, nullptr)) {
+                summary.blocked_by_obstruction += 1;
                 return;
             }
 

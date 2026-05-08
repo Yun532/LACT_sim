@@ -99,6 +99,98 @@ def make_plane_patch(plane_point, plane_normal, radius):
     return corners
 
 
+def load_obstruction_cells(mask_csv):
+    mask_csv = Path(mask_csv)
+    meta = {}
+    cells = []
+    with mask_csv.open() as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith("#"):
+                item = line[1:].strip()
+                if "=" in item:
+                    key, value = item.split("=", 1)
+                    meta[key.strip()] = value.strip()
+                continue
+            if line.lower().startswith("ix,"):
+                continue
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) < 2:
+                continue
+            cells.append((int(parts[0]), int(parts[1])))
+
+    required = ("x_min_m", "y_min_m", "cell_size_m", "plane_z_m")
+    missing = [key for key in required if key not in meta]
+    if missing:
+        raise ValueError(f"obstruction mask is missing metadata: {', '.join(missing)}")
+
+    x_min = float(meta["x_min_m"])
+    y_min = float(meta["y_min_m"])
+    cell = float(meta["cell_size_m"])
+    z = float(meta["plane_z_m"])
+    points = np.array(
+        [[x_min + (ix + 0.5) * cell, y_min + (iy + 0.5) * cell, z] for ix, iy in cells],
+        dtype=float,
+    )
+    return points, meta
+
+
+def load_obstruction_primitives(primitives_csv):
+    primitives = []
+    with Path(primitives_csv).open() as handle:
+        reader = None
+        for raw in handle:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if reader is None:
+                reader = [item.strip() for item in line.split(",")]
+                continue
+            cells = [item.strip() for item in line.split(",")]
+            if len(cells) < 12:
+                continue
+            primitives.append(
+                {
+                    "type": cells[0].lower(),
+                    "name": cells[1],
+                    "p0": np.array([float(cells[2]), float(cells[3]), float(cells[4])]),
+                    "p1": np.array([float(cells[5]), float(cells[6]), float(cells[7])]),
+                    "radius": float(cells[8]),
+                    "half": np.array([float(cells[9]), float(cells[10]), float(cells[11])]),
+                }
+            )
+    return primitives
+
+
+def box_corners(center, half):
+    x, y, z = center
+    hx, hy, hz = half
+    return np.array([
+        [x - hx, y - hy, z - hz],
+        [x + hx, y - hy, z - hz],
+        [x + hx, y + hy, z - hz],
+        [x - hx, y + hy, z - hz],
+        [x - hx, y - hy, z + hz],
+        [x + hx, y - hy, z + hz],
+        [x + hx, y + hy, z + hz],
+        [x - hx, y + hy, z + hz],
+    ])
+
+
+def box_faces(center, half):
+    c = box_corners(center, half)
+    return [
+        c[[0, 1, 2, 3]],
+        c[[4, 5, 6, 7]],
+        c[[0, 1, 5, 4]],
+        c[[2, 3, 7, 6]],
+        c[[1, 2, 6, 5]],
+        c[[0, 3, 7, 4]],
+    ]
+
+
 def set_equal_3d(ax, points, pad=0.08):
     pts = np.asarray(points)
     mins = pts.min(axis=0)
@@ -131,6 +223,25 @@ def main():
     parser.add_argument("--ray-stride", type=int, default=1, help="draw every Nth center ray")
     parser.add_argument("--normal-scale", type=float, default=0.35, help="normal arrow length in m")
     parser.add_argument("--plane-radius", type=float, default=None, help="output plane half-size in m")
+    parser.add_argument(
+        "--show-obstruction",
+        action="store_true",
+        help="overlay obstruction mask cells from obstruction.config",
+    )
+    parser.add_argument(
+        "--obstruction-mask",
+        help="explicit obstruction mask CSV; overrides config obstruction.mask_csv",
+    )
+    parser.add_argument(
+        "--obstruction-primitives",
+        help="explicit obstruction primitives CSV; overrides config obstruction.primitives_csv",
+    )
+    parser.add_argument(
+        "--obstruction-stride",
+        type=int,
+        default=1,
+        help="draw every Nth obstruction mask cell",
+    )
     parser.add_argument("--view", default="32,-58", help="elev,azim camera view")
     args = parser.parse_args()
 
@@ -163,6 +274,37 @@ def main():
         facets = apply_telescope_frame_to_facets(facets, frame)
     centers = np.array([f["center"] for f in facets])
     radial = np.linalg.norm(centers[:, :2], axis=1)
+
+    obstruction_points = None
+    obstruction_primitives = []
+    if args.show_obstruction or args.obstruction_mask or args.obstruction_primitives:
+        mode = cfg.get("obstruction.mode", "mask").lower()
+        obstruction_enabled = cfg.get("obstruction.enabled", "false").lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if not obstruction_enabled and not args.obstruction_mask and not args.obstruction_primitives:
+            raise SystemExit("config obstruction.enabled is false; use --obstruction-mask to force drawing")
+        if args.obstruction_primitives or mode == "primitives":
+            primitives_path = args.obstruction_primitives or cfg.get("obstruction.primitives_csv")
+            if not primitives_path:
+                raise SystemExit("primitive obstruction drawing requires obstruction.primitives_csv")
+            obstruction_primitives = load_obstruction_primitives(primitives_path)
+            if frame is not None:
+                for primitive in obstruction_primitives:
+                    primitive["p0"] = point_to_global(primitive["p0"], frame)
+                    primitive["p1"] = point_to_global(primitive["p1"], frame)
+        else:
+            mask_path = args.obstruction_mask or cfg.get("obstruction.mask_csv")
+            if not mask_path:
+                raise SystemExit("--show-obstruction requires obstruction.mask_csv in config")
+            obstruction_points, _ = load_obstruction_cells(mask_path)
+            stride = max(1, args.obstruction_stride)
+            obstruction_points = obstruction_points[::stride]
+            if frame is not None:
+                obstruction_points = np.array([point_to_global(p, frame) for p in obstruction_points])
 
     polygons = [aperture_polygon(f) for f in facets]
     rays = []
@@ -247,12 +389,60 @@ def main():
         label="Output plane center",
     )
 
+    if obstruction_points is not None and len(obstruction_points) > 0:
+        ax.scatter(
+            obstruction_points[:, 0],
+            obstruction_points[:, 1],
+            obstruction_points[:, 2],
+            s=1.2,
+            marker="s",
+            color=(0.02, 0.02, 0.02, 0.34),
+            depthshade=False,
+            label="Support obstruction mask",
+        )
+    if obstruction_primitives:
+        segments = []
+        widths = []
+        box_polys = []
+        for primitive in obstruction_primitives:
+            if primitive["type"] == "cylinder":
+                segments.append(np.array([primitive["p0"], primitive["p1"]]))
+                widths.append(max(0.8, primitive["radius"] * 22.0))
+            elif primitive["type"] in {"box", "aabb"}:
+                box_polys.extend(box_faces(primitive["p0"], primitive["half"]))
+        if segments:
+            ax.add_collection3d(
+                Line3DCollection(
+                    segments,
+                    colors=(0.03, 0.03, 0.03, 0.72),
+                    linewidths=widths,
+                    label="3D support obstruction",
+                )
+            )
+        if box_polys:
+            ax.add_collection3d(
+                Poly3DCollection(
+                    box_polys,
+                    facecolors=(0.04, 0.04, 0.04, 0.25),
+                    edgecolors=(0.03, 0.03, 0.03, 0.68),
+                    linewidths=0.6,
+                )
+            )
+
     all_points = []
     all_points.extend(centers)
     all_points.extend(np.concatenate(polygons))
     all_points.extend(plane_patch)
     if rays:
         all_points.extend(np.concatenate(rays))
+    if obstruction_points is not None and len(obstruction_points) > 0:
+        all_points.extend(obstruction_points)
+    if obstruction_primitives:
+        for primitive in obstruction_primitives:
+            all_points.append(primitive["p0"])
+            all_points.append(primitive["p1"])
+            if primitive["type"] in {"box", "aabb"}:
+                all_points.extend(box_corners(primitive["p0"], primitive["half"]))
     set_equal_3d(ax, np.array(all_points))
 
     elev, azim = [float(x) for x in args.view.split(",", 1)]
@@ -266,6 +456,8 @@ def main():
     mappable.set_array(radial)
     cbar = fig.colorbar(mappable, ax=ax, shrink=0.62, pad=0.08)
     cbar.set_label("facet radial position [m]")
+    if (obstruction_points is not None and len(obstruction_points) > 0) or obstruction_primitives:
+        ax.legend(loc="upper right", frameon=True, framealpha=0.9, fontsize=8)
 
     ax.text2D(
         0.02,

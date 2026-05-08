@@ -110,7 +110,7 @@ def expand_component_config(main_config_path):
             scoped = _scoped_key(key, prefix)
             if scoped == "error.structural_deformation_config":
                 value = str(_resolve_include_path(component_path, value))
-            if scoped == "obstruction.mask_csv":
+            if scoped in {"obstruction.mask_csv", "obstruction.primitives_csv"}:
                 value = str(_resolve_include_path(component_path, value))
             expanded[scoped] = value
 

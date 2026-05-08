@@ -84,7 +84,11 @@ struct ErrorConfig {
 
 struct ObstructionMask {
     bool enabled = false;
+    std::string mode = "mask";
     std::string mask_csv;
+    std::string primitives_csv;
+    bool check_incoming = true;
+    bool check_reflected = false;
     double plane_z_m = -16.0;
     double x_min_m = -4.5;
     double y_min_m = -4.5;
@@ -92,6 +96,17 @@ struct ObstructionMask {
     int nx = 0;
     int ny = 0;
     std::vector<std::uint8_t> blocked;
+
+    struct Primitive {
+        std::string type;
+        std::string name;
+        Vec3 p0;
+        Vec3 p1;
+        double radius_m = 0.0;
+        Vec3 half_size;
+    };
+
+    std::vector<Primitive> primitives;
 
     bool contains(double x_m, double y_m) const;
 };
@@ -289,6 +304,10 @@ ObstructionMask buildObstructionMask(const std::map<std::string, std::string>& c
 bool photonBlockedByObstruction(const Photon& photon,
                                 const ObstructionMask& obstruction,
                                 const TelescopeFrame* trace_to_local_frame = nullptr);
+bool segmentBlockedByObstruction(const Vec3& a,
+                                 const Vec3& b,
+                                 const ObstructionMask& obstruction,
+                                 const TelescopeFrame* trace_to_local_frame = nullptr);
 void applyStructuralDeformation(std::vector<MirrorFacet>& facets,
                                 const ErrorConfig& error,
                                 const TelescopeConfig& telescope);

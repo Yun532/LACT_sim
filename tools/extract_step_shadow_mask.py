@@ -30,6 +30,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cell-size-m", type=float, default=0.02, help="mask cell size")
     parser.add_argument("--dilate-cells", type=int, default=2, help="binary dilation cells")
     parser.add_argument("--plane-z-m", type=float, default=-16.0, help="LACT local z plane")
+    parser.add_argument(
+        "--local-z-min-m",
+        type=float,
+        default=None,
+        help="optional lower local-z cut after STEP Y -> local z mapping",
+    )
+    parser.add_argument(
+        "--local-z-max-m",
+        type=float,
+        default=None,
+        help="optional upper local-z cut after STEP Y -> local z mapping",
+    )
     return parser.parse_args()
 
 
@@ -69,6 +81,12 @@ def main() -> None:
     mask = np.zeros((ny, nx), dtype=bool)
     n_points = 0
     n_used = 0
+    n_z_selected = 0
+
+    z_min = args.local_z_min_m
+    z_max = args.local_z_max_m
+    if z_min is not None and z_max is not None and z_min > z_max:
+        raise SystemExit("--local-z-min-m must be <= --local-z-max-m")
 
     with args.step.open(errors="ignore") as handle:
         for line in handle:
@@ -76,11 +94,17 @@ def main() -> None:
             if point is None:
                 continue
             n_points += 1
-            step_x_mm, _step_y_mm, step_z_mm = point
+            step_x_mm, step_y_mm, step_z_mm = point
             # STEP model axes for this support:
             #   STEP X -> LACT local x
             #   STEP Z -> LACT local y
             #   STEP Y -> LACT local z, projected onto plane_z_m
+            z = step_y_mm * 0.001
+            if z_min is not None and z < z_min:
+                continue
+            if z_max is not None and z > z_max:
+                continue
+            n_z_selected += 1
             x = step_x_mm * 0.001
             y = step_z_mm * 0.001
             if not (x_min <= x < -x_min and y_min <= y < -y_min):
@@ -104,7 +128,12 @@ def main() -> None:
         handle.write("# nx=%d\n" % nx)
         handle.write("# ny=%d\n" % ny)
         handle.write("# plane_z_m=%.10g\n" % args.plane_z_m)
+        if z_min is not None:
+            handle.write("# local_z_min_m=%.10g\n" % z_min)
+        if z_max is not None:
+            handle.write("# local_z_max_m=%.10g\n" % z_max)
         handle.write("# input_cartesian_points=%d\n" % n_points)
+        handle.write("# z_selected_points=%d\n" % n_z_selected)
         handle.write("# projected_points_in_grid=%d\n" % n_used)
         handle.write("# dilate_cells=%d\n" % args.dilate_cells)
         writer = csv.writer(handle)
@@ -153,6 +182,7 @@ def main() -> None:
     frac = float(np.logical_and(mask, aperture).sum()) / float(aperture.sum())
     print(f"wrote {args.output}")
     print(f"input_cartesian_points={n_points}")
+    print(f"z_selected_points={n_z_selected}")
     print(f"projected_points_in_grid={n_used}")
     print(f"blocked_cells={int(mask.sum())}")
     print(f"aperture_blocked_fraction_estimate={frac:.6f}")
