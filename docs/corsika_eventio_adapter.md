@@ -225,6 +225,20 @@ build/run_corsika_trace configs/official_tests/corsika_nsb_trigger_camera.cfg \
   2>&1 | tee run_logs/official_tests/corsika/camera_nsb_trigger_run.log
 ```
 
+Dense HDF5 pixel-camera trace with the current full optical response:
+
+```bash
+DYLD_LIBRARY_PATH=$PWD/external/hessioxxx/source/lib \
+build/run_corsika_trace configs/official_tests/corsika_full_response_camera.cfg \
+  /path/to/photon_E500_th0_run000001.zst \
+  2>&1 | tee run_logs/official_tests/corsika/camera_full_response_run.log
+```
+
+This full-response smoke test enables support deformation, small random optical
+errors, mirror reflectivity, filter transmission, SiPM PDE, and the
+`new_camera` light collector. The electronics conversion is disabled in this
+cfg so the SiPM PDE is applied only once through the efficiency module.
+
 These write:
 
 ```text
@@ -232,6 +246,7 @@ run_logs/official_tests/corsika/whiteboard_hits.csv
 run_logs/official_tests/corsika/whiteboard_summary.csv
 run_logs/official_tests/corsika/camera_dense.h5
 run_logs/official_tests/corsika/camera_nsb_trigger_dense.h5
+run_logs/official_tests/corsika/camera_full_response_dense.h5
 ```
 
 Plot all dense camera images for one CORSIKA shower-event order:

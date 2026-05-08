@@ -635,6 +635,32 @@ the official script plots all available/triggered telescope images for
 images that pass the trigger, so the number of PNGs may be smaller than the
 full array.
 
+To run the official full-response CORSIKA smoke test, use:
+
+```bash
+build/run_corsika_trace \
+  configs/official_tests/corsika_full_response_camera.cfg \
+  /path/to/input.zst \
+  2>&1 | tee run_logs/official_tests/corsika/camera_full_response_run.log
+```
+
+This writes `camera_full_response_dense.h5`. It enables the current optical
+error paths plus the wavelength-dependent mirror reflectivity, filter
+transmission, and SiPM PDE curves. The electronics config is intentionally
+`configs/electronics/ideal_pe.cfg`, because the SiPM PDE is already applied by
+`configs/efficiency/curves_all.cfg`; this avoids counting PDE twice. The
+official one-command script also plots all camera images and the array layout
+for `shower-event-number=1, array-id=${LACT_PLOT_ARRAY_ID:-2}`:
+
+```text
+run_logs/official_tests/corsika/plots/shower1_array2_full_response/all_tel_pe.png
+run_logs/official_tests/corsika/plots/shower1_array2_full_response/layout_pe.png
+```
+
+The random optical error values in
+`configs/errors/full_response_1229.cfg` are reproducible smoke-test values, not
+a calibrated alignment model.
+
 For synthetic sources, `run_optical_sim` also supports compact camera output:
 
 ```ini
@@ -705,6 +731,7 @@ configs/official_tests/deformation_parallel_whiteboard.cfg
 configs/official_tests/corsika_whiteboard.cfg
 configs/official_tests/corsika_new_camera.cfg
 configs/official_tests/corsika_nsb_trigger_camera.cfg
+configs/official_tests/corsika_full_response_camera.cfg
 ```
 
 Core shared components:
@@ -719,6 +746,9 @@ configs/cameras/new_camera.cfg
 configs/cameras/new_camera_pixels.csv
 configs/sipm/new_camera_sipm.cfg
 configs/electronics/new_camera_pe.cfg
+configs/electronics/ideal_pe.cfg
+configs/efficiency/curves_all.cfg
+configs/errors/full_response_1229.cfg
 configs/atmosphere/ideal.cfg
 configs/nsb/ideal.cfg
 configs/trigger/disabled.cfg
