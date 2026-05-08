@@ -52,7 +52,13 @@ for `new_camera`.
     ...
 
 /metadata/electronics
-  attrs: placeholder model and pe_conversion
+  attrs: placeholder model
+
+/metadata/sipm
+  attrs: size_m, pde
+
+/metadata/efficiency
+  attrs: mirror/filter/atmosphere/funnel settings
 
 /metadata/nsb
   attrs: enabled, model, rate_pe_per_ns_per_pixel, window_ns, seed

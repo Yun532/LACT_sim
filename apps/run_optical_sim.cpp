@@ -263,9 +263,10 @@ int main(int argc, char** argv) {
 
         printSection("SiPM");
         printField("size_m", doubleToString(sipm_cfg.size_m));
+        printField("pde", factorDescription(efficiency_cfg.sipm_pde));
 
         printSection("Electronics");
-        printField("pe_conversion", factorDescription(electronics_cfg.pe_conversion));
+        printField("response", "reserved; SiPM PDE is handled by sipm.pde");
 
         printSection("Efficiency");
         printField("constant_scale", doubleToString(efficiency_cfg.constant_scale));
@@ -273,7 +274,6 @@ int main(int argc, char** argv) {
                    factorDescription(efficiency_cfg.mirror_reflectivity));
         printField("filter_transmission",
                    factorDescription(efficiency_cfg.filter_transmission));
-        printField("sipm_pde", factorDescription(efficiency_cfg.sipm_pde));
         printField("atmosphere",
                    factorDescription(efficiency_cfg.atmosphere_transmission));
         printField("funnel_acceptance",

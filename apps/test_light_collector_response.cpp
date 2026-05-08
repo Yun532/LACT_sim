@@ -61,23 +61,19 @@ int main()
     SipmConfig sipm;
     sipm.size_m = 0.0130;
 
-    ElectronicsConfig half_pe_cfg;
-    half_pe_cfg.pe_conversion.enabled = true;
-    half_pe_cfg.pe_conversion.use_curve = false;
-    half_pe_cfg.pe_conversion.constant = 0.5;
-    ElectronicsResponse half_pe(half_pe_cfg);
+    ElectronicsResponse electronics;
 
     bool ok = true;
     auto direct = makeHit(0.0, 0.0, {0.0, 0.0, 1.0});
-    applyCameraResponse(camera, nullptr, plane, sipm, half_pe, direct);
+    applyCameraResponse(camera, nullptr, plane, sipm, electronics, direct);
     ok &= check(direct.hit_camera, "direct center hit should enter the pixel");
     ok &= check(direct.accepted, "direct center hit should be accepted");
     ok &= check(direct.pixel_id == 7, "direct center hit should map to pixel id 7");
-    ok &= check(std::abs(direct.relative_efficiency - 0.5) < 1e-12,
-                "direct center hit should include electronics pe conversion");
+    ok &= check(std::abs(direct.relative_efficiency - 1.0) < 1e-12,
+                "direct center hit should keep ideal electronics weight");
 
     auto outside = makeHit(0.02, 0.0, {0.0, 0.0, 1.0});
-    applyCameraResponse(camera, nullptr, plane, sipm, half_pe, outside);
+    applyCameraResponse(camera, nullptr, plane, sipm, electronics, outside);
     ok &= check(!outside.hit_camera, "point outside square pixel should not hit camera");
 
     CameraConfig collector_cfg;

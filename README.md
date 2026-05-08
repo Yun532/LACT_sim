@@ -239,10 +239,10 @@ atmosphere.transmission=0.92
 atmosphere.transmission=configs/atmosphere/my_transmission.csv
 ```
 
-The SiPM/electronics block is currently an interface layer. It converts collected
-photons into integrated p.e. through `electronics.pe_conversion`; detailed
-waveform, saturation, crosstalk, afterpulse, and trigger electronics are reserved
-for later replacement with the real implementation.
+The SiPM block converts collected photons into integrated p.e. through
+`sipm.pde`, which can be omitted, set to a constant, or set to a wavelength
+table. Detailed waveform, saturation, crosstalk, afterpulse, and trigger
+electronics are reserved for later replacement with the real implementation.
 
 Run:
 
@@ -646,10 +646,10 @@ build/run_corsika_trace \
 
 This writes `camera_full_response_dense.h5`. It enables the current optical
 error paths, the wavelength-dependent mirror reflectivity, filter transmission,
-SiPM PDE curves, and the simple multiplicity trigger. The electronics config is
-intentionally `configs/electronics/ideal_pe.cfg`, because the SiPM PDE is
-already applied by `configs/efficiency/curves_all.cfg`; this avoids counting PDE
-twice. This test uses `output.save_only_triggered=true`, so `/images/dense/*`
+SiPM PDE curve, and the simple multiplicity trigger. SiPM PDE is configured only
+once in `configs/sipm/new_camera_sipm.cfg` as `sipm.pde`; the electronics config
+is only a placeholder for future waveform/electronics effects. This test uses
+`output.save_only_triggered=true`, so `/images/dense/*`
 contains only telescope images that pass the trigger. The complete trigger
 decision tables remain in `/trigger/telescope` and `/trigger/array`.
 
@@ -749,7 +749,6 @@ configs/outputs/focal_plane_f8.cfg
 configs/cameras/new_camera.cfg
 configs/cameras/new_camera_pixels.csv
 configs/sipm/new_camera_sipm.cfg
-configs/electronics/new_camera_pe.cfg
 configs/electronics/ideal_pe.cfg
 configs/efficiency/curves_all.cfg
 configs/errors/full_response_1229.cfg

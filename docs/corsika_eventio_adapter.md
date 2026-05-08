@@ -238,8 +238,8 @@ This full-response smoke test enables support deformation, small random optical
 errors, mirror reflectivity, filter transmission, SiPM PDE, the `new_camera`
 light collector, and the simple multiplicity trigger. It saves only triggered
 telescope images under `/images`; complete trigger decisions are kept under
-`/trigger`. The electronics conversion is disabled in this cfg so the SiPM PDE
-is applied only once through the efficiency module.
+`/trigger`. The SiPM PDE is configured as `sipm.pde`, so photon-to-p.e.
+conversion has one wavelength-dependent path.
 
 These write:
 
@@ -298,9 +298,8 @@ event_id,telescope_id,pixel_id,photon_count,pe,signal,time_mean_ns,time_rms_ns
 ```
 
 `pe` is evaluated after the light collector by multiplying the collected photon
-weight by `electronics.pe_conversion`. The conversion can be a constant or a
-two-column wavelength table. `signal` is currently kept as a backward-compatible
-alias for `pe`.
+weight by `sipm.pde`. The PDE can be a constant or a two-column wavelength
+table. `signal` is currently kept as a backward-compatible alias for `pe`.
 
 ## Diagnostic Text Bridge
 

@@ -102,7 +102,6 @@ struct SipmConfig {
 };
 
 struct ElectronicsConfig {
-    EfficiencyFactorConfig pe_conversion;
 };
 
 struct NsbConfig {
@@ -129,7 +128,6 @@ public:
 
 private:
     ElectronicsConfig cfg_;
-    EfficiencyCurve pe_conversion_curve_;
 };
 
 struct SourceRuntimeConfig {

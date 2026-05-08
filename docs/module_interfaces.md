@@ -70,15 +70,15 @@ propagation.speed_of_light_m_per_ns=0.299792458
 The current SiPM/electronics path is an interface layer:
 
 ```text
-collector photon -> pe conversion -> integrated pixel image
+collector photon -> SiPM PDE -> integrated pixel image
 ```
 
 The active setting is:
 
 ```ini
-electronics.pe_conversion=none
-electronics.pe_conversion=0.35
-electronics.pe_conversion=configs/efficiency/sipm_pde.csv
+sipm.pde=none
+sipm.pde=0.35
+sipm.pde=configs/efficiency/sipm_pde.csv
 ```
 
 Detailed waveform, saturation, crosstalk, afterpulse, dark count, gain
@@ -95,13 +95,14 @@ p.e. contribution =
   * optical photon weight
   * mirror/filter/atmosphere efficiency factors
   * light-collector acceptance and reflection weight
-  * electronics.pe_conversion
+  * sipm.pde
 ```
 
-`electronics.pe_conversion` can be disabled, a constant, or a wavelength table.
-The current output is an integrated p.e. image. It is not yet a waveform and it
-does not model SiPM saturation, crosstalk, afterpulse, dark count, or gain
-fluctuations.
+`sipm.pde` can be disabled, a constant, or a wavelength table. The current
+output is an integrated p.e. image. It is not yet a waveform and it does not
+model SiPM saturation, crosstalk, afterpulse, dark count, or gain fluctuations.
+Legacy `electronics.pe_conversion` and `efficiency.sipm_pde` config keys are
+accepted only as compatibility aliases and are mapped to the same SiPM PDE path.
 
 ## NSB
 

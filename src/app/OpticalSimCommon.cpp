@@ -14,6 +14,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 #include "geometry/MirrorFacetValidation.hpp"
 #include "io/MirrorFacetCsvReader.hpp"
@@ -656,6 +657,26 @@ EfficiencyFactorConfig parseEfficiencyFactor(const std::map<std::string, std::st
     factor.use_curve = true;
     factor.csv_path = value;
     return factor;
+}
+
+bool hasEfficiencyFactorConfig(const std::map<std::string, std::string>& cfg,
+                               const std::string& base_key)
+{
+    return cfg.find(base_key) != cfg.end() ||
+           cfg.find(base_key + "_csv") != cfg.end() ||
+           cfg.find(base_key + "_constant") != cfg.end();
+}
+
+EfficiencyFactorConfig parseFirstEfficiencyFactor(
+    const std::map<std::string, std::string>& cfg,
+    const std::vector<std::string>& base_keys)
+{
+    for (const auto& base_key : base_keys) {
+        if (hasEfficiencyFactorConfig(cfg, base_key)) {
+            return parseEfficiencyFactor(cfg, base_key);
+        }
+    }
+    return {};
 }
 
 std::vector<double> parseDoubleList(const std::string& text, const std::string& key) {
@@ -1594,31 +1615,18 @@ SipmConfig buildSipmConfig(const std::map<std::string, std::string>& cfg) {
 ElectronicsResponse::ElectronicsResponse(const ElectronicsConfig& cfg)
     : cfg_(cfg)
 {
-    if (cfg_.pe_conversion.enabled && cfg_.pe_conversion.use_curve) {
-        pe_conversion_curve_.loadCsv(cfg_.pe_conversion.csv_path);
-    }
+    (void)cfg_;
 }
 
 double ElectronicsResponse::peConversion(double wavelength_nm) const
 {
-    if (!cfg_.pe_conversion.enabled) {
-        return 1.0;
-    }
-    if (cfg_.pe_conversion.use_curve) {
-        return pe_conversion_curve_.evaluate(wavelength_nm);
-    }
-    return cfg_.pe_conversion.constant;
+    (void)wavelength_nm;
+    return 1.0;
 }
 
 ElectronicsConfig buildElectronicsConfig(const std::map<std::string, std::string>& cfg) {
+    (void)cfg;
     ElectronicsConfig electronics;
-    electronics.pe_conversion = parseEfficiencyFactor(cfg, "electronics.pe_conversion");
-    if (!electronics.pe_conversion.enabled) {
-        electronics.pe_conversion = parseEfficiencyFactor(cfg, "electronics.pde");
-    }
-    if (!electronics.pe_conversion.enabled) {
-        electronics.pe_conversion = parseEfficiencyFactor(cfg, "sipm.pe_conversion");
-    }
     return electronics;
 }
 
@@ -2015,7 +2023,13 @@ OpticalEfficiencyConfig buildEfficiencyConfig(const std::map<std::string, std::s
 
     eff.mirror_reflectivity = parseEfficiencyFactor(cfg, "efficiency.mirror_reflectivity");
     eff.filter_transmission = parseEfficiencyFactor(cfg, "efficiency.filter_transmission");
-    eff.sipm_pde = parseEfficiencyFactor(cfg, "efficiency.sipm_pde");
+    eff.sipm_pde = parseFirstEfficiencyFactor(
+        cfg,
+        {"sipm.pde",
+         "sipm.pe_conversion",
+         "efficiency.sipm_pde",
+         "electronics.pe_conversion",
+         "electronics.pde"});
     eff.atmosphere_transmission = parseEfficiencyFactor(cfg, "efficiency.atmosphere_transmission");
     if (!eff.atmosphere_transmission.enabled) {
         eff.atmosphere_transmission = parseEfficiencyFactor(cfg, "atmosphere.transmission");

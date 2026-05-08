@@ -585,7 +585,9 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                           const EventIOMetadata& metadata,
                           const CameraGeometry& camera,
                           const std::vector<MirrorFacet>& facets,
+                          const SipmConfig& sipm_cfg,
                           const ElectronicsConfig& electronics_cfg,
+                          const OpticalEfficiencyConfig& efficiency_cfg,
                           const NsbConfig& nsb_cfg,
                           const TriggerConfig& trigger_cfg,
                           const std::map<SummaryKey, TraceSummary>& summaries,
@@ -683,11 +685,31 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                              "camera x/y are output-plane u/v coordinates, normally u=local +x and v=local +y");
         H5Gclose(coordinates_group);
 
+        hid_t sipm_group = H5Gcreate2(metadata_group, "sipm",
+                                      H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        writeStringAttribute(sipm_group, "size_m", doubleToString(sipm_cfg.size_m));
+        writeStringAttribute(sipm_group, "pde", factorDescription(efficiency_cfg.sipm_pde));
+        H5Gclose(sipm_group);
+
+        hid_t efficiency_group = H5Gcreate2(metadata_group, "efficiency",
+                                            H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        writeStringAttribute(efficiency_group, "constant_scale",
+                             doubleToString(efficiency_cfg.constant_scale));
+        writeStringAttribute(efficiency_group, "mirror_reflectivity",
+                             factorDescription(efficiency_cfg.mirror_reflectivity));
+        writeStringAttribute(efficiency_group, "filter_transmission",
+                             factorDescription(efficiency_cfg.filter_transmission));
+        writeStringAttribute(efficiency_group, "atmosphere",
+                             factorDescription(efficiency_cfg.atmosphere_transmission));
+        writeStringAttribute(efficiency_group, "funnel_acceptance",
+                             efficiency_cfg.use_funnel_acceptance ? "cos(theta)" : "not set -> 1");
+        H5Gclose(efficiency_group);
+
         hid_t electronics_group = H5Gcreate2(metadata_group, "electronics",
                                              H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
         writeStringAttribute(electronics_group, "model", "integrated_pe_placeholder");
-        writeStringAttribute(electronics_group, "pe_conversion",
-                             factorDescription(electronics_cfg.pe_conversion));
+        writeStringAttribute(electronics_group, "response",
+                             "reserved; SiPM PDE is handled by sipm.pde");
         H5Gclose(electronics_group);
 
         hid_t nsb_group = H5Gcreate2(metadata_group, "nsb",
@@ -1833,9 +1855,10 @@ void printCorsikaOpticalConfiguration(
 
     printSection("SiPM");
     printField("size_m", doubleToString(sipm_cfg.size_m));
+    printField("pde", factorDescription(efficiency_cfg.sipm_pde));
 
     printSection("Electronics");
-    printField("pe_conversion", factorDescription(electronics_cfg.pe_conversion));
+    printField("response", "reserved; SiPM PDE is handled by sipm.pde");
     printField("model", "integrated_pe_placeholder");
 
     printSection("NSB");
@@ -1860,7 +1883,6 @@ void printCorsikaOpticalConfiguration(
                factorDescription(efficiency_cfg.mirror_reflectivity));
     printField("filter_transmission",
                factorDescription(efficiency_cfg.filter_transmission));
-    printField("sipm_pde", factorDescription(efficiency_cfg.sipm_pde));
     printField("atmosphere", factorDescription(efficiency_cfg.atmosphere_transmission));
     printField("funnel_acceptance",
                efficiency_cfg.use_funnel_acceptance ? "cos(theta)" : "not set -> 1");
@@ -2207,7 +2229,9 @@ int main(int argc, char** argv) {
                                  metadata,
                                  camera,
                                  facets,
+                                 sipm_cfg,
                                  electronics_cfg,
+                                 efficiency_cfg,
                                  nsb_cfg,
                                  trigger_cfg,
                                  summaries,
