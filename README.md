@@ -748,6 +748,7 @@ configs/outputs/whiteboard_f8.cfg
 configs/outputs/focal_plane_f8.cfg
 configs/cameras/new_camera.cfg
 configs/cameras/new_camera_pixels.csv
+configs/sipm/ideal_sipm.cfg
 configs/sipm/new_camera_sipm.cfg
 configs/electronics/ideal_pe.cfg
 configs/efficiency/curves_all.cfg
@@ -756,6 +757,11 @@ configs/atmosphere/ideal.cfg
 configs/nsb/ideal.cfg
 configs/trigger/disabled.cfg
 ```
+
+Use `configs/sipm/ideal_sipm.cfg` for pure optical/camera tests where the SiPM
+aperture is present but PDE losses are disabled. Use
+`configs/sipm/new_camera_sipm.cfg` for full-response runs with the measured SiPM
+PDE curve.
 
 Reusable starting templates:
 
