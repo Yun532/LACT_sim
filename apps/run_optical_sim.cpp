@@ -37,6 +37,7 @@ int main(int argc, char** argv) {
         TelescopeFrame telescope_frame = buildTelescopeFrame(telescope_cfg);
         std::vector<MirrorFacet> facets = buildFacetsFromConfig(cfg);
         ErrorConfig error_cfg = buildErrorConfig(cfg);
+        ObstructionMask obstruction = buildObstructionMask(cfg);
         applyStructuralDeformation(facets, error_cfg, telescope_cfg);
         OutputPlane plane = buildOutputPlane(cfg);
         CameraConfig camera_cfg = buildCameraConfig(cfg);
@@ -99,6 +100,9 @@ int main(int argc, char** argv) {
         }
         if (!component_paths.error.empty()) {
             printField("error", component_paths.error);
+        }
+        if (!component_paths.obstruction.empty()) {
+            printField("obstruction", component_paths.obstruction);
         }
 
         printSection("Telescope");
@@ -300,6 +304,18 @@ int main(int argc, char** argv) {
         printField("reflectivity_scale_sigma",
                    doubleToString(error_cfg.reflectivity_scale_sigma));
 
+        printSection("Obstruction");
+        printField("enabled", obstruction.enabled ? "true" : "false");
+        if (obstruction.enabled) {
+            printField("mask_csv", obstruction.mask_csv);
+            printField("plane_z_m", doubleToString(obstruction.plane_z_m));
+            printField("grid",
+                       intToString(static_cast<std::uint64_t>(obstruction.nx)) +
+                       " x " +
+                       intToString(static_cast<std::uint64_t>(obstruction.ny)));
+            printField("cell_size_m", doubleToString(obstruction.cell_size_m));
+        }
+
         printSection("Model");
         printField("optics", "ideal reflection only");
         printField("speed_of_light_m/ns",
@@ -352,6 +368,7 @@ int main(int argc, char** argv) {
         int n_hit_surface = 0;
         int n_hit_camera = 0;
         int n_accepted = 0;
+        int n_blocked = 0;
         std::set<int> unique_hit_pixels;
         double sum_w = 0.0;
         double sum_r2 = 0.0;
@@ -366,6 +383,11 @@ int main(int argc, char** argv) {
             if ((!source_runtime_cfg.use_photon_csv && !source_runtime_cfg.use_eventio) ||
                 source_runtime_cfg.csv_local_telescope_frame) {
                 applyTelescopeFrame(photon, telescope_frame);
+            }
+
+            if (photonBlockedByObstruction(photon, obstruction, &telescope_frame)) {
+                ++n_blocked;
+                continue;
             }
 
             OpticalSurfaceHit hit = tracer.traceToPlane(photon, mirrors, plane, eff);
@@ -427,6 +449,8 @@ int main(int argc, char** argv) {
 
         printSection("Results");
         printField("total_photons", intToString(static_cast<std::uint64_t>(n_total)));
+        printField("blocked_by_obstruction",
+                   intToString(static_cast<std::uint64_t>(n_blocked)));
         printField("hit_mirror", intToString(static_cast<std::uint64_t>(n_hit_mirror)));
         printField("hit_output_plane", intToString(static_cast<std::uint64_t>(n_hit_surface)));
         if (camera_cfg.enabled) {
@@ -461,6 +485,7 @@ int main(int argc, char** argv) {
         printSection("Machine-readable summary");
         std::cout << "mirror_facets=" << mirrors.size() << "\n";
         std::cout << "total_photons=" << n_total << "\n";
+        std::cout << "blocked_by_obstruction=" << n_blocked << "\n";
         std::cout << "hit_mirror=" << n_hit_mirror << "\n";
         std::cout << "hit_output_plane=" << n_hit_surface << "\n";
         if (camera_cfg.enabled) {

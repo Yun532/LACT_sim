@@ -172,6 +172,7 @@ std::string scopedComponentKey(const std::string& key, const std::string& prefix
         startsWith(key, "nsb.") ||
         startsWith(key, "trigger.") ||
         startsWith(key, "error.") ||
+        startsWith(key, "obstruction.") ||
         startsWith(key, "dish.") ||
         startsWith(key, "facet.")) {
         return key;
@@ -204,7 +205,8 @@ bool isIncludeConfigKey(const std::string& key) {
            key == "atmosphere.config" ||
            key == "nsb.config" ||
            key == "trigger.config" ||
-           key == "error.config";
+           key == "error.config" ||
+           key == "obstruction.config";
 }
 
 void mergeTelescopeConfig(std::map<std::string, std::string>& dst,
@@ -253,6 +255,9 @@ void mergeComponentConfig(std::map<std::string, std::string>& dst,
         if (scoped == "error.structural_deformation_config") {
             value = resolveRelativePath(path, value);
         }
+        if (scoped == "obstruction.mask_csv") {
+            value = resolveRelativePath(path, value);
+        }
         dst[scoped] = value;
     }
 
@@ -278,6 +283,8 @@ void mergeComponentConfig(std::map<std::string, std::string>& dst,
         paths.trigger = path;
     } else if (include_key == "error.config") {
         paths.error = path;
+    } else if (include_key == "obstruction.config") {
+        paths.obstruction = path;
     }
 }
 
@@ -316,6 +323,8 @@ std::map<std::string, std::string> expandConfig(const std::map<std::string, std:
                          "trigger.config", "trigger.");
     mergeComponentConfig(expanded, paths, assembly_cfg, main_config_path,
                          "error.config", "error.");
+    mergeComponentConfig(expanded, paths, assembly_cfg, main_config_path,
+                         "obstruction.config", "obstruction.");
 
     // Assembly values intentionally override component defaults.
     for (const auto& kv : assembly_cfg) {
@@ -1944,6 +1953,135 @@ ErrorConfig buildErrorConfig(const std::map<std::string, std::string>& cfg) {
     checkNonNegative(error.reflectivity_scale_sigma,
                      "error.reflectivity_scale_sigma");
     return error;
+}
+
+bool ObstructionMask::contains(double x_m, double y_m) const
+{
+    if (!enabled || nx <= 0 || ny <= 0 || cell_size_m <= 0.0 ||
+        blocked.size() != static_cast<std::size_t>(nx * ny)) {
+        return false;
+    }
+    const int ix = static_cast<int>(std::floor((x_m - x_min_m) / cell_size_m));
+    const int iy = static_cast<int>(std::floor((y_m - y_min_m) / cell_size_m));
+    if (ix < 0 || iy < 0 || ix >= nx || iy >= ny) {
+        return false;
+    }
+    return blocked[static_cast<std::size_t>(iy * nx + ix)] != 0;
+}
+
+ObstructionMask buildObstructionMask(const std::map<std::string, std::string>& cfg)
+{
+    ObstructionMask obstruction;
+    obstruction.enabled = getBool(cfg, "obstruction.enabled", false);
+    obstruction.mask_csv = getString(cfg, "obstruction.mask_csv", "");
+    obstruction.plane_z_m = getDouble(cfg, "obstruction.plane_z_m", obstruction.plane_z_m);
+
+    if (!obstruction.enabled) {
+        return obstruction;
+    }
+    if (isDisabledText(obstruction.mask_csv)) {
+        throw std::runtime_error("obstruction.enabled=true requires obstruction.mask_csv");
+    }
+
+    std::ifstream in(obstruction.mask_csv);
+    if (!in) {
+        throw std::runtime_error("failed to read obstruction mask CSV: " +
+                                 obstruction.mask_csv);
+    }
+
+    std::string line;
+    bool saw_header = false;
+    while (std::getline(in, line)) {
+        line = trim(line);
+        if (line.empty()) {
+            continue;
+        }
+        if (line[0] == '#') {
+            const std::string meta = trim(line.substr(1));
+            const auto eq = meta.find('=');
+            if (eq == std::string::npos) {
+                continue;
+            }
+            const std::string key = lowerCopy(trim(meta.substr(0, eq)));
+            const std::string value = trim(meta.substr(eq + 1));
+            if (key == "x_min_m") {
+                obstruction.x_min_m = std::stod(value);
+            } else if (key == "y_min_m") {
+                obstruction.y_min_m = std::stod(value);
+            } else if (key == "cell_size_m") {
+                obstruction.cell_size_m = std::stod(value);
+            } else if (key == "nx") {
+                obstruction.nx = std::stoi(value);
+            } else if (key == "ny") {
+                obstruction.ny = std::stoi(value);
+            } else if (key == "plane_z_m") {
+                obstruction.plane_z_m = std::stod(value);
+            }
+            continue;
+        }
+
+        const auto cells = splitCsvCells(line);
+        if (!saw_header) {
+            saw_header = true;
+            continue;
+        }
+        if (obstruction.nx <= 0 || obstruction.ny <= 0) {
+            throw std::runtime_error("obstruction mask CSV must define # nx and # ny");
+        }
+        if (obstruction.blocked.empty()) {
+            obstruction.blocked.assign(static_cast<std::size_t>(obstruction.nx *
+                                                                obstruction.ny),
+                                       0);
+        }
+        if (cells.size() < 2) {
+            continue;
+        }
+        const int ix = std::stoi(cells[0]);
+        const int iy = std::stoi(cells[1]);
+        if (ix < 0 || iy < 0 || ix >= obstruction.nx || iy >= obstruction.ny) {
+            continue;
+        }
+        obstruction.blocked[static_cast<std::size_t>(iy * obstruction.nx + ix)] = 1;
+    }
+
+    if (!std::isfinite(obstruction.x_min_m) ||
+        !std::isfinite(obstruction.y_min_m) ||
+        !std::isfinite(obstruction.cell_size_m) ||
+        obstruction.cell_size_m <= 0.0 ||
+        obstruction.nx <= 0 || obstruction.ny <= 0) {
+        throw std::runtime_error("invalid obstruction mask metadata in " +
+                                 obstruction.mask_csv);
+    }
+    if (obstruction.blocked.empty()) {
+        obstruction.blocked.assign(static_cast<std::size_t>(obstruction.nx *
+                                                            obstruction.ny),
+                                   0);
+    }
+    return obstruction;
+}
+
+bool photonBlockedByObstruction(const Photon& photon,
+                                const ObstructionMask& obstruction,
+                                const TelescopeFrame* trace_to_local_frame)
+{
+    if (!obstruction.enabled) {
+        return false;
+    }
+    Vec3 p = photon.pos;
+    Vec3 d = photon.dir;
+    if (trace_to_local_frame) {
+        p = trace_to_local_frame->pointToLocal(photon.pos);
+        d = trace_to_local_frame->rotateVectorToLocal(photon.dir).normalized();
+    }
+    if (std::abs(d.z) < 1e-12) {
+        return false;
+    }
+    const double t = (obstruction.plane_z_m - p.z) / d.z;
+    if (t < 0.0) {
+        return false;
+    }
+    const Vec3 q = p + d * t;
+    return obstruction.contains(q.x, q.y);
 }
 
 void applyStructuralDeformation(std::vector<MirrorFacet>& facets,

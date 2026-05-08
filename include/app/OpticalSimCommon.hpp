@@ -43,6 +43,7 @@ struct ComponentConfigPaths {
     std::string nsb;
     std::string trigger;
     std::string error;
+    std::string obstruction;
 };
 
 struct PropagationConfig {
@@ -79,6 +80,20 @@ struct ErrorConfig {
     double radius_of_curvature_sigma_m = 0.0;
     double reflectivity_scale_sigma = 0.0;
     std::string structural_deformation_config;
+};
+
+struct ObstructionMask {
+    bool enabled = false;
+    std::string mask_csv;
+    double plane_z_m = -16.0;
+    double x_min_m = -4.5;
+    double y_min_m = -4.5;
+    double cell_size_m = 0.02;
+    int nx = 0;
+    int ny = 0;
+    std::vector<std::uint8_t> blocked;
+
+    bool contains(double x_m, double y_m) const;
 };
 
 struct CameraConfig {
@@ -270,6 +285,10 @@ void writePixelCsv(const std::string& path,
                    const std::map<PixelKey, PixelAccumulator>& pixels);
 TelescopeConfig buildTelescopeConfig(const std::map<std::string, std::string>& cfg);
 ErrorConfig buildErrorConfig(const std::map<std::string, std::string>& cfg);
+ObstructionMask buildObstructionMask(const std::map<std::string, std::string>& cfg);
+bool photonBlockedByObstruction(const Photon& photon,
+                                const ObstructionMask& obstruction,
+                                const TelescopeFrame* trace_to_local_frame = nullptr);
 void applyStructuralDeformation(std::vector<MirrorFacet>& facets,
                                 const ErrorConfig& error,
                                 const TelescopeConfig& telescope);

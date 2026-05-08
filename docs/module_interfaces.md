@@ -65,6 +65,39 @@ Current optical-path timing uses:
 propagation.speed_of_light_m_per_ns=0.299792458
 ```
 
+## Obstruction
+
+The obstruction module is a first-order support-shadow model. It checks whether
+a photon crosses a blocked cell in a configured plane before mirror
+intersection:
+
+```ini
+obstruction.config=configs/obstructions/lact_zz_asm_shadow.cfg
+```
+
+The included `lact_zz_asm_shadow` input was extracted from the support STEP
+model as a 2D mask in the LACT local aperture frame:
+
+```text
+STEP X -> local x
+STEP Z -> local y
+STEP Y -> local z
+```
+
+Runtime configuration:
+
+```ini
+obstruction.enabled=true
+obstruction.mask_csv=configs/obstructions/lact_zz_asm_shadow_mask.csv
+obstruction.plane_z_m=-16.0
+```
+
+The mask CSV stores blocked grid cells and metadata comments for grid origin,
+cell size, grid dimensions, and plane position. This approach is portable and
+fast because it does not require a CAD kernel on the server. It is suitable for
+on-axis and near-on-axis shadow studies. It is not a full 3D CAD ray-solid
+intersection model.
+
 ## SiPM And Electronics
 
 The current SiPM/electronics path is an interface layer:

@@ -36,6 +36,7 @@ done
 
 cd "$ROOT_DIR"
 mkdir -p run_logs/official_tests/perfect_parallel
+mkdir -p run_logs/official_tests/obstruction_parallel
 mkdir -p run_logs/official_tests/point_900m
 mkdir -p run_logs/official_tests/deformation_scan
 mkdir -p run_logs/official_tests/corsika/plots/shower1_array0_whiteboard
@@ -60,6 +61,14 @@ MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_spot_histogram.py \
   run_logs/official_tests/perfect_parallel/hits.csv \
   --output run_logs/official_tests/perfect_parallel/spot.png \
+  --max-bins 520 --dpi 350
+
+"$BUILD_DIR/run_optical_sim" configs/official_tests/perfect_parallel_obstructed_whiteboard.cfg \
+  2>&1 | tee run_logs/official_tests/obstruction_parallel/run.log
+MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
+python3 python/plot_spot_histogram.py \
+  run_logs/official_tests/obstruction_parallel/hits.csv \
+  --output run_logs/official_tests/obstruction_parallel/spot.png \
   --max-bins 520 --dpi 350
 
 "$BUILD_DIR/run_optical_sim" configs/official_tests/perfect_point_900m_whiteboard.cfg \

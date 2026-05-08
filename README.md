@@ -294,6 +294,64 @@ run_logs/official_tests/perfect_parallel/run.log
 run_logs/official_tests/perfect_parallel/spot.png
 ```
 
+### Parallel Light With Support Obstruction
+
+This test uses the same ideal parallel-light optical setup, but adds a
+simplified support shadow mask extracted from `lact-zz_asm.stp`. The full STEP
+file is not read at runtime; it is projected once into a portable 2D obstruction
+mask in the local mirror-support plane.
+
+Run ray tracing:
+
+```bash
+mkdir -p run_logs/official_tests/obstruction_parallel
+build/run_optical_sim configs/official_tests/perfect_parallel_obstructed_whiteboard.cfg \
+  2>&1 | tee run_logs/official_tests/obstruction_parallel/run.log
+```
+
+Plot the whiteboard spot:
+
+```bash
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_spot_histogram.py \
+  run_logs/official_tests/obstruction_parallel/hits.csv \
+  --output run_logs/official_tests/obstruction_parallel/spot.png \
+  --max-bins 520 \
+  --dpi 350 \
+  --title "Perfect optics: on-axis parallel light with support obstruction"
+```
+
+Main outputs:
+
+```text
+run_logs/official_tests/obstruction_parallel/hits.csv
+run_logs/official_tests/obstruction_parallel/run.log
+run_logs/official_tests/obstruction_parallel/spot.png
+```
+
+The current extracted mask is:
+
+```text
+configs/obstructions/lact_zz_asm_shadow.cfg
+configs/obstructions/lact_zz_asm_shadow_mask.csv
+```
+
+To regenerate the mask from the original STEP file:
+
+```bash
+python3 tools/extract_step_shadow_mask.py /path/to/lact-zz_asm.stp \
+  --output configs/obstructions/lact_zz_asm_shadow_mask.csv \
+  --preview run_logs/obstruction_parallel/obstruction_mask_preview.png \
+  --extent-m 4.5 \
+  --cell-size-m 0.02 \
+  --dilate-cells 2 \
+  --plane-z-m -16.0
+```
+
+The adopted CAD-to-LACT local mapping is documented in
+`configs/obstructions/lact_zz_asm_shadow.cfg`. For the current mask and 1M
+on-axis photons, the obstruction blocks about 12% of generated photons before
+mirror intersection.
+
 ### 900 m Point Source
 
 Run ray tracing:
@@ -730,6 +788,7 @@ See `docs/hdf5_output_format.md` for the file layout.
 
 ```text
 configs/official_tests/perfect_parallel_whiteboard.cfg
+configs/official_tests/perfect_parallel_obstructed_whiteboard.cfg
 configs/official_tests/perfect_point_900m_whiteboard.cfg
 configs/official_tests/deformation_parallel_whiteboard.cfg
 configs/official_tests/corsika_whiteboard.cfg
@@ -752,6 +811,8 @@ configs/sipm/ideal_sipm.cfg
 configs/sipm/new_camera_sipm.cfg
 configs/electronics/ideal_pe.cfg
 configs/efficiency/curves_all.cfg
+configs/obstructions/lact_zz_asm_shadow.cfg
+configs/obstructions/lact_zz_asm_shadow_mask.csv
 configs/errors/full_response_1229.cfg
 configs/atmosphere/ideal.cfg
 configs/nsb/ideal.cfg

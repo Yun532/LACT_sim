@@ -33,6 +33,7 @@ def _scoped_key(key, prefix):
         "nsb.",
         "trigger.",
         "error.",
+        "obstruction.",
         "dish.",
         "facet.",
     )
@@ -61,6 +62,7 @@ def _is_include_config_key(key):
         "nsb.config",
         "trigger.config",
         "error.config",
+        "obstruction.config",
     }
 
 
@@ -96,6 +98,7 @@ def expand_component_config(main_config_path):
         ("nsb.config", "nsb.", "nsb"),
         ("trigger.config", "trigger.", "trigger"),
         ("error.config", "error.", "error"),
+        ("obstruction.config", "obstruction.", "obstruction"),
     ):
         include = assembly_cfg.get(include_key)
         if not include:
@@ -106,6 +109,8 @@ def expand_component_config(main_config_path):
         for key, value in component_cfg.items():
             scoped = _scoped_key(key, prefix)
             if scoped == "error.structural_deformation_config":
+                value = str(_resolve_include_path(component_path, value))
+            if scoped == "obstruction.mask_csv":
                 value = str(_resolve_include_path(component_path, value))
             expanded[scoped] = value
 

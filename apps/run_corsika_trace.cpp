@@ -31,6 +31,7 @@ struct TraceSummary {
     int telescope_id = 0;
     std::uint64_t input_bunches = 0;
     double input_photons = 0.0;
+    std::uint64_t blocked_by_obstruction = 0;
     std::uint64_t hit_mirror = 0;
     std::uint64_t hit_output_plane = 0;
     std::uint64_t hit_camera = 0;
@@ -47,6 +48,7 @@ struct TelescopeEventAccumulator {
     std::set<int> output_events;
     std::uint64_t input_bunches = 0;
     double input_photons = 0.0;
+    std::uint64_t blocked_by_obstruction = 0;
     std::uint64_t hit_mirror = 0;
     std::uint64_t hit_output_plane = 0;
     std::uint64_t hit_camera = 0;
@@ -384,7 +386,7 @@ void writeSummaryCsv(const std::string& path,
     }
     ofs << std::setprecision(10);
     ofs << "event_id,telescope_id,input_bunches,input_photons,"
-        << "hit_mirror,hit_output_plane,hit_camera,accepted_camera,"
+        << "blocked_by_obstruction,hit_mirror,hit_output_plane,hit_camera,accepted_camera,"
         << "lost_between_pixels,unique_hit_pixels,pe,signal,"
         << "time_mean_ns,time_rms_ns\n";
     for (const auto& kv : summaries) {
@@ -399,6 +401,7 @@ void writeSummaryCsv(const std::string& path,
             << s.telescope_id << ","
             << s.input_bunches << ","
             << s.input_photons << ","
+            << s.blocked_by_obstruction << ","
             << s.hit_mirror << ","
             << s.hit_output_plane << ","
             << s.hit_camera << ","
@@ -643,6 +646,7 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             {"efficiency", component_paths.efficiency},
             {"atmosphere", component_paths.atmosphere},
             {"error", component_paths.error},
+            {"obstruction", component_paths.obstruction},
         };
         for (const auto& item : component_items) {
             if (item.second.empty()) {
@@ -1556,6 +1560,7 @@ std::string formatStreamSummaryLine(const TraceSummary& s,
           << " event_id=" << s.event_id
           << " input_bunches=" << s.input_bunches
           << " input_photons=" << doubleToString(s.input_photons, 3)
+          << " blocked=" << s.blocked_by_obstruction
           << " hit_mirror=" << s.hit_mirror
           << " hit_output=" << s.hit_output_plane;
     if (camera_enabled) {
@@ -1585,6 +1590,7 @@ std::string formatTelescopeEventLine(const TelescopeEventAccumulator& s,
           << " output_events=" << s.output_events.size()
           << " input_bunches=" << s.input_bunches
           << " input_photons=" << doubleToString(s.input_photons, 3)
+          << " blocked=" << s.blocked_by_obstruction
           << " hit_mirror=" << s.hit_mirror
           << " hit_output=" << s.hit_output_plane;
     if (camera_enabled) {
@@ -1633,6 +1639,7 @@ void printEventSummary(const std::map<SummaryKey, TraceSummary>& summaries,
         std::set<int> telescopes;
         std::uint64_t input_bunches = 0;
         double input_photons = 0.0;
+        std::uint64_t blocked_by_obstruction = 0;
         std::uint64_t hit_output_plane = 0;
         std::uint64_t hit_camera = 0;
         std::uint64_t accepted_camera = 0;
@@ -1654,6 +1661,7 @@ void printEventSummary(const std::map<SummaryKey, TraceSummary>& summaries,
         e.telescopes.insert(s.telescope_id);
         e.input_bunches += s.input_bunches;
         e.input_photons += s.input_photons;
+        e.blocked_by_obstruction += s.blocked_by_obstruction;
         e.hit_output_plane += s.hit_output_plane;
         e.hit_camera += s.hit_camera;
         e.accepted_camera += s.accepted_camera;
@@ -1665,8 +1673,8 @@ void printEventSummary(const std::map<SummaryKey, TraceSummary>& summaries,
     printSection("Per-event summary");
     printField("columns",
                camera_enabled
-                   ? "event_id shower_event array_id energy_gev core_N_m core_E_m core_source telescopes input_bunches input_photons hit_output hit_camera accepted pe time_mean_ns time_rms_ns"
-                   : "event_id shower_event array_id energy_gev core_N_m core_E_m core_source telescopes input_bunches input_photons hit_output signal time_mean_ns time_rms_ns");
+                   ? "event_id shower_event array_id energy_gev core_N_m core_E_m core_source telescopes input_bunches input_photons blocked hit_output hit_camera accepted pe time_mean_ns time_rms_ns"
+                   : "event_id shower_event array_id energy_gev core_N_m core_E_m core_source telescopes input_bunches input_photons blocked hit_output signal time_mean_ns time_rms_ns");
     for (const auto& kv : events) {
         const auto& e = kv.second;
         const OutputEventMetadata meta = outputEventMetadata(e.event_id, event_id_mode, metadata);
@@ -1695,6 +1703,7 @@ void printEventSummary(const std::map<SummaryKey, TraceSummary>& summaries,
               << " telescopes=" << e.telescopes.size()
               << " input_bunches=" << e.input_bunches
               << " input_photons=" << doubleToString(e.input_photons, 3)
+              << " blocked=" << e.blocked_by_obstruction
               << " hit_output=" << e.hit_output_plane;
         if (camera_enabled) {
             value << " hit_camera=" << e.hit_camera
@@ -1726,6 +1735,7 @@ void printCorsikaOpticalConfiguration(
     const TriggerConfig& trigger_cfg,
     const OpticalEfficiencyConfig& efficiency_cfg,
     const ErrorConfig& error_cfg,
+    const ObstructionMask& obstruction,
     const PropagationConfig& propagation_cfg)
 {
     const std::string mirror_mode = lowerCopy(getString(cfg, "mirror.mode", "generated"));
@@ -1907,6 +1917,18 @@ void printCorsikaOpticalConfiguration(
     printField("reflectivity_scale_sigma",
                doubleToString(error_cfg.reflectivity_scale_sigma));
 
+    printSection("Obstruction");
+    printField("enabled", obstruction.enabled ? "true" : "false");
+    if (obstruction.enabled) {
+        printField("mask_csv", obstruction.mask_csv);
+        printField("plane_z_m", doubleToString(obstruction.plane_z_m));
+        printField("grid",
+                   intToString(static_cast<std::uint64_t>(obstruction.nx)) +
+                   " x " +
+                   intToString(static_cast<std::uint64_t>(obstruction.ny)));
+        printField("cell_size_m", doubleToString(obstruction.cell_size_m));
+    }
+
     printSection("Model");
     printField("optics", "ideal reflection only");
     printField("speed_of_light_m/ns",
@@ -1962,6 +1984,7 @@ int main(int argc, char** argv) {
         TelescopeConfig telescope_cfg = buildTelescopeConfig(cfg);
         std::vector<MirrorFacet> facets = buildFacetsFromConfig(cfg);
         ErrorConfig error_cfg = buildErrorConfig(cfg);
+        ObstructionMask obstruction = buildObstructionMask(cfg);
         applyStructuralDeformation(facets, error_cfg, telescope_cfg);
         applyFacetErrors(facets, error_cfg);
         OutputPlane plane = buildOutputPlane(cfg);
@@ -2009,6 +2032,9 @@ int main(int argc, char** argv) {
         if (!component_paths.nsb.empty()) printField("nsb", component_paths.nsb);
         if (!component_paths.trigger.empty()) printField("trigger", component_paths.trigger);
         if (!component_paths.error.empty()) printField("error", component_paths.error);
+        if (!component_paths.obstruction.empty()) {
+            printField("obstruction", component_paths.obstruction);
+        }
         if (component_paths.source.empty()) printField("source", "inline EventIO settings");
 
         printCorsikaOpticalConfiguration(cfg,
@@ -2028,6 +2054,7 @@ int main(int argc, char** argv) {
                                          trigger_cfg,
                                          efficiency_cfg,
                                          error_cfg,
+                                         obstruction,
                                          propagation_cfg);
         auto eventio_cfg = buildEventIOPhotonConfig(cfg, source_cfg, source_runtime_cfg);
 
@@ -2075,6 +2102,7 @@ int main(int argc, char** argv) {
                            : "telescope output_events input_bunches input_photons hit_mirror hit_output signal time_mean_ns time_rms_ns");
             std::uint64_t input_bunches = 0;
             double input_photons = 0.0;
+            std::uint64_t blocked = 0;
             std::uint64_t hit_output = 0;
             std::uint64_t hit_camera = 0;
             std::uint64_t accepted = 0;
@@ -2089,6 +2117,7 @@ int main(int argc, char** argv) {
                 }
                 input_bunches += s.input_bunches;
                 input_photons += s.input_photons;
+                blocked += s.blocked_by_obstruction;
                 hit_output += s.hit_output_plane;
                 hit_camera += s.hit_camera;
                 accepted += s.accepted_camera;
@@ -2099,6 +2128,7 @@ int main(int argc, char** argv) {
                 tel.output_events.insert(s.event_id);
                 tel.input_bunches += s.input_bunches;
                 tel.input_photons += s.input_photons;
+                tel.blocked_by_obstruction += s.blocked_by_obstruction;
                 tel.hit_mirror += s.hit_mirror;
                 tel.hit_output_plane += s.hit_output_plane;
                 tel.hit_camera += s.hit_camera;
@@ -2118,6 +2148,7 @@ int main(int argc, char** argv) {
                   << " telescopes=" << telescopes.size()
                   << " input_bunches=" << input_bunches
                   << " input_photons=" << doubleToString(input_photons, 3)
+                  << " blocked=" << blocked
                   << " hit_output=" << hit_output;
             if (camera_cfg.enabled) {
                 value << " hit_camera=" << hit_camera
@@ -2154,6 +2185,11 @@ int main(int argc, char** argv) {
             Photon photon = bunch.photon;
             photon.normalizeDirection();
             photon.weight *= bunch.multiplicity;
+
+            if (photonBlockedByObstruction(photon, obstruction, nullptr)) {
+                summary.blocked_by_obstruction += 1;
+                return;
+            }
 
             OpticalSurfaceHit hit = tracer.traceToPlane(photon, mirrors, plane, eff);
             if (hit.hit_mirror) {
