@@ -100,10 +100,22 @@ struct ObstructionMask {
     struct Primitive {
         std::string type;
         std::string name;
+        std::string role = "default";
+        std::string material_id = "default";
         Vec3 p0;
         Vec3 p1;
         double radius_m = 0.0;
         Vec3 half_size;
+        Vec3 bbox_min;
+        Vec3 bbox_max;
+        Vec3 center;
+        double height_m = 0.0;
+        double rotation_rad = 0.0;
+        int sides = 0;
+        double hole_radius_m = 0.0;
+        double hole_rotation_rad = 0.0;
+        int hole_sides = 0;
+        bool has_hole = false;
     };
 
     std::vector<Primitive> primitives;

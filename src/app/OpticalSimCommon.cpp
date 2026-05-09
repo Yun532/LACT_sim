@@ -2026,7 +2026,9 @@ bool segmentIntersectsCylinder(const Vec3& a,
 bool segmentIntersectsAabb(const Vec3& a,
                            const Vec3& b,
                            const Vec3& center,
-                           const Vec3& half)
+                           const Vec3& half,
+                           double* out_t0 = nullptr,
+                           double* out_t1 = nullptr)
 {
     const Vec3 d = b - a;
     double tmin = 0.0;
@@ -2053,7 +2055,179 @@ bool segmentIntersectsAabb(const Vec3& a,
             return false;
         }
     }
+    if (out_t0) {
+        *out_t0 = tmin;
+    }
+    if (out_t1) {
+        *out_t1 = tmax;
+    }
     return true;
+}
+
+std::vector<Vec3> regularPolygonVertices(double radius,
+                                          double rotation,
+                                          int sides,
+                                          double z = 0.0)
+{
+    std::vector<Vec3> vertices;
+    if (radius <= 0.0 || sides < 3) {
+        return vertices;
+    }
+    vertices.reserve(static_cast<std::size_t>(sides));
+    for (int i = 0; i < sides; ++i) {
+        constexpr double kPi = 3.141592653589793238462643383279502884;
+        const double theta = rotation + 2.0 * kPi * static_cast<double>(i) /
+                                            static_cast<double>(sides);
+        vertices.push_back({radius * std::cos(theta), radius * std::sin(theta), z});
+    }
+    return vertices;
+}
+
+bool pointInsideRegularPolygon(const Vec3& p,
+                               const Vec3& center,
+                               double radius,
+                               double rotation,
+                               int sides)
+{
+    const auto vertices = regularPolygonVertices(radius, rotation, sides);
+    if (vertices.empty()) {
+        return false;
+    }
+    bool has_pos = false;
+    bool has_neg = false;
+    const double x = p.x - center.x;
+    const double y = p.y - center.y;
+    for (std::size_t i = 0; i < vertices.size(); ++i) {
+        const Vec3& a = vertices[i];
+        const Vec3& b = vertices[(i + 1) % vertices.size()];
+        const double cross = (b.x - a.x) * (y - a.y) -
+                             (b.y - a.y) * (x - a.x);
+        if (cross > 1e-12) {
+            has_pos = true;
+        } else if (cross < -1e-12) {
+            has_neg = true;
+        }
+        if (has_pos && has_neg) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool segmentIntersectsRegularPrism(const Vec3& a,
+                                   const Vec3& b,
+                                   const Vec3& center,
+                                   double radius,
+                                   double height,
+                                   double rotation,
+                                   int sides)
+{
+    if (radius <= 0.0 || height <= 0.0 || sides < 3) {
+        return false;
+    }
+    const Vec3 half{radius, radius, 0.5 * height};
+    double t0 = 0.0;
+    double t1 = 0.0;
+    if (!segmentIntersectsAabb(a, b, center, half, &t0, &t1)) {
+        return false;
+    }
+    const Vec3 d = b - a;
+    const Vec3 p0 = a + d * t0;
+    const Vec3 p1 = a + d * t1;
+    const Vec3 pm = a + d * (0.5 * (t0 + t1));
+    return pointInsideRegularPolygon(p0, center, radius, rotation, sides) ||
+           pointInsideRegularPolygon(p1, center, radius, rotation, sides) ||
+           pointInsideRegularPolygon(pm, center, radius, rotation, sides);
+}
+
+bool segmentIntersectsBoxWithHole(const Vec3& a,
+                                  const Vec3& b,
+                                  const ObstructionMask::Primitive& primitive)
+{
+    double t0 = 0.0;
+    double t1 = 0.0;
+    if (!segmentIntersectsAabb(a, b, primitive.center, primitive.half_size,
+                               &t0, &t1)) {
+        return false;
+    }
+    if (!primitive.has_hole) {
+        return true;
+    }
+    const Vec3 d = b - a;
+    const Vec3 entry = a + d * t0;
+    const Vec3 exit = a + d * t1;
+    const bool entry_inside = pointInsideRegularPolygon(entry,
+                                                        primitive.center,
+                                                        primitive.hole_radius_m,
+                                                        primitive.hole_rotation_rad,
+                                                        primitive.hole_sides);
+    const bool exit_inside = pointInsideRegularPolygon(exit,
+                                                       primitive.center,
+                                                       primitive.hole_radius_m,
+                                                       primitive.hole_rotation_rad,
+                                                       primitive.hole_sides);
+    // The hole is a convex vertical prism. If both endpoints of the segment
+    // inside the AABB are inside the aperture, the whole segment stays in the
+    // aperture and the box should not block it.
+    return !(entry_inside && exit_inside);
+}
+
+bool primitiveAppliesToDirection(const ObstructionMask::Primitive& primitive,
+                                 const Vec3& direction)
+{
+    const std::string role = lowerCopy(primitive.role);
+    const std::string material = lowerCopy(primitive.material_id);
+    if (material == "void") {
+        return false;
+    }
+    if (direction.z > 0.0 && role != "support_strut") {
+        return false;
+    }
+    return true;
+}
+
+std::map<std::string, std::string> csvRowMap(const std::vector<std::string>& header,
+                                             const std::vector<std::string>& cells)
+{
+    std::map<std::string, std::string> row;
+    const std::size_t n = std::min(header.size(), cells.size());
+    for (std::size_t i = 0; i < n; ++i) {
+        row[lowerCopy(trim(header[i]))] = trim(cells[i]);
+    }
+    return row;
+}
+
+std::string csvGetString(const std::map<std::string, std::string>& row,
+                         const std::string& key,
+                         const std::string& fallback = "")
+{
+    const auto it = row.find(lowerCopy(key));
+    if (it == row.end() || trim(it->second).empty()) {
+        return fallback;
+    }
+    return it->second;
+}
+
+double csvGetDouble(const std::map<std::string, std::string>& row,
+                    const std::string& key,
+                    double fallback = 0.0)
+{
+    const std::string value = csvGetString(row, key, "");
+    if (value.empty()) {
+        return fallback;
+    }
+    return std::stod(value);
+}
+
+int csvGetInt(const std::map<std::string, std::string>& row,
+              const std::string& key,
+              int fallback = 0)
+{
+    const std::string value = csvGetString(row, key, "");
+    if (value.empty()) {
+        return fallback;
+    }
+    return std::stoi(value);
 }
 
 bool segmentBlockedLocal(const Vec3& a,
@@ -2064,7 +2238,11 @@ bool segmentBlockedLocal(const Vec3& a,
         return false;
     }
     if (lowerCopy(obstruction.mode) == "primitives") {
+        const Vec3 direction = b - a;
         for (const auto& primitive : obstruction.primitives) {
+            if (!primitiveAppliesToDirection(primitive, direction)) {
+                continue;
+            }
             const std::string type = lowerCopy(primitive.type);
             if (type == "cylinder") {
                 if (segmentIntersectsCylinder(a, b, primitive.p0, primitive.p1,
@@ -2072,7 +2250,15 @@ bool segmentBlockedLocal(const Vec3& a,
                     return true;
                 }
             } else if (type == "box" || type == "aabb") {
-                if (segmentIntersectsAabb(a, b, primitive.p0, primitive.half_size)) {
+                if (segmentIntersectsBoxWithHole(a, b, primitive)) {
+                    return true;
+                }
+            } else if (type == "polygon_prism") {
+                if (segmentIntersectsRegularPrism(a, b, primitive.center,
+                                                  primitive.radius_m,
+                                                  primitive.height_m,
+                                                  primitive.rotation_rad,
+                                                  primitive.sides)) {
                     return true;
                 }
             }
@@ -2119,27 +2305,57 @@ ObstructionMask buildObstructionMask(const std::map<std::string, std::string>& c
                                      obstruction.primitives_csv);
         }
         std::string line;
-        bool saw_header = false;
+        std::vector<std::string> header;
         while (std::getline(in, line)) {
             line = trim(line);
             if (line.empty() || line[0] == '#') {
                 continue;
             }
             const auto cells = splitCsvCells(line);
-            if (!saw_header) {
-                saw_header = true;
+            if (header.empty()) {
+                header = cells;
                 continue;
             }
-            if (cells.size() < 12) {
+            const auto row = csvRowMap(header, cells);
+            if (row.empty()) {
                 continue;
             }
             ObstructionMask::Primitive p;
-            p.type = lowerCopy(cells[0]);
-            p.name = cells[1];
-            p.p0 = {std::stod(cells[2]), std::stod(cells[3]), std::stod(cells[4])};
-            p.p1 = {std::stod(cells[5]), std::stod(cells[6]), std::stod(cells[7])};
-            p.radius_m = std::stod(cells[8]);
-            p.half_size = {std::stod(cells[9]), std::stod(cells[10]), std::stod(cells[11])};
+            p.type = lowerCopy(csvGetString(row, "type"));
+            p.name = csvGetString(row, "name", csvGetString(row, "role", p.type));
+            p.role = csvGetString(row, "role", "default");
+            p.material_id = csvGetString(row, "material_id", "default");
+            p.p0 = {csvGetDouble(row, "x0_m"),
+                    csvGetDouble(row, "y0_m"),
+                    csvGetDouble(row, "z0_m")};
+            p.p1 = {csvGetDouble(row, "x1_m", p.p0.x),
+                    csvGetDouble(row, "y1_m", p.p0.y),
+                    csvGetDouble(row, "z1_m", p.p0.z)};
+            p.center = {csvGetDouble(row, "center_x_m", p.p0.x),
+                        csvGetDouble(row, "center_y_m", p.p0.y),
+                        csvGetDouble(row, "center_z_m", p.p0.z)};
+            p.radius_m = csvGetDouble(row, "radius_m");
+            p.height_m = csvGetDouble(row, "height_m");
+            p.rotation_rad = csvGetDouble(row, "rotation_rad");
+            p.sides = csvGetInt(row, "sides");
+            p.half_size = {csvGetDouble(row, "half_x_m"),
+                           csvGetDouble(row, "half_y_m"),
+                           csvGetDouble(row, "half_z_m")};
+            p.bbox_min = {csvGetDouble(row, "bbox_min_x_m", p.center.x - p.half_size.x),
+                          csvGetDouble(row, "bbox_min_y_m", p.center.y - p.half_size.y),
+                          csvGetDouble(row, "bbox_min_z_m", p.center.z - p.half_size.z)};
+            p.bbox_max = {csvGetDouble(row, "bbox_max_x_m", p.center.x + p.half_size.x),
+                          csvGetDouble(row, "bbox_max_y_m", p.center.y + p.half_size.y),
+                          csvGetDouble(row, "bbox_max_z_m", p.center.z + p.half_size.z)};
+            if (p.half_size.norm2() <= 0.0 &&
+                (p.bbox_max - p.bbox_min).norm2() > 0.0) {
+                p.center = (p.bbox_min + p.bbox_max) * 0.5;
+                p.half_size = (p.bbox_max - p.bbox_min) * 0.5;
+            }
+            p.hole_radius_m = csvGetDouble(row, "hole_radius_m");
+            p.hole_rotation_rad = csvGetDouble(row, "hole_rotation_rad");
+            p.hole_sides = csvGetInt(row, "hole_sides");
+            p.has_hole = p.hole_radius_m > 0.0 && p.hole_sides >= 3;
             obstruction.primitives.push_back(p);
         }
         if (obstruction.primitives.empty()) {

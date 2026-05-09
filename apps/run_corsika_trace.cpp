@@ -32,6 +32,8 @@ struct TraceSummary {
     std::uint64_t input_bunches = 0;
     double input_photons = 0.0;
     std::uint64_t blocked_by_obstruction = 0;
+    std::uint64_t blocked_incoming = 0;
+    std::uint64_t blocked_reflected = 0;
     std::uint64_t hit_mirror = 0;
     std::uint64_t hit_output_plane = 0;
     std::uint64_t hit_camera = 0;
@@ -49,6 +51,8 @@ struct TelescopeEventAccumulator {
     std::uint64_t input_bunches = 0;
     double input_photons = 0.0;
     std::uint64_t blocked_by_obstruction = 0;
+    std::uint64_t blocked_incoming = 0;
+    std::uint64_t blocked_reflected = 0;
     std::uint64_t hit_mirror = 0;
     std::uint64_t hit_output_plane = 0;
     std::uint64_t hit_camera = 0;
@@ -386,7 +390,8 @@ void writeSummaryCsv(const std::string& path,
     }
     ofs << std::setprecision(10);
     ofs << "event_id,telescope_id,input_bunches,input_photons,"
-        << "blocked_by_obstruction,hit_mirror,hit_output_plane,hit_camera,accepted_camera,"
+        << "blocked_by_obstruction,blocked_incoming,blocked_reflected,"
+        << "hit_mirror,hit_output_plane,hit_camera,accepted_camera,"
         << "lost_between_pixels,unique_hit_pixels,pe,signal,"
         << "time_mean_ns,time_rms_ns\n";
     for (const auto& kv : summaries) {
@@ -402,6 +407,8 @@ void writeSummaryCsv(const std::string& path,
             << s.input_bunches << ","
             << s.input_photons << ","
             << s.blocked_by_obstruction << ","
+            << s.blocked_incoming << ","
+            << s.blocked_reflected << ","
             << s.hit_mirror << ","
             << s.hit_output_plane << ","
             << s.hit_camera << ","
@@ -1561,6 +1568,8 @@ std::string formatStreamSummaryLine(const TraceSummary& s,
           << " input_bunches=" << s.input_bunches
           << " input_photons=" << doubleToString(s.input_photons, 3)
           << " blocked=" << s.blocked_by_obstruction
+          << " blocked_incoming=" << s.blocked_incoming
+          << " blocked_reflected=" << s.blocked_reflected
           << " hit_mirror=" << s.hit_mirror
           << " hit_output=" << s.hit_output_plane;
     if (camera_enabled) {
@@ -1591,6 +1600,8 @@ std::string formatTelescopeEventLine(const TelescopeEventAccumulator& s,
           << " input_bunches=" << s.input_bunches
           << " input_photons=" << doubleToString(s.input_photons, 3)
           << " blocked=" << s.blocked_by_obstruction
+          << " blocked_incoming=" << s.blocked_incoming
+          << " blocked_reflected=" << s.blocked_reflected
           << " hit_mirror=" << s.hit_mirror
           << " hit_output=" << s.hit_output_plane;
     if (camera_enabled) {
@@ -1640,6 +1651,8 @@ void printEventSummary(const std::map<SummaryKey, TraceSummary>& summaries,
         std::uint64_t input_bunches = 0;
         double input_photons = 0.0;
         std::uint64_t blocked_by_obstruction = 0;
+        std::uint64_t blocked_incoming = 0;
+        std::uint64_t blocked_reflected = 0;
         std::uint64_t hit_output_plane = 0;
         std::uint64_t hit_camera = 0;
         std::uint64_t accepted_camera = 0;
@@ -1662,6 +1675,8 @@ void printEventSummary(const std::map<SummaryKey, TraceSummary>& summaries,
         e.input_bunches += s.input_bunches;
         e.input_photons += s.input_photons;
         e.blocked_by_obstruction += s.blocked_by_obstruction;
+        e.blocked_incoming += s.blocked_incoming;
+        e.blocked_reflected += s.blocked_reflected;
         e.hit_output_plane += s.hit_output_plane;
         e.hit_camera += s.hit_camera;
         e.accepted_camera += s.accepted_camera;
@@ -1704,6 +1719,8 @@ void printEventSummary(const std::map<SummaryKey, TraceSummary>& summaries,
               << " input_bunches=" << e.input_bunches
               << " input_photons=" << doubleToString(e.input_photons, 3)
               << " blocked=" << e.blocked_by_obstruction
+              << " blocked_incoming=" << e.blocked_incoming
+              << " blocked_reflected=" << e.blocked_reflected
               << " hit_output=" << e.hit_output_plane;
         if (camera_enabled) {
             value << " hit_camera=" << e.hit_camera
@@ -2112,6 +2129,8 @@ int main(int argc, char** argv) {
             std::uint64_t input_bunches = 0;
             double input_photons = 0.0;
             std::uint64_t blocked = 0;
+            std::uint64_t blocked_incoming = 0;
+            std::uint64_t blocked_reflected = 0;
             std::uint64_t hit_output = 0;
             std::uint64_t hit_camera = 0;
             std::uint64_t accepted = 0;
@@ -2127,6 +2146,8 @@ int main(int argc, char** argv) {
                 input_bunches += s.input_bunches;
                 input_photons += s.input_photons;
                 blocked += s.blocked_by_obstruction;
+                blocked_incoming += s.blocked_incoming;
+                blocked_reflected += s.blocked_reflected;
                 hit_output += s.hit_output_plane;
                 hit_camera += s.hit_camera;
                 accepted += s.accepted_camera;
@@ -2138,6 +2159,8 @@ int main(int argc, char** argv) {
                 tel.input_bunches += s.input_bunches;
                 tel.input_photons += s.input_photons;
                 tel.blocked_by_obstruction += s.blocked_by_obstruction;
+                tel.blocked_incoming += s.blocked_incoming;
+                tel.blocked_reflected += s.blocked_reflected;
                 tel.hit_mirror += s.hit_mirror;
                 tel.hit_output_plane += s.hit_output_plane;
                 tel.hit_camera += s.hit_camera;
@@ -2158,6 +2181,8 @@ int main(int argc, char** argv) {
                   << " input_bunches=" << input_bunches
                   << " input_photons=" << doubleToString(input_photons, 3)
                   << " blocked=" << blocked
+                  << " blocked_incoming=" << blocked_incoming
+                  << " blocked_reflected=" << blocked_reflected
                   << " hit_output=" << hit_output;
             if (camera_cfg.enabled) {
                 value << " hit_camera=" << hit_camera
@@ -2197,6 +2222,7 @@ int main(int argc, char** argv) {
 
             if (photonBlockedByObstruction(photon, obstruction, nullptr)) {
                 summary.blocked_by_obstruction += 1;
+                summary.blocked_incoming += 1;
                 return;
             }
 
@@ -2210,6 +2236,7 @@ int main(int argc, char** argv) {
             if (segmentBlockedByObstruction(hit.mirror_point, hit.surface_point,
                                             obstruction, nullptr)) {
                 summary.blocked_by_obstruction += 1;
+                summary.blocked_reflected += 1;
                 return;
             }
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import csv
 import math
 from pathlib import Path
 
@@ -139,26 +140,34 @@ def load_obstruction_cells(mask_csv):
 
 def load_obstruction_primitives(primitives_csv):
     primitives = []
-    with Path(primitives_csv).open() as handle:
-        reader = None
-        for raw in handle:
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-            if reader is None:
-                reader = [item.strip() for item in line.split(",")]
-                continue
-            cells = [item.strip() for item in line.split(",")]
-            if len(cells) < 12:
-                continue
+    with Path(primitives_csv).open(newline="") as handle:
+        rows = csv.DictReader(line for line in handle if not line.lstrip().startswith("#"))
+        for row in rows:
+            def value(key, default=0.0):
+                text = row.get(key, "")
+                if text in ("", None):
+                    return default
+                return float(text)
             primitives.append(
                 {
-                    "type": cells[0].lower(),
-                    "name": cells[1],
-                    "p0": np.array([float(cells[2]), float(cells[3]), float(cells[4])]),
-                    "p1": np.array([float(cells[5]), float(cells[6]), float(cells[7])]),
-                    "radius": float(cells[8]),
-                    "half": np.array([float(cells[9]), float(cells[10]), float(cells[11])]),
+                    "type": row.get("type", "").lower(),
+                    "name": row.get("name", ""),
+                    "role": row.get("role", ""),
+                    "p0": np.array([value("x0_m"), value("y0_m"), value("z0_m")]),
+                    "p1": np.array([value("x1_m"), value("y1_m"), value("z1_m")]),
+                    "center": np.array([
+                        value("center_x_m", value("x0_m")),
+                        value("center_y_m", value("y0_m")),
+                        value("center_z_m", value("z0_m")),
+                    ]),
+                    "radius": value("radius_m"),
+                    "height": value("height_m"),
+                    "rotation": value("rotation_rad"),
+                    "sides": int(value("sides")),
+                    "half": np.array([value("half_x_m"), value("half_y_m"), value("half_z_m")]),
+                    "hole_radius": value("hole_radius_m"),
+                    "hole_rotation": value("hole_rotation_rad"),
+                    "hole_sides": int(value("hole_sides")),
                 }
             )
     return primitives
@@ -189,6 +198,23 @@ def box_faces(center, half):
         c[[1, 2, 6, 5]],
         c[[0, 3, 7, 4]],
     ]
+
+
+def regular_prism_faces(center, radius, height, rotation, sides):
+    if radius <= 0 or height <= 0 or sides < 3:
+        return []
+    angles = rotation + np.arange(sides) * (2 * math.pi / sides)
+    xy = np.column_stack([
+        center[0] + radius * np.cos(angles),
+        center[1] + radius * np.sin(angles),
+    ])
+    bottom = np.column_stack([xy, np.full(sides, center[2] - 0.5 * height)])
+    top = np.column_stack([xy, np.full(sides, center[2] + 0.5 * height)])
+    faces = [bottom, top]
+    for i in range(sides):
+        j = (i + 1) % sides
+        faces.append(np.array([bottom[i], bottom[j], top[j], top[i]]))
+    return faces
 
 
 def set_equal_3d(ax, points, pad=0.08):
@@ -409,7 +435,27 @@ def main():
                 segments.append(np.array([primitive["p0"], primitive["p1"]]))
                 widths.append(max(0.8, primitive["radius"] * 22.0))
             elif primitive["type"] in {"box", "aabb"}:
-                box_polys.extend(box_faces(primitive["p0"], primitive["half"]))
+                box_polys.extend(box_faces(primitive["center"], primitive["half"]))
+                if primitive["hole_radius"] > 0 and primitive["hole_sides"] >= 3:
+                    box_polys.extend(
+                        regular_prism_faces(
+                            primitive["center"],
+                            primitive["hole_radius"],
+                            primitive["half"][2] * 2.0,
+                            primitive["hole_rotation"],
+                            primitive["hole_sides"],
+                        )
+                    )
+            elif primitive["type"] == "polygon_prism":
+                box_polys.extend(
+                    regular_prism_faces(
+                        primitive["center"],
+                        primitive["radius"],
+                        primitive["height"],
+                        primitive["rotation"],
+                        primitive["sides"],
+                    )
+                )
         if segments:
             ax.add_collection3d(
                 Line3DCollection(
@@ -442,7 +488,16 @@ def main():
             all_points.append(primitive["p0"])
             all_points.append(primitive["p1"])
             if primitive["type"] in {"box", "aabb"}:
-                all_points.extend(box_corners(primitive["p0"], primitive["half"]))
+                all_points.extend(box_corners(primitive["center"], primitive["half"]))
+            if primitive["type"] == "polygon_prism":
+                for face in regular_prism_faces(
+                    primitive["center"],
+                    primitive["radius"],
+                    primitive["height"],
+                    primitive["rotation"],
+                    primitive["sides"],
+                ):
+                    all_points.extend(face)
     set_equal_3d(ax, np.array(all_points))
 
     elev, azim = [float(x) for x in args.view.split(",", 1)]

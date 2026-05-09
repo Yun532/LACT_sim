@@ -378,6 +378,8 @@ int main(int argc, char** argv) {
         int n_hit_camera = 0;
         int n_accepted = 0;
         int n_blocked = 0;
+        int n_blocked_incoming = 0;
+        int n_blocked_reflected = 0;
         std::set<int> unique_hit_pixels;
         double sum_w = 0.0;
         double sum_r2 = 0.0;
@@ -396,6 +398,7 @@ int main(int argc, char** argv) {
 
             if (photonBlockedByObstruction(photon, obstruction, &telescope_frame)) {
                 ++n_blocked;
+                ++n_blocked_incoming;
                 continue;
             }
 
@@ -407,6 +410,7 @@ int main(int argc, char** argv) {
                 if (segmentBlockedByObstruction(hit.mirror_point, hit.surface_point,
                                                 obstruction, &telescope_frame)) {
                     ++n_blocked;
+                    ++n_blocked_reflected;
                     continue;
                 }
                 if (camera_cfg.enabled) {
@@ -465,6 +469,10 @@ int main(int argc, char** argv) {
         printField("total_photons", intToString(static_cast<std::uint64_t>(n_total)));
         printField("blocked_by_obstruction",
                    intToString(static_cast<std::uint64_t>(n_blocked)));
+        printField("blocked_incoming",
+                   intToString(static_cast<std::uint64_t>(n_blocked_incoming)));
+        printField("blocked_reflected",
+                   intToString(static_cast<std::uint64_t>(n_blocked_reflected)));
         printField("hit_mirror", intToString(static_cast<std::uint64_t>(n_hit_mirror)));
         printField("hit_output_plane", intToString(static_cast<std::uint64_t>(n_hit_surface)));
         if (camera_cfg.enabled) {
@@ -500,6 +508,8 @@ int main(int argc, char** argv) {
         std::cout << "mirror_facets=" << mirrors.size() << "\n";
         std::cout << "total_photons=" << n_total << "\n";
         std::cout << "blocked_by_obstruction=" << n_blocked << "\n";
+        std::cout << "blocked_incoming=" << n_blocked_incoming << "\n";
+        std::cout << "blocked_reflected=" << n_blocked_reflected << "\n";
         std::cout << "hit_mirror=" << n_hit_mirror << "\n";
         std::cout << "hit_output_plane=" << n_hit_surface << "\n";
         if (camera_cfg.enabled) {

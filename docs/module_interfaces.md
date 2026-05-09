@@ -82,18 +82,27 @@ obstruction.check_reflected=true
 Primitive CSV columns:
 
 ```text
-type,name,x0_m,y0_m,z0_m,x1_m,y1_m,z1_m,radius_m,half_x_m,half_y_m,half_z_m
+type,name,role,material_id,x0_m,y0_m,z0_m,x1_m,y1_m,z1_m,
+center_x_m,center_y_m,center_z_m,radius_m,height_m,rotation_rad,sides,
+half_x_m,half_y_m,half_z_m,bbox_min_*,bbox_max_*,
+hole_radius_m,hole_rotation_rad,hole_sides
 ```
 
 Supported primitive types:
 
 - `cylinder`: uses `p0`, `p1`, and `radius_m`; intended for support tubes.
-- `box`/`aabb`: uses `p0` as box center and `half_*_m` as half sizes.
+- `box`/`aabb`: uses `center_*_m` and `half_*_m`; optional `hole_*`
+  describes a vertical regular-polygon aperture that does not block rays.
+- `polygon_prism`: uses `center_*_m`, `radius_m`, `height_m`,
+  `rotation_rad`, and `sides`; intended for regular camera-body prisms.
 
 Coordinates are LACT telescope-local meters. The code can test both the
 incoming segment before mirror intersection and the reflected segment from
 mirror to output plane, so the shadow depends on source direction and telescope
-pointing.
+pointing. For primitive mode, a segment with local `dir.z < 0` checks all solid
+objects; a segment with local `dir.z > 0` checks only `role=support_strut`, so
+camera-side bodies above the receiving plane do not incorrectly block reflected
+photons on their way to the whiteboard/camera.
 
 The legacy `obstruction.mode=mask` path still exists for diagnostic 2D masks,
 but it should not be used as the formal off-axis obstruction model because a

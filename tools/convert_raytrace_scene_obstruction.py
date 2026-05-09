@@ -17,7 +17,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--include-camera-body",
         action="store_true",
-        help="include camera_body as a solid obstruction; usually false for focal-plane tests",
+        default=True,
+        help="include camera_body as a solid obstruction; enabled by default",
+    )
+    parser.add_argument(
+        "--exclude-camera-body",
+        action="store_false",
+        dest="include_camera_body",
+        help="exclude camera_body from the generated obstruction CSV",
     )
     parser.add_argument(
         "--unit-scale",
@@ -77,22 +84,46 @@ def make_transform(lens_center, unit_scale: float, local_lens_z_m: float):
     return point, length
 
 
-def add_box(rows, name, center, half):
-    rows.append(
-        {
-            "type": "box",
-            "name": name,
-            "x0_m": center[0],
-            "y0_m": center[1],
-            "z0_m": center[2],
-            "x1_m": center[0],
-            "y1_m": center[1],
-            "z1_m": center[2],
-            "radius_m": 0.0,
-            "half_x_m": half[0],
-            "half_y_m": half[1],
-            "half_z_m": half[2],
-        }
+def empty_row() -> dict:
+    return {
+        "type": "",
+        "name": "",
+        "role": "",
+        "material_id": "default",
+        "x0_m": "",
+        "y0_m": "",
+        "z0_m": "",
+        "x1_m": "",
+        "y1_m": "",
+        "z1_m": "",
+        "center_x_m": "",
+        "center_y_m": "",
+        "center_z_m": "",
+        "radius_m": "",
+        "height_m": "",
+        "rotation_rad": "",
+        "sides": "",
+        "half_x_m": "",
+        "half_y_m": "",
+        "half_z_m": "",
+        "bbox_min_x_m": "",
+        "bbox_min_y_m": "",
+        "bbox_min_z_m": "",
+        "bbox_max_x_m": "",
+        "bbox_max_y_m": "",
+        "bbox_max_z_m": "",
+        "hole_radius_m": "",
+        "hole_rotation_rad": "",
+        "hole_sides": "",
+    }
+
+
+def bbox_to_local(obj, point):
+    bmin = point(obj["bbox_min_x"], obj["bbox_min_y"], obj["bbox_min_z"])
+    bmax = point(obj["bbox_max_x"], obj["bbox_max_y"], obj["bbox_max_z"])
+    return (
+        (min(bmin[0], bmax[0]), min(bmin[1], bmax[1]), min(bmin[2], bmax[2])),
+        (max(bmin[0], bmax[0]), max(bmin[1], bmax[1]), max(bmin[2], bmax[2])),
     )
 
 
@@ -100,15 +131,16 @@ def convert_scene(objects: list[dict], point, length, include_camera_body: bool)
     rows: list[dict] = []
     stats = {
         "support_cylinders": 0,
-        "gap_box_ring_boxes": 0,
+        "gap_boxes": 0,
+        "adapter_holes": 0,
         "camera_body_included": 0,
         "camera_body_skipped": 0,
-        "void_prisms_skipped": 0,
     }
 
     hole = next((o for o in objects if o.get("role") == "camera_adapter_hole"), None)
-    hole_half_x = length(abs(num(hole.get("bbox_max_x"))) if hole else 0.0)
-    hole_half_y = length(abs(num(hole.get("bbox_max_y"))) if hole else 0.0)
+    hole_radius = length(hole["radius"]) if hole else 0.0
+    hole_rotation = float(hole.get("rotation", 0.0)) if hole else 0.0
+    hole_sides = int(float(hole.get("sides", 0))) if hole else 0
 
     for obj in objects:
         if not obj.get("enabled", True):
@@ -118,58 +150,64 @@ def convert_scene(objects: list[dict], point, length, include_camera_body: bool)
         typ = obj.get("type", "")
 
         if material == "void" or role == "camera_adapter_hole":
-            stats["void_prisms_skipped"] += 1
+            stats["adapter_holes"] += 1
             continue
 
         if typ == "support_cylinder":
             p0 = point(obj["p0_x"], obj["p0_y"], obj["p0_z"])
             p1 = point(obj["p1_x"], obj["p1_y"], obj["p1_z"])
-            rows.append(
-                {
-                    "type": "cylinder",
-                    "name": f"{role}_{obj['object_id']}",
-                    "x0_m": p0[0],
-                    "y0_m": p0[1],
-                    "z0_m": p0[2],
-                    "x1_m": p1[0],
-                    "y1_m": p1[1],
-                    "z1_m": p1[2],
-                    "radius_m": length(obj["radius"]),
-                    "half_x_m": 0.0,
-                    "half_y_m": 0.0,
-                    "half_z_m": 0.0,
-                }
-            )
+            row = empty_row()
+            row.update({
+                "type": "cylinder",
+                "name": f"{role}_{obj['object_id']}",
+                "role": role,
+                "material_id": material,
+                "x0_m": p0[0],
+                "y0_m": p0[1],
+                "z0_m": p0[2],
+                "x1_m": p1[0],
+                "y1_m": p1[1],
+                "z1_m": p1[2],
+                "radius_m": length(obj["radius"]),
+            })
+            rows.append(row)
             stats["support_cylinders"] += 1
             continue
 
         if typ == "box" and role == "camera_support_gap_box":
-            xmin = length(obj["bbox_min_x"])
-            xmax = length(obj["bbox_max_x"])
-            ymin = length(obj["bbox_min_y"])
-            ymax = length(obj["bbox_max_y"])
-            zmin = point(0.0, 0.0, obj["bbox_min_z"])[2]
-            zmax = point(0.0, 0.0, obj["bbox_max_z"])[2]
-            outer_x = max(abs(xmin), abs(xmax))
-            outer_y = max(abs(ymin), abs(ymax))
-            inner_x = min(hole_half_x, outer_x)
-            inner_y = min(hole_half_y, outer_y)
-            zc = 0.5 * (zmin + zmax)
-            hz = 0.5 * (zmax - zmin)
-
-            # Four bars around the central adapter aperture. This is a
-            # conservative portable approximation of the box-minus-octagon CSG.
-            hx_side = 0.5 * (outer_x - inner_x)
-            hy_side = outer_y
-            x_side = 0.5 * (outer_x + inner_x)
-            add_box(rows, f"{role}_right", (x_side, 0.0, zc), (hx_side, hy_side, hz))
-            add_box(rows, f"{role}_left", (-x_side, 0.0, zc), (hx_side, hy_side, hz))
-            hx_top = inner_x
-            hy_top = 0.5 * (outer_y - inner_y)
-            y_top = 0.5 * (outer_y + inner_y)
-            add_box(rows, f"{role}_top", (0.0, y_top, zc), (hx_top, hy_top, hz))
-            add_box(rows, f"{role}_bottom", (0.0, -y_top, zc), (hx_top, hy_top, hz))
-            stats["gap_box_ring_boxes"] += 4
+            bmin, bmax = bbox_to_local(obj, point)
+            center = tuple(0.5 * (lo + hi) for lo, hi in zip(bmin, bmax))
+            half = tuple(0.5 * (hi - lo) for lo, hi in zip(bmin, bmax))
+            row = empty_row()
+            row.update({
+                "type": "box",
+                "name": role,
+                "role": role,
+                "material_id": material,
+                "center_x_m": center[0],
+                "center_y_m": center[1],
+                "center_z_m": center[2],
+                "x0_m": center[0],
+                "y0_m": center[1],
+                "z0_m": center[2],
+                "x1_m": center[0],
+                "y1_m": center[1],
+                "z1_m": center[2],
+                "half_x_m": half[0],
+                "half_y_m": half[1],
+                "half_z_m": half[2],
+                "bbox_min_x_m": bmin[0],
+                "bbox_min_y_m": bmin[1],
+                "bbox_min_z_m": bmin[2],
+                "bbox_max_x_m": bmax[0],
+                "bbox_max_y_m": bmax[1],
+                "bbox_max_z_m": bmax[2],
+                "hole_radius_m": hole_radius,
+                "hole_rotation_rad": hole_rotation,
+                "hole_sides": hole_sides,
+            })
+            rows.append(row)
+            stats["gap_boxes"] += 1
             continue
 
         if typ == "polygon_prism" and role == "camera_body":
@@ -177,12 +215,34 @@ def convert_scene(objects: list[dict], point, length, include_camera_body: bool)
                 stats["camera_body_skipped"] += 1
                 continue
             center = point(obj["center_x"], obj["center_y"], obj["center_z"])
-            half = (
-                length(abs(num(obj["bbox_max_x"]))),
-                length(abs(num(obj["bbox_max_y"]))),
-                0.5 * length(obj["height"]),
-            )
-            add_box(rows, "camera_body_aabb", center, half)
+            row = empty_row()
+            bmin, bmax = bbox_to_local(obj, point)
+            row.update({
+                "type": "polygon_prism",
+                "name": role,
+                "role": role,
+                "material_id": material,
+                "center_x_m": center[0],
+                "center_y_m": center[1],
+                "center_z_m": center[2],
+                "x0_m": center[0],
+                "y0_m": center[1],
+                "z0_m": center[2],
+                "x1_m": center[0],
+                "y1_m": center[1],
+                "z1_m": center[2],
+                "radius_m": length(obj["radius"]),
+                "height_m": length(obj["height"]),
+                "rotation_rad": obj["rotation"],
+                "sides": int(float(obj["sides"])),
+                "bbox_min_x_m": bmin[0],
+                "bbox_min_y_m": bmin[1],
+                "bbox_min_z_m": bmin[2],
+                "bbox_max_x_m": bmax[0],
+                "bbox_max_y_m": bmax[1],
+                "bbox_max_z_m": bmax[2],
+            })
+            rows.append(row)
             stats["camera_body_included"] += 1
 
     return rows, stats
@@ -204,16 +264,33 @@ def write_csv(path: Path, rows: list[dict], source: Path, stats: dict, lens_cent
             fieldnames=[
                 "type",
                 "name",
+                "role",
+                "material_id",
                 "x0_m",
                 "y0_m",
                 "z0_m",
                 "x1_m",
                 "y1_m",
                 "z1_m",
+                "center_x_m",
+                "center_y_m",
+                "center_z_m",
                 "radius_m",
+                "height_m",
+                "rotation_rad",
+                "sides",
                 "half_x_m",
                 "half_y_m",
                 "half_z_m",
+                "bbox_min_x_m",
+                "bbox_min_y_m",
+                "bbox_min_z_m",
+                "bbox_max_x_m",
+                "bbox_max_y_m",
+                "bbox_max_z_m",
+                "hole_radius_m",
+                "hole_rotation_rad",
+                "hole_sides",
             ],
         )
         writer.writeheader()
