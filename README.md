@@ -294,57 +294,6 @@ run_logs/official_tests/perfect_parallel/run.log
 run_logs/official_tests/perfect_parallel/spot.png
 ```
 
-### Parallel Light With Support Obstruction
-
-This test uses the same ideal parallel-light optical setup, but adds a
-simplified 3D camera-support obstruction model. The support is represented by
-cylindrical tubes and a camera-edge frame in telescope-local coordinates. This
-3D model is checked for both incoming rays and reflected rays, so off-axis
-sources get direction-dependent shadows.
-
-Run ray tracing:
-
-```bash
-mkdir -p run_logs/official_tests/obstruction_3d_parallel
-build/run_optical_sim configs/official_tests/perfect_parallel_3d_obstructed_whiteboard.cfg \
-  2>&1 | tee run_logs/official_tests/obstruction_3d_parallel/run.log
-```
-
-Plot the whiteboard spot:
-
-```bash
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_spot_histogram.py \
-  run_logs/official_tests/obstruction_3d_parallel/hits.csv \
-  --output run_logs/official_tests/obstruction_3d_parallel/spot.png \
-  --max-bins 520 \
-  --dpi 350 \
-  --title "Perfect optics: 3D camera support obstruction"
-```
-
-Plot the 3D layout with the obstruction model:
-
-```bash
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_optical_layout_3d.py \
-  --config configs/official_tests/perfect_parallel_3d_obstructed_whiteboard.cfg \
-  --show-obstruction \
-  --output run_logs/official_tests/obstruction_3d_parallel/layout_3d.png \
-  --ray-stride 12 \
-  --dpi 300
-```
-
-Main outputs:
-
-```text
-run_logs/official_tests/obstruction_3d_parallel/hits.csv
-run_logs/official_tests/obstruction_3d_parallel/run.log
-run_logs/official_tests/obstruction_3d_parallel/spot.png
-run_logs/official_tests/obstruction_3d_parallel/layout_3d.png
-```
-
-The 2D STEP projection mask under `configs/obstructions/lact_zz_asm_shadow.cfg`
-is kept only as a diagnostic helper. It should not be used as the formal
-off-axis obstruction model.
-
 ### 900 m Point Source
 
 Run ray tracing:
@@ -781,8 +730,6 @@ See `docs/hdf5_output_format.md` for the file layout.
 
 ```text
 configs/official_tests/perfect_parallel_whiteboard.cfg
-configs/official_tests/perfect_parallel_obstructed_whiteboard.cfg
-configs/official_tests/perfect_parallel_3d_obstructed_whiteboard.cfg
 configs/official_tests/perfect_point_900m_whiteboard.cfg
 configs/official_tests/deformation_parallel_whiteboard.cfg
 configs/official_tests/corsika_whiteboard.cfg
@@ -805,10 +752,6 @@ configs/sipm/ideal_sipm.cfg
 configs/sipm/new_camera_sipm.cfg
 configs/electronics/ideal_pe.cfg
 configs/efficiency/curves_all.cfg
-configs/obstructions/lact_camera_support_primitives.cfg
-configs/obstructions/lact_camera_support_primitives.csv
-configs/obstructions/lact_zz_asm_shadow.cfg
-configs/obstructions/lact_zz_asm_shadow_mask.csv
 configs/errors/full_response_1229.cfg
 configs/atmosphere/ideal.cfg
 configs/nsb/ideal.cfg

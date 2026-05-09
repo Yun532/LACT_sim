@@ -67,55 +67,37 @@ propagation.speed_of_light_m_per_ns=0.299792458
 
 ## Obstruction
 
-The obstruction module supports two levels.
-
-The recommended model is a simplified 3D primitive description of the camera
-support structure:
+The obstruction module is intentionally input-driven. No built-in telescope
+support model is distributed. Provide an external obstruction configuration
+when you want to include support shadows:
 
 ```ini
-obstruction.config=configs/obstructions/lact_camera_support_primitives.cfg
 obstruction.enabled=true
 obstruction.mode=primitives
-obstruction.primitives_csv=configs/obstructions/lact_camera_support_primitives.csv
+obstruction.primitives_csv=path/to/obstruction_primitives.csv
 obstruction.check_incoming=true
 obstruction.check_reflected=true
 ```
 
-The primitives CSV currently supports `cylinder` and axis-aligned `box` rows in
-LACT telescope-local coordinates. Cylinders are used for support tubes. The
-code tests both the incoming segment before mirror intersection and the
-reflected segment from mirror to output plane, so the shadow depends on source
-direction and telescope pointing.
-
-The older diagnostic model checks whether a photon crosses a blocked cell in a
-single configured plane before mirror intersection:
-
-```ini
-obstruction.config=configs/obstructions/lact_zz_asm_shadow.cfg
-```
-
-The included `lact_zz_asm_shadow` input was extracted from the support STEP
-model as a 2D mask in the LACT local aperture frame:
+Primitive CSV columns:
 
 ```text
-STEP X -> local x
-STEP Z -> local y
-STEP Y -> local z
+type,name,x0_m,y0_m,z0_m,x1_m,y1_m,z1_m,radius_m,half_x_m,half_y_m,half_z_m
 ```
 
-Runtime configuration:
+Supported primitive types:
 
-```ini
-obstruction.enabled=true
-obstruction.mode=mask
-obstruction.mask_csv=configs/obstructions/lact_zz_asm_shadow_mask.csv
-obstruction.plane_z_m=-16.0
-```
+- `cylinder`: uses `p0`, `p1`, and `radius_m`; intended for support tubes.
+- `box`/`aabb`: uses `p0` as box center and `half_*_m` as half sizes.
 
-The mask CSV stores blocked grid cells and metadata comments for grid origin,
-cell size, grid dimensions, and plane position. This 2D mask is fast but should
-not be used as the formal off-axis obstruction model because it does not change
-projection with ray direction and it does not block reflected rays.
+Coordinates are LACT telescope-local meters. The code can test both the
+incoming segment before mirror intersection and the reflected segment from
+mirror to output plane, so the shadow depends on source direction and telescope
+pointing.
+
+The legacy `obstruction.mode=mask` path still exists for diagnostic 2D masks,
+but it should not be used as the formal off-axis obstruction model because a
+single projected mask does not change with ray direction.
 
 ## SiPM And Electronics
 
