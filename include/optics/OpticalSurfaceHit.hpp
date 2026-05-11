@@ -22,6 +22,13 @@ struct OpticalSurfaceHit {
     double u_m = 0.0;
     double v_m = 0.0;
 
+    // 遮挡诊断标记：
+    // 默认正式模拟会丢弃被遮挡光子；只有 obstruction.mark_only=true 时，
+    // 被遮挡光子仍会写出，用这些字段在图里单独上色。
+    bool obstruction_blocked = false;
+    bool obstruction_blocked_incoming = false;
+    bool obstruction_blocked_reflected = false;
+
     // 可选相机几何映射：
     // camera_enabled=false 表示这次运行只使用白板输出。
     bool camera_enabled = false;

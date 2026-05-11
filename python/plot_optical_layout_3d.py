@@ -200,6 +200,18 @@ def box_faces(center, half):
     ]
 
 
+def box_edges(center, half):
+    c = box_corners(center, half)
+    return [
+        c[[0, 1, 2, 3, 0]],
+        c[[4, 5, 6, 7, 4]],
+        c[[0, 4]],
+        c[[1, 5]],
+        c[[2, 6]],
+        c[[3, 7]],
+    ]
+
+
 def regular_prism_faces(center, radius, height, rotation, sides):
     if radius <= 0 or height <= 0 or sides < 3:
         return []
@@ -215,6 +227,24 @@ def regular_prism_faces(center, radius, height, rotation, sides):
         j = (i + 1) % sides
         faces.append(np.array([bottom[i], bottom[j], top[j], top[i]]))
     return faces
+
+
+def regular_prism_edges(center, radius, height, rotation, sides):
+    faces = regular_prism_faces(center, radius, height, rotation, sides)
+    if len(faces) < 2:
+        return []
+    bottom = faces[0]
+    top = faces[1]
+    edges = [np.vstack([bottom, bottom[0]]), np.vstack([top, top[0]])]
+    for a, b in zip(bottom, top):
+        edges.append(np.array([a, b]))
+    return edges
+
+
+def transform_points(points, frame):
+    if frame is None:
+        return np.array(points, dtype=float)
+    return np.array([point_to_global(np.array(p, dtype=float), frame) for p in points])
 
 
 def set_equal_3d(ax, points, pad=0.08):
@@ -318,10 +348,6 @@ def main():
             if not primitives_path:
                 raise SystemExit("primitive obstruction drawing requires obstruction.primitives_csv")
             obstruction_primitives = load_obstruction_primitives(primitives_path)
-            if frame is not None:
-                for primitive in obstruction_primitives:
-                    primitive["p0"] = point_to_global(primitive["p0"], frame)
-                    primitive["p1"] = point_to_global(primitive["p1"], frame)
         else:
             mask_path = args.obstruction_mask or cfg.get("obstruction.mask_csv")
             if not mask_path:
@@ -427,51 +453,80 @@ def main():
             label="Support obstruction mask",
         )
     if obstruction_primitives:
-        segments = []
-        widths = []
-        box_polys = []
+        cylinder_segments = []
+        cylinder_widths = []
+        solid_polys = []
+        wire_segments = []
+        wire_colors = []
+        wire_widths = []
         for primitive in obstruction_primitives:
             if primitive["type"] == "cylinder":
-                segments.append(np.array([primitive["p0"], primitive["p1"]]))
-                widths.append(max(0.8, primitive["radius"] * 22.0))
+                cylinder_segments.append(transform_points([primitive["p0"], primitive["p1"]], frame))
+                cylinder_widths.append(max(0.8, primitive["radius"] * 22.0))
             elif primitive["type"] in {"box", "aabb"}:
-                box_polys.extend(box_faces(primitive["center"], primitive["half"]))
+                faces = [transform_points(face, frame) for face in box_faces(primitive["center"], primitive["half"])]
+                solid_polys.extend(faces)
+                for edge in box_edges(primitive["center"], primitive["half"]):
+                    wire_segments.append(transform_points(edge, frame))
+                    wire_colors.append((0.10, 0.44, 0.22, 0.95))
+                    wire_widths.append(1.1)
                 if primitive["hole_radius"] > 0 and primitive["hole_sides"] >= 3:
-                    box_polys.extend(
-                        regular_prism_faces(
+                    for edge in regular_prism_edges(
                             primitive["center"],
                             primitive["hole_radius"],
                             primitive["half"][2] * 2.0,
                             primitive["hole_rotation"],
                             primitive["hole_sides"],
-                        )
-                    )
+                    ):
+                        wire_segments.append(transform_points(edge, frame))
+                        wire_colors.append((0.78, 0.05, 0.14, 1.0))
+                        wire_widths.append(1.4)
             elif primitive["type"] == "polygon_prism":
-                box_polys.extend(
-                    regular_prism_faces(
+                faces = [
+                    transform_points(face, frame)
+                    for face in regular_prism_faces(
                         primitive["center"],
                         primitive["radius"],
                         primitive["height"],
                         primitive["rotation"],
                         primitive["sides"],
                     )
-                )
-        if segments:
+                ]
+                solid_polys.extend(faces)
+                for edge in regular_prism_edges(
+                    primitive["center"],
+                    primitive["radius"],
+                    primitive["height"],
+                    primitive["rotation"],
+                    primitive["sides"],
+                ):
+                    wire_segments.append(transform_points(edge, frame))
+                    wire_colors.append((0.0, 0.58, 0.68, 1.0))
+                    wire_widths.append(1.2)
+        if cylinder_segments:
             ax.add_collection3d(
                 Line3DCollection(
-                    segments,
+                    cylinder_segments,
                     colors=(0.03, 0.03, 0.03, 0.72),
-                    linewidths=widths,
+                    linewidths=cylinder_widths,
                     label="3D support obstruction",
                 )
             )
-        if box_polys:
+        if solid_polys:
             ax.add_collection3d(
                 Poly3DCollection(
-                    box_polys,
-                    facecolors=(0.04, 0.04, 0.04, 0.25),
-                    edgecolors=(0.03, 0.03, 0.03, 0.68),
-                    linewidths=0.6,
+                    solid_polys,
+                    facecolors=(0.08, 0.08, 0.08, 0.13),
+                    edgecolors=(0.03, 0.03, 0.03, 0.30),
+                    linewidths=0.35,
+                )
+            )
+        if wire_segments:
+            ax.add_collection3d(
+                Line3DCollection(
+                    wire_segments,
+                    colors=wire_colors,
+                    linewidths=wire_widths,
                 )
             )
 
@@ -485,10 +540,9 @@ def main():
         all_points.extend(obstruction_points)
     if obstruction_primitives:
         for primitive in obstruction_primitives:
-            all_points.append(primitive["p0"])
-            all_points.append(primitive["p1"])
+            all_points.extend(transform_points([primitive["p0"], primitive["p1"]], frame))
             if primitive["type"] in {"box", "aabb"}:
-                all_points.extend(box_corners(primitive["center"], primitive["half"]))
+                all_points.extend(transform_points(box_corners(primitive["center"], primitive["half"]), frame))
             if primitive["type"] == "polygon_prism":
                 for face in regular_prism_faces(
                     primitive["center"],
@@ -497,7 +551,7 @@ def main():
                     primitive["rotation"],
                     primitive["sides"],
                 ):
-                    all_points.extend(face)
+                    all_points.extend(transform_points(face, frame))
     set_equal_3d(ax, np.array(all_points))
 
     elev, azim = [float(x) for x in args.view.split(",", 1)]

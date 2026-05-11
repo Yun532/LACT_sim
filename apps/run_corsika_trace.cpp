@@ -34,6 +34,8 @@ struct TraceSummary {
     std::uint64_t blocked_by_obstruction = 0;
     std::uint64_t blocked_incoming = 0;
     std::uint64_t blocked_reflected = 0;
+    std::uint64_t hit_mirror_before_obstruction = 0;
+    std::uint64_t hit_output_before_obstruction = 0;
     std::uint64_t hit_mirror = 0;
     std::uint64_t hit_output_plane = 0;
     std::uint64_t hit_camera = 0;
@@ -53,6 +55,8 @@ struct TelescopeEventAccumulator {
     std::uint64_t blocked_by_obstruction = 0;
     std::uint64_t blocked_incoming = 0;
     std::uint64_t blocked_reflected = 0;
+    std::uint64_t hit_mirror_before_obstruction = 0;
+    std::uint64_t hit_output_before_obstruction = 0;
     std::uint64_t hit_mirror = 0;
     std::uint64_t hit_output_plane = 0;
     std::uint64_t hit_camera = 0;
@@ -391,7 +395,10 @@ void writeSummaryCsv(const std::string& path,
     ofs << std::setprecision(10);
     ofs << "event_id,telescope_id,input_bunches,input_photons,"
         << "blocked_by_obstruction,blocked_incoming,blocked_reflected,"
+        << "hit_mirror_before_obstruction,hit_output_before_obstruction,"
         << "hit_mirror,hit_output_plane,hit_camera,accepted_camera,"
+        << "mirror_transmission_after_incoming_obstruction,"
+        << "output_transmission_after_obstruction,"
         << "lost_between_pixels,unique_hit_pixels,pe,signal,"
         << "time_mean_ns,time_rms_ns\n";
     for (const auto& kv : summaries) {
@@ -402,6 +409,14 @@ void writeSummaryCsv(const std::string& path,
         const double var = s.weighted_signal > 0.0
             ? std::max(0.0, s.weighted_time2_sum / s.weighted_signal - mean * mean)
             : 0.0;
+        const double mirror_transmission = s.hit_mirror_before_obstruction > 0
+            ? static_cast<double>(s.hit_mirror) /
+              static_cast<double>(s.hit_mirror_before_obstruction)
+            : 0.0;
+        const double output_transmission = s.hit_output_before_obstruction > 0
+            ? static_cast<double>(s.hit_output_plane) /
+              static_cast<double>(s.hit_output_before_obstruction)
+            : 0.0;
         ofs << s.event_id << ","
             << s.telescope_id << ","
             << s.input_bunches << ","
@@ -409,10 +424,14 @@ void writeSummaryCsv(const std::string& path,
             << s.blocked_by_obstruction << ","
             << s.blocked_incoming << ","
             << s.blocked_reflected << ","
+            << s.hit_mirror_before_obstruction << ","
+            << s.hit_output_before_obstruction << ","
             << s.hit_mirror << ","
             << s.hit_output_plane << ","
             << s.hit_camera << ","
             << s.accepted_camera << ","
+            << mirror_transmission << ","
+            << output_transmission << ","
             << s.lost_between_pixels << ","
             << s.unique_pixels.size() << ","
             << s.weighted_signal << ","
@@ -1561,6 +1580,10 @@ std::string formatStreamSummaryLine(const TraceSummary& s,
     const double var = s.weighted_signal > 0.0
         ? std::max(0.0, s.weighted_time2_sum / s.weighted_signal - mean * mean)
         : 0.0;
+    const double output_transmission = s.hit_output_before_obstruction > 0
+        ? static_cast<double>(s.hit_output_plane) /
+          static_cast<double>(s.hit_output_before_obstruction)
+        : 0.0;
     std::ostringstream value;
     value << "array_id=" << array_id
           << " telescope=" << s.telescope_id
@@ -1570,8 +1593,12 @@ std::string formatStreamSummaryLine(const TraceSummary& s,
           << " blocked=" << s.blocked_by_obstruction
           << " blocked_incoming=" << s.blocked_incoming
           << " blocked_reflected=" << s.blocked_reflected
+          << " hit_mirror_before_obstruction=" << s.hit_mirror_before_obstruction
+          << " hit_output_before_obstruction=" << s.hit_output_before_obstruction
           << " hit_mirror=" << s.hit_mirror
-          << " hit_output=" << s.hit_output_plane;
+          << " hit_output=" << s.hit_output_plane
+          << " output_transmission_after_obstruction="
+          << doubleToString(output_transmission, 6);
     if (camera_enabled) {
         value << " hit_camera=" << s.hit_camera
               << " accepted=" << s.accepted_camera
@@ -1594,6 +1621,10 @@ std::string formatTelescopeEventLine(const TelescopeEventAccumulator& s,
     const double var = s.weighted_signal > 0.0
         ? std::max(0.0, s.weighted_time2_sum / s.weighted_signal - mean * mean)
         : 0.0;
+    const double output_transmission = s.hit_output_before_obstruction > 0
+        ? static_cast<double>(s.hit_output_plane) /
+          static_cast<double>(s.hit_output_before_obstruction)
+        : 0.0;
     std::ostringstream value;
     value << "telescope=" << s.telescope_id
           << " output_events=" << s.output_events.size()
@@ -1602,8 +1633,12 @@ std::string formatTelescopeEventLine(const TelescopeEventAccumulator& s,
           << " blocked=" << s.blocked_by_obstruction
           << " blocked_incoming=" << s.blocked_incoming
           << " blocked_reflected=" << s.blocked_reflected
+          << " hit_mirror_before_obstruction=" << s.hit_mirror_before_obstruction
+          << " hit_output_before_obstruction=" << s.hit_output_before_obstruction
           << " hit_mirror=" << s.hit_mirror
-          << " hit_output=" << s.hit_output_plane;
+          << " hit_output=" << s.hit_output_plane
+          << " output_transmission_after_obstruction="
+          << doubleToString(output_transmission, 6);
     if (camera_enabled) {
         value << " hit_camera=" << s.hit_camera
               << " accepted=" << s.accepted_camera
@@ -1653,6 +1688,8 @@ void printEventSummary(const std::map<SummaryKey, TraceSummary>& summaries,
         std::uint64_t blocked_by_obstruction = 0;
         std::uint64_t blocked_incoming = 0;
         std::uint64_t blocked_reflected = 0;
+        std::uint64_t hit_mirror_before_obstruction = 0;
+        std::uint64_t hit_output_before_obstruction = 0;
         std::uint64_t hit_output_plane = 0;
         std::uint64_t hit_camera = 0;
         std::uint64_t accepted_camera = 0;
@@ -1677,6 +1714,8 @@ void printEventSummary(const std::map<SummaryKey, TraceSummary>& summaries,
         e.blocked_by_obstruction += s.blocked_by_obstruction;
         e.blocked_incoming += s.blocked_incoming;
         e.blocked_reflected += s.blocked_reflected;
+        e.hit_mirror_before_obstruction += s.hit_mirror_before_obstruction;
+        e.hit_output_before_obstruction += s.hit_output_before_obstruction;
         e.hit_output_plane += s.hit_output_plane;
         e.hit_camera += s.hit_camera;
         e.accepted_camera += s.accepted_camera;
@@ -1721,7 +1760,14 @@ void printEventSummary(const std::map<SummaryKey, TraceSummary>& summaries,
               << " blocked=" << e.blocked_by_obstruction
               << " blocked_incoming=" << e.blocked_incoming
               << " blocked_reflected=" << e.blocked_reflected
+              << " hit_mirror_before_obstruction=" << e.hit_mirror_before_obstruction
+              << " hit_output_before_obstruction=" << e.hit_output_before_obstruction
               << " hit_output=" << e.hit_output_plane;
+        if (e.hit_output_before_obstruction > 0) {
+            value << " output_transmission_after_obstruction="
+                  << doubleToString(static_cast<double>(e.hit_output_plane) /
+                                    static_cast<double>(e.hit_output_before_obstruction), 6);
+        }
         if (camera_enabled) {
             value << " hit_camera=" << e.hit_camera
                   << " accepted=" << e.accepted_camera;
@@ -2131,6 +2177,7 @@ int main(int argc, char** argv) {
             std::uint64_t blocked = 0;
             std::uint64_t blocked_incoming = 0;
             std::uint64_t blocked_reflected = 0;
+            std::uint64_t hit_output_before_obstruction = 0;
             std::uint64_t hit_output = 0;
             std::uint64_t hit_camera = 0;
             std::uint64_t accepted = 0;
@@ -2148,6 +2195,7 @@ int main(int argc, char** argv) {
                 blocked += s.blocked_by_obstruction;
                 blocked_incoming += s.blocked_incoming;
                 blocked_reflected += s.blocked_reflected;
+                hit_output_before_obstruction += s.hit_output_before_obstruction;
                 hit_output += s.hit_output_plane;
                 hit_camera += s.hit_camera;
                 accepted += s.accepted_camera;
@@ -2161,6 +2209,8 @@ int main(int argc, char** argv) {
                 tel.blocked_by_obstruction += s.blocked_by_obstruction;
                 tel.blocked_incoming += s.blocked_incoming;
                 tel.blocked_reflected += s.blocked_reflected;
+                tel.hit_mirror_before_obstruction += s.hit_mirror_before_obstruction;
+                tel.hit_output_before_obstruction += s.hit_output_before_obstruction;
                 tel.hit_mirror += s.hit_mirror;
                 tel.hit_output_plane += s.hit_output_plane;
                 tel.hit_camera += s.hit_camera;
@@ -2183,7 +2233,13 @@ int main(int argc, char** argv) {
                   << " blocked=" << blocked
                   << " blocked_incoming=" << blocked_incoming
                   << " blocked_reflected=" << blocked_reflected
+                  << " hit_output_before_obstruction=" << hit_output_before_obstruction
                   << " hit_output=" << hit_output;
+            if (hit_output_before_obstruction > 0) {
+                value << " output_transmission_after_obstruction="
+                      << doubleToString(static_cast<double>(hit_output) /
+                                        static_cast<double>(hit_output_before_obstruction), 6);
+            }
             if (camera_cfg.enabled) {
                 value << " hit_camera=" << hit_camera
                       << " accepted=" << accepted
@@ -2220,14 +2276,18 @@ int main(int argc, char** argv) {
             photon.normalizeDirection();
             photon.weight *= bunch.multiplicity;
 
-            if (photonBlockedByObstruction(photon, obstruction, nullptr)) {
-                summary.blocked_by_obstruction += 1;
-                summary.blocked_incoming += 1;
-                return;
-            }
-
             OpticalSurfaceHit hit = tracer.traceToPlane(photon, mirrors, plane, eff);
             if (hit.hit_mirror) {
+                summary.hit_mirror_before_obstruction += 1;
+                if (hit.hit_surface) {
+                    summary.hit_output_before_obstruction += 1;
+                }
+                if (incomingSegmentBlockedByObstruction(photon.pos, hit.mirror_point,
+                                                        obstruction, nullptr)) {
+                    summary.blocked_by_obstruction += 1;
+                    summary.blocked_incoming += 1;
+                    return;
+                }
                 summary.hit_mirror += 1;
             }
             if (!hit.hit_surface) {

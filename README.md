@@ -323,7 +323,87 @@ run_logs/official_tests/point_900m/run.log
 run_logs/official_tests/point_900m/spot.png
 ```
 
-## Test 2: Structural Deformation Scan
+## Test 2: Imported 3D Obstruction
+
+This test uses the external simplified 3D obstruction model converted into:
+
+```text
+configs/obstructions/raytrace_final_structure_primitives.csv
+```
+
+It checks both incoming and reflected-ray obstruction. The official smoke test
+keeps three plots: a parallel-light whiteboard spot, a 30 m point-source
+whiteboard spot, and the point-source mirror-hit distribution with the
+projected mirror-facet outlines.
+
+Parallel-light obstruction run:
+
+```bash
+mkdir -p run_logs/official_tests/raytrace_structure_parallel
+build/run_optical_sim configs/official_tests/perfect_parallel_raytrace_structure_whiteboard.cfg \
+  2>&1 | tee run_logs/official_tests/raytrace_structure_parallel/run.log
+
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_spot_histogram.py \
+  run_logs/official_tests/raytrace_structure_parallel/hits.csv \
+  --output run_logs/official_tests/raytrace_structure_parallel/spot.png \
+  --max-bins 520 \
+  --dpi 350 \
+  --title "Parallel beam with 3D obstruction"
+```
+
+30 m point-source obstruction run:
+
+```bash
+mkdir -p run_logs/official_tests/raytrace_structure_point_30m
+build/run_optical_sim configs/official_tests/point_30m_structure_whiteboard.cfg \
+  2>&1 | tee run_logs/official_tests/raytrace_structure_point_30m/run.log
+
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_spot_histogram.py \
+  run_logs/official_tests/raytrace_structure_point_30m/hits.csv \
+  --output run_logs/official_tests/raytrace_structure_point_30m/spot.png \
+  --max-bins 520 \
+  --dpi 350 \
+  --title "30 m point source with 3D obstruction"
+```
+
+Mirror-hit distribution with projected facet outlines:
+
+```bash
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_mirror_hit_map.py \
+  run_logs/official_tests/raytrace_structure_point_30m/hits.csv \
+  --config configs/official_tests/point_30m_structure_whiteboard.cfg \
+  --require-surface \
+  --overlay-facets \
+  --output run_logs/official_tests/raytrace_structure_point_30m/mirror_hits_with_facet_outlines.png \
+  --dpi 350 \
+  --title "30 m point source: mirror hit points with facet outlines"
+```
+
+Main outputs:
+
+```text
+run_logs/official_tests/raytrace_structure_parallel/spot.png
+run_logs/official_tests/raytrace_structure_parallel/layout_3d.png
+run_logs/official_tests/raytrace_structure_parallel/layout_3d.html
+run_logs/official_tests/raytrace_structure_point_30m/spot.png
+run_logs/official_tests/raytrace_structure_point_30m/mirror_hits_with_facet_outlines.png
+```
+
+The obstruction run log also reports true before/after obstruction statistics
+and equivalent collection areas, for example:
+
+```text
+hit_output_before_obstruction
+hit_output_plane
+output_transmission_after_obstruction
+output_loss_fraction_from_obstruction
+source_sampling_area_m2
+output_collecting_area_before_obstruction_m2
+output_collecting_area_after_obstruction_m2
+output_collecting_area_loss_from_obstruction_m2
+```
+
+## Test 3: Structural Deformation Scan
 
 This test enables the elevation-dependent mirror series:
 
@@ -387,7 +467,7 @@ for el in 0 20 45 60 90; do
 done
 ```
 
-## Test 3: CORSIKA/EventIO to Whiteboard and Camera Images
+## Test 4: CORSIKA/EventIO to Whiteboard and Camera Images
 
 This test requires the hessio-enabled build. The input file is passed on the
 command line; the configs keep `source.eventio_path` empty.
@@ -731,6 +811,8 @@ See `docs/hdf5_output_format.md` for the file layout.
 ```text
 configs/official_tests/perfect_parallel_whiteboard.cfg
 configs/official_tests/perfect_point_900m_whiteboard.cfg
+configs/official_tests/perfect_parallel_raytrace_structure_whiteboard.cfg
+configs/official_tests/point_30m_structure_whiteboard.cfg
 configs/official_tests/deformation_parallel_whiteboard.cfg
 configs/official_tests/corsika_whiteboard.cfg
 configs/official_tests/corsika_new_camera.cfg

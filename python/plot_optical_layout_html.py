@@ -105,6 +105,7 @@ def load_primitives(path: Path):
 
             primitives.append({
                 "type": row.get("type", "").lower(),
+                "name": row.get("name", ""),
                 "role": row.get("role", ""),
                 "p0": [f("x0_m"), f("y0_m"), f("z0_m")],
                 "p1": [f("x1_m"), f("y1_m"), f("z1_m")],
@@ -133,7 +134,13 @@ def main():
     parser.add_argument("--config", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--ray-stride", type=int, default=12)
+    parser.add_argument(
+        "--highlight-primitives",
+        default="",
+        help="comma-separated obstruction primitive names to highlight and label",
+    )
     args = parser.parse_args()
+    highlighted = {name.strip() for name in args.highlight_primitives.split(",") if name.strip()}
 
     cfg_path = Path(args.config).resolve()
     cfg, _ = expand_component_config(cfg_path)
@@ -155,34 +162,50 @@ def main():
     polygons.append({"points": plane, "color": "#e05a47", "role": "output_plane"})
 
     lines = []
+    labels = []
     for p in load_primitives(resolve_primitives_path(cfg)):
         role = p["role"]
-        color = "#f08a24" if role == "support_strut" else "#28a95f"
+        is_highlighted = p["name"] in highlighted
+        color = "#ff3b30" if is_highlighted else ("#f08a24" if role == "support_strut" else "#28a95f")
+        width = 6 if is_highlighted else 3
         if p["type"] == "cylinder":
             a = point_to_global(np.array(p["p0"]), frame)
             b = point_to_global(np.array(p["p1"]), frame)
-            lines.append({"points": [list(a.astype(float)), list(b.astype(float))], "color": color, "role": role, "width": 3})
+            lines.append({
+                "points": [list(a.astype(float)), list(b.astype(float))],
+                "color": color,
+                "role": role,
+                "name": p["name"],
+                "width": width,
+            })
+            if is_highlighted:
+                label_pos = 0.5 * (a + b)
+                labels.append({"point": list(label_pos.astype(float)), "text": p["name"], "color": color})
         elif p["type"] in {"box", "aabb"}:
             center = np.array(p["center"])
             for edge in box_edges(center, p["half"]):
-                lines.append({"points": transform_line(edge, frame), "color": color, "role": role, "width": 2})
+                lines.append({"points": transform_line(edge, frame), "color": color, "role": role, "name": p["name"], "width": 3 if is_highlighted else 2})
             if p["hole_radius"] > 0:
                 for edge in regular_prism_edges(center, p["hole_radius"], p["half"][2] * 2, p["hole_rotation"], p["hole_sides"]):
                     lines.append({"points": transform_line(edge, frame), "color": "#e02f45", "role": "camera_adapter_hole", "width": 2})
+            if is_highlighted:
+                labels.append({"point": list(point_to_global(center, frame).astype(float)), "text": p["name"], "color": color})
         elif p["type"] == "polygon_prism":
             center = np.array(p["center"])
             for edge in regular_prism_edges(center, p["radius"], p["height"], p["rotation"], p["sides"]):
-                lines.append({"points": transform_line(edge, frame), "color": "#00b9c7", "role": role, "width": 2})
+                lines.append({"points": transform_line(edge, frame), "color": color if is_highlighted else "#00b9c7", "role": role, "name": p["name"], "width": 3 if is_highlighted else 2})
+            if is_highlighted:
+                labels.append({"point": list(point_to_global(center, frame).astype(float)), "text": p["name"], "color": color})
 
     all_points = [pt for poly in polygons for pt in poly["points"]] + [pt for line in lines for pt in line["points"]]
     arr = np.array(all_points, dtype=float)
     bounds = [arr.min(axis=0).tolist(), arr.max(axis=0).tolist()]
-    data = {"polygons": polygons, "lines": lines, "bounds": bounds}
+    data = {"polygons": polygons, "lines": lines, "labels": labels, "bounds": bounds}
 
     html = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>LACT Optical Layout</title>
 <style>html,body{{margin:0;height:100%;background:#101216;color:#e8edf2;font-family:Segoe UI,Arial,sans-serif}}#bar{{position:fixed;left:12px;top:10px;padding:8px 10px;background:rgba(16,18,22,.78);border:1px solid #2b3038;border-radius:6px;font-size:13px}}canvas{{width:100vw;height:100vh;display:block;cursor:grab}}canvas:active{{cursor:grabbing}}</style>
-</head><body><canvas id="view"></canvas><div id="bar">Drag to rotate · Wheel to zoom · Blue: mirrors · Red: output plane · Orange: support · Green: box · Cyan: camera · Red wire: adapter hole</div>
+</head><body><canvas id="view"></canvas><div id="bar">Drag to rotate · Wheel to zoom · Blue: mirrors · Red: output plane · Orange: support · Green: box · Cyan: camera · Red wire: adapter hole · Bright red: highlighted struts</div>
 <script>
 const data = {json.dumps(data)};
 const canvas=document.getElementById('view'),ctx=canvas.getContext('2d');let rx=-0.7,ry=0.8,zoom=1,drag=false,lx=0,ly=0;
@@ -192,7 +215,8 @@ function rot(p){{let x=(p[0]-center[0])/span,y=(p[1]-center[1])/span,z=(p[2]-cen
 function proj(p){{const r=rot(p),s=Math.min(canvas.width,canvas.height)*0.78*zoom;return[canvas.width/2+r[0]*s,canvas.height/2-r[1]*s,r[2]];}}
 function line(points,color,width=1,closed=false){{if(!points.length)return;ctx.beginPath();let p=proj(points[0]);ctx.moveTo(p[0],p[1]);for(let i=1;i<points.length;i++){{p=proj(points[i]);ctx.lineTo(p[0],p[1]);}}if(closed)ctx.closePath();ctx.strokeStyle=color;ctx.lineWidth=width*devicePixelRatio;ctx.stroke();}}
 function poly(points,color){{ctx.beginPath();let p=proj(points[0]);ctx.moveTo(p[0],p[1]);for(let i=1;i<points.length;i++){{p=proj(points[i]);ctx.lineTo(p[0],p[1]);}}ctx.closePath();ctx.fillStyle=color+'44';ctx.strokeStyle=color;ctx.lineWidth=devicePixelRatio;ctx.fill();ctx.stroke();}}
-function draw(){{ctx.fillStyle='#101216';ctx.fillRect(0,0,canvas.width,canvas.height);for(const p of data.polygons)poly(p.points,p.color);for(const l of data.lines)line(l.points,l.color,l.width||1,false);}}
+function label(item){{const p=proj(item.point);ctx.font=`${{13*devicePixelRatio}}px Segoe UI,Arial,sans-serif`;ctx.textBaseline='middle';const pad=4*devicePixelRatio,w=ctx.measureText(item.text).width+2*pad,h=20*devicePixelRatio;ctx.fillStyle='rgba(16,18,22,.78)';ctx.strokeStyle=item.color;ctx.lineWidth=1.5*devicePixelRatio;ctx.fillRect(p[0]+6*devicePixelRatio,p[1]-h/2,w,h);ctx.strokeRect(p[0]+6*devicePixelRatio,p[1]-h/2,w,h);ctx.fillStyle='#fff';ctx.fillText(item.text,p[0]+6*devicePixelRatio+pad,p[1]);}}
+function draw(){{ctx.fillStyle='#101216';ctx.fillRect(0,0,canvas.width,canvas.height);for(const p of data.polygons)poly(p.points,p.color);for(const l of data.lines)line(l.points,l.color,l.width||1,false);for(const item of data.labels)label(item);}}
 canvas.addEventListener('mousedown',e=>{{drag=true;lx=e.clientX;ly=e.clientY;}});addEventListener('mouseup',()=>drag=false);addEventListener('mousemove',e=>{{if(!drag)return;ry+=(e.clientX-lx)*.008;rx+=(e.clientY-ly)*.008;lx=e.clientX;ly=e.clientY;draw();}});canvas.addEventListener('wheel',e=>{{e.preventDefault();zoom*=Math.exp(-e.deltaY*.001);zoom=Math.max(.2,Math.min(5,zoom));draw();}},{{passive:false}});addEventListener('resize',resize);resize();
 </script></body></html>"""
     output = Path(args.output)

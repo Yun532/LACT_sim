@@ -2289,6 +2289,7 @@ ObstructionMask buildObstructionMask(const std::map<std::string, std::string>& c
     obstruction.check_incoming = getBool(cfg, "obstruction.check_incoming", true);
     obstruction.check_reflected = getBool(cfg, "obstruction.check_reflected",
                                           obstruction.mode == "primitives");
+    obstruction.mark_only = getBool(cfg, "obstruction.mark_only", false);
     obstruction.plane_z_m = getDouble(cfg, "obstruction.plane_z_m", obstruction.plane_z_m);
 
     if (!obstruction.enabled) {
@@ -2459,6 +2460,23 @@ bool photonBlockedByObstruction(const Photon& photon,
         d = trace_to_local_frame->rotateVectorToLocal(photon.dir).normalized();
     }
     return segmentBlockedLocal(p, p + d * 1.0e4, obstruction);
+}
+
+bool incomingSegmentBlockedByObstruction(const Vec3& a,
+                                         const Vec3& b,
+                                         const ObstructionMask& obstruction,
+                                         const TelescopeFrame* trace_to_local_frame)
+{
+    if (!obstruction.enabled || !obstruction.check_incoming) {
+        return false;
+    }
+    Vec3 p0 = a;
+    Vec3 p1 = b;
+    if (trace_to_local_frame) {
+        p0 = trace_to_local_frame->pointToLocal(a);
+        p1 = trace_to_local_frame->pointToLocal(b);
+    }
+    return segmentBlockedLocal(p0, p1, obstruction);
 }
 
 bool segmentBlockedByObstruction(const Vec3& a,

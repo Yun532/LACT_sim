@@ -310,6 +310,7 @@ int main(int argc, char** argv) {
             printField("mode", obstruction.mode);
             printField("check_incoming", obstruction.check_incoming ? "true" : "false");
             printField("check_reflected", obstruction.check_reflected ? "true" : "false");
+            printField("mark_only", obstruction.mark_only ? "true" : "false");
             if (obstruction.mode == "primitives") {
                 printField("primitives_csv", obstruction.primitives_csv);
                 printField("primitive_count",
@@ -373,6 +374,8 @@ int main(int argc, char** argv) {
 
         PhotonBunch bunch;
         int n_total = 0;
+        int n_hit_mirror_before_obstruction = 0;
+        int n_hit_surface_before_obstruction = 0;
         int n_hit_mirror = 0;
         int n_hit_surface = 0;
         int n_hit_camera = 0;
@@ -396,24 +399,42 @@ int main(int argc, char** argv) {
                 applyTelescopeFrame(photon, telescope_frame);
             }
 
-            if (photonBlockedByObstruction(photon, obstruction, &telescope_frame)) {
-                ++n_blocked;
-                ++n_blocked_incoming;
-                continue;
-            }
-
             OpticalSurfaceHit hit = tracer.traceToPlane(photon, mirrors, plane, eff);
             if (hit.hit_mirror) {
-                ++n_hit_mirror;
+                ++n_hit_mirror_before_obstruction;
+                if (hit.hit_surface) {
+                    ++n_hit_surface_before_obstruction;
+                }
+                hit.obstruction_blocked_incoming =
+                    incomingSegmentBlockedByObstruction(photon.pos, hit.mirror_point,
+                                                        obstruction, &telescope_frame);
+                if (hit.obstruction_blocked_incoming) {
+                    ++n_blocked;
+                    ++n_blocked_incoming;
+                    if (!obstruction.mark_only) {
+                        continue;
+                    }
+                } else {
+                    ++n_hit_mirror;
+                }
             }
             if (hit.hit_surface) {
-                if (segmentBlockedByObstruction(hit.mirror_point, hit.surface_point,
-                                                obstruction, &telescope_frame)) {
-                    ++n_blocked;
+                hit.obstruction_blocked_reflected =
+                    segmentBlockedByObstruction(hit.mirror_point, hit.surface_point,
+                                                obstruction, &telescope_frame);
+                if (hit.obstruction_blocked_reflected) {
                     ++n_blocked_reflected;
-                    continue;
+                    if (!hit.obstruction_blocked_incoming) {
+                        ++n_blocked;
+                    }
+                    if (!obstruction.mark_only) {
+                        continue;
+                    }
                 }
-                if (camera_cfg.enabled) {
+                hit.obstruction_blocked = hit.obstruction_blocked_incoming ||
+                                          hit.obstruction_blocked_reflected;
+                const bool physically_reaches_output = !hit.obstruction_blocked;
+                if (camera_cfg.enabled && physically_reaches_output) {
                     applyCameraResponse(camera, light_collector.get(), plane, sipm_cfg,
                                         electronics, hit);
                     if (hit.hit_camera) {
@@ -427,15 +448,19 @@ int main(int argc, char** argv) {
                         accumulatePixelHit(pixels, bunch.event_id, bunch.telescope_id, hit);
                     }
                 }
-                ++n_hit_surface;
+                if (physically_reaches_output) {
+                    ++n_hit_surface;
+                }
                 if (save_hits_csv) {
                     hits.push_back(hit);
                 }
 
-                double w = hit.weight * hit.relative_efficiency;
-                double r2 = hit.u_m * hit.u_m + hit.v_m * hit.v_m;
-                sum_w += w;
-                sum_r2 += w * r2;
+                if (physically_reaches_output) {
+                    double w = hit.weight * hit.relative_efficiency;
+                    double r2 = hit.u_m * hit.u_m + hit.v_m * hit.v_m;
+                    sum_w += w;
+                    sum_r2 += w * r2;
+                }
             }
         }
         const auto t_trace_done = std::chrono::steady_clock::now();
@@ -451,9 +476,41 @@ int main(int argc, char** argv) {
         const double mirror_fraction = n_total > 0
             ? static_cast<double>(n_hit_mirror) / static_cast<double>(n_total)
             : 0.0;
+        const double mirror_before_fraction = n_total > 0
+            ? static_cast<double>(n_hit_mirror_before_obstruction) / static_cast<double>(n_total)
+            : 0.0;
         const double surface_fraction = n_total > 0
             ? static_cast<double>(n_hit_surface) / static_cast<double>(n_total)
             : 0.0;
+        const double surface_before_fraction = n_total > 0
+            ? static_cast<double>(n_hit_surface_before_obstruction) / static_cast<double>(n_total)
+            : 0.0;
+        const double mirror_obstruction_transmission = n_hit_mirror_before_obstruction > 0
+            ? static_cast<double>(n_hit_mirror) /
+              static_cast<double>(n_hit_mirror_before_obstruction)
+            : 0.0;
+        const double output_obstruction_transmission = n_hit_surface_before_obstruction > 0
+            ? static_cast<double>(n_hit_surface) /
+              static_cast<double>(n_hit_surface_before_obstruction)
+            : 0.0;
+        const bool has_sampling_area =
+            !source_runtime_cfg.use_photon_csv && !source_runtime_cfg.use_eventio;
+        const double sampling_radius_m = source_cfg.mode == SyntheticMode::ParallelBeam
+            ? source_cfg.beam_radius_m
+            : source_cfg.aperture_radius_m;
+        const double source_sampling_area_m2 = has_sampling_area
+            ? std::acos(-1.0) * sampling_radius_m * sampling_radius_m
+            : std::nan("");
+        const double mirror_area_before_obstruction_m2 =
+            source_sampling_area_m2 * mirror_before_fraction;
+        const double mirror_area_after_incoming_obstruction_m2 =
+            source_sampling_area_m2 * mirror_fraction;
+        const double output_area_before_obstruction_m2 =
+            source_sampling_area_m2 * surface_before_fraction;
+        const double output_area_after_obstruction_m2 =
+            source_sampling_area_m2 * surface_fraction;
+        const double output_area_loss_from_obstruction_m2 =
+            output_area_before_obstruction_m2 - output_area_after_obstruction_m2;
         const double camera_fraction = n_total > 0
             ? static_cast<double>(n_hit_camera) / static_cast<double>(n_total)
             : 0.0;
@@ -473,6 +530,10 @@ int main(int argc, char** argv) {
                    intToString(static_cast<std::uint64_t>(n_blocked_incoming)));
         printField("blocked_reflected",
                    intToString(static_cast<std::uint64_t>(n_blocked_reflected)));
+        printField("hit_mirror_before_obstruction",
+                   intToString(static_cast<std::uint64_t>(n_hit_mirror_before_obstruction)));
+        printField("hit_output_before_obstruction",
+                   intToString(static_cast<std::uint64_t>(n_hit_surface_before_obstruction)));
         printField("hit_mirror", intToString(static_cast<std::uint64_t>(n_hit_mirror)));
         printField("hit_output_plane", intToString(static_cast<std::uint64_t>(n_hit_surface)));
         if (camera_cfg.enabled) {
@@ -483,8 +544,31 @@ int main(int argc, char** argv) {
             printField("unique_hit_pixels",
                        intToString(static_cast<std::uint64_t>(unique_hit_pixels.size())));
         }
+        printField("hit_mirror_before_obstruction_fraction", doubleToString(mirror_before_fraction));
         printField("hit_mirror_fraction", doubleToString(mirror_fraction));
+        printField("hit_output_before_obstruction_fraction", doubleToString(surface_before_fraction));
         printField("hit_output_fraction", doubleToString(surface_fraction));
+        printField("mirror_transmission_after_incoming_obstruction",
+                   doubleToString(mirror_obstruction_transmission));
+        printField("mirror_loss_fraction_from_incoming_obstruction",
+                   doubleToString(1.0 - mirror_obstruction_transmission));
+        printField("output_transmission_after_obstruction",
+                   doubleToString(output_obstruction_transmission));
+        printField("output_loss_fraction_from_obstruction",
+                   doubleToString(1.0 - output_obstruction_transmission));
+        if (has_sampling_area) {
+            printField("source_sampling_area_m2", doubleToString(source_sampling_area_m2));
+            printField("mirror_collecting_area_before_obstruction_m2",
+                       doubleToString(mirror_area_before_obstruction_m2));
+            printField("mirror_collecting_area_after_incoming_obstruction_m2",
+                       doubleToString(mirror_area_after_incoming_obstruction_m2));
+            printField("output_collecting_area_before_obstruction_m2",
+                       doubleToString(output_area_before_obstruction_m2));
+            printField("output_collecting_area_after_obstruction_m2",
+                       doubleToString(output_area_after_obstruction_m2));
+            printField("output_collecting_area_loss_from_obstruction_m2",
+                       doubleToString(output_area_loss_from_obstruction_m2));
+        }
         if (camera_cfg.enabled) {
             printField("hit_camera_fraction", doubleToString(camera_fraction));
             printField("accepted_camera_fraction", doubleToString(accepted_fraction));
@@ -510,8 +594,29 @@ int main(int argc, char** argv) {
         std::cout << "blocked_by_obstruction=" << n_blocked << "\n";
         std::cout << "blocked_incoming=" << n_blocked_incoming << "\n";
         std::cout << "blocked_reflected=" << n_blocked_reflected << "\n";
+        std::cout << "hit_mirror_before_obstruction="
+                  << n_hit_mirror_before_obstruction << "\n";
+        std::cout << "hit_output_before_obstruction="
+                  << n_hit_surface_before_obstruction << "\n";
         std::cout << "hit_mirror=" << n_hit_mirror << "\n";
         std::cout << "hit_output_plane=" << n_hit_surface << "\n";
+        std::cout << "mirror_transmission_after_incoming_obstruction="
+                  << mirror_obstruction_transmission << "\n";
+        std::cout << "output_transmission_after_obstruction="
+                  << output_obstruction_transmission << "\n";
+        if (has_sampling_area) {
+            std::cout << "source_sampling_area_m2=" << source_sampling_area_m2 << "\n";
+            std::cout << "mirror_collecting_area_before_obstruction_m2="
+                      << mirror_area_before_obstruction_m2 << "\n";
+            std::cout << "mirror_collecting_area_after_incoming_obstruction_m2="
+                      << mirror_area_after_incoming_obstruction_m2 << "\n";
+            std::cout << "output_collecting_area_before_obstruction_m2="
+                      << output_area_before_obstruction_m2 << "\n";
+            std::cout << "output_collecting_area_after_obstruction_m2="
+                      << output_area_after_obstruction_m2 << "\n";
+            std::cout << "output_collecting_area_loss_from_obstruction_m2="
+                      << output_area_loss_from_obstruction_m2 << "\n";
+        }
         if (camera_cfg.enabled) {
             std::cout << "hit_camera=" << n_hit_camera << "\n";
             std::cout << "accepted_camera=" << n_accepted << "\n";

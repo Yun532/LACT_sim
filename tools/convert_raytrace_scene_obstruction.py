@@ -38,6 +38,12 @@ def parse_args() -> argparse.Namespace:
         default=-16.0,
         help="LACT local z coordinate of the lens/mirror reference plane",
     )
+    parser.add_argument(
+        "--no-swap-xy",
+        action="store_false",
+        dest="swap_xy",
+        help="keep source x/y axes unchanged; default swaps x/y to match LACT mirror coordinates",
+    )
     return parser.parse_args()
 
 
@@ -68,20 +74,27 @@ def num(value, fallback=0.0) -> float:
     return float(value)
 
 
-def make_transform(lens_center, unit_scale: float, local_lens_z_m: float):
+def make_transform(lens_center, unit_scale: float, local_lens_z_m: float, swap_xy: bool):
     lx, ly, lz = lens_center
 
     def point(x, y, z):
-        return (
-            (float(x) - lx) * unit_scale,
-            (float(y) - ly) * unit_scale,
-            local_lens_z_m + (float(z) - lz) * unit_scale,
-        )
+        dx = (float(x) - lx) * unit_scale
+        dy = (float(y) - ly) * unit_scale
+        if swap_xy:
+            dx, dy = dy, dx
+        return (dx, dy, local_lens_z_m + (float(z) - lz) * unit_scale)
 
     def length(v):
         return float(v) * unit_scale
 
     return point, length
+
+
+def transform_rotation(rotation: float, swap_xy: bool) -> float:
+    if not swap_xy:
+        return rotation
+    # Swapping coordinates maps a local polygon angle theta to pi/2 - theta.
+    return 0.5 * 3.141592653589793 - rotation
 
 
 def empty_row() -> dict:
@@ -127,7 +140,7 @@ def bbox_to_local(obj, point):
     )
 
 
-def convert_scene(objects: list[dict], point, length, include_camera_body: bool) -> tuple[list[dict], dict]:
+def convert_scene(objects: list[dict], point, length, include_camera_body: bool, swap_xy: bool) -> tuple[list[dict], dict]:
     rows: list[dict] = []
     stats = {
         "support_cylinders": 0,
@@ -139,7 +152,7 @@ def convert_scene(objects: list[dict], point, length, include_camera_body: bool)
 
     hole = next((o for o in objects if o.get("role") == "camera_adapter_hole"), None)
     hole_radius = length(hole["radius"]) if hole else 0.0
-    hole_rotation = float(hole.get("rotation", 0.0)) if hole else 0.0
+    hole_rotation = transform_rotation(float(hole.get("rotation", 0.0)), swap_xy) if hole else 0.0
     hole_sides = int(float(hole.get("sides", 0))) if hole else 0
 
     for obj in objects:
@@ -233,7 +246,7 @@ def convert_scene(objects: list[dict], point, length, include_camera_body: bool)
                 "z1_m": center[2],
                 "radius_m": length(obj["radius"]),
                 "height_m": length(obj["height"]),
-                "rotation_rad": obj["rotation"],
+                "rotation_rad": transform_rotation(float(obj["rotation"]), swap_xy),
                 "sides": int(float(obj["sides"])),
                 "bbox_min_x_m": bmin[0],
                 "bbox_min_y_m": bmin[1],
@@ -248,14 +261,15 @@ def convert_scene(objects: list[dict], point, length, include_camera_body: bool)
     return rows, stats
 
 
-def write_csv(path: Path, rows: list[dict], source: Path, stats: dict, lens_center) -> None:
+def write_csv(path: Path, rows: list[dict], source: Path, stats: dict, lens_center, swap_xy: bool) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
         handle.write("# format=LACT_obstruction_primitives_v1\n")
         handle.write(f"# source_package={source}\n")
         handle.write("# source_units=mm\n")
         handle.write("# target_units=m\n")
-        handle.write("# coordinate_transform=x/y centered on lens_reference, z(lens_reference)=-16 m\n")
+        xy_text = "swap source x/y, center on lens_reference" if swap_xy else "x/y centered on lens_reference"
+        handle.write(f"# coordinate_transform={xy_text}, z(lens_reference)=-16 m\n")
         handle.write(f"# lens_reference_center={lens_center[0]},{lens_center[1]},{lens_center[2]}\n")
         for key, value in stats.items():
             handle.write(f"# {key}={value}\n")
@@ -323,9 +337,9 @@ def main() -> None:
     scene_path = args.package_dir / "raytrace_scene_final.json"
     objects = read_json(scene_path)
     lens_center = read_lens_reference(args.package_dir)
-    point, length = make_transform(lens_center, args.unit_scale, args.local_lens_z_m)
-    rows, stats = convert_scene(objects, point, length, args.include_camera_body)
-    write_csv(args.output_csv, rows, args.package_dir, stats, lens_center)
+    point, length = make_transform(lens_center, args.unit_scale, args.local_lens_z_m, args.swap_xy)
+    rows, stats = convert_scene(objects, point, length, args.include_camera_body, args.swap_xy)
+    write_csv(args.output_csv, rows, args.package_dir, stats, lens_center, args.swap_xy)
     write_cfg(args.output_cfg, args.output_csv)
     print(f"wrote {args.output_csv}")
     print(f"wrote {args.output_cfg}")

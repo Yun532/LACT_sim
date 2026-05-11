@@ -89,6 +89,7 @@ struct ObstructionMask {
     std::string primitives_csv;
     bool check_incoming = true;
     bool check_reflected = false;
+    bool mark_only = false;
     double plane_z_m = -16.0;
     double x_min_m = -4.5;
     double y_min_m = -4.5;
@@ -316,6 +317,10 @@ ObstructionMask buildObstructionMask(const std::map<std::string, std::string>& c
 bool photonBlockedByObstruction(const Photon& photon,
                                 const ObstructionMask& obstruction,
                                 const TelescopeFrame* trace_to_local_frame = nullptr);
+bool incomingSegmentBlockedByObstruction(const Vec3& a,
+                                         const Vec3& b,
+                                         const ObstructionMask& obstruction,
+                                         const TelescopeFrame* trace_to_local_frame = nullptr);
 bool segmentBlockedByObstruction(const Vec3& a,
                                  const Vec3& b,
                                  const ObstructionMask& obstruction,
