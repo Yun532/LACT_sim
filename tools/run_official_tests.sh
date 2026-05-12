@@ -43,6 +43,7 @@ mkdir -p run_logs/official_tests/deformation_scan
 mkdir -p run_logs/official_tests/corsika/plots/shower1_array0_whiteboard
 mkdir -p "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_camera"
 mkdir -p "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_nsb_trigger"
+mkdir -p "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_obstruction_nsb_trigger"
 mkdir -p "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_full_response"
 mkdir -p run_logs/official_tests/collector_angular_response
 
@@ -161,6 +162,8 @@ fi
   2>&1 | tee run_logs/official_tests/corsika/camera_run.log
 "$BUILD_DIR/run_corsika_trace" configs/official_tests/corsika_nsb_trigger_camera.cfg "$CORSIKA_FILE" \
   2>&1 | tee run_logs/official_tests/corsika/camera_nsb_trigger_run.log
+"$BUILD_DIR/run_corsika_trace" configs/official_tests/corsika_obstruction_nsb_trigger_camera.cfg "$CORSIKA_FILE" \
+  2>&1 | tee run_logs/official_tests/corsika/camera_obstruction_nsb_trigger_run.log
 "$BUILD_DIR/run_corsika_trace" configs/official_tests/corsika_full_response_camera.cfg "$CORSIKA_FILE" \
   2>&1 | tee run_logs/official_tests/corsika/camera_full_response_run.log
 
@@ -177,6 +180,11 @@ fi
 if [[ ! -s run_logs/official_tests/corsika/camera_nsb_trigger_dense.h5 ]]; then
   echo "Expected NSB+trigger HDF5 was not created: run_logs/official_tests/corsika/camera_nsb_trigger_dense.h5" >&2
   echo "Check run_logs/official_tests/corsika/camera_nsb_trigger_run.log" >&2
+  exit 1
+fi
+if [[ ! -s run_logs/official_tests/corsika/camera_obstruction_nsb_trigger_dense.h5 ]]; then
+  echo "Expected obstruction+NSB+trigger HDF5 was not created: run_logs/official_tests/corsika/camera_obstruction_nsb_trigger_dense.h5" >&2
+  echo "Check run_logs/official_tests/corsika/camera_obstruction_nsb_trigger_run.log" >&2
   exit 1
 fi
 if [[ ! -s run_logs/official_tests/corsika/camera_full_response_dense.h5 ]]; then
@@ -224,6 +232,30 @@ python3 python/plot_hdf5_camera.py \
   --array-id "$PLOT_ARRAY_ID" \
   --quantity pe \
   --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_nsb_trigger/all_tel_final_pe.png"
+
+MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
+python3 python/plot_hdf5_camera.py \
+  run_logs/official_tests/corsika/camera_obstruction_nsb_trigger_dense.h5 \
+  --shower-event-number 1 \
+  --array-id "$PLOT_ARRAY_ID" \
+  --quantity cherenkov_pe \
+  --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_obstruction_nsb_trigger/all_tel_cherenkov_pe.png"
+
+MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
+python3 python/plot_hdf5_camera.py \
+  run_logs/official_tests/corsika/camera_obstruction_nsb_trigger_dense.h5 \
+  --shower-event-number 1 \
+  --array-id "$PLOT_ARRAY_ID" \
+  --quantity nsb_pe \
+  --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_obstruction_nsb_trigger/all_tel_nsb_pe.png"
+
+MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
+python3 python/plot_hdf5_camera.py \
+  run_logs/official_tests/corsika/camera_obstruction_nsb_trigger_dense.h5 \
+  --shower-event-number 1 \
+  --array-id "$PLOT_ARRAY_ID" \
+  --quantity pe \
+  --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_obstruction_nsb_trigger/all_tel_final_pe.png"
 
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_hdf5_camera.py \

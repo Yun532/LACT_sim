@@ -138,6 +138,10 @@ export MPLCONFIGDIR=/tmp
 The helper script rebuilds the C++ code, runs tests, runs the official optical
 cases, and plots the standard figures.
 
+For a cfg-by-cfg explanation of every official test, including independent run
+commands and expected outputs, see
+[`docs/official_tests.md`](docs/official_tests.md).
+
 Without CORSIKA:
 
 ```bash
@@ -727,8 +731,8 @@ build/run_corsika_trace \
 This writes `camera_full_response_dense.h5`. It enables the current optical
 error paths, the wavelength-dependent mirror reflectivity, filter transmission,
 SiPM PDE curve, and the simple multiplicity trigger. SiPM PDE is configured only
-once in `configs/sipm/new_camera_sipm.cfg` as `sipm.pde`; the electronics config
-is only a placeholder for future waveform/electronics effects. This test uses
+once in `configs/sipm/new_camera_sipm.cfg` as `sipm.pde`; the electronics module
+is still only a placeholder for future waveform/electronics effects. This test uses
 `output.save_only_triggered=true`, so `/images/dense/*`
 contains only telescope images that pass the trigger. The complete trigger
 decision tables remain in `/trigger/telescope` and `/trigger/array`.
@@ -817,6 +821,7 @@ configs/official_tests/deformation_parallel_whiteboard.cfg
 configs/official_tests/corsika_whiteboard.cfg
 configs/official_tests/corsika_new_camera.cfg
 configs/official_tests/corsika_nsb_trigger_camera.cfg
+configs/official_tests/corsika_obstruction_nsb_trigger_camera.cfg
 configs/official_tests/corsika_full_response_camera.cfg
 ```
 
