@@ -1,57 +1,115 @@
-# Official Test Suite
+# 官方测试说明
 
-This document explains the reproducible tests run by
-`tools/run_official_tests.sh`. Each official cfg under `configs/official_tests/`
-is meant to be small and explicit: it lists only the non-default modules needed
-for that test.
+这份文档解释 `tools/run_official_tests.sh` 会运行哪些测试，以及每个
+`configs/official_tests/*.cfg` 里的配置项具体代表什么。目标是让新用户只看
+cfg 和这份文档，就能知道每个测试在测什么、怎么单独运行、应该检查哪些输出。
 
-Run non-CORSIKA tests:
+运行不依赖 CORSIKA/EventIO 的测试：
 
 ```bash
 tools/run_official_tests.sh --no-corsika 2>&1 | tee run_logs/official_tests/run_no_corsika.log
 ```
 
-Run the full suite:
+运行完整测试，需要给一个 CORSIKA/EventIO 输入文件：
 
 ```bash
 tools/run_official_tests.sh --corsika-file /path/to/input.zst \
   2>&1 | tee run_logs/official_tests/run_all.log
 ```
 
-## Shared Config Blocks
+默认编译目录是 `build/`。如果想用其它编译目录：
 
-- `telescope.config`: telescope metadata and pointing.
-- `mirror.config`: mirror facet layout.
-- `source.config`: synthetic source for non-CORSIKA tests.
-- `output.config`: whiteboard or focal-plane geometry.
-- `camera.config`: pixel layout and collector. `new_camera.cfg` enables the
-  Bezier square-cone collector with `true_reflect`.
-- `sipm.config`: SiPM size and optional PDE curve.
-- `atmosphere.config`: extra transmission after CORSIKA; ideal is off.
-- `nsb.config`: night-sky background. Ideal is disabled.
-- `trigger.config`: simple multiplicity trigger. Disabled unless specified.
-- `obstruction.config`: imported 3D obstruction primitives.
-- `error.config`: structural deformation and random optical errors.
+```bash
+LACT_BUILD_DIR=build_release tools/run_official_tests.sh --no-corsika
+```
 
-`electronics.config=ideal_pe` is intentionally not used by official cfgs now.
-Electronics is still a placeholder; SiPM PDE is configured through `sipm.pde`.
+## 共同配置规则
 
-## Optical Whiteboard Tests
+official cfg 基本都是“装配文件”：它们引用 telescope、mirror、source、
+output、camera、sipm、NSB、trigger 等模块 cfg。每个 official cfg 只写本测试
+真正需要改变或显式启用的配置。
 
-### Perfect Parallel Whiteboard
+常见配置项含义：
 
-Cfg: `configs/official_tests/perfect_parallel_whiteboard.cfg`
+- `telescope.config`: 望远镜元信息和默认指向。官方测试一般用
+  `configs/official_tests/telescope_1229_minimal.cfg`。
+- `telescope.pointing_az_deg`: 望远镜指向方位角，单位 degree。
+- `telescope.pointing_el_deg`: 望远镜指向仰角，单位 degree。
+- `mirror.config`: 镜片布局。标准 1229 镜面是
+  `configs/mirrors/mirror_1229_imported.cfg`。
+- `source.config`: 非 CORSIKA 测试用的人工光源。
+- `source.mode=EventIO`: CORSIKA/EventIO 输入模式。
+- `source.eventio_path`: EventIO 文件路径。official cfg 里留空，因为运行时通过
+  命令行传入，避免用户每次改 cfg。
+- `source.event_id_mode=event_array100`: 输出事件编号采用
+  `event_id = shower_event * 100 + array_id`。
+- `source.eventio_coordinate_frame=corsika_iact`: 使用当前 EventIO/CORSIKA IACT
+  坐标转换约定。
+- `output.config`: 白板或相机焦平面位置。
+- `output.format=csv`: 输出光子命中 CSV。
+- `output.format=hdf5`: 输出 HDF5。
+- `output.hdf5_storage=dense`: 每个图像保存完整 1616 像素，便于后续加 NSB/trigger。
+- `output.hdf5_write_components=true`: 额外写出 `cherenkov_pe` 和 `nsb_pe`。
+- `output.save_only_triggered=true`: HDF5 只保留通过 telescope trigger 的图像。
+- `camera.config`: 相机像素和光收集器。`new_camera.cfg` 使用真实像素表、
+  Bezier square-cone 光收集器和 `true_reflect` 材料。
+- `sipm.config`: SiPM 有效面积和 PDE。理想测试用 `ideal_sipm.cfg`，PDE 不启用。
+- `efficiency.config`: 镜面反射率、滤光片透过率等效率曲线。
+- `atmosphere.config`: CORSIKA 到达望远镜之后的额外大气透过率。`ideal.cfg` 表示不额外衰减。
+- `nsb.config`: 夜空背景光。`ideal.cfg` 表示关闭。
+- `trigger.config`: 简单 multiplicity trigger。`disabled.cfg` 表示关闭。
+- `obstruction.config`: 3D 遮挡模型。
+- `error.config`: 镜片形变和随机误差项。
+- `propagation.speed_of_light_m_per_ns`: 局部望远镜光路中的光速，默认真空光速。
 
-Content:
+注意：official cfg 现在不写 `electronics.config=../electronics/ideal_pe.cfg`。
+目前 electronics 模块只是后续波形/电子学的 placeholder，没有实际响应；SiPM PDE
+只通过 `sipm.pde` 设置，避免同一个 p.e. 转换逻辑出现两个入口。
 
-- `telescope.config=telescope_1229_minimal.cfg`: vertical 1229 metadata.
-- `mirror.config=../mirrors/mirror_1229_imported.cfg`: all 54 ideal facets.
-- `source.config=../sources/parallel_1M_on_axis.cfg`: 1,000,000 on-axis
-  parallel photons sampled over a 4 m radius disk.
-- `output.config=../outputs/whiteboard_f8.cfg`: virtual whiteboard at `z=-8 m`.
-- `output.csv=.../perfect_parallel/hits.csv`: photon hit table.
+## 一键脚本包含的测试
 
-Run:
+`tools/run_official_tests.sh --no-corsika` 会运行：
+
+1. C++ 单元测试和小型回归测试。
+2. 完美平行光白板。
+3. 完美 900 m 点源白板。
+4. 平行光 + 3D 遮挡白板。
+5. 30 m 点源 + 3D 遮挡白板。
+6. 支架形变 0 到 90 度仰角扫描。
+7. 光收集器角响应测试。
+
+如果没有 `--no-corsika`，脚本还会继续运行：
+
+1. CORSIKA 白板 debug。
+2. CORSIKA 完美相机 dense HDF5。
+3. CORSIKA + NSB + trigger。
+4. CORSIKA + 3D 遮挡 + NSB + trigger。
+5. CORSIKA full-response smoke test。
+
+## 1. 完美平行光白板测试
+
+cfg:
+
+```text
+configs/official_tests/perfect_parallel_whiteboard.cfg
+```
+
+测试内容：理想 54 片镜子、无效率损失、无误差、无遮挡，用 100 万平行光打到 8 m
+白板上，检查基础 PSF。
+
+cfg 逐项解释：
+
+- `telescope.config=telescope_1229_minimal.cfg`: 使用 1229 望远镜元信息。默认指向
+  `az=0, el=90`，也就是竖直向上。
+- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 使用完整 54 片标准镜面。
+- `source.config=../sources/parallel_1M_on_axis.cfg`: 平行光源，`n_bunches=1000000`，
+  采样半径 `beam_radius_m=4`，方向 `beam_direction=0,0,-1`。
+- `output.config=../outputs/whiteboard_f8.cfg`: 白板在本地 `z=-8 m`，法向量
+  `0,0,-1`，图像坐标由 `plane_u_axis=1,0,0` 和 `plane_v_axis=0,1,0` 定义。
+- `propagation.speed_of_light_m_per_ns=0.299792458`: 局部传播光速。
+- `output.csv=run_logs/official_tests/perfect_parallel/hits.csv`: 输出白板命中光子。
+
+单独运行：
 
 ```bash
 mkdir -p run_logs/official_tests/perfect_parallel
@@ -63,22 +121,30 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_spot_histogram.py \
   --max-bins 520 --dpi 350
 ```
 
-Expected: no obstruction and no errors; `hit_output_plane` equals
-`hit_output_before_obstruction`.
+检查重点：`blocked_by_obstruction=0`，`hit_output_plane` 等于
+`hit_output_before_obstruction`，spot 应该是理想光学 PSF。
 
-### Perfect 900 m Point Source
+## 2. 完美 900 m 点光源白板测试
 
-Cfg: `configs/official_tests/perfect_point_900m_whiteboard.cfg`
+cfg:
 
-Content:
+```text
+configs/official_tests/perfect_point_900m_whiteboard.cfg
+```
 
-- Standard telescope and 54 ideal facets.
-- `source.config=../sources/point_900m_on_axis.cfg`: point source at local
-  `z=900 m`.
-- `output.config=../outputs/whiteboard_point_900m_focus.cfg`: finite-distance
-  focal plane at about `8.07175 m`.
+测试内容：理想镜面下，900 m 处轴上点光源在有限距离焦平面附近形成的光斑。
 
-Run:
+cfg 逐项解释：
+
+- `telescope.config=telescope_1229_minimal.cfg`: 使用默认竖直望远镜。
+- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 完整 54 片标准镜面。
+- `source.config=../sources/point_900m_on_axis.cfg`: 点源在本地 `z=900 m`，
+  程序从 `aperture_z=0`、半径 4 m 的入瞳采样发射光线。
+- `output.config=../outputs/whiteboard_point_900m_focus.cfg`: 900 m 物距对应的近似
+  成像平面，`z=-8.0717488789 m`。
+- `output.csv=run_logs/official_tests/point_900m/hits.csv`: 输出白板命中光子。
+
+单独运行：
 
 ```bash
 mkdir -p run_logs/official_tests/point_900m
@@ -90,22 +156,31 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_spot_histogram.py \
   --max-bins 520 --dpi 350
 ```
 
-Expected: finite-distance spot differs from the parallel PSF.
+检查重点：有限距离点源光斑应明显不同于无限远平行光。
 
-## Imported 3D Obstruction Tests
+## 3. 平行光 + 3D 遮挡白板测试
 
-### Parallel Whiteboard With Obstruction
+cfg:
 
-Cfg: `configs/official_tests/perfect_parallel_raytrace_structure_whiteboard.cfg`
+```text
+configs/official_tests/perfect_parallel_raytrace_structure_whiteboard.cfg
+```
 
-Content:
+测试内容：在理想平行光 PSF 基础上加入 3D 遮挡模型，检查支架、相机盒等结构对光子
+数量和光斑形状的影响。
 
-- Same ideal parallel source as the perfect whiteboard test.
-- `obstruction.config=../obstructions/raytrace_final_structure.cfg`: imported
-  camera/support primitives are enabled.
-- Normal physics mode: blocked photons are discarded.
+cfg 逐项解释：
 
-Run:
+- `telescope.config=telescope_1229_minimal.cfg`: 默认竖直望远镜。
+- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 完整 54 片标准镜面。
+- `source.config=../sources/parallel_1M_on_axis.cfg`: 100 万平行光。
+- `output.config=../outputs/whiteboard_f8.cfg`: 8 m 白板。
+- `obstruction.config=../obstructions/raytrace_final_structure.cfg`: 启用由外部模型转换得到的
+  3D primitives。当前会检查入射段和反射段遮挡。
+- `output.csv=run_logs/official_tests/raytrace_structure_parallel/hits.csv`: 正常物理模式下，
+  被遮挡光子不会写入这个 CSV。
+
+单独运行：
 
 ```bash
 mkdir -p run_logs/official_tests/raytrace_structure_parallel
@@ -126,21 +201,30 @@ python3 python/plot_optical_layout_html.py \
   --output run_logs/official_tests/raytrace_structure_parallel/layout_3d.html
 ```
 
-Expected: log reports blocked counts, transmission after obstruction, and
-before/after equivalent collection areas.
+检查重点：log 中应有 `blocked_by_obstruction`、
+`output_transmission_after_obstruction` 和遮挡前后等效收集面积。
 
-### 30 m Point Source With Obstruction
+## 4. 30 m 点光源 + 3D 遮挡白板测试
 
-Cfg: `configs/official_tests/point_30m_structure_whiteboard.cfg`
+cfg:
 
-Content:
+```text
+configs/official_tests/point_30m_structure_whiteboard.cfg
+```
 
-- `source.config=../sources/point_30m_from_whiteboard_on_axis.cfg`: source is
-  30 m in front of the standard `z=-8 m` whiteboard, so local source `z=22 m`.
-- Standard whiteboard remains fixed at `z=-8 m`.
-- Obstruction primitives are enabled.
+测试内容：有限距离点源下遮挡结构的投影会变化，这个测试用来检查非平行光情况下的
+遮挡光斑和镜面命中分布。
 
-Run:
+cfg 逐项解释：
+
+- `source.config=../sources/point_30m_from_whiteboard_on_axis.cfg`: 点源距离标准白板
+  30 m。因为白板在 `z=-8 m`，所以点源设为本地 `z=22 m`。
+- `output.config=../outputs/whiteboard_f8.cfg`: 仍然使用标准 8 m 白板，不自动移动到点源
+  最佳焦面。
+- `obstruction.config=../obstructions/raytrace_final_structure.cfg`: 启用 3D 遮挡。
+- 其它 telescope/mirror 配置与标准 1229 完美镜面一致。
+
+单独运行：
 
 ```bash
 mkdir -p run_logs/official_tests/raytrace_structure_point_30m
@@ -160,20 +244,28 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_mirror_hit_map.py \
   --title "30 m point source: mirror hit points with facet outlines"
 ```
 
-Expected: spot and mirror-hit maps show finite-distance obstruction projection.
+检查重点：spot 和镜面命中图都应体现有限距离和遮挡的共同影响。
 
-## Structural Deformation Scan
+## 5. 支架形变仰角扫描
 
-Cfg: `configs/official_tests/deformation_parallel_whiteboard.cfg`
+cfg:
 
-Content:
+```text
+configs/official_tests/deformation_parallel_whiteboard.cfg
+```
 
-- Standard ideal parallel setup.
-- `error.config=../errors/structural_deformation_1229.cfg`: uses the
-  elevation-dependent mirror series.
-- The scan runner overrides elevation and photon count.
+测试内容：使用仰角相关镜面 series，扫描 0 到 90 度仰角下的平行光 PSF。
 
-Run:
+cfg 逐项解释：
+
+- `telescope.config=telescope_1229_minimal.cfg`: 基础望远镜信息。
+- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 理想镜面作为基准。
+- `error.config=../errors/structural_deformation_1229.cfg`: 启用结构形变 series。程序会根据
+  当前 `telescope.pointing_el_deg` 插值/读取对应仰角下的镜片中心和法向。
+- `source.config=../sources/parallel_1M_on_axis.cfg`: 平行光；扫描脚本会覆盖光子数。
+- `output.csv=run_logs/official_tests/deformation_scan/hits.csv`: 基础输出路径，扫描时每个仰角会写到各自子目录。
+
+单独运行：
 
 ```bash
 MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/run_elevation_parallel_scan.py \
@@ -184,20 +276,28 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/run_elevation_parallel_scan.py \
   --output-dir run_logs/official_tests/deformation_scan
 ```
 
-Expected: one PSF and one mirror-layout diagnostic per elevation.
+检查重点：每个仰角都有独立 spot 图和指标，RMS/质心应随仰角发生变化。
 
-## Light Collector Angular Response
+## 6. 光收集器角响应测试
 
-This test uses a dedicated binary rather than an assembly cfg.
+这个测试不是 assembly cfg，而是专用 C++ 程序：
 
-Model:
+```text
+apps/scan_light_collector_angular_response.cpp
+```
 
-- One 2.44 cm square pixel.
-- Bezier square-cone collector.
-- `true_reflect` material.
-- 1.30 cm square SiPM.
+测试内容：直接把光子打到单个光收集器入口，扫描 0 到 90 度入射角，检查几何接受率、
+考虑材料权重后的接受率、多次反射次数。
 
-Run:
+固定模型：
+
+- 单个 square pixel，入口边长 `2.44 cm`。
+- Bezier square-cone 光收集器。
+- 材料为 `true_reflect`，不是 100% 理想反射。
+- SiPM 有效面边长 `1.30 cm`。
+- 每个角度默认 `2000` 个光子，角度步长 `1 deg`。
+
+单独运行：
 
 ```bash
 mkdir -p run_logs/official_tests/collector_angular_response
@@ -213,34 +313,37 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_collector_angular_response.
   --dpi 350
 ```
 
-Expected: CSV and plot show geometric acceptance, weighted acceptance,
-collector photon weight, and mean reflection count versus incidence angle.
+输出 CSV 关键列：
 
-## CORSIKA/EventIO Tests
+- `geometric_acceptance`: 是否最终打到 SiPM 的几何比例。
+- `weighted_acceptance`: 几何接受后再乘 collector 材料权重的比例。
+- `mean_collector_weight`: 被接受光子的平均权重。
+- `mean_reflections`: 被接受光子的平均反射次数。
 
-All CORSIKA tests read the input file from the command line:
+## 7. CORSIKA 白板 debug 测试
 
-```bash
-build/run_corsika_trace CONFIG.cfg /path/to/input.zst
+cfg:
+
+```text
+configs/official_tests/corsika_whiteboard.cfg
 ```
 
-All use:
+测试内容：从 EventIO 读取 CORSIKA 光子，只做镜面光追到白板，不接相机。用于在相机
+像素化前检查光子是否读入和坐标转换是否正常。
 
-- `source.mode=EventIO`
-- `source.event_id_mode=event_array100`, so `event_id = shower_event * 100 + array_id`
-- `source.eventio_coordinate_frame=corsika_iact`
+cfg 逐项解释：
 
-### Whiteboard Debug
+- `telescope.pointing_az_deg=0`, `telescope.pointing_el_deg=70`: 望远镜指向，和 CORSIKA
+  文件中的天顶角 20 度示例相匹配。
+- `source.mode=EventIO`: 读取 EventIO 光子。
+- `source.eventio_path=`: 留空，运行命令传入 zst 文件。
+- `source.event_id_mode=event_array100`: 输出事件号为 `shower_event * 100 + array_id`。
+- `source.eventio_coordinate_frame=corsika_iact`: 使用 CORSIKA IACT 坐标约定。
+- `output.format=csv`: 输出白板光子 CSV。
+- `output.hits_csv`: 白板命中光子。
+- `output.summary_csv`: 每个 event/telescope 的简要统计。
 
-Cfg: `configs/official_tests/corsika_whiteboard.cfg`
-
-Content:
-
-- CORSIKA photons traced to a whiteboard.
-- `output.format=csv`: saves `whiteboard_hits.csv` and `whiteboard_summary.csv`.
-- No camera, collector, NSB, trigger, efficiency curves, errors, or obstruction.
-
-Run:
+单独运行：
 
 ```bash
 build/run_corsika_trace configs/official_tests/corsika_whiteboard.cfg /path/to/input.zst \
@@ -252,21 +355,35 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_corsika_trace_output.py \
   --output-dir run_logs/official_tests/corsika/plots/shower1_array0_whiteboard
 ```
 
-### Perfect Camera Dense HDF5
+检查重点：每个 event/telescope 的 hit 数量、芯位、能量和方向应在 log 中可检查。
 
-Cfg: `configs/official_tests/corsika_new_camera.cfg`
+## 8. CORSIKA 完美相机 dense HDF5 测试
 
-Content:
+cfg:
 
-- `telescope.pointing_az_deg=0`, `telescope.pointing_el_deg=70`.
-- Standard ideal mirrors and ideal atmosphere.
-- `camera.config=../cameras/new_camera.cfg`: real pixel map plus Bezier
-  collector.
-- `sipm.config=../sipm/ideal_sipm.cfg`: SiPM size only; PDE off.
-- NSB and trigger disabled.
-- Dense HDF5 stores every pixel.
+```text
+configs/official_tests/corsika_new_camera.cfg
+```
 
-Run:
+测试内容：CORSIKA 光子经过理想镜面、真实 new_camera 像素和光收集器，输出 dense HDF5
+相机图像。不加 NSB，不加 trigger，不加效率曲线和误差。
+
+cfg 逐项解释：
+
+- `telescope.pointing_az_deg=0`, `telescope.pointing_el_deg=70`: 望远镜指向。
+- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 标准 54 片理想镜面。
+- `output.config=../outputs/focal_plane_f8.cfg`: 相机焦平面在 `z=-8 m`，法向指向镜面。
+- `camera.config=../cameras/new_camera.cfg`: 使用真实相机像素表和 Bezier 光收集器。
+- `sipm.config=../sipm/ideal_sipm.cfg`: SiPM 只提供有效面尺寸，PDE 关闭。
+- `atmosphere.config=../atmosphere/ideal.cfg`: 不额外加大气透过率。
+- `nsb.config=../nsb/ideal.cfg`: 背景光关闭。
+- `trigger.config=../trigger/disabled.cfg`: trigger 关闭。
+- `output.format=hdf5`: 输出 HDF5。
+- `output.hdf5_path=run_logs/official_tests/corsika/camera_dense.h5`: 输出文件。
+- `output.hdf5_storage=dense`: 每个 image 保存完整 1616 像素。
+- `output.hdf5_write_components=false`: 只写最终 `pe/signal/photon_count`，不额外写分量。
+
+单独运行：
 
 ```bash
 build/run_corsika_trace configs/official_tests/corsika_new_camera.cfg /path/to/input.zst \
@@ -277,21 +394,31 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
   --output run_logs/official_tests/corsika/plots/shower1_array2_camera/all_tel_pe.png
 ```
 
-### Camera + NSB + Trigger
+检查重点：输出应包含每个 event/telescope 的 dense 相机图像，且没有 NSB/trigger 筛选。
 
-Cfg: `configs/official_tests/corsika_nsb_trigger_camera.cfg`
+## 9. CORSIKA + NSB + trigger 测试
 
-Content:
+cfg:
 
-- Same camera chain as the perfect camera test.
-- `nsb.config=../nsb/example_constant_rate.cfg`: Poisson NSB with
-  `0.05 p.e./ns/pixel * 16 ns = 0.8 p.e./pixel` mean.
-- `trigger.config=../trigger/example_simple_multiplicity.cfg` and
-  `trigger.pixel_threshold_pe=10`.
-- `output.hdf5_write_components=true`: writes Cherenkov, NSB, and final p.e.
-- `output.save_only_triggered=true`: keeps triggered telescope images.
+```text
+configs/official_tests/corsika_nsb_trigger_camera.cfg
+```
 
-Run:
+测试内容：在完美相机链路基础上加入常数 NSB 和简单 multiplicity trigger，检查 HDF5
+中的 Cherenkov/NSB/final p.e. 分量和 trigger 表。
+
+cfg 逐项解释：
+
+- `nsb.config=../nsb/example_constant_rate.cfg`: 启用常数 NSB。
+  当前参数为 `rate_pe_per_ns_per_pixel=0.05`、`window_ns=16`，所以平均
+  `0.8 p.e./pixel`。
+- `trigger.config=../trigger/example_simple_multiplicity.cfg`: 启用简单 trigger。
+- `trigger.pixel_threshold_pe=10`: official smoke test 使用 10 p.e. 像素阈值。
+- `output.hdf5_write_components=true`: 写出 `cherenkov_pe`、`nsb_pe` 和最终 `pe`。
+- `output.save_only_triggered=true`: 只保存触发望远镜图像，减少输出体积。
+- 其它镜面、相机、SiPM、EventIO 配置与完美相机测试相同。
+
+单独运行：
 
 ```bash
 build/run_corsika_trace configs/official_tests/corsika_nsb_trigger_camera.cfg /path/to/input.zst \
@@ -302,19 +429,33 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
   --output run_logs/official_tests/corsika/plots/shower1_array2_nsb_trigger/all_tel_final_pe.png
 ```
 
-### Camera + Obstruction + NSB + Trigger
+检查重点：HDF5 里应有 `/images/dense/cherenkov_pe`、`/images/dense/nsb_pe` 和
+`/trigger` 表。
 
-Cfg: `configs/official_tests/corsika_obstruction_nsb_trigger_camera.cfg`
+## 10. CORSIKA + 3D 遮挡 + NSB + trigger 测试
 
-Content:
+cfg:
 
-- Same as the NSB+trigger camera test.
-- Adds `obstruction.config=../obstructions/raytrace_final_structure.cfg`.
-- Blocked photons are discarded before camera pixelization.
-- This is the smoke test for the current end-to-end chain with structure
-  shadowing.
+```text
+configs/official_tests/corsika_obstruction_nsb_trigger_camera.cfg
+```
 
-Run:
+测试内容：这是当前最接近完整链路的 smoke test：EventIO 光子、镜面光追、3D 遮挡、
+真实相机、Bezier 光收集器、SiPM p.e.、NSB、trigger、dense HDF5。
+
+cfg 逐项解释：
+
+- `obstruction.config=../obstructions/raytrace_final_structure.cfg`: 启用 3D 遮挡模型。
+  正常模式下，被遮挡光子在进入相机前被丢弃。
+- `nsb.config=../nsb/example_constant_rate.cfg`: 加常数 NSB。
+- `trigger.config=../trigger/example_simple_multiplicity.cfg`: 启用 trigger。
+- `trigger.pixel_threshold_pe=10`: 像素阈值 10 p.e.。
+- `output.hdf5_path=run_logs/official_tests/corsika/camera_obstruction_nsb_trigger_dense.h5`:
+  独立输出文件，避免覆盖不带遮挡的 NSB+trigger 测试。
+- `output.hdf5_write_components=true`: 写 Cherenkov/NSB/final 分量，方便比较遮挡前后。
+- `output.save_only_triggered=true`: 只保存触发图像。
+
+单独运行：
 
 ```bash
 build/run_corsika_trace configs/official_tests/corsika_obstruction_nsb_trigger_camera.cfg /path/to/input.zst \
@@ -325,24 +466,32 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
   --output run_logs/official_tests/corsika/plots/shower1_array2_obstruction_nsb_trigger/all_tel_final_pe.png
 ```
 
-Expected: the log includes obstruction statistics and HDF5 includes triggered
-final camera images.
+检查重点：log 中应输出遮挡统计；HDF5 里应有 final p.e. 图和 trigger 表。
 
-### Full Response Smoke Test
+## 11. CORSIKA full-response smoke test
 
-Cfg: `configs/official_tests/corsika_full_response_camera.cfg`
+cfg:
 
-Content:
+```text
+configs/official_tests/corsika_full_response_camera.cfg
+```
 
-- Structural deformation and small optical errors through
-  `error.config=../errors/full_response_1229.cfg`.
-- Mirror reflectivity and filter transmission through
-  `efficiency.config=../efficiency/curves_all.cfg`.
-- SiPM PDE through `sipm.config=../sipm/new_camera_sipm.cfg`.
-- NSB is disabled to isolate optical/efficiency response plus trigger.
-- Trigger threshold is set to 10 p.e.
+测试内容：加入目前已实现的“非理想响应”：支架形变、小随机误差、镜面反射率、滤光片
+透过率、SiPM PDE 和 trigger。NSB 在这个测试中关闭，用于单独检查光学/效率响应。
 
-Run:
+cfg 逐项解释：
+
+- `telescope.pointing_el_deg=70`: 望远镜仰角 70 度，结构形变会按这个仰角取值。
+- `error.config=../errors/full_response_1229.cfg`: 启用仰角相关结构形变和小随机误差。
+- `efficiency.config=../efficiency/curves_all.cfg`: 启用镜面反射率和滤光片透过率曲线。
+- `sipm.config=../sipm/new_camera_sipm.cfg`: 启用 SiPM PDE 曲线。
+- `nsb.config=../nsb/ideal.cfg`: NSB 关闭。
+- `trigger.config=../trigger/example_simple_multiplicity.cfg`: trigger 开启。
+- `trigger.pixel_threshold_pe=10`: official 阈值设为 10 p.e.。
+- `output.hdf5_write_components=false`: 这个测试只关心最终 p.e.，不写 NSB 分量。
+- `output.save_only_triggered=true`: 只保存触发图像。
+
+单独运行：
 
 ```bash
 build/run_corsika_trace configs/official_tests/corsika_full_response_camera.cfg /path/to/input.zst \
@@ -353,19 +502,64 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
   --output run_logs/official_tests/corsika/plots/shower1_array2_full_response/all_tel_pe.png
 ```
 
-Expected: images differ from the ideal camera test because deformation, random
-errors, mirror/filter curves, and SiPM PDE are active.
+检查重点：相对完美相机测试，图像 p.e. 会受到形变、误差和效率曲线影响。
 
-## Diagnostic Cfgs Not Run By Default
+## 默认不在一键脚本里跑的诊断 cfg
 
-- `configs/official_tests/inner_two_rings_parallel_whiteboard.cfg`: inner 18
-  facets, no obstruction.
-- `configs/official_tests/outer_ring_parallel_structure_mark_only_whiteboard.cfg`:
-  outer 18 facets, obstruction marked but photons still propagated.
-- `configs/official_tests/perfect_parallel_structure_mark_only_whiteboard.cfg`:
-  all 54 facets, obstruction marked but photons still propagated.
+这些 cfg 是调试用，不放进默认 official 脚本，避免测试时间和输出文件过大。
 
-For mark-only runs, use:
+### 中间两圈镜片平行光
+
+cfg:
+
+```text
+configs/official_tests/inner_two_rings_parallel_whiteboard.cfg
+```
+
+配置说明：
+
+- `mirror.config=../mirrors/mirror_1229_inner_two_rings.cfg`: 只使用中心第一圈 6 片和第二圈
+  12 片，共 18 片。
+- 不启用遮挡、不启用误差。
+
+### 最外圈镜片遮挡 mark-only 诊断
+
+cfg:
+
+```text
+configs/official_tests/outer_ring_parallel_structure_mark_only_whiteboard.cfg
+```
+
+配置说明：
+
+- `mirror.config=../mirrors/mirror_1229_outer_ring.cfg`: 只使用最外圈 18 片。
+- `obstruction.mark_only=true`: 被遮挡光子只打标记，仍继续传播到白板。
+- `mirror.mode` 和 `mirror.csv_path` 在这里显式写出，是为了让这个单独诊断 cfg 即使脱离
+  mirror 组件文件也能清楚指向最外圈 CSV。
+
+### 全镜面遮挡 mark-only 诊断
+
+cfg:
+
+```text
+configs/official_tests/perfect_parallel_structure_mark_only_whiteboard.cfg
+```
+
+配置说明：
+
+- 完整 54 片镜面。
+- `obstruction.mark_only=true`: 用于定位具体遮挡来源，比如区分 incoming 和 reflected
+  段遮挡。
+
+mark-only 输出 CSV 会多出：
+
+```text
+obstruction_blocked
+obstruction_blocked_incoming
+obstruction_blocked_reflected
+```
+
+画被遮挡光子的镜面分布：
 
 ```bash
 MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_obstruction_marked_hits.py \
