@@ -46,6 +46,7 @@ mkdir -p "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_ns
 mkdir -p "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_obstruction_nsb_trigger"
 mkdir -p "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_full_response"
 mkdir -p run_logs/official_tests/collector_angular_response
+mkdir -p run_logs/official_tests/efficiency_curves
 
 if [[ "$RUN_CORSIKA" -eq 0 ]]; then
   cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DLACT_ENABLE_HESSIO=OFF
@@ -128,6 +129,12 @@ python3 python/plot_collector_angular_response.py \
   run_logs/official_tests/collector_angular_response/collector_angular_response.csv \
   --output run_logs/official_tests/collector_angular_response/collector_angular_response.png \
   --dpi 350
+
+MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
+python3 python/plot_efficiency_curves.py \
+  --output-dir run_logs/official_tests/efficiency_curves \
+  --dpi 350 \
+  2>&1 | tee run_logs/official_tests/efficiency_curves/run.log
 
 if [[ "$RUN_CORSIKA" -eq 0 ]]; then
   echo "Skipping CORSIKA/EventIO tests (--no-corsika)."

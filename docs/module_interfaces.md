@@ -147,6 +147,11 @@ model SiPM saturation, crosstalk, afterpulse, dark count, or gain fluctuations.
 Legacy `electronics.pe_conversion` and `efficiency.sipm_pde` config keys are
 accepted only as compatibility aliases and are mapped to the same SiPM PDE path.
 
+For wavelength tables, duplicate wavelength rows are merged by arithmetic mean,
+then linear interpolation is used. Values outside the table wavelength range are
+treated as zero. Use `python/plot_efficiency_curves.py` to inspect each table and
+the combined efficiency before running a full response simulation.
+
 ## NSB
 
 The first NSB implementation is a constant-rate Poisson model:

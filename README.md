@@ -810,6 +810,23 @@ separate from `--telescope-id`.
 
 See `docs/hdf5_output_format.md` for the file layout.
 
+## Efficiency Curve Checks
+
+Mirror reflectivity, filter transmission, SiPM PDE, and optional atmosphere
+transmission are wavelength-dependent multiplicative factors. To inspect the
+input tables and the total response curve:
+
+```bash
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_efficiency_curves.py \
+  --output-dir run_logs/official_tests/efficiency_curves \
+  2>&1 | tee run_logs/official_tests/efficiency_curves/run.log
+```
+
+This writes one plot per component, `total_efficiency.png`, sampled values in
+`efficiency_curve_samples.csv`, and a short report. See
+`docs/efficiency_validation.md` for the exact interpolation and duplicate-point
+rules.
+
 ## Configs Used by the Official Tests
 
 ```text

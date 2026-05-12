@@ -77,6 +77,7 @@ output、camera、sipm、NSB、trigger 等模块 cfg。每个 official cfg 只�
 5. 30 m 点源 + 3D 遮挡白板。
 6. 支架形变 0 到 90 度仰角扫描。
 7. 光收集器角响应测试。
+8. 效率曲线验证测试。
 
 如果没有 `--no-corsika`，脚本还会继续运行：
 
@@ -85,6 +86,43 @@ output、camera、sipm、NSB、trigger 等模块 cfg。每个 official cfg 只�
 3. CORSIKA + NSB + trigger。
 4. CORSIKA + 3D 遮挡 + NSB + trigger。
 5. CORSIKA full-response smoke test。
+
+## 0. 效率曲线验证测试
+
+脚本会在非 CORSIKA 阶段运行：
+
+```bash
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_efficiency_curves.py \
+  --output-dir run_logs/official_tests/efficiency_curves \
+  2>&1 | tee run_logs/official_tests/efficiency_curves/run.log
+```
+
+测试内容：分别检查镜面反射率、滤光片透过率、SiPM PDE 和大气透过率曲线，再检查它们的
+逐波长乘积。默认大气项关闭，所以大气透过率图是一条 `1` 的理想曲线。
+
+默认输入：
+
+- `configs/efficiency/mirror_reflectivity.csv`: 镜面反射率。
+- `configs/efficiency/filter_transmission.csv`: 相机滤光片透过率。
+- `configs/efficiency/sipm_pde.csv`: SiPM PDE。
+- `atmosphere_transmission=none`: 不额外加入大气衰减。
+
+输出：
+
+- `efficiency_summary.png/pdf`: 推荐检查图，所有单项效率和总效率画在同一张图上；同色虚线是
+  输入表格理论线，同色实线是程序实际使用线。
+- `mirror_reflectivity.png`: 原始镜面反射率点和程序插值曲线。
+- `filter_transmission.png`: 原始滤光片点和程序插值曲线。
+- `sipm_pde.png`: 原始 SiPM PDE 点和程序插值曲线。
+- `atmosphere_transmission.png`: 大气项，未配置时为理想 `1`。
+- `total_efficiency.png`: 所有已启用效率项的总乘积。
+- `efficiency_curve_samples.csv`: 逐波长采样后的数值，方便人工核对。
+- `efficiency_curve_report.txt`: 输入行数、重复波长、效率范围和总效率范围。
+
+检查重点：灰点是输入表格点，橙色虚线是输入表格按波长连起来的理论/文件线，蓝线是程序
+实际使用的曲线。同一波长有多个输入值时，程序会先取平均再插值；这个行为由 C++ 测试
+`test_efficiency_curves` 锁定。更详细的说明见
+`docs/efficiency_validation.md`。
 
 ## 1. 完美平行光白板测试
 

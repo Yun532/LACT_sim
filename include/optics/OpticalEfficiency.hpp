@@ -5,6 +5,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 class EfficiencyCurve {
@@ -41,6 +42,21 @@ public:
 
         std::sort(points_.begin(), points_.end(),
                   [](const auto& a, const auto& b) { return a.first < b.first; });
+
+        std::vector<std::pair<double, double>> merged;
+        merged.reserve(points_.size());
+        for (std::size_t i = 0; i < points_.size();) {
+            const double wavelength_nm = points_[i].first;
+            double sum = 0.0;
+            std::size_t count = 0;
+            while (i < points_.size() && points_[i].first == wavelength_nm) {
+                sum += points_[i].second;
+                ++count;
+                ++i;
+            }
+            merged.push_back({wavelength_nm, sum / static_cast<double>(count)});
+        }
+        points_ = std::move(merged);
 
         if (points_.empty()) {
             throw std::runtime_error("efficiency curve has no numeric rows: " + path);

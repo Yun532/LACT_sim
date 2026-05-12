@@ -145,6 +145,12 @@ add_executable(test_detector_response_config
 target_link_libraries(test_detector_response_config PRIVATE simlite_core)
 add_test(NAME test_detector_response_config COMMAND test_detector_response_config)
 
+add_executable(test_efficiency_curves
+    apps/test_efficiency_curves.cpp
+)
+target_link_libraries(test_efficiency_curves PRIVATE simlite_core)
+add_test(NAME test_efficiency_curves COMMAND test_efficiency_curves)
+
 add_executable(scan_light_collector_angular_response
     apps/scan_light_collector_angular_response.cpp
 )
