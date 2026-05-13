@@ -525,14 +525,22 @@ event_id = shower_event * 100 + array_id
 ```
 
 For a file with `CSCAT 10 ...`, the valid array IDs are normally `0..9`.
+The official script now auto-selects one bright event common to all camera HDF5
+outputs and writes it to:
+
+```text
+run_logs/official_tests/corsika/plots/selected_event.env
+```
+
+After sourcing that file, all CORSIKA plots can use the same `event_id`:
 
 ```bash
+source run_logs/official_tests/corsika/plots/selected_event.env
 MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_corsika_trace_output.py \
   run_logs/official_tests/corsika/whiteboard_hits.csv \
   --summary-csv run_logs/official_tests/corsika/whiteboard_summary.csv \
-  --shower-event-number 1 \
-  --array-id 0 \
-  --output-dir run_logs/official_tests/corsika/plots/whiteboard_shower1_array0 \
+  --event-id "$LACT_SELECTED_EVENT_ID" \
+  --output-dir "run_logs/official_tests/corsika/plots/event_${LACT_SELECTED_EVENT_ID}/whiteboard" \
   --dpi 350
 ```
 
@@ -596,18 +604,17 @@ Inside the file:
 /trigger/array              array trigger rows
 ```
 
-Plot all telescope camera images for one CORSIKA shower-event order. Again,
-`--array-id` selects which CORSIKA array reuse / core offset to draw. Omitting
-`--telescope-id` writes one camera PNG for every telescope image in the selected
-event. If `--output` is a filename, a directory with the same stem is created:
+Plot all telescope camera images for the selected CORSIKA event. Omitting
+`--telescope-id` writes one camera PNG for every telescope image available in
+the selected event:
 
 ```bash
+source run_logs/official_tests/corsika/plots/selected_event.env
 MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
   run_logs/official_tests/corsika/camera_dense.h5 \
-  --shower-event-number 1 \
-  --array-id 2 \
+  --event-id "$LACT_SELECTED_EVENT_ID" \
   --quantity pe \
-  --output run_logs/official_tests/corsika/camera_shower1_array2_all_tel.png \
+  --output "run_logs/official_tests/corsika/plots/event_${LACT_SELECTED_EVENT_ID}/camera/all_tel_pe" \
   --dpi 350
 ```
 
@@ -616,11 +623,10 @@ Add `--telescope-id N` only if you want one telescope:
 ```bash
 MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
   run_logs/official_tests/corsika/camera_dense.h5 \
-  --shower-event-number 1 \
-  --array-id 2 \
+  --event-id "$LACT_SELECTED_EVENT_ID" \
   --telescope-id 3 \
   --quantity pe \
-  --output run_logs/official_tests/corsika/camera_shower1_array2_tel3_pe.png \
+  --output "run_logs/official_tests/corsika/plots/event_${LACT_SELECTED_EVENT_ID}/camera/tel3_pe.png" \
   --dpi 350
 ```
 
@@ -738,11 +744,11 @@ contains only telescope images that pass the trigger. The complete trigger
 decision tables remain in `/trigger/telescope` and `/trigger/array`.
 
 The official one-command script also plots the triggered camera images and the
-array layout for `shower-event-number=1, array-id=${LACT_PLOT_ARRAY_ID:-2}`:
+array/core layout for the same automatically selected event:
 
 ```text
-run_logs/official_tests/corsika/plots/shower1_array2_full_response/all_tel_pe.png
-run_logs/official_tests/corsika/plots/shower1_array2_full_response/layout_pe.png
+run_logs/official_tests/corsika/plots/event_<event_id>/full_response/all_tel_pe/
+run_logs/official_tests/corsika/plots/event_<event_id>/layout/core_and_array_pe.png
 ```
 
 The random optical error values in

@@ -6,7 +6,6 @@ BUILD_DIR="${LACT_BUILD_DIR:-$ROOT_DIR/build}"
 RUN_CORSIKA=1
 CORSIKA_FILE=""
 DEFAULT_CORSIKA_FILE="${LACT_DEFAULT_CORSIKA_FILE:-}"
-PLOT_ARRAY_ID="${LACT_PLOT_ARRAY_ID:-2}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -40,11 +39,7 @@ mkdir -p run_logs/official_tests/point_900m
 mkdir -p run_logs/official_tests/raytrace_structure_parallel
 mkdir -p run_logs/official_tests/raytrace_structure_point_30m
 mkdir -p run_logs/official_tests/deformation_scan
-mkdir -p run_logs/official_tests/corsika/plots/shower1_array0_whiteboard
-mkdir -p "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_camera"
-mkdir -p "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_nsb_trigger"
-mkdir -p "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_obstruction_nsb_trigger"
-mkdir -p "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_full_response"
+mkdir -p run_logs/official_tests/corsika/plots
 mkdir -p run_logs/official_tests/collector_angular_response
 mkdir -p run_logs/official_tests/efficiency_curves
 
@@ -201,84 +196,97 @@ if [[ ! -s run_logs/official_tests/corsika/camera_full_response_dense.h5 ]]; the
 fi
 
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
+python3 python/select_hdf5_event.py \
+  run_logs/official_tests/corsika/camera_dense.h5 \
+  run_logs/official_tests/corsika/camera_nsb_trigger_dense.h5 \
+  run_logs/official_tests/corsika/camera_obstruction_nsb_trigger_dense.h5 \
+  run_logs/official_tests/corsika/camera_full_response_dense.h5 \
+  --quantity pe \
+  --min-images 1 \
+  --output-env run_logs/official_tests/corsika/plots/selected_event.env \
+  --output-summary run_logs/official_tests/corsika/plots/selected_event.txt \
+  2>&1 | tee run_logs/official_tests/corsika/plots/select_event.log
+
+# shellcheck disable=SC1091
+source run_logs/official_tests/corsika/plots/selected_event.env
+PLOT_EVENT_DIR="run_logs/official_tests/corsika/plots/event_${LACT_SELECTED_EVENT_ID}"
+mkdir -p "$PLOT_EVENT_DIR/whiteboard" \
+  "$PLOT_EVENT_DIR/camera" \
+  "$PLOT_EVENT_DIR/nsb_trigger" \
+  "$PLOT_EVENT_DIR/obstruction_nsb_trigger" \
+  "$PLOT_EVENT_DIR/full_response" \
+  "$PLOT_EVENT_DIR/layout"
+
+MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_corsika_trace_output.py \
   run_logs/official_tests/corsika/whiteboard_hits.csv \
   --summary-csv run_logs/official_tests/corsika/whiteboard_summary.csv \
-  --shower-event-number 1 \
-  --array-id 0 \
-  --output-dir run_logs/official_tests/corsika/plots/shower1_array0_whiteboard
+  --event-id "$LACT_SELECTED_EVENT_ID" \
+  --output-dir "$PLOT_EVENT_DIR/whiteboard"
 
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_hdf5_camera.py \
   run_logs/official_tests/corsika/camera_dense.h5 \
-  --shower-event-number 1 \
-  --array-id "$PLOT_ARRAY_ID" \
+  --event-id "$LACT_SELECTED_EVENT_ID" \
   --quantity pe \
-  --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_camera/all_tel_pe.png"
+  --output "$PLOT_EVENT_DIR/camera/all_tel_pe"
 
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_hdf5_camera.py \
   run_logs/official_tests/corsika/camera_nsb_trigger_dense.h5 \
-  --shower-event-number 1 \
-  --array-id "$PLOT_ARRAY_ID" \
+  --event-id "$LACT_SELECTED_EVENT_ID" \
   --quantity cherenkov_pe \
-  --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_nsb_trigger/all_tel_cherenkov_pe.png"
+  --output "$PLOT_EVENT_DIR/nsb_trigger/all_tel_cherenkov_pe"
 
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_hdf5_camera.py \
   run_logs/official_tests/corsika/camera_nsb_trigger_dense.h5 \
-  --shower-event-number 1 \
-  --array-id "$PLOT_ARRAY_ID" \
+  --event-id "$LACT_SELECTED_EVENT_ID" \
   --quantity nsb_pe \
-  --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_nsb_trigger/all_tel_nsb_pe.png"
+  --output "$PLOT_EVENT_DIR/nsb_trigger/all_tel_nsb_pe"
 
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_hdf5_camera.py \
   run_logs/official_tests/corsika/camera_nsb_trigger_dense.h5 \
-  --shower-event-number 1 \
-  --array-id "$PLOT_ARRAY_ID" \
+  --event-id "$LACT_SELECTED_EVENT_ID" \
   --quantity pe \
-  --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_nsb_trigger/all_tel_final_pe.png"
+  --output "$PLOT_EVENT_DIR/nsb_trigger/all_tel_final_pe"
 
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_hdf5_camera.py \
   run_logs/official_tests/corsika/camera_obstruction_nsb_trigger_dense.h5 \
-  --shower-event-number 1 \
-  --array-id "$PLOT_ARRAY_ID" \
+  --event-id "$LACT_SELECTED_EVENT_ID" \
   --quantity cherenkov_pe \
-  --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_obstruction_nsb_trigger/all_tel_cherenkov_pe.png"
+  --output "$PLOT_EVENT_DIR/obstruction_nsb_trigger/all_tel_cherenkov_pe"
 
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_hdf5_camera.py \
   run_logs/official_tests/corsika/camera_obstruction_nsb_trigger_dense.h5 \
-  --shower-event-number 1 \
-  --array-id "$PLOT_ARRAY_ID" \
+  --event-id "$LACT_SELECTED_EVENT_ID" \
   --quantity nsb_pe \
-  --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_obstruction_nsb_trigger/all_tel_nsb_pe.png"
+  --output "$PLOT_EVENT_DIR/obstruction_nsb_trigger/all_tel_nsb_pe"
 
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_hdf5_camera.py \
   run_logs/official_tests/corsika/camera_obstruction_nsb_trigger_dense.h5 \
-  --shower-event-number 1 \
-  --array-id "$PLOT_ARRAY_ID" \
+  --event-id "$LACT_SELECTED_EVENT_ID" \
   --quantity pe \
-  --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_obstruction_nsb_trigger/all_tel_final_pe.png"
+  --output "$PLOT_EVENT_DIR/obstruction_nsb_trigger/all_tel_final_pe"
 
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_hdf5_camera.py \
   run_logs/official_tests/corsika/camera_full_response_dense.h5 \
-  --shower-event-number 1 \
-  --array-id "$PLOT_ARRAY_ID" \
+  --event-id "$LACT_SELECTED_EVENT_ID" \
   --quantity pe \
-  --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_full_response/all_tel_pe.png"
+  --output "$PLOT_EVENT_DIR/full_response/all_tel_pe"
 
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_hdf5_array_layout.py \
   run_logs/official_tests/corsika/camera_full_response_dense.h5 \
-  --shower-event-number 1 \
-  --array-id "$PLOT_ARRAY_ID" \
+  --event-id "$LACT_SELECTED_EVENT_ID" \
   --quantity pe \
-  --output "run_logs/official_tests/corsika/plots/shower1_array${PLOT_ARRAY_ID}_full_response/layout_pe.png" \
+  --log-color \
+  --output "$PLOT_EVENT_DIR/layout/core_and_array_pe.png" \
   --dpi 350
 
 echo "Official tests completed. See run_logs/official_tests/ for outputs and README.md for commands."

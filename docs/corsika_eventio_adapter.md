@@ -254,12 +254,18 @@ run_logs/official_tests/corsika/camera_full_response_dense.h5
 Plot all dense camera images for one CORSIKA shower-event order:
 
 ```bash
+python3 python/select_hdf5_event.py \
+  run_logs/official_tests/corsika/camera_dense.h5 \
+  run_logs/official_tests/corsika/camera_nsb_trigger_dense.h5 \
+  run_logs/official_tests/corsika/camera_obstruction_nsb_trigger_dense.h5 \
+  run_logs/official_tests/corsika/camera_full_response_dense.h5 \
+  --output-env run_logs/official_tests/corsika/plots/selected_event.env
+source run_logs/official_tests/corsika/plots/selected_event.env
 python3 python/plot_hdf5_camera.py \
   run_logs/official_tests/corsika/camera_dense.h5 \
-  --shower-event-number 1 \
-  --array-id 0 \
+  --event-id "$LACT_SELECTED_EVENT_ID" \
   --quantity pe \
-  --output run_logs/official_tests/corsika/camera_shower1_array0_all_tel.png
+  --output "run_logs/official_tests/corsika/plots/event_${LACT_SELECTED_EVENT_ID}/camera/all_tel_pe"
 ```
 
 Plot all whiteboard images for one CORSIKA event:

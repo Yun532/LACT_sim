@@ -87,6 +87,25 @@ output、camera、sipm、NSB、trigger 等模块 cfg。每个 official cfg 只�
 4. CORSIKA + 3D 遮挡 + NSB + trigger。
 5. CORSIKA full-response smoke test。
 
+CORSIKA 阶段的画图会先自动选择一个共同 event：
+
+```bash
+python3 python/select_hdf5_event.py \
+  run_logs/official_tests/corsika/camera_dense.h5 \
+  run_logs/official_tests/corsika/camera_nsb_trigger_dense.h5 \
+  run_logs/official_tests/corsika/camera_obstruction_nsb_trigger_dense.h5 \
+  run_logs/official_tests/corsika/camera_full_response_dense.h5 \
+  --output-env run_logs/official_tests/corsika/plots/selected_event.env
+```
+
+选择规则：这个 `event_id` 必须在所有 camera HDF5 中都有可画图像，并且优先选择总
+p.e. 较高的事件。后续 whiteboard、完美相机、NSB+trigger、遮挡+NSB+trigger、
+full-response 和阵列芯位图都使用同一个 `event_id`。输出目录形如：
+
+```text
+run_logs/official_tests/corsika/plots/event_<event_id>/
+```
+
 ## 0. 效率曲线验证测试
 
 脚本会在非 CORSIKA 阶段运行：
@@ -389,8 +408,8 @@ build/run_corsika_trace configs/official_tests/corsika_whiteboard.cfg /path/to/i
 MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_corsika_trace_output.py \
   run_logs/official_tests/corsika/whiteboard_hits.csv \
   --summary-csv run_logs/official_tests/corsika/whiteboard_summary.csv \
-  --shower-event-number 1 --array-id 0 \
-  --output-dir run_logs/official_tests/corsika/plots/shower1_array0_whiteboard
+  --event-id "$LACT_SELECTED_EVENT_ID" \
+  --output-dir "run_logs/official_tests/corsika/plots/event_${LACT_SELECTED_EVENT_ID}/whiteboard"
 ```
 
 检查重点：每个 event/telescope 的 hit 数量、芯位、能量和方向应在 log 中可检查。
@@ -428,11 +447,12 @@ build/run_corsika_trace configs/official_tests/corsika_new_camera.cfg /path/to/i
   2>&1 | tee run_logs/official_tests/corsika/camera_run.log
 MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
   run_logs/official_tests/corsika/camera_dense.h5 \
-  --shower-event-number 1 --array-id 2 --quantity pe \
-  --output run_logs/official_tests/corsika/plots/shower1_array2_camera/all_tel_pe.png
+  --event-id "$LACT_SELECTED_EVENT_ID" --quantity pe \
+  --output "run_logs/official_tests/corsika/plots/event_${LACT_SELECTED_EVENT_ID}/camera/all_tel_pe"
 ```
 
-检查重点：输出应包含每个 event/telescope 的 dense 相机图像，且没有 NSB/trigger 筛选。
+检查重点：输出应包含所选 event 下可画的全部 telescope dense 相机图像，且没有
+NSB/trigger 筛选。
 
 ## 9. CORSIKA + NSB + trigger 测试
 
@@ -463,8 +483,8 @@ build/run_corsika_trace configs/official_tests/corsika_nsb_trigger_camera.cfg /p
   2>&1 | tee run_logs/official_tests/corsika/camera_nsb_trigger_run.log
 MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
   run_logs/official_tests/corsika/camera_nsb_trigger_dense.h5 \
-  --shower-event-number 1 --array-id 2 --quantity pe \
-  --output run_logs/official_tests/corsika/plots/shower1_array2_nsb_trigger/all_tel_final_pe.png
+  --event-id "$LACT_SELECTED_EVENT_ID" --quantity pe \
+  --output "run_logs/official_tests/corsika/plots/event_${LACT_SELECTED_EVENT_ID}/nsb_trigger/all_tel_final_pe"
 ```
 
 检查重点：HDF5 里应有 `/images/dense/cherenkov_pe`、`/images/dense/nsb_pe` 和
@@ -500,8 +520,8 @@ build/run_corsika_trace configs/official_tests/corsika_obstruction_nsb_trigger_c
   2>&1 | tee run_logs/official_tests/corsika/camera_obstruction_nsb_trigger_run.log
 MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
   run_logs/official_tests/corsika/camera_obstruction_nsb_trigger_dense.h5 \
-  --shower-event-number 1 --array-id 2 --quantity pe \
-  --output run_logs/official_tests/corsika/plots/shower1_array2_obstruction_nsb_trigger/all_tel_final_pe.png
+  --event-id "$LACT_SELECTED_EVENT_ID" --quantity pe \
+  --output "run_logs/official_tests/corsika/plots/event_${LACT_SELECTED_EVENT_ID}/obstruction_nsb_trigger/all_tel_final_pe"
 ```
 
 检查重点：log 中应输出遮挡统计；HDF5 里应有 final p.e. 图和 trigger 表。
@@ -536,11 +556,19 @@ build/run_corsika_trace configs/official_tests/corsika_full_response_camera.cfg 
   2>&1 | tee run_logs/official_tests/corsika/camera_full_response_run.log
 MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
   run_logs/official_tests/corsika/camera_full_response_dense.h5 \
-  --shower-event-number 1 --array-id 2 --quantity pe \
-  --output run_logs/official_tests/corsika/plots/shower1_array2_full_response/all_tel_pe.png
+  --event-id "$LACT_SELECTED_EVENT_ID" --quantity pe \
+  --output "run_logs/official_tests/corsika/plots/event_${LACT_SELECTED_EVENT_ID}/full_response/all_tel_pe"
 ```
 
-检查重点：相对完美相机测试，图像 p.e. 会受到形变、误差和效率曲线影响。
+检查重点：相对完美相机测试，图像 p.e. 会受到形变、误差和效率曲线影响。一键脚本还会
+额外生成芯位/阵列分布图：
+
+```bash
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_array_layout.py \
+  run_logs/official_tests/corsika/camera_full_response_dense.h5 \
+  --event-id "$LACT_SELECTED_EVENT_ID" --quantity pe --log-color \
+  --output "run_logs/official_tests/corsika/plots/event_${LACT_SELECTED_EVENT_ID}/layout/core_and_array_pe.png"
+```
 
 ## 默认不在一键脚本里跑的诊断 cfg
 
