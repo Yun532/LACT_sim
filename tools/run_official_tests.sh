@@ -58,6 +58,7 @@ ctest --test-dir "$BUILD_DIR" --output-on-failure
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_spot_histogram.py \
   run_logs/official_tests/perfect_parallel/hits.csv \
+  --config configs/official_tests/perfect_parallel_whiteboard.cfg \
   --output run_logs/official_tests/perfect_parallel/spot.png \
   --max-bins 520 --dpi 350
 
@@ -66,6 +67,7 @@ python3 python/plot_spot_histogram.py \
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_spot_histogram.py \
   run_logs/official_tests/point_900m/hits.csv \
+  --config configs/official_tests/perfect_point_900m_whiteboard.cfg \
   --output run_logs/official_tests/point_900m/spot.png \
   --max-bins 520 --dpi 350
 
@@ -74,9 +76,20 @@ python3 python/plot_spot_histogram.py \
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_spot_histogram.py \
   run_logs/official_tests/raytrace_structure_parallel/hits.csv \
+  --config configs/official_tests/perfect_parallel_raytrace_structure_whiteboard.cfg \
   --output run_logs/official_tests/raytrace_structure_parallel/spot.png \
   --max-bins 520 --dpi 350 \
   --title "Parallel beam with 3D obstruction"
+MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
+python3 python/plot_mirror_hit_map.py \
+  run_logs/official_tests/raytrace_structure_parallel/hits.csv \
+  --config configs/official_tests/perfect_parallel_raytrace_structure_whiteboard.cfg \
+  --require-surface \
+  --overlay-facets \
+  --sky-up \
+  --output run_logs/official_tests/raytrace_structure_parallel/mirror_hits_with_facet_outlines.png \
+  --dpi 350 \
+  --title "Parallel beam: mirror hit points with facet outlines"
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_optical_layout_3d.py \
   --config configs/official_tests/perfect_parallel_raytrace_structure_whiteboard.cfg \
@@ -92,6 +105,7 @@ python3 python/plot_optical_layout_html.py \
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_spot_histogram.py \
   run_logs/official_tests/raytrace_structure_point_30m/hits.csv \
+  --config configs/official_tests/point_30m_structure_whiteboard.cfg \
   --output run_logs/official_tests/raytrace_structure_point_30m/spot.png \
   --max-bins 520 --dpi 350 \
   --title "30 m point source with 3D obstruction"
@@ -101,6 +115,7 @@ python3 python/plot_mirror_hit_map.py \
   --config configs/official_tests/point_30m_structure_whiteboard.cfg \
   --require-surface \
   --overlay-facets \
+  --sky-up \
   --output run_logs/official_tests/raytrace_structure_point_30m/mirror_hits_with_facet_outlines.png \
   --dpi 350 \
   --title "30 m point source: mirror hit points with facet outlines"
@@ -222,6 +237,7 @@ python3 python/plot_corsika_trace_output.py \
   run_logs/official_tests/corsika/whiteboard_hits.csv \
   --summary-csv run_logs/official_tests/corsika/whiteboard_summary.csv \
   --event-id "$LACT_SELECTED_EVENT_ID" \
+  --config configs/official_tests/corsika_whiteboard.cfg \
   --output-dir "$PLOT_EVENT_DIR/whiteboard"
 
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \

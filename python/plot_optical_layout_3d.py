@@ -90,6 +90,12 @@ def intersect_plane(point, direction, plane_point, plane_normal):
 
 def make_plane_patch(plane_point, plane_normal, radius):
     u, v, _ = local_frame(plane_normal)
+    return make_oriented_plane_patch(plane_point, u, v, radius)
+
+
+def make_oriented_plane_patch(plane_point, u_axis, v_axis, radius):
+    u = u_axis / np.linalg.norm(u_axis)
+    v = v_axis / np.linalg.norm(v_axis)
     s = radius
     corners = np.array([
         plane_point + (-s) * u + (-s) * v,
@@ -298,6 +304,11 @@ def main():
         default=1,
         help="draw every Nth obstruction mask cell",
     )
+    parser.add_argument(
+        "--show-camera-axes",
+        action="store_true",
+        help="draw output-plane +u/+v image axes on the static layout",
+    )
     parser.add_argument("--view", default="32,-58", help="elev,azim camera view")
     args = parser.parse_args()
 
@@ -312,12 +323,23 @@ def main():
 
     plane_point = parse_vec3(cfg.get("output.plane_point"), [0.0, 0.0, 0.0])
     plane_normal = parse_vec3(cfg.get("output.plane_normal"), [0.0, 0.0, 1.0])
+    plane_u_axis = parse_vec3(cfg["output.plane_u_axis"]) if "output.plane_u_axis" in cfg else None
+    plane_v_axis = parse_vec3(cfg["output.plane_v_axis"]) if "output.plane_v_axis" in cfg else None
     beam_dir = source_direction_from_config(cfg)
     if frame is not None:
         plane_point = point_to_global(plane_point, frame)
         plane_normal = rotate_local_vector(plane_normal, frame)
+        if plane_u_axis is not None:
+            plane_u_axis = rotate_local_vector(plane_u_axis, frame)
+        if plane_v_axis is not None:
+            plane_v_axis = rotate_local_vector(plane_v_axis, frame)
         beam_dir = rotate_local_vector(beam_dir, frame)
     plane_normal = plane_normal / np.linalg.norm(plane_normal)
+    if plane_u_axis is None or plane_v_axis is None:
+        plane_u_axis, plane_v_axis, _ = local_frame(plane_normal)
+    else:
+        plane_u_axis = plane_u_axis / np.linalg.norm(plane_u_axis)
+        plane_v_axis = plane_v_axis / np.linalg.norm(plane_v_axis)
     beam_dir = beam_dir / np.linalg.norm(beam_dir)
 
     if args.mirror_csv:
@@ -373,7 +395,7 @@ def main():
         plane_radius = max(0.7, 0.18 * xy_span)
     else:
         plane_radius = args.plane_radius
-    plane_patch = make_plane_patch(plane_point, plane_normal, plane_radius)
+    plane_patch = make_oriented_plane_patch(plane_point, plane_u_axis, plane_v_axis, plane_radius)
 
     plt.rcParams.update({
         "font.family": "DejaVu Sans",
@@ -440,6 +462,64 @@ def main():
         depthshade=False,
         label="Output plane center",
     )
+
+    if args.show_camera_axes:
+        axis_length = max(0.75, plane_radius * 1.45)
+        for direction, color, label in (
+            (plane_u_axis, "#F2B701", "+u / image +x"),
+            (plane_v_axis, "#2CA25F", "+v / image +y"),
+            (plane_normal, "#B2182B", "camera normal / toward mirror"),
+        ):
+            end = plane_point + direction * axis_length
+            ax.quiver(
+                [plane_point[0]],
+                [plane_point[1]],
+                [plane_point[2]],
+                [direction[0]],
+                [direction[1]],
+                [direction[2]],
+                length=axis_length,
+                normalize=True,
+                color=color,
+                linewidth=2.0,
+                arrow_length_ratio=0.18,
+                label=label,
+            )
+            ax.text(
+                end[0],
+                end[1],
+                end[2],
+                label,
+                color=color,
+                fontsize=8,
+                weight="bold",
+            )
+        global_z = np.array([0.0, 0.0, 1.0])
+        global_z_start = plane_point - 0.18 * plane_u_axis - 0.18 * plane_v_axis
+        global_z_end = global_z_start + global_z * axis_length
+        ax.quiver(
+            [global_z_start[0]],
+            [global_z_start[1]],
+            [global_z_start[2]],
+            [global_z[0]],
+            [global_z[1]],
+            [global_z[2]],
+            length=axis_length,
+            normalize=True,
+            color="#111111",
+            linewidth=1.8,
+            arrow_length_ratio=0.18,
+            label="+global z / up",
+        )
+        ax.text(
+            global_z_end[0],
+            global_z_end[1],
+            global_z_end[2],
+            "+global z / up",
+            color="#111111",
+            fontsize=8,
+            weight="bold",
+        )
 
     if obstruction_points is not None and len(obstruction_points) > 0:
         ax.scatter(

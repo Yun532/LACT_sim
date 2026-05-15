@@ -13,7 +13,8 @@ import pandas as pd
 from matplotlib.collections import LineCollection
 from matplotlib.colors import LogNorm
 
-from plot_mirror_hit_map import projected_facet_outlines
+from plot_mirror_hit_map import mirror_display_basis, project_points_3d, projected_facet_outlines
+from plot_orientation import basis_from_optical_config, orient_xy
 
 
 def parse_args() -> argparse.Namespace:
@@ -26,6 +27,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bins", type=int, default=420)
     parser.add_argument("--dpi", type=int, default=350)
     parser.add_argument("--title", default=None)
+    parser.add_argument(
+        "--sky-up",
+        action="store_true",
+        help="with --config, rotate the plot so display +y is global +z/up projected onto the plotted plane",
+    )
     return parser.parse_args()
 
 
@@ -109,19 +115,42 @@ def main() -> None:
         raise SystemExit("no rows with hit_mirror=1 and hit_surface=1")
 
     blocked = df["obstruction_blocked"].to_numpy(dtype=int) != 0
+    output_display_basis = None
+    mirror_basis = None
+    oriented = False
+    if args.sky_up:
+        if not args.config:
+            raise SystemExit("--sky-up requires --config")
     if args.space == "spot":
         require_columns(df, {"u_m", "v_m"}, hits_path)
         x = df["u_m"].to_numpy(dtype=float) * 1000.0
         y = df["v_m"].to_numpy(dtype=float) * 1000.0
-        xlabel = "Whiteboard u [mm]"
-        ylabel = "Whiteboard v [mm]"
+        if args.sky_up:
+            display_x, display_y, oriented = basis_from_optical_config(args.config)
+            output_display_basis = (display_x, display_y)
+            x, y = orient_xy(x, y, output_display_basis[0], output_display_basis[1])
+        xlabel = "Whiteboard display x [mm]" if oriented else "Whiteboard u [mm]"
+        ylabel = "Whiteboard display y [mm] (global +z/up)" if oriented else "Whiteboard v [mm]"
         default_title = "Outer-ring parallel spot with marked obstruction"
     else:
-        require_columns(df, {"mirror_x", "mirror_y"}, hits_path)
-        x = df["mirror_x"].to_numpy(dtype=float) * 1000.0
-        y = df["mirror_y"].to_numpy(dtype=float) * 1000.0
-        xlabel = "Mirror hit x [mm]"
-        ylabel = "Mirror hit y [mm]"
+        required = {"mirror_x", "mirror_y"}
+        if args.sky_up:
+            required.add("mirror_z")
+        require_columns(df, required, hits_path)
+        if args.sky_up:
+            mirror_basis = mirror_display_basis(Path(args.config).resolve())
+            projected = project_points_3d(
+                df[["mirror_x", "mirror_y", "mirror_z"]].to_numpy(dtype=float),
+                mirror_basis,
+            )
+            x = projected[:, 0] * 1000.0
+            y = projected[:, 1] * 1000.0
+            oriented = True
+        else:
+            x = df["mirror_x"].to_numpy(dtype=float) * 1000.0
+            y = df["mirror_y"].to_numpy(dtype=float) * 1000.0
+        xlabel = "Mirror display x [mm]" if oriented else "Mirror hit x [mm]"
+        ylabel = "Mirror display y [mm] (global +z/up)" if oriented else "Mirror hit y [mm]"
         default_title = "Outer-ring mirror hit distribution with marked obstruction"
 
     fig, ax = plt.subplots(figsize=(7.4, 6.5), dpi=args.dpi)
@@ -132,7 +161,7 @@ def main() -> None:
     if args.space == "mirror" and args.overlay_facets:
         if not args.config:
             raise SystemExit("--overlay-facets requires --config")
-        outlines = projected_facet_outlines(Path(args.config).resolve())
+        outlines = projected_facet_outlines(Path(args.config).resolve(), display_basis=mirror_basis)
         ax.add_collection(LineCollection(outlines, colors="black", linewidths=0.75, alpha=0.9))
 
     n_total = len(df)
@@ -142,6 +171,8 @@ def main() -> None:
         f"marked obstructed = {n_blocked} ({n_blocked / n_total:.3%})",
         f"unblocked = {n_total - n_blocked}",
     ]
+    if oriented:
+        notes.append("display +y = global +z/up")
     note_x, note_y = (0.34, 0.86) if args.space == "mirror" else (0.02, 0.02)
     note_va = "top" if args.space == "mirror" else "bottom"
     ax.text(

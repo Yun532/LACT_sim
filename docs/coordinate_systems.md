@@ -309,6 +309,55 @@ x_m, y_m
 
 These are camera/image coordinates, not CORSIKA array coordinates.
 
+### Camera Handedness
+
+The telescope-local optical frame is right-handed:
+
+```text
+local x cross local y = local z
+```
+
+The recommended camera/image axes keep the camera image coordinates aligned
+with the telescope-local mirror coordinates:
+
+```text
+u = local +x
+v = local +y
+```
+
+Therefore:
+
+```text
+u cross v = local +z
+```
+
+At the same time, the camera front-face normal is defined to point toward the
+mirror:
+
+```text
+camera normal = local -z
+```
+
+So the ordered triple `(u, v, camera normal)` is **not** right-handed:
+
+```text
+u cross v = -camera normal
+```
+
+This is intentional. It keeps camera image `x/y` in the same direction as the
+mirror-layout `x/y`, while the physical camera normal still points toward the
+mirror. If a later module needs a right-handed camera-surface basis, use
+`(u, v, -normal)` or explicitly flip one image axis and document the image
+orientation change.
+
+To inspect this visually for any cfg, use:
+
+```bash
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_coordinate_system_3d.py \
+  --config path/to/run.cfg \
+  --output coordinate_system_3d.png
+```
+
 ## Synthetic Parallel-Beam Angles
 
 Analytic optical tests do not use CORSIKA coordinates. For:

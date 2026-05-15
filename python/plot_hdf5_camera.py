@@ -8,7 +8,9 @@ import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.collections import PatchCollection
-from matplotlib.patches import Rectangle
+from matplotlib.patches import Polygon, Rectangle
+
+from plot_orientation import basis_from_corsika_pointing, orient_points
 
 
 def event_table(h5):
@@ -127,16 +129,36 @@ def values_for_image(h5, image, quantity):
     return {int(r["pixel_id"]): float(r[quantity]) for r in rows}
 
 
-def draw_camera(camera, image, values_by_pixel, quantity, dpi):
+def telescope_pointing_for_image(h5, image):
+    if "telescopes/table" not in h5:
+        return None
+    table = h5["telescopes/table"][:]
+    names = table.dtype.names or ()
+    if "pointing_az_deg" not in names or "pointing_el_deg" not in names:
+        return None
+    matches = table[table["telescope_id"] == image["telescope_id"]]
+    if len(matches) == 0:
+        return None
+    return float(matches[0]["pointing_az_deg"]), float(matches[0]["pointing_el_deg"])
+
+
+def draw_camera(camera, image, values_by_pixel, quantity, dpi, display_basis=None):
     patches = []
     values = []
     for p in camera:
         size = float(p["size_m"])
-        patches.append(Rectangle(
-            (float(p["x_m"]) - 0.5 * size, float(p["y_m"]) - 0.5 * size),
-            size,
-            size,
-        ))
+        x = float(p["x_m"])
+        y = float(p["y_m"])
+        if display_basis is None:
+            patches.append(Rectangle((x - 0.5 * size, y - 0.5 * size), size, size))
+        else:
+            corners = np.array([
+                [x - 0.5 * size, y - 0.5 * size],
+                [x + 0.5 * size, y - 0.5 * size],
+                [x + 0.5 * size, y + 0.5 * size],
+                [x - 0.5 * size, y + 0.5 * size],
+            ])
+            patches.append(Polygon(orient_points(corners, display_basis[0], display_basis[1]), closed=True))
         values.append(values_by_pixel.get(int(p["pixel_id"]), 0.0))
 
     plt.rcParams.update({
@@ -164,8 +186,12 @@ def draw_camera(camera, image, values_by_pixel, quantity, dpi):
     ax.add_collection(collection)
     ax.set_aspect("equal", adjustable="box")
     ax.autoscale_view()
-    ax.set_xlabel("camera x [m]")
-    ax.set_ylabel("camera y [m]")
+    if display_basis is None:
+        ax.set_xlabel("camera x [m]")
+        ax.set_ylabel("camera y [m]")
+    else:
+        ax.set_xlabel("camera display x [m]")
+        ax.set_ylabel("camera display y [m] (global +z/up)")
     ax.set_title(
         f"HDF5 camera event {int(image['event_id'])}, telescope {int(image['telescope_id']) + 1}"
     )
@@ -177,7 +203,8 @@ def draw_camera(camera, image, values_by_pixel, quantity, dpi):
         0.02,
         f"filled = {int(image['count'])}\n"
         f"signal = {float(image['total_signal']):.1f}\n"
-        f"pe = {float(image['total_pe']):.1f}",
+        f"pe = {float(image['total_pe']):.1f}"
+        + ("\ndisplay +y = global +z/up" if display_basis is not None else ""),
         transform=ax.transAxes,
         fontsize=8,
         bbox=dict(boxstyle="round,pad=0.25", facecolor="white", edgecolor="0.82", alpha=0.9),
@@ -236,6 +263,11 @@ def main():
     )
     parser.add_argument("--output", default="hdf5_camera.png")
     parser.add_argument("--dpi", type=int, default=350)
+    parser.add_argument(
+        "--raw-camera-xy",
+        action="store_true",
+        help="plot stored camera x/y directly instead of rotating display +y to global +z/up",
+    )
     args = parser.parse_args()
 
     with h5py.File(args.h5, "r") as h5:
@@ -259,7 +291,14 @@ def main():
         saved = []
         for image in images:
             values_by_pixel = values_for_image(h5, image, args.quantity)
-            fig = draw_camera(camera, image, values_by_pixel, args.quantity, args.dpi)
+            display_basis = None
+            if not args.raw_camera_xy:
+                pointing = telescope_pointing_for_image(h5, image)
+                if pointing is not None:
+                    display_x, display_y, oriented = basis_from_corsika_pointing(*pointing)
+                    if oriented:
+                        display_basis = (display_x, display_y)
+            fig = draw_camera(camera, image, values_by_pixel, args.quantity, args.dpi, display_basis)
             out = output_path(args.output, image, args.quantity, multiple)
             fig.savefig(out, bbox_inches="tight")
             plt.close(fig)

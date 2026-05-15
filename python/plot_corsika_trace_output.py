@@ -16,7 +16,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.collections import PatchCollection
-from matplotlib.patches import Rectangle
+from matplotlib.patches import Polygon, Rectangle
+
+from plot_orientation import basis_from_optical_config, orient_points, orient_xy
 
 
 def read_camera_pixels(path):
@@ -45,7 +47,7 @@ def setup_style(dpi):
     })
 
 
-def plot_pixel_image(df, pixels, event_label, telescope_id, output):
+def plot_pixel_image(df, pixels, event_label, telescope_id, output, display_basis=None):
     df = df.groupby("pixel_id", as_index=False).agg(
         photon_count=("photon_count", "sum"),
         pe=("pe", "sum"),
@@ -59,11 +61,18 @@ def plot_pixel_image(df, pixels, event_label, telescope_id, output):
     values = []
     for pixel in pixels:
         size = pixel["size_m"]
-        patch_list.append(Rectangle(
-            (pixel["x_m"] - 0.5 * size, pixel["y_m"] - 0.5 * size),
-            size,
-            size,
-        ))
+        x = pixel["x_m"]
+        y = pixel["y_m"]
+        if display_basis is None:
+            patch_list.append(Rectangle((x - 0.5 * size, y - 0.5 * size), size, size))
+        else:
+            corners = np.array([
+                [x - 0.5 * size, y - 0.5 * size],
+                [x + 0.5 * size, y - 0.5 * size],
+                [x + 0.5 * size, y + 0.5 * size],
+                [x - 0.5 * size, y + 0.5 * size],
+            ])
+            patch_list.append(Polygon(orient_points(corners, display_basis[0], display_basis[1]), closed=True))
         values.append(values_by_id.get(pixel["id"], 0.0))
 
     fig, ax = plt.subplots(figsize=(6.8, 6.2))
@@ -82,8 +91,12 @@ def plot_pixel_image(df, pixels, event_label, telescope_id, output):
     ax.add_collection(collection)
     ax.set_aspect("equal", adjustable="box")
     ax.autoscale_view()
-    ax.set_xlabel("camera x [m]")
-    ax.set_ylabel("camera y [m]")
+    if display_basis is None:
+        ax.set_xlabel("camera x [m]")
+        ax.set_ylabel("camera y [m]")
+    else:
+        ax.set_xlabel("camera display x [m]")
+        ax.set_ylabel("camera display y [m] (global +z/up)")
     ax.set_title(f"CORSIKA {event_label} telescope {telescope_id} camera")
     ax.grid(True, alpha=0.18, linewidth=0.5)
     cbar = fig.colorbar(collection, ax=ax, fraction=0.046, pad=0.04)
@@ -91,7 +104,8 @@ def plot_pixel_image(df, pixels, event_label, telescope_id, output):
     ax.text(
         0.02,
         0.02,
-        f"filled pixels = {len(df)}\nsignal = {df['signal'].sum():.1f}",
+        f"filled pixels = {len(df)}\nsignal = {df['signal'].sum():.1f}"
+        + ("\ndisplay +y = global +z/up" if display_basis is not None else ""),
         transform=ax.transAxes,
         fontsize=8,
         bbox=dict(boxstyle="round,pad=0.25", facecolor="white", edgecolor="0.82", alpha=0.9),
@@ -108,9 +122,11 @@ def weighted_centroid(x, y, w):
     return float(np.sum(w * x) / sw), float(np.sum(w * y) / sw)
 
 
-def plot_whiteboard(df, event_label, telescope_id, output, max_bins):
+def plot_whiteboard(df, event_label, telescope_id, output, max_bins, display_basis=None):
     x_mm = df["u_m"].to_numpy(float) * 1000.0
     y_mm = df["v_m"].to_numpy(float) * 1000.0
+    if display_basis is not None:
+        x_mm, y_mm = orient_xy(x_mm, y_mm, display_basis[0], display_basis[1])
     w = df["signal_weight"].to_numpy(float)
     cx, cy = weighted_centroid(x_mm, y_mm, w)
     r = np.sqrt((x_mm - cx) ** 2 + (y_mm - cy) ** 2)
@@ -155,15 +171,20 @@ def plot_whiteboard(df, event_label, telescope_id, output, max_bins):
         linewidth=2.2,
         label=f"R68 = {r68:.2f} mm",
     ))
-    ax.set_xlabel("u [mm]")
-    ax.set_ylabel("v [mm]")
+    if display_basis is None:
+        ax.set_xlabel("u [mm]")
+        ax.set_ylabel("v [mm]")
+    else:
+        ax.set_xlabel("display x [mm]")
+        ax.set_ylabel("display y [mm] (global +z/up)")
     ax.set_title(f"CORSIKA {event_label} telescope {telescope_id} whiteboard")
     ax.grid(True, color="white", alpha=0.22, linewidth=0.5)
     ax.legend(frameon=True, framealpha=1.0, edgecolor="black", loc="best")
     ax.text(
         0.02,
         0.02,
-        f"N = {len(df)}\nRMS = {math.sqrt(np.average(r * r, weights=w)):.2f} mm",
+        f"N = {len(df)}\nRMS = {math.sqrt(np.average(r * r, weights=w)):.2f} mm"
+        + ("\ndisplay +y = global +z/up" if display_basis is not None else ""),
         transform=ax.transAxes,
         fontsize=8,
         bbox=dict(boxstyle="round,pad=0.25", facecolor="white", edgecolor="0.82", alpha=0.92),
@@ -247,6 +268,11 @@ def main():
         help="run_corsika_trace summary CSV; used to resolve --shower-event-number",
     )
     parser.add_argument("--camera-csv", default="configs/cameras/new_camera_pixels.csv")
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="optional optical cfg; when provided, display +y is global +z/up projected onto the output plane",
+    )
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--dpi", type=int, default=350)
     parser.add_argument("--max-bins", type=int, default=520)
@@ -327,14 +353,19 @@ def main():
     outdir.mkdir(parents=True, exist_ok=True)
     telescope_ids = sorted(int(x) for x in df["telescope_id"].unique())
     pixels = read_camera_pixels(args.camera_csv) if is_pixel else None
+    display_basis = None
+    if args.config:
+        display_x, display_y, oriented = basis_from_optical_config(args.config)
+        if oriented:
+            display_basis = (display_x, display_y)
 
     for tel in telescope_ids:
         one = df[df["telescope_id"] == tel].copy()
         output = outdir / f"tel{tel:03d}_{'camera' if is_pixel else 'whiteboard'}.png"
         if is_pixel:
-            plot_pixel_image(one, pixels, event_label, tel, output)
+            plot_pixel_image(one, pixels, event_label, tel, output, display_basis)
         else:
-            plot_whiteboard(one, event_label, tel, output, args.max_bins)
+            plot_whiteboard(one, event_label, tel, output, args.max_bins, display_basis)
         print(f"Saved {output}")
 
 

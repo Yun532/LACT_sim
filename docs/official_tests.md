@@ -66,6 +66,19 @@ output、camera、sipm、NSB、trigger 等模块 cfg。每个 official cfg 只�
 目前 electronics 模块只是后续波形/电子学的 placeholder，没有实际响应；SiPM PDE
 只通过 `sipm.pde` 设置，避免同一个 p.e. 转换逻辑出现两个入口。
 
+## 绘图方向约定
+
+为了让不同 pointing 的图像更容易比较，官方二维图默认采用 sky-up 显示约定：
+
+```text
+display +y = global +z/up 在当前镜面/相机平面上的投影
+```
+
+因此白板、镜面命中图和相机图的画面上方都对应 3D layout 里的天空/竖直向上方向。
+CSV 图需要传入对应 `--config` 才能知道 pointing；镜面命中图还会使用
+`--sky-up`。HDF5 相机图会从文件里的 telescope pointing metadata 自动计算显示方向。
+如果需要检查原始相机坐标，可对 `plot_hdf5_camera.py` 加 `--raw-camera-xy`。
+
 ## 一键脚本包含的测试
 
 `tools/run_official_tests.sh --no-corsika` 会运行：
@@ -248,6 +261,13 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_spot_histogram.py \
   --output run_logs/official_tests/raytrace_structure_parallel/spot.png \
   --max-bins 520 --dpi 350 \
   --title "Parallel beam with 3D obstruction"
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_mirror_hit_map.py \
+  run_logs/official_tests/raytrace_structure_parallel/hits.csv \
+  --config configs/official_tests/perfect_parallel_raytrace_structure_whiteboard.cfg \
+  --require-surface --overlay-facets \
+  --output run_logs/official_tests/raytrace_structure_parallel/mirror_hits_with_facet_outlines.png \
+  --dpi 350 \
+  --title "Parallel beam: mirror hit points with facet outlines"
 MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_optical_layout_3d.py \
   --config configs/official_tests/perfect_parallel_raytrace_structure_whiteboard.cfg \
   --show-obstruction \
@@ -259,7 +279,8 @@ python3 python/plot_optical_layout_html.py \
 ```
 
 检查重点：log 中应有 `blocked_by_obstruction`、
-`output_transmission_after_obstruction` 和遮挡前后等效收集面积。
+`output_transmission_after_obstruction` 和遮挡前后等效收集面积；
+`mirror_hits_with_facet_outlines.png` 应显示平行光在镜面上的命中区域和镜片轮廓。
 
 ## 4. 30 m 点光源 + 3D 遮挡白板测试
 

@@ -12,6 +12,15 @@ It supports:
 Generated build folders, logs, CSV outputs, and plots are intentionally not part
 of the source package. They can be regenerated with the commands below.
 
+## Chinese Overview
+
+For a compact Chinese guide to the program flow, coordinate conventions, core
+functions, output files, and current physics boundaries, see:
+
+```text
+docs/program_overview_zh.md
+```
+
 ## Repository Layout
 
 ```text
@@ -336,9 +345,10 @@ configs/obstructions/raytrace_final_structure_primitives.csv
 ```
 
 It checks both incoming and reflected-ray obstruction. The official smoke test
-keeps three plots: a parallel-light whiteboard spot, a 30 m point-source
-whiteboard spot, and the point-source mirror-hit distribution with the
-projected mirror-facet outlines.
+keeps four plots: a parallel-light whiteboard spot, a parallel-light mirror-hit
+distribution with projected mirror-facet outlines, a 30 m point-source
+whiteboard spot, and the point-source mirror-hit distribution with projected
+mirror-facet outlines.
 
 Parallel-light obstruction run:
 
@@ -353,6 +363,15 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_spot_histogram.py \
   --max-bins 520 \
   --dpi 350 \
   --title "Parallel beam with 3D obstruction"
+
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_mirror_hit_map.py \
+  run_logs/official_tests/raytrace_structure_parallel/hits.csv \
+  --config configs/official_tests/perfect_parallel_raytrace_structure_whiteboard.cfg \
+  --require-surface \
+  --overlay-facets \
+  --output run_logs/official_tests/raytrace_structure_parallel/mirror_hits_with_facet_outlines.png \
+  --dpi 350 \
+  --title "Parallel beam: mirror hit points with facet outlines"
 ```
 
 30 m point-source obstruction run:
@@ -387,6 +406,7 @@ Main outputs:
 
 ```text
 run_logs/official_tests/raytrace_structure_parallel/spot.png
+run_logs/official_tests/raytrace_structure_parallel/mirror_hits_with_facet_outlines.png
 run_logs/official_tests/raytrace_structure_parallel/layout_3d.png
 run_logs/official_tests/raytrace_structure_parallel/layout_3d.html
 run_logs/official_tests/raytrace_structure_point_30m/spot.png
@@ -899,3 +919,8 @@ Important short version:
 - the reflecting optical system forms an inverted image on the focal plane
 - camera/whiteboard image coordinates are defined by
   `output.plane_u_axis` and `output.plane_v_axis`
+- standard 2D plotters use a sky-up display convention when enough pointing
+  metadata or `--config` is provided: display `+y` is the projection of global
+  `+z/up` onto the plotted plane. Use `--raw-camera-xy` in
+  `plot_hdf5_camera.py` when you need stored camera x/y without display
+  rotation.

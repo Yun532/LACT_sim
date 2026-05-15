@@ -135,6 +135,11 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--ray-stride", type=int, default=12)
     parser.add_argument(
+        "--show-coordinate-axes",
+        action="store_true",
+        help="draw camera u/v image axes and the global +Z direction",
+    )
+    parser.add_argument(
         "--highlight-primitives",
         default="",
         help="comma-separated obstruction primitive names to highlight and label",
@@ -149,7 +154,15 @@ def main():
 
     plane_point = point_to_global(parse_vec3(cfg.get("output.plane_point"), [0, 0, -8]), frame)
     plane_normal = rotate_local_vector(parse_vec3(cfg.get("output.plane_normal"), [0, 0, -1]), frame)
-    u, v, _ = local_frame(plane_normal)
+    local_u = parse_vec3(cfg["output.plane_u_axis"]) if "output.plane_u_axis" in cfg else None
+    local_v = parse_vec3(cfg["output.plane_v_axis"]) if "output.plane_v_axis" in cfg else None
+    if local_u is None or local_v is None:
+        u, v, _ = local_frame(plane_normal)
+    else:
+        u = rotate_local_vector(local_u, frame)
+        v = rotate_local_vector(local_v, frame)
+        u = u / np.linalg.norm(u)
+        v = v / np.linalg.norm(v)
     plane_radius = 0.8
     plane = [
         list((plane_point - plane_radius * u - plane_radius * v).astype(float)),
@@ -163,6 +176,30 @@ def main():
 
     lines = []
     labels = []
+    if args.show_coordinate_axes:
+        axis_length = 2.2
+        axis_origin = plane_point
+        axis_items = [
+            (u, "+u / image +x", "#f5c542"),
+            (v, "+v / image +y", "#49d17d"),
+            (np.array([0.0, 0.0, 1.0]), "+global Z / up", "#ffffff"),
+        ]
+        for direction, label_text, color in axis_items:
+            direction = direction / np.linalg.norm(direction)
+            start = axis_origin
+            end = axis_origin + axis_length * direction
+            lines.append({
+                "points": [list(start.astype(float)), list(end.astype(float))],
+                "color": color,
+                "role": "coordinate_axis",
+                "name": label_text,
+                "width": 5,
+            })
+            labels.append({
+                "point": list(end.astype(float)),
+                "text": label_text,
+                "color": color,
+            })
     for p in load_primitives(resolve_primitives_path(cfg)):
         role = p["role"]
         is_highlighted = p["name"] in highlighted

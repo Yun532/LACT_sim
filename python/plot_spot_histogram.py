@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from plot_orientation import basis_from_optical_config, orient_xy
+
 
 def containment_radii(center, points, fractions=(0.68, 0.80)):
     r = np.linalg.norm(points - center, axis=1)
@@ -39,6 +41,11 @@ def main():
     parser.add_argument("--focal-length-m", type=float, default=8.0, help="plate-scale focal length")
     parser.add_argument("--dpi", type=int, default=350)
     parser.add_argument("--title", default="Optical output-plane spot")
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="optional optical cfg; when provided, display +y is global +z/up projected onto the output plane",
+    )
     args = parser.parse_args()
 
     df = pd.read_csv(args.csv)
@@ -48,6 +55,10 @@ def main():
 
     x_mm = df["u_m"].to_numpy(float) * 1000.0
     y_mm = df["v_m"].to_numpy(float) * 1000.0
+    oriented = False
+    if args.config:
+        display_x, display_y, oriented = basis_from_optical_config(args.config)
+        x_mm, y_mm = orient_xy(x_mm, y_mm, display_x, display_y)
     w = df["weight"].to_numpy(float) * df["relative_efficiency"].to_numpy(float)
 
     cx_mm, cy_mm = weighted_centroid(x_mm, y_mm, w)
@@ -130,13 +141,17 @@ def main():
     def deg_to_mm(deg):
         return np.radians(np.asarray(deg, dtype=float)) * args.focal_length_m * 1000.0
 
-    ax.set_xlabel("u [mm]")
-    ax.set_ylabel("v [mm]")
+    if oriented:
+        ax.set_xlabel("display x [mm]")
+        ax.set_ylabel("display y [mm] (global +z/up)")
+    else:
+        ax.set_xlabel("u [mm]")
+        ax.set_ylabel("v [mm]")
     ax.set_title(args.title)
     secax_x = ax.secondary_xaxis("top", functions=(mm_to_deg, deg_to_mm))
-    secax_x.set_xlabel("u [deg]")
+    secax_x.set_xlabel("display x [deg]" if oriented else "u [deg]")
     secax_y = ax.secondary_yaxis("right", functions=(mm_to_deg, deg_to_mm))
-    secax_y.set_ylabel("v [deg]")
+    secax_y.set_ylabel("display y [deg]" if oriented else "v [deg]")
 
     ax.grid(True, color="white", alpha=0.22, linewidth=0.5)
     ax.legend(frameon=True, framealpha=1.0, edgecolor="black", loc="best")
@@ -146,6 +161,8 @@ def main():
         f"Centroid = ({cx_mm:.2f}, {cy_mm:.2f}) mm\n"
         f"RMS = {rms_mm:.2f} mm"
     )
+    if oriented:
+        text += "\ndisplay +y = global +z/up"
     ax.text(
         0.02,
         0.02,
