@@ -175,7 +175,9 @@ The sections below show the same tests as explicit commands.
 
 For CORSIKA/EventIO runs, the input file gives photon positions and directions
 in the CORSIKA IACT horizontal frame. LACT_sim then rotates those photons into
-the telescope-local optical frame using the telescope pointing in the cfg:
+the telescope-local optical frame using the telescope pointing in the cfg.
+Use `run_corsika_trace` for these runs; `run_optical_sim` is for synthetic and
+PhotonCsv optical debugging and rejects `source.mode=EventIO`.
 
 ```ini
 telescope.pointing_az_deg=0
@@ -214,6 +216,11 @@ telescope.pointing_el_deg=70
 The azimuth convention is the hessio/sim_telarray-compatible one documented in
 `docs/coordinate_systems.md`: `0 deg` points along array `+X` / North, and
 `90 deg` points toward East, represented as array `-Y` in the CORSIKA frame.
+
+The generic frame used by `run_optical_sim` is different: its
+`buildTelescopeFrame()` helper measures azimuth from global `+x` toward global
+`+y`. That generic frame is kept for local optical tests and should not be used
+as the CORSIKA NWU transform.
 
 For the smallest normal CORSIKA camera run, copy this template and edit only
 pointing plus input/output paths:

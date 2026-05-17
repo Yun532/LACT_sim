@@ -137,8 +137,12 @@ axis, azimuth, ARRANG, telescope optical-frame, and camera-plane convention.
 
 ## One-Command zst to Images
 
-`run_optical_sim` can now read EventIO directly when LACT_sim is built with the
-project-local hessioxxx library:
+CORSIKA/EventIO files should be traced with `run_corsika_trace`, not
+`run_optical_sim`. The dedicated CORSIKA runner owns the NWU-to-optical-frame
+rotation, per-event/per-telescope stream handling, MC_TELOFF core metadata, and
+HDF5 CORSIKA provenance tables.
+
+A typical CORSIKA/EventIO source section is:
 
 ```ini
 source.mode=EventIO
@@ -150,10 +154,14 @@ source.filter_event_id=100
 source.filter_telescope_id=0
 ```
 
-`source.use_eventio_telescope_position` defaults to `true` in EventIO mode.
-The selected telescope position is taken from the CORSIKA `IO_TYPE_MC_TELPOS`
-table using `source.filter_telescope_id`. Set it to `false` only when you want
-to force `telescope.position_m` from the LACT_sim config.
+`run_optical_sim` is intentionally limited to synthetic and PhotonCsv optical
+debugging. It rejects `source.mode=EventIO` so raw EventIO files cannot bypass
+the CORSIKA-specific coordinate transform.
+
+`source.use_eventio_telescope_position` defaults to `true` in EventIO mode in
+the CORSIKA runner. The selected telescope position is taken from the CORSIKA
+`IO_TYPE_MC_TELPOS` table using `source.filter_telescope_id`. Set it to `false`
+only when you want to force `telescope.position_m` from the LACT_sim config.
 
 Every EventIO run prints a metadata block to the log:
 
@@ -365,17 +373,8 @@ run_logs/eventio_text_adapter_smoke/run2_photons_from_read_iact_n5.csv
 The converted output contains 64274 photon bunch rows from 60 events and 229
 telescopes.
 
-## Future In-Process Source
+## EventIO Entry Point
 
-The next target is to make `run_optical_sim` accept:
-
-```ini
-source.mode=EventIO
-source.eventio_path=...
-source.filter_event_id=...
-source.filter_telescope_id=...
-```
-
-For now, `source.mode=EventIO` intentionally still fails with a clear message.
-The validated path is direct binary EventIO conversion to `PhotonCsv`, followed
-by the existing `source.mode=PhotonCsv` raytrace.
+`run_corsika_trace` is the validated in-process EventIO source path.
+`run_optical_sim` intentionally rejects `source.mode=EventIO` with a clear
+message and remains the synthetic/PhotonCsv optical debugging runner.

@@ -158,41 +158,15 @@ def main() -> None:
 
     mean_x = float(np.mean(x))
     mean_y = float(np.mean(y))
-    ax.scatter(mean_x, mean_y, marker="x", s=85, linewidths=2.6, color="yellow", label="Mean", zorder=5)
+    ax.scatter(mean_x, mean_y, marker="x", s=85, linewidths=2.6, color="yellow", label="Centroid", zorder=5)
     ax.set_aspect("equal", adjustable="box")
-    if args.sky_up:
-        ax.set_xlabel("Mirror display x [mm]")
-        if sky_up_projected:
-            ax.set_ylabel("Mirror display y [mm] (global +z/up)")
-        else:
-            ax.set_ylabel("Mirror display y [mm] (native mirror +y)")
-    else:
-        ax.set_xlabel("Mirror hit x [mm]")
-        ax.set_ylabel("Mirror hit y [mm]")
+    ax.set_xlabel("x [mm]")
+    ax.set_ylabel("y [mm]")
     ax.set_title(args.title)
     ax.grid(alpha=0.16, linewidth=0.6)
     ax.legend(loc="upper right", frameon=True, framealpha=0.95, edgecolor="black")
     cbar = fig.colorbar(image, ax=ax, pad=0.02)
-    cbar.set_label("Count / bin")
-
-    notes = [f"N = {len(df)}", f"mean = ({mean_x:.1f}, {mean_y:.1f}) mm"]
-    if args.overlay_facets:
-        notes.insert(1, "facet outlines: mirror-plane projection" if args.sky_up else "facet outlines: x-y projection")
-    if args.sky_up:
-        if sky_up_projected:
-            notes.append("display +y = global +z/up projected on mirror plane")
-        else:
-            notes.append("display +y = native mirror +y; global +z projection is degenerate")
-    ax.text(
-        0.02,
-        0.02,
-        "\n".join(notes),
-        transform=ax.transAxes,
-        va="bottom",
-        ha="left",
-        fontsize=9,
-        bbox=dict(facecolor="white", edgecolor="0.75", alpha=0.9, boxstyle="round,pad=0.28"),
-    )
+    cbar.set_label("Counts")
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)

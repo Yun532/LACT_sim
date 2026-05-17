@@ -228,7 +228,10 @@ event_id = 46889802
 读取望远镜位置、az/el 指向、焦距和坐标系名称。
 
 `buildTelescopeFrame()`  
-根据望远镜配置生成本地坐标系。CORSIKA 模式下要特别注意 azimuth 是 North to East。
+根据望远镜配置生成 `run_optical_sim` 使用的通用本地到全局坐标变换。这个通用全局
+框架中 `az=90 deg` 指向 `+y`，主要用于人工光源、PhotonCsv、镜面/白板和可视化
+调试；它不是 CORSIKA NWU 坐标变换。CORSIKA/EventIO 原始输入应使用
+`run_corsika_trace`，其中单独实现 `az=90 deg -> -y/East` 的 CORSIKA IACT 约定。
 
 `buildFacetsFromConfig()`  
 构造镜片列表。支持生成布局、导入 CSV、半边镜片、内外圈镜片和 elevation series。
@@ -524,4 +527,3 @@ python/plot_optical_layout_html.py
 6. 白板 CSV 是逐光子调试文件，不适合大规模生产保存。
 7. dense HDF5 是当前推荐的正式相机输出格式。
 8. 物理验证优先用 official tests，不要只看单个事件图像下结论。
-

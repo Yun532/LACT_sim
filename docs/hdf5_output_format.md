@@ -317,9 +317,9 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_array_layout.py \
   --output run_logs/official_tests/corsika/array_layout.png
 ```
 
-Plot total p.e. per telescope for one event. The figure uses East on the x-axis
-and North on the y-axis, while reading telescope coordinates from the
-CORSIKA-compatible HDF5 fields:
+Plot total p.e. per telescope for one event. The figure labels the displayed
+axes as `x/y`; the lower-left compass marks North/East, while coordinates are
+read from the CORSIKA-compatible HDF5 fields:
 
 ```bash
 MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_array_layout.py \

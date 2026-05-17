@@ -125,7 +125,34 @@ telescope.pointing_el_deg=70
 Again, this azimuth zero is CORSIKA magnetic north unless an external
 declination correction is explicitly applied.
 
-### 4. Telescope-Local Optical Frame
+### 4. Generic LACT Telescope Frame
+
+`buildTelescopeFrame()` is the generic frame used by `run_optical_sim` for
+synthetic sources, PhotonCsv optical debugging, mirror geometry, output planes,
+and visualization helpers. It is not the CORSIKA NWU transform.
+
+In this generic frame, azimuth is measured from global `+x` toward global `+y`:
+
+```text
+z_axis = ( cos(el) cos(az),
+           cos(el) sin(az),
+           sin(el) )
+```
+
+Therefore:
+
+```text
+az = 0 deg   -> +x
+az = 90 deg  -> +y
+```
+
+This convention is useful for local optical tests where the global `x/y` axes
+are only a simulation frame. Do not interpret it as CORSIKA IACT coordinates.
+For raw CORSIKA/EventIO input, use `run_corsika_trace`, which applies the
+CORSIKA-specific NWU basis below. `run_optical_sim` intentionally rejects
+`source.mode=EventIO`.
+
+### 5. Telescope-Local Optical Frame
 
 The optical ray tracer works in a telescope-local frame:
 
@@ -165,26 +192,28 @@ local_dir = ( dot(dir_NWU, x_axis),
 Because EventIO photon positions are already telescope-relative, the standard
 `corsika_iact` mode does not subtract the EventIO telescope position. Telescope
 positions are still written to HDF5 for provenance and array-level plotting.
+This CORSIKA transform is used by `run_corsika_trace`.
 
-### 5. Array Layout Plots
+### 6. Array Layout Plots
 
-Array-layout plots use East on the horizontal axis and North on the vertical
-axis:
+Array-layout plots display generic `x/y` axes to avoid mixing plot labels with
+stored CORSIKA `x/y` fields. The plotting coordinates are:
 
 ```text
-plot_x = East  = -array_y_west_m
-plot_y = North =  array_x_north_m
+plot x = -array_y_west_m
+plot y =  array_x_north_m
 ```
 
 Core positions are plotted the same way:
 
 ```text
-core_East  = -core_y_west_m
-core_North =  core_x_north_m
+core plot x = -core_y_west_m
+core plot y =  core_x_north_m
 ```
 
-The plot label deliberately says `HDF5 positions: x=N, y=W; plotted as East vs
-North` to prevent confusing the stored NWU values with the display axes.
+The lower-left compass marks the physical North/East directions on top of these
+generic plot axes. Telescope and event arrows use the same displayed `x/y`
+coordinates.
 
 ## Core Position And MC_TELOFF
 
@@ -407,7 +436,7 @@ camera `v`.
 
 1. For CORSIKA/EventIO HDF5 metadata, read coordinates as NWU:
    `x=N`, `y=W`, `z=U`.
-2. For array plots, display East-North using `East=-West`, `North=North`.
+2. For array plots, display generic `x/y`; the lower-left compass marks N/E.
 3. For event-level core positions, use `/events/corsika`, not
    `/events/corsika_showers`.
 4. For CORSIKA files with `CSCAT`, core position is `-MC_TELOFF`.

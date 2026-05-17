@@ -174,4 +174,10 @@ set_tests_properties(run_optical_sim_photon_csv PROPERTIES
 add_test(NAME run_optical_sim_photon_csv_filter
          COMMAND run_optical_sim ${CMAKE_CURRENT_SOURCE_DIR}/configs/mirror_1229_photon_csv_filter_test.cfg)
 set_tests_properties(run_optical_sim_photon_csv_filter PROPERTIES
-                     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_test(NAME run_optical_sim_rejects_eventio
+         COMMAND run_optical_sim ${CMAKE_CURRENT_SOURCE_DIR}/configs/official_tests/corsika_whiteboard.cfg)
+set_tests_properties(run_optical_sim_rejects_eventio PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    WILL_FAIL TRUE)

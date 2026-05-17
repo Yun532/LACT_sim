@@ -48,7 +48,13 @@ and then transformed by that telescope's position and pointing.
 local_telescope_frame=false
 ```
 
-means the photon rows are already expressed in the global array frame.
+means the photon rows are already expressed in the generic LACT global frame
+used by `buildTelescopeFrame()`: azimuth is measured from global `+x` toward
+global `+y`. This is not the CORSIKA NWU frame.
+
+Raw CORSIKA/EventIO photon bunches should be read with `run_corsika_trace`.
+Do not feed raw EventIO-derived rows into `run_optical_sim` as generic global
+PhotonCsv unless they have first been explicitly converted into this LACT frame.
 
 ## Array Distribution
 

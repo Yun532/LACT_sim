@@ -38,7 +38,8 @@ output、camera、sipm、NSB、trigger 等模块 cfg。每个 official cfg 只�
 - `mirror.config`: 镜片布局。标准 1229 镜面是
   `configs/mirrors/mirror_1229_imported.cfg`。
 - `source.config`: 非 CORSIKA 测试用的人工光源。
-- `source.mode=EventIO`: CORSIKA/EventIO 输入模式。
+- `source.mode=EventIO`: CORSIKA/EventIO 输入模式，只用于 `run_corsika_trace`。
+  `run_optical_sim` 只用于人工光源和 PhotonCsv 调试，遇到 EventIO 会直接报错。
 - `source.eventio_path`: EventIO 文件路径。official cfg 里留空，因为运行时通过
   命令行传入，避免用户每次改 cfg。
 - `source.event_id_mode=event_array100`: 输出事件编号采用

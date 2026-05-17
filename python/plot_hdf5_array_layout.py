@@ -187,31 +187,116 @@ def add_compass(ax, x0, y0, length):
     ax.text(x0 - length * 0.18, y0, "W", ha="right", va="center", fontsize=9, color="0.35")
 
 
-def add_arrival_arrow(ax, core_east, core_north, az_deg, span, mode):
-    az = np.deg2rad(az_deg)
-    if mode == "incoming":
-        dx = -np.sin(az)
-        dy = -np.cos(az)
-    else:
-        dx = np.sin(az)
-        dy = np.cos(az)
-    length = 0.20 * span
+def add_telescope_direction_inset(ax, x0, y0, length, az_deg):
+    dx, dy = azimuth_vector_xy(az_deg, mode="source")
+    start_x = x0
+    start_y = y0
+    end_x = start_x + dx * 0.72 * length
+    end_y = start_y + dy * 0.72 * length
     ax.annotate(
         "",
-        xy=(core_east + dx * length, core_north + dy * length),
-        xytext=(core_east, core_north),
-        arrowprops=dict(arrowstyle="-|>", lw=1.5, color="#b2182b"),
+        xy=(end_x, end_y),
+        xytext=(start_x, start_y),
+        arrowprops=dict(arrowstyle="-|>", lw=1.35, color="#2166ac"),
+        zorder=8,
+    )
+    ax.text(
+        end_x,
+        end_y,
+        "Telescope",
+        ha="left" if dx >= 0 else "right",
+        va="bottom" if dy >= 0 else "top",
+        fontsize=7.6,
+        color="#2166ac",
+        weight="bold",
+        bbox=dict(boxstyle="round,pad=0.12", facecolor="white", edgecolor="none", alpha=0.78),
+        zorder=9,
     )
 
+
+def azimuth_vector_xy(az_deg, mode="source"):
+    az = np.deg2rad(az_deg)
+    if mode == "incoming":
+        return -np.sin(az), -np.cos(az)
+    return np.sin(az), np.cos(az)
+
+
+def add_direction_arrow(
+    ax,
+    x0,
+    y0,
+    az_deg,
+    span,
+    label,
+    color,
+    mode="source",
+    length_scale=0.18,
+    label_fraction=1.0,
+):
+    dx, dy = azimuth_vector_xy(az_deg, mode)
+    length = 0.20 * span
+    if length_scale is not None:
+        length = length_scale * span
+    x1 = x0 + dx * length
+    y1 = y0 + dy * length
+    ax.annotate(
+        "",
+        xy=(x1, y1),
+        xytext=(x0, y0),
+        arrowprops=dict(arrowstyle="-|>", lw=1.6, color=color),
+        zorder=8,
+    )
+    label_x = x0 + dx * length * label_fraction
+    label_y = y0 + dy * length * label_fraction
+    ax.text(
+        label_x,
+        label_y,
+        label,
+        ha="left" if dx >= 0 else "right",
+        va="bottom" if dy >= 0 else "top",
+        fontsize=8.2,
+        color=color,
+        weight="bold",
+        zorder=9,
+        bbox=dict(boxstyle="round,pad=0.16", facecolor="white", edgecolor="none", alpha=0.78),
+    )
+
+
+def add_arrival_arrow(ax, core_east, core_north, az_deg, span, mode):
+    dx, dy = azimuth_vector_xy(az_deg, mode)
+    length = 0.13 * span
+    x0 = core_east - dx * length
+    y0 = core_north - dy * length
+    label_x = x0 - dx * length * 0.07
+    label_y = y0 - dy * length * 0.07
+    ax.annotate(
+        "",
+        xy=(core_east, core_north),
+        xytext=(x0, y0),
+        arrowprops=dict(arrowstyle="-|>", lw=1.6, color="#b2182b"),
+        zorder=8,
+    )
+    ax.text(
+        label_x,
+        label_y,
+        "Event",
+        ha="right" if dx >= 0 else "left",
+        va="top" if dy >= 0 else "bottom",
+        fontsize=8.2,
+        color="#b2182b",
+        weight="bold",
+        zorder=9,
+        bbox=dict(boxstyle="round,pad=0.16", facecolor="white", edgecolor="none", alpha=0.78),
+    )
 
 def format_event_info(event_id, core_x, core_y, arrival_az):
     lines = []
     if event_id is not None:
         lines.append(f"event_id = {event_id}")
     if core_x is not None and core_y is not None:
-        lines.append(f"core: N = {core_x:.1f} m, E = {-core_y:.1f} m")
+        lines.append(f"core: x = {-core_y:.1f} m, y = {core_x:.1f} m")
     if arrival_az is not None:
-        lines.append(f"arrival azimuth = {arrival_az:.2f} deg")
+        lines.append(f"event az = {arrival_az:.2f} deg")
     return "\n".join(lines)
 
 
@@ -230,12 +315,16 @@ def total_quantity_label(quantity):
 def event_title(event_id, event_meta):
     if event_id is None:
         return "LACT telescope array layout"
-    if event_meta is not None:
-        return (
-            f"LACT array event_id={event_id} "
-            f"(shower={int(event_meta['shower_event_id'])}, array={int(event_meta['array_id'])})"
-        )
     return f"LACT array event_id={event_id}"
+
+
+def telescope_pointing(telescopes):
+    names = telescopes.dtype.names or ()
+    if "pointing_az_deg" not in names or "pointing_el_deg" not in names:
+        return None
+    az_values = telescopes["pointing_az_deg"].astype(float)
+    el_values = telescopes["pointing_el_deg"].astype(float)
+    return float(np.nanmedian(az_values)), float(np.nanmedian(el_values))
 
 
 def main():
@@ -326,6 +415,7 @@ def main():
         telescopes = h5["telescopes/table"][:]
         tel_ids = telescopes["telescope_id"].astype(int)
         east, north = get_telescope_positions(telescopes)
+        tel_pointing = telescope_pointing(telescopes)
 
         event_id = resolve_event_id(
             h5,
@@ -462,11 +552,7 @@ def main():
             linewidth=0.8,
             zorder=6,
         )
-        core_label = (
-            "Core\n"
-            f"N = {core_x:.1f} m\n"
-            f"E = {-core_y:.1f} m"
-        )
+        core_label = f"Core\nx={-core_y:.1f} m\ny={core_x:.1f} m"
         x_offset = -12 if core_east > float(np.mean(east)) else 12
         y_offset = -12 if core_north > float(np.mean(north)) else 12
         core_xytext = (x_offset, y_offset)
@@ -530,8 +616,8 @@ def main():
         limit_north = north
     ax.set_xlim(float(np.min(limit_east)) - pad, float(np.max(limit_east)) + pad)
     ax.set_ylim(float(np.min(limit_north)) - pad, float(np.max(limit_north)) + pad)
-    ax.set_xlabel("East [m]")
-    ax.set_ylabel("North [m]")
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
     ax.grid(True, alpha=0.25, linewidth=0.55)
     ax.tick_params(direction="in", top=True, right=True)
 
@@ -542,6 +628,9 @@ def main():
     compass_x = x_min + 0.070 * (x_max - x_min)
     compass_y = y_min + 0.085 * (y_max - y_min)
     add_compass(ax, compass_x, compass_y, compass_length)
+    if tel_pointing is not None:
+        tel_az, tel_el = tel_pointing
+        add_telescope_direction_inset(ax, compass_x, compass_y, compass_length, tel_az)
 
     if args.title is not None:
         title = args.title
@@ -549,18 +638,6 @@ def main():
         title = event_title(event_id, event_meta)
     ax.set_title(title)
 
-    if attrs:
-        ax.text(
-            0.01,
-            0.99,
-            "HDF5 positions: x=N, y=W; plotted as East vs North",
-            transform=ax.transAxes,
-            ha="left",
-            va="top",
-            fontsize=8.2,
-            color="0.25",
-            bbox=dict(boxstyle="round,pad=0.24", facecolor="white", edgecolor="0.82", alpha=0.9),
-        )
     info = format_event_info(event_id, core_x, core_y, arrival_az)
     if info:
         ax.text(

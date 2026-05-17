@@ -17,23 +17,13 @@ int main(int argc, char** argv) {
 
         SyntheticPhotonConfig source_cfg = buildSourceConfig(cfg);
         SourceRuntimeConfig source_runtime_cfg = buildSourceRuntimeConfig(cfg);
-        TelescopeConfig telescope_cfg = buildTelescopeConfig(cfg);
-#ifdef LACT_HAS_HESSIO
-        std::optional<EventIOMetadata> eventio_metadata;
         if (source_runtime_cfg.use_eventio) {
-            auto eventio_cfg = buildEventIOPhotonConfig(cfg, source_cfg, source_runtime_cfg);
-            eventio_metadata = readEventIOMetadata(eventio_cfg);
-            if (source_runtime_cfg.use_eventio_telescope_position) {
-                auto selected_tel =
-                    eventio_metadata->telescopeById(source_runtime_cfg.selected_telescope_id);
-                if (selected_tel) {
-                    telescope_cfg.position_m =
-                        {selected_tel->x_m, selected_tel->y_m, selected_tel->z_m};
-                    telescope_cfg.coordinate_system = "eventio_array";
-                }
-            }
+            throw std::runtime_error(
+                "run_optical_sim no longer accepts source.mode=EventIO. "
+                "Use run_corsika_trace for CORSIKA/EventIO input so the "
+                "CORSIKA NWU coordinate transform and event metadata are handled consistently.");
         }
-#endif
+        TelescopeConfig telescope_cfg = buildTelescopeConfig(cfg);
         TelescopeFrame telescope_frame = buildTelescopeFrame(telescope_cfg);
         std::vector<MirrorFacet> facets = buildFacetsFromConfig(cfg);
         ErrorConfig error_cfg = buildErrorConfig(cfg);
@@ -117,12 +107,6 @@ int main(int argc, char** argv) {
         printField("frame_x_axis", vec3ToString(telescope_frame.x_axis));
         printField("frame_y_axis", vec3ToString(telescope_frame.y_axis));
         printField("frame_z_axis", vec3ToString(telescope_frame.z_axis));
-
-#ifdef LACT_HAS_HESSIO
-        if (eventio_metadata) {
-            printEventIOMetadata(*eventio_metadata, source_runtime_cfg);
-        }
-#endif
 
         printSection("Mirror");
         printField("mode", mirror_mode);
@@ -348,16 +332,8 @@ int main(int argc, char** argv) {
             reserve_hits = csv_source->size();
             source = std::move(csv_source);
         } else if (source_runtime_cfg.use_eventio) {
-#ifdef LACT_HAS_HESSIO
-            auto eventio_cfg = buildEventIOPhotonConfig(cfg, source_cfg, source_runtime_cfg);
-            auto eventio_source = std::make_unique<EventIOPhotonSource>(eventio_cfg);
-            reserve_hits = eventio_source->size();
-            source = std::move(eventio_source);
-#else
             throw std::runtime_error(
-                "source.mode=EventIO requires libhessio. Build external/hessioxxx/source "
-                "and reconfigure LACT_sim.");
-#endif
+                "run_optical_sim no longer accepts source.mode=EventIO; use run_corsika_trace.");
         } else {
             reserve_hits = static_cast<std::size_t>(std::max(0, source_cfg.n_bunches));
             source = std::make_unique<SyntheticPhotonSource>(source_cfg);
