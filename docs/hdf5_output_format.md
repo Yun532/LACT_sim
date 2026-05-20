@@ -303,8 +303,8 @@ waveform.enabled=true
 waveform.source=pe             # or photon_count
 waveform.time_reference=absolute # or image_mean
 waveform.time_bin_width_ns=1
-waveform.time_window_start_ns=0
-waveform.time_window_end_ns=100
+waveform.time_window_start_ns=-20
+waveform.time_window_end_ns=120
 ```
 
 `waveform.source=photon_count` writes `/waveforms/photon_count`;
