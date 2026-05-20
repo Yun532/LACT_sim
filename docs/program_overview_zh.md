@@ -35,7 +35,7 @@ p.e. contribution =
   * sipm.pde
 ```
 
-也就是说，现在没有 waveform、采样、增益涨落、串扰、afterpulse、dark count 和真实 trigger board。它已经适合做光学验证、CORSIKA 到相机 p.e. 图像、NSB/trigger 流程打通，但还不是完整电子学模拟。
+也就是说，现在有可选的 p.e./photon-count proxy waveform，但没有真实电子学 waveform、采样、增益涨落、串扰、afterpulse、dark count 和真实 trigger board。它已经适合做光学验证、CORSIKA 到相机 p.e. 图像、NSB/trigger 流程打通，但还不是完整电子学模拟。
 
 ## 2. 两个主程序
 
@@ -348,6 +348,9 @@ event/telescope 级摘要。绘图时用于按第几个 shower event 或 event_i
 ```text
 /images/dense/cherenkov_pe
 /images/dense/nsb_pe
+/waveforms/cherenkov_pe
+/waveforms/nsb_pe
+/waveforms/pe
 ```
 
 ### camera_full_response_dense.h5

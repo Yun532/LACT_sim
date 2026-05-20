@@ -182,7 +182,14 @@ def draw_camera(camera, image, values_by_pixel, quantity, dpi, display_basis=Non
         linewidth=0.25,
     )
     collection.set_array(np.asarray(values, dtype=float))
-    collection.set_clim(vmin=0.5, vmax=max(positive) if positive else 1.0)
+    if quantity in ("time_mean_ns", "time_rms_ns"):
+        nonzero = [v for v in values if v != 0 and np.isfinite(v)]
+        if nonzero:
+            collection.set_clim(vmin=min(nonzero), vmax=max(nonzero))
+        else:
+            collection.set_clim(vmin=0.0, vmax=1.0)
+    else:
+        collection.set_clim(vmin=0.5, vmax=max(positive) if positive else 1.0)
     ax.add_collection(collection)
     ax.set_aspect("equal", adjustable="box")
     ax.autoscale_view()
@@ -257,9 +264,21 @@ def main():
     parser.add_argument("--image-index", type=int, default=None)
     parser.add_argument(
         "--quantity",
-        choices=("signal", "pe", "photon_count", "cherenkov_pe", "nsb_pe"),
+        choices=(
+            "signal",
+            "pe",
+            "photon_count",
+            "cherenkov_pe",
+            "nsb_pe",
+            "time_mean_ns",
+            "time_rms_ns",
+        ),
         default="signal",
-        help="Dense image quantity to plot. Component quantities require output.hdf5_write_components=true.",
+        help=(
+            "Image quantity to plot. Component quantities require "
+            "output.hdf5_write_components=true; dense pixel time quantities require "
+            "output.write_pixel_time_stats=true."
+        ),
     )
     parser.add_argument("--output", default="hdf5_camera.png")
     parser.add_argument("--dpi", type=int, default=350)

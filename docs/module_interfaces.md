@@ -167,7 +167,10 @@ nsb.seed=12345
 It applies only to dense pixel-camera HDF5 output. The final
 `/images/dense/pe` includes the NSB p.e. contribution. Use
 `output.hdf5_write_components=true` to additionally write `cherenkov_pe` and
-`nsb_pe`.
+`nsb_pe`. When waveform output is enabled with `waveform.source=pe`, NSB is
+sampled per waveform time bin using `rate_pe_per_ns_per_pixel *
+waveform.time_bin_width_ns`; otherwise it is sampled once per pixel with
+`rate_pe_per_ns_per_pixel * nsb.window_ns`.
 
 ## Trigger
 

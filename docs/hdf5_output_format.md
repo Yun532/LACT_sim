@@ -54,6 +54,9 @@ for `new_camera`.
 /metadata/electronics
   attrs: placeholder model
 
+/metadata/waveform
+  attrs: enabled, source, time bin/window settings
+
 /metadata/sipm
   attrs: size_m, pde
 
@@ -165,6 +168,17 @@ shower before selecting an array-offset stream.
 /images/dense/cherenkov_pe
 /images/dense/nsb_pe
 
+# optional when output.write_pixel_time_stats=true
+/images/dense/time_mean_ns
+/images/dense/time_rms_ns
+
+/waveforms
+  attrs: source, shape note
+  pixel_id_axis
+  time_edges_ns
+  time_centers_ns
+  photon_count or pe      # shape: image_index, time_bin, pixel_id_axis
+
 /trigger/telescope
   event_id
   telescope_id
@@ -266,6 +280,47 @@ already includes the Poisson NSB contribution. Set
 `output.hdf5_write_components=true` to also save the Cherenkov-only and NSB-only
 components for debugging.
 
+Dense pixel time maps are optional because they add two full camera arrays per
+image:
+
+```ini
+output.write_pixel_time_stats=true
+```
+
+They are written as `/images/dense/time_mean_ns` and
+`/images/dense/time_rms_ns`. The values are weighted by the final per-photon
+signal weight before NSB. Pixels with no signal are stored as zero.
+
+## Proxy Waveforms
+
+The current program does not simulate a real electronics waveform. For timing
+checks it can optionally save a proxy time series at the camera/collector
+output:
+
+```ini
+waveform.enabled=true
+waveform.source=pe             # or photon_count
+waveform.time_bin_width_ns=1
+waveform.time_window_start_ns=0
+waveform.time_window_end_ns=100
+```
+
+`waveform.source=photon_count` writes `/waveforms/photon_count`;
+`waveform.source=pe` writes `/waveforms/pe`. Both have shape:
+
+```text
+[image_index, time_bin, pixel]
+```
+
+The pixel order is `/waveforms/pixel_id_axis`, and time bins are described by
+`/waveforms/time_edges_ns` and `/waveforms/time_centers_ns`. This proxy waveform
+does not include a real SiPM/electronics response. If NSB is enabled together
+with `waveform.source=pe`, the constant-rate NSB model is sampled independently
+in every time bin, and the dense `/images/dense/nsb_pe` image is the time
+integral of `/waveforms/nsb_pe`. Cherenkov photons outside the configured
+waveform time window are not written to `/waveforms/cherenkov_pe`, so choose a
+wide enough time window when exact Cherenkov time-integral closure is required.
+
 ## Trigger Tables
 
 The first trigger implementation is a simple multiplicity model. Telescope rows
@@ -308,6 +363,29 @@ The original CORSIKA shower id may therefore look like the HDF5 event id with
 the last two digits removed. Omit `--telescope-id` in
 `python/plot_hdf5_camera.py` to write one camera image for every telescope in
 the selected event.
+
+Plot pixel time statistics:
+
+```bash
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
+  run_logs/my_run/camera_dense.h5 \
+  --event-id 46889802 \
+  --telescope-id 0 \
+  --quantity time_mean_ns \
+  --output run_logs/my_run/event46889802_tel1_time_mean.png
+```
+
+Make proxy waveform frames, optionally with a GIF:
+
+```bash
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_waveform_gif.py \
+  run_logs/my_run/camera_dense.h5 \
+  --event-id 46889802 \
+  --telescope-id 0 \
+  --quantity pe \
+  --output-dir run_logs/my_run/waveform_frames \
+  --gif run_logs/my_run/event46889802_tel1_pe.gif
+```
 
 Plot the telescope distribution only:
 

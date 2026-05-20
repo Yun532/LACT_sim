@@ -493,9 +493,14 @@ cfg 逐项解释：
   当前参数为 `rate_pe_per_ns_per_pixel=0.05`、`window_ns=16`，所以平均
   `0.8 p.e./pixel`。
 - `trigger.config=../trigger/example_simple_multiplicity.cfg`: 启用简单 trigger。
+- `source.max_shower_events=1`: 这个 official 项是 CORSIKA waveform smoke test，
+  只跑 1 个 shower，避免 1 ns waveform 输出过大。
 - `trigger.pixel_threshold_pe=10`: official smoke test 使用 10 p.e. 像素阈值。
 - `output.hdf5_write_components=true`: 写出 `cherenkov_pe`、`nsb_pe` 和最终 `pe`。
 - `output.save_only_triggered=true`: 只保存触发望远镜图像，减少输出体积。
+- `output.write_pixel_time_stats=true`: 写出逐像素时间均值和 RMS。
+- `waveform.enabled=true`、`waveform.source=pe`: 写出 p.e. proxy waveform。
+- `waveform.time_bin_width_ns=1`: official NSB/trigger GIF 使用 1 ns 时间 bin。
 - 其它镜面、相机、SiPM、EventIO 配置与完美相机测试相同。
 
 单独运行：
@@ -510,7 +515,11 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
 ```
 
 检查重点：HDF5 里应有 `/images/dense/cherenkov_pe`、`/images/dense/nsb_pe` 和
-`/trigger` 表。
+`/trigger` 表，也应有 `/waveforms/cherenkov_pe`、`/waveforms/nsb_pe` 和
+`/waveforms/pe`。官方脚本会为 Cherenkov、NSB 和 final p.e. 各画一组 GIF。
+Cherenkov waveform 只包含 `waveform.time_window_start_ns` 到
+`waveform.time_window_end_ns` 内的光子；如果某台望远镜的到达时间在窗口外，
+对应 GIF 会很暗或为空。
 
 ## 10. CORSIKA + 3D 遮挡 + NSB + trigger 测试
 
