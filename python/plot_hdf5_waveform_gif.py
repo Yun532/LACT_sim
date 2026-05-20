@@ -70,6 +70,67 @@ def combine_bin_count(args, time_edges):
     return bins
 
 
+def decode_attr(value, default=""):
+    if value is None:
+        return default
+    if isinstance(value, bytes):
+        return value.decode("utf-8")
+    return str(value)
+
+
+def stored_time_reference(h5):
+    if "waveforms" not in h5:
+        return "absolute"
+    return decode_attr(h5["waveforms"].attrs.get("time_reference"), "absolute")
+
+
+def time_reference_ns(args, image, stored_reference, stored_reference_times):
+    if args.time_reference == "none":
+        return 0.0
+    if args.time_reference == "stored":
+        if stored_reference == "image_mean":
+            image_index = int(image["image_index"])
+            if stored_reference_times is not None and image_index < len(stored_reference_times):
+                return float(stored_reference_times[image_index])
+            return float(image["time_mean_ns"])
+        return 0.0
+    if args.time_reference == "image-mean":
+        return float(image["time_mean_ns"])
+    raise SystemExit(f"Unsupported --time-reference={args.time_reference}")
+
+
+def frame_center_for_plot(args, t0_ns, t1_ns, ref_ns, stored_reference):
+    center = 0.5 * (t0_ns + t1_ns)
+    if args.time_reference == "stored" and stored_reference == "image_mean":
+        return center
+    return center - ref_ns
+
+
+def keep_frame(args, t0_ns, t1_ns, ref_ns, stored_reference):
+    if args.plot_window_start_ns is None and args.plot_window_end_ns is None:
+        return True
+    center = frame_center_for_plot(args, t0_ns, t1_ns, ref_ns, stored_reference)
+    if args.plot_window_start_ns is not None and center < args.plot_window_start_ns:
+        return False
+    if args.plot_window_end_ns is not None and center >= args.plot_window_end_ns:
+        return False
+    return True
+
+
+def time_title(args, t0_ns, t1_ns, ref_ns, stored_reference):
+    if args.time_reference == "none":
+        return f"t = {t0_ns:.2f}..{t1_ns:.2f} ns"
+    if args.time_reference == "stored" and stored_reference == "image_mean":
+        return (
+            f"t - mean = {t0_ns:.2f}..{t1_ns:.2f} ns "
+            f"(mean = {ref_ns:.2f} ns)"
+        )
+    return (
+        f"t - mean = {t0_ns - ref_ns:.2f}..{t1_ns - ref_ns:.2f} ns "
+        f"(mean = {ref_ns:.2f} ns)"
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Plot time-binned proxy waveform frames from LACT_sim HDF5."
@@ -100,6 +161,28 @@ def main():
         type=float,
         default=None,
         help="sum bins into this time width, e.g. 5 for 5 ns frames",
+    )
+    parser.add_argument(
+        "--time-reference",
+        choices=("stored", "none", "image-mean"),
+        default="stored",
+        help=(
+            "time coordinate used only for plotting labels/windows. 'stored' uses "
+            "the HDF5 waveform time_reference; 'image-mean' subtracts images/index "
+            "time_mean_ns for older absolute-time files."
+        ),
+    )
+    parser.add_argument(
+        "--plot-window-start-ns",
+        type=float,
+        default=None,
+        help="optional frame-center lower bound in the selected plotting time reference",
+    )
+    parser.add_argument(
+        "--plot-window-end-ns",
+        type=float,
+        default=None,
+        help="optional frame-center upper bound in the selected plotting time reference",
     )
     parser.add_argument("--dpi", type=int, default=180)
     parser.add_argument("--raw-camera-xy", action="store_true")
@@ -133,6 +216,12 @@ def main():
         time_edges = h5["waveforms/time_edges_ns"][:]
         waveform = h5[dataset_name]
         combine_bins = combine_bin_count(args, time_edges)
+        stored_reference = stored_time_reference(h5)
+        stored_reference_times = (
+            h5["waveforms/reference_time_ns"][:]
+            if "waveforms/reference_time_ns" in h5
+            else None
+        )
 
         all_saved = []
         gif_outputs = []
@@ -156,8 +245,14 @@ def main():
             image_frame_dir.mkdir(parents=True, exist_ok=True)
             saved = []
             frame_index = 0
+            ref_ns = time_reference_ns(
+                args, image, stored_reference, stored_reference_times)
             for bin_index in range(0, waveform.shape[1], combine_bins * args.stride):
                 end_bin = min(bin_index + combine_bins, waveform.shape[1])
+                t0 = float(time_edges[bin_index])
+                t1 = float(time_edges[end_bin])
+                if not keep_frame(args, t0, t1, ref_ns, stored_reference):
+                    continue
                 values = waveform[image_index, bin_index:end_bin, :].sum(axis=0)
                 values_by_pixel = {int(pid): float(v) for pid, v in zip(pixel_axis, values)}
                 fig = draw_camera(
@@ -169,11 +264,9 @@ def main():
                     display_basis,
                 )
                 ax = fig.axes[0]
-                t0 = float(time_edges[bin_index])
-                t1 = float(time_edges[end_bin])
                 ax.set_title(
                     f"event {int(image['event_id'])}, telescope {int(image['telescope_id']) + 1}, "
-                    f"t = {t0:.2f}..{t1:.2f} ns"
+                    f"{time_title(args, t0, t1, ref_ns, stored_reference)}"
                 )
                 out = output_frame_path(image_frame_dir, image, args.quantity, frame_index)
                 fig.savefig(out, bbox_inches="tight")

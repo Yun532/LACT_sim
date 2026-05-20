@@ -30,6 +30,7 @@ struct CorsikaTraceOutputConfig {
 struct WaveformOutputConfig {
     bool enabled = false;
     std::string source = "none";
+    std::string time_reference = "absolute";
     double time_bin_width_ns = 1.0;
     double time_window_start_ns = 0.0;
     double time_window_end_ns = 100.0;
@@ -92,6 +93,15 @@ struct WaveformPixelAccumulator {
     int telescope_id = 0;
     int pixel_id = -1;
     int time_bin = -1;
+    std::uint64_t photon_count = 0;
+    double pe = 0.0;
+};
+
+struct RawWaveformHit {
+    int event_id = 0;
+    int telescope_id = 0;
+    int pixel_id = -1;
+    double time_ns = 0.0;
     std::uint64_t photon_count = 0;
     double pe = 0.0;
 };
@@ -368,6 +378,8 @@ WaveformOutputConfig buildWaveformOutputConfig(
     WaveformOutputConfig out;
     out.enabled = getBool(cfg, "waveform.enabled", out.enabled);
     out.source = lowerCopy(trim(getString(cfg, "waveform.source", out.source)));
+    out.time_reference = lowerCopy(trim(getString(
+        cfg, "waveform.time_reference", out.time_reference)));
     out.time_bin_width_ns =
         getDouble(cfg, "waveform.time_bin_width_ns", out.time_bin_width_ns);
     out.time_window_start_ns =
@@ -376,6 +388,9 @@ WaveformOutputConfig buildWaveformOutputConfig(
         getDouble(cfg, "waveform.time_window_end_ns", out.time_window_end_ns);
     if (out.source.empty()) {
         out.source = "none";
+    }
+    if (out.time_reference.empty()) {
+        out.time_reference = "absolute";
     }
     if (out.enabled) {
         if (!(out.source == "photon_count" || out.source == "pe" ||
@@ -394,6 +409,15 @@ WaveformOutputConfig buildWaveformOutputConfig(
         if (out.time_window_end_ns <= out.time_window_start_ns) {
             throw std::runtime_error(
                 "waveform.time_window_end_ns must be greater than waveform.time_window_start_ns");
+        }
+        if (!(out.time_reference == "absolute" ||
+              out.time_reference == "image_mean" ||
+              out.time_reference == "image-mean")) {
+            throw std::runtime_error(
+                "waveform.time_reference must be absolute or image_mean");
+        }
+        if (out.time_reference == "image-mean") {
+            out.time_reference = "image_mean";
         }
     }
     return out;
@@ -441,6 +465,11 @@ int waveformBinForTime(const WaveformOutputConfig& cfg, double time_ns)
     return bin >= 0 && bin < n_bins ? bin : -1;
 }
 
+bool waveformUsesImageMeanReference(const WaveformOutputConfig& cfg)
+{
+    return cfg.enabled && cfg.time_reference == "image_mean";
+}
+
 std::uint64_t mixNsbSeed(std::uint64_t seed, std::uint64_t value)
 {
     seed ^= value + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
@@ -471,12 +500,25 @@ float sampleTimeBinnedNsbPe(const NsbConfig& nsb_cfg,
 }
 
 void accumulateWaveformHit(std::map<WaveformKey, WaveformPixelAccumulator>& waveform,
+                           std::vector<RawWaveformHit>& raw_waveform_hits,
                            const WaveformOutputConfig& cfg,
                            int event_id,
                            int telescope_id,
                            const OpticalSurfaceHit& hit)
 {
     if (!cfg.enabled || !hit.hit_camera || hit.pixel_id < 0) {
+        return;
+    }
+    const double pe = hit.weight * hit.relative_efficiency;
+    if (waveformUsesImageMeanReference(cfg)) {
+        raw_waveform_hits.push_back(RawWaveformHit{
+            event_id,
+            telescope_id,
+            hit.pixel_id,
+            hit.time_ns,
+            1,
+            pe,
+        });
         return;
     }
     const int bin = waveformBinForTime(cfg, hit.time_ns);
@@ -489,7 +531,7 @@ void accumulateWaveformHit(std::map<WaveformKey, WaveformPixelAccumulator>& wave
     acc.pixel_id = hit.pixel_id;
     acc.time_bin = bin;
     acc.photon_count += 1;
-    acc.pe += hit.weight * hit.relative_efficiency;
+    acc.pe += pe;
 }
 
 void appendCollectorDebugPhoton(std::vector<CollectorDebugPhotonRow>& rows,
@@ -895,6 +937,7 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                           const std::map<SummaryKey, TraceSummary>& summaries,
                           const std::map<PixelKey, PixelAccumulator>& pixels,
                           const std::map<WaveformKey, WaveformPixelAccumulator>& waveforms,
+                          const std::vector<RawWaveformHit>& raw_waveform_hits,
                           const std::vector<WhiteboardHdf5Row>& whiteboard_hits)
 {
     const bool write_sparse =
@@ -1025,6 +1068,8 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         writeStringAttribute(waveform_group_meta, "enabled",
                              waveform_cfg.enabled ? "true" : "false");
         writeStringAttribute(waveform_group_meta, "source", waveform_cfg.source);
+        writeStringAttribute(waveform_group_meta, "time_reference",
+                             waveform_cfg.time_reference);
         writeStringAttribute(waveform_group_meta, "time_bin_width_ns",
                              doubleToString(waveform_cfg.time_bin_width_ns));
         writeStringAttribute(waveform_group_meta, "time_window_start_ns",
@@ -1872,6 +1917,13 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                     static_cast<int>(image_rows[row].telescope_id),
                 }] = row;
             }
+            std::vector<double> waveform_reference_time_ns(n_images, 0.0);
+            if (waveformUsesImageMeanReference(waveform_cfg)) {
+                for (std::size_t row = 0; row < image_rows.size(); ++row) {
+                    waveform_reference_time_ns[row] =
+                        static_cast<double>(image_rows[row].time_mean_ns);
+                }
+            }
 
             std::vector<std::int32_t> waveform_photon_count;
             std::vector<float> waveform_pe;
@@ -1911,6 +1963,37 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                     }
                 }
             }
+            if (waveformUsesImageMeanReference(waveform_cfg)) {
+                for (const auto& hit : raw_waveform_hits) {
+                    const auto image_it = image_row_by_key.find({
+                        hit.event_id, hit.telescope_id});
+                    const auto pixel_it = pixel_to_col.find(hit.pixel_id);
+                    if (image_it == image_row_by_key.end() ||
+                        pixel_it == pixel_to_col.end()) {
+                        continue;
+                    }
+                    const std::size_t row = image_it->second;
+                    const double relative_time_ns =
+                        hit.time_ns - waveform_reference_time_ns[row];
+                    const int bin = waveformBinForTime(waveform_cfg, relative_time_ns);
+                    if (bin < 0) {
+                        continue;
+                    }
+                    const std::size_t index =
+                        (row * n_bins + static_cast<std::size_t>(bin)) *
+                        n_pixels + pixel_it->second;
+                    if (waveform_cfg.source == "photon_count") {
+                        waveform_photon_count[index] +=
+                            static_cast<std::int32_t>(hit.photon_count);
+                    } else if (waveform_cfg.source == "pe") {
+                        const float cherenkov_pe = static_cast<float>(hit.pe);
+                        waveform_pe[index] += cherenkov_pe;
+                        if (output_cfg.hdf5_write_components) {
+                            waveform_cherenkov_pe[index] += cherenkov_pe;
+                        }
+                    }
+                }
+            }
 
             if (waveform_cfg.source == "pe" &&
                 nsb_cfg.enabled &&
@@ -1940,6 +2023,8 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             hid_t waveform_group = H5Gcreate2(file, "waveforms",
                                               H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
             writeStringAttribute(waveform_group, "source", waveform_cfg.source);
+            writeStringAttribute(waveform_group, "time_reference",
+                                 waveform_cfg.time_reference);
             writeStringAttribute(waveform_group, "shape",
                                  "image_index,time_bin,pixel_id_axis");
             writeStringAttribute(waveform_group, "note",
@@ -1948,6 +2033,10 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             writePlain1D(waveform_group, "pixel_id_axis", H5T_NATIVE_INT32, pixel_id_axis);
             writePlain1D(waveform_group, "time_edges_ns", H5T_NATIVE_DOUBLE, time_edges);
             writePlain1D(waveform_group, "time_centers_ns", H5T_NATIVE_DOUBLE, time_centers);
+            writePlain1D(waveform_group,
+                         "reference_time_ns",
+                         H5T_NATIVE_DOUBLE,
+                         waveform_reference_time_ns);
             if (waveform_cfg.source == "photon_count") {
                 writePlain3D(waveform_group,
                              "photon_count",
@@ -2444,6 +2533,7 @@ void printCorsikaOpticalConfiguration(
     printSection("Waveform");
     printField("enabled", waveform_cfg.enabled ? "true" : "false");
     printField("source", waveform_cfg.source);
+    printField("time_reference", waveform_cfg.time_reference);
     printField("time_bin_width_ns", doubleToString(waveform_cfg.time_bin_width_ns));
     printField("time_window_start_ns", doubleToString(waveform_cfg.time_window_start_ns));
     printField("time_window_end_ns", doubleToString(waveform_cfg.time_window_end_ns));
@@ -2684,6 +2774,7 @@ int main(int argc, char** argv) {
         std::map<SummaryKey, TraceSummary> summaries;
         std::map<PixelKey, PixelAccumulator> pixels;
         std::map<WaveformKey, WaveformPixelAccumulator> waveforms;
+        std::vector<RawWaveformHit> raw_waveform_hits;
         std::vector<CollectorDebugPhotonRow> collector_debug_rows;
         std::vector<WhiteboardHdf5Row> whiteboard_hits;
 
@@ -2868,6 +2959,7 @@ int main(int argc, char** argv) {
 
             accumulatePixelHit(pixels, bunch.event_id, bunch.telescope_id, hit);
             accumulateWaveformHit(waveforms,
+                                  raw_waveform_hits,
                                   waveform_cfg,
                                   bunch.event_id,
                                   bunch.telescope_id,
@@ -2922,6 +3014,7 @@ int main(int argc, char** argv) {
                                  summaries,
                                  pixels,
                                  waveforms,
+                                 raw_waveform_hits,
                                  whiteboard_hits);
             printField("status", "HDF5 trace file written");
         }

@@ -38,6 +38,7 @@ output.write_pixel_time_stats=true
 ```ini
 waveform.enabled=true
 waveform.source=pe             # 可选 pe 或 photon_count
+waveform.time_reference=image_mean # 可选 absolute 或 image_mean
 waveform.time_bin_width_ns=5
 waveform.time_window_start_ns=0
 waveform.time_window_end_ns=100
@@ -48,6 +49,7 @@ waveform.time_window_end_ns=100
 ```text
 /waveforms/time_edges_ns
 /waveforms/time_centers_ns
+/waveforms/reference_time_ns
 /waveforms/pixel_id_axis
 /waveforms/pe                 # 当 waveform.source=pe
 /waveforms/photon_count       # 当 waveform.source=photon_count
@@ -65,6 +67,20 @@ Poisson 采样，并写入 `/waveforms/nsb_pe`；最终 `/images/dense/nsb_pe`
 等于这些 time bins 的积分。Cherenkov 光子如果落在配置的 waveform 时间窗
 之外，不会进入 `/waveforms/cherenkov_pe`，因此需要精确检查 Cherenkov 时间
 积分时，要把时间窗设得足够宽。
+
+对 CORSIKA 相机 GIF，推荐：
+
+```ini
+waveform.time_reference=image_mean
+waveform.time_window_start_ns=-20
+waveform.time_window_end_ns=120
+```
+
+这种模式在保存 HDF5 时先用每个 event/telescope 图像自己的
+`/images/index.time_mean_ns` 作为参考时间，再把光子填入 waveform bin。
+`/waveforms/reference_time_ns` 会逐 image 记录被减掉的平均时间。这样 HDF5
+不用把绝对时间窗开得很宽，也不会因为某台望远镜的 CORSIKA 原始时间是负数而
+把主峰裁掉。
 
 如果设置：
 

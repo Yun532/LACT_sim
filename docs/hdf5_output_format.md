@@ -173,10 +173,11 @@ shower before selecting an array-offset stream.
 /images/dense/time_rms_ns
 
 /waveforms
-  attrs: source, shape note
+  attrs: source, time_reference, shape, note
   pixel_id_axis
   time_edges_ns
   time_centers_ns
+  reference_time_ns
   photon_count or pe      # shape: image_index, time_bin, pixel_id_axis
 
 /trigger/telescope
@@ -300,6 +301,7 @@ output:
 ```ini
 waveform.enabled=true
 waveform.source=pe             # or photon_count
+waveform.time_reference=absolute # or image_mean
 waveform.time_bin_width_ns=5
 waveform.time_window_start_ns=0
 waveform.time_window_end_ns=100
@@ -313,13 +315,22 @@ waveform.time_window_end_ns=100
 ```
 
 The pixel order is `/waveforms/pixel_id_axis`, and time bins are described by
-`/waveforms/time_edges_ns` and `/waveforms/time_centers_ns`. This proxy waveform
-does not include a real SiPM/electronics response. If NSB is enabled together
-with `waveform.source=pe`, the constant-rate NSB model is sampled independently
-in every time bin, and the dense `/images/dense/nsb_pe` image is the time
-integral of `/waveforms/nsb_pe`. Cherenkov photons outside the configured
-waveform time window are not written to `/waveforms/cherenkov_pe`, so choose a
-wide enough time window when exact Cherenkov time-integral closure is required.
+`/waveforms/time_edges_ns` and `/waveforms/time_centers_ns`. If
+`waveform.time_reference=absolute`, those edges are in the CORSIKA/EventIO
+absolute time coordinate plus optical propagation. If
+`waveform.time_reference=image_mean`, every image uses its own
+`/images/index.time_mean_ns` as the reference time; the stored waveform time
+axis is then relative to that image mean, and `/waveforms/reference_time_ns`
+records the subtracted value for each image.
+
+This proxy waveform does not include a real SiPM/electronics response. If NSB is
+enabled together with `waveform.source=pe`, the constant-rate NSB model is
+sampled independently in every time bin, and the dense `/images/dense/nsb_pe`
+image is the time integral of `/waveforms/nsb_pe`. Cherenkov photons outside
+the configured waveform time window are not written to
+`/waveforms/cherenkov_pe`. For CORSIKA camera GIF checks, prefer
+`waveform.time_reference=image_mean` so a compact window such as `-20..120 ns`
+can still cover each telescope image.
 
 ## Trigger Tables
 

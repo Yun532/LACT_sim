@@ -500,6 +500,9 @@ cfg 逐项解释：
 - `output.save_only_triggered=true`: 只保存触发望远镜图像，减少输出体积。
 - `output.write_pixel_time_stats=true`: 写出逐像素时间均值和 RMS。
 - `waveform.enabled=true`、`waveform.source=pe`: 写出 p.e. proxy waveform。
+- `waveform.time_reference=image_mean`: 保存 waveform 时先减去每台望远镜图像的
+  `time_mean_ns`，并在 `/waveforms/reference_time_ns` 中记录该参考时间。这样
+  GIF 使用紧凑的相对时间窗，不需要把 HDF5 绝对时间窗开得很宽。
 - `waveform.time_bin_width_ns=5`: official NSB/trigger GIF 使用 5 ns 时间 bin。
 - 其它镜面、相机、SiPM、EventIO 配置与完美相机测试相同。
 
