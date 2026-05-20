@@ -503,7 +503,9 @@ cfg 逐项解释：
 - `waveform.time_reference=image_mean`: 保存 waveform 时先减去每台望远镜图像的
   `time_mean_ns`，并在 `/waveforms/reference_time_ns` 中记录该参考时间。这样
   GIF 使用紧凑的相对时间窗，不需要把 HDF5 绝对时间窗开得很宽。
-- `waveform.time_bin_width_ns=5`: official NSB/trigger GIF 使用 5 ns 时间 bin。
+- `waveform.time_bin_width_ns=1`: HDF5 保存 1 ns 时间 bin，保留较细时间信息。
+- 官方 GIF 绘图命令使用 `--combine-width-ns 5`，显示时把 1 ns bin 合并成
+  5 ns 一帧。
 - 其它镜面、相机、SiPM、EventIO 配置与完美相机测试相同。
 
 单独运行：

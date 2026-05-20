@@ -39,7 +39,7 @@ output.write_pixel_time_stats=true
 waveform.enabled=true
 waveform.source=pe             # 可选 pe 或 photon_count
 waveform.time_reference=image_mean # 可选 absolute 或 image_mean
-waveform.time_bin_width_ns=5
+waveform.time_bin_width_ns=1
 waveform.time_window_start_ns=0
 waveform.time_window_end_ns=100
 ```

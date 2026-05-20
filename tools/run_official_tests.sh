@@ -281,6 +281,7 @@ python3 python/plot_hdf5_waveform_gif.py \
   --quantity nsb_pe \
   --output-dir "$PLOT_EVENT_DIR/nsb_trigger/waveform_nsb_pe_frames" \
   --gif "$PLOT_EVENT_DIR/nsb_trigger/one_tel_nsb_pe.gif" \
+  --combine-width-ns 5 \
   --stride 1
 
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
@@ -296,6 +297,7 @@ python3 python/plot_hdf5_waveform_gif.py \
   --quantity pe \
   --output-dir "$PLOT_EVENT_DIR/nsb_trigger/waveform_final_pe_frames" \
   --gif "$PLOT_EVENT_DIR/nsb_trigger/all_tel_final_pe_gif" \
+  --combine-width-ns 5 \
   --stride 1
 
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
