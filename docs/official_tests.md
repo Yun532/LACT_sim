@@ -516,10 +516,9 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
 
 检查重点：HDF5 里应有 `/images/dense/cherenkov_pe`、`/images/dense/nsb_pe` 和
 `/trigger` 表，也应有 `/waveforms/cherenkov_pe`、`/waveforms/nsb_pe` 和
-`/waveforms/pe`。官方脚本会为 Cherenkov、NSB 和 final p.e. 各画一组 GIF。
-Cherenkov waveform 只包含 `waveform.time_window_start_ns` 到
-`waveform.time_window_end_ns` 内的光子；如果某台望远镜的到达时间在窗口外，
-对应 GIF 会很暗或为空。
+`/waveforms/pe`。官方脚本只为 `nsb_trigger` 画两类 GIF：`nsb_pe` 只画一台
+代表性望远镜，`final_pe` 画该事件下保存的所有触发望远镜。Cherenkov 只保留
+静态 PNG，不画 GIF。
 
 ## 10. CORSIKA + 3D 遮挡 + NSB + trigger 测试
 

@@ -225,6 +225,19 @@ python3 python/select_hdf5_event.py \
 # shellcheck disable=SC1091
 source run_logs/official_tests/corsika/plots/selected_event.env
 PLOT_EVENT_DIR="run_logs/official_tests/corsika/plots/event_${LACT_SELECTED_EVENT_ID}"
+LACT_SELECTED_NSB_GIF_TELESCOPE_ID="$(
+python3 -c 'import h5py, sys
+path, event_id = sys.argv[1], int(sys.argv[2])
+with h5py.File(path, "r") as h5:
+    rows = h5["images/index"][:]
+    rows = rows[rows["event_id"] == event_id]
+    if len(rows) == 0:
+        raise SystemExit("no image rows for selected event")
+    row = max(rows, key=lambda r: float(r["total_pe"]))
+    print(int(row["telescope_id"]))' \
+  run_logs/official_tests/corsika/camera_nsb_trigger_dense.h5 \
+  "$LACT_SELECTED_EVENT_ID"
+)"
 mkdir -p "$PLOT_EVENT_DIR/whiteboard" \
   "$PLOT_EVENT_DIR/camera" \
   "$PLOT_EVENT_DIR/nsb_trigger" \
@@ -253,14 +266,6 @@ python3 python/plot_hdf5_camera.py \
   --event-id "$LACT_SELECTED_EVENT_ID" \
   --quantity cherenkov_pe \
   --output "$PLOT_EVENT_DIR/nsb_trigger/all_tel_cherenkov_pe"
-MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
-python3 python/plot_hdf5_waveform_gif.py \
-  run_logs/official_tests/corsika/camera_nsb_trigger_dense.h5 \
-  --event-id "$LACT_SELECTED_EVENT_ID" \
-  --quantity cherenkov_pe \
-  --output-dir "$PLOT_EVENT_DIR/nsb_trigger/waveform_cherenkov_pe_frames" \
-  --gif "$PLOT_EVENT_DIR/nsb_trigger/all_tel_cherenkov_pe_gif" \
-  --stride 1
 
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_hdf5_camera.py \
@@ -272,9 +277,10 @@ MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_hdf5_waveform_gif.py \
   run_logs/official_tests/corsika/camera_nsb_trigger_dense.h5 \
   --event-id "$LACT_SELECTED_EVENT_ID" \
+  --telescope-id "$LACT_SELECTED_NSB_GIF_TELESCOPE_ID" \
   --quantity nsb_pe \
   --output-dir "$PLOT_EVENT_DIR/nsb_trigger/waveform_nsb_pe_frames" \
-  --gif "$PLOT_EVENT_DIR/nsb_trigger/all_tel_nsb_pe_gif" \
+  --gif "$PLOT_EVENT_DIR/nsb_trigger/one_tel_nsb_pe.gif" \
   --stride 1
 
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
@@ -298,14 +304,6 @@ python3 python/plot_hdf5_camera.py \
   --event-id "$LACT_SELECTED_EVENT_ID" \
   --quantity cherenkov_pe \
   --output "$PLOT_EVENT_DIR/obstruction_nsb_trigger/all_tel_cherenkov_pe"
-MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
-python3 python/plot_hdf5_waveform_gif.py \
-  run_logs/official_tests/corsika/camera_obstruction_nsb_trigger_dense.h5 \
-  --event-id "$LACT_SELECTED_EVENT_ID" \
-  --quantity cherenkov_pe \
-  --output-dir "$PLOT_EVENT_DIR/obstruction_nsb_trigger/waveform_cherenkov_pe_frames" \
-  --gif "$PLOT_EVENT_DIR/obstruction_nsb_trigger/all_tel_cherenkov_pe_gif" \
-  --stride 1
 
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_hdf5_camera.py \
@@ -313,14 +311,6 @@ python3 python/plot_hdf5_camera.py \
   --event-id "$LACT_SELECTED_EVENT_ID" \
   --quantity nsb_pe \
   --output "$PLOT_EVENT_DIR/obstruction_nsb_trigger/all_tel_nsb_pe"
-MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
-python3 python/plot_hdf5_waveform_gif.py \
-  run_logs/official_tests/corsika/camera_obstruction_nsb_trigger_dense.h5 \
-  --event-id "$LACT_SELECTED_EVENT_ID" \
-  --quantity nsb_pe \
-  --output-dir "$PLOT_EVENT_DIR/obstruction_nsb_trigger/waveform_nsb_pe_frames" \
-  --gif "$PLOT_EVENT_DIR/obstruction_nsb_trigger/all_tel_nsb_pe_gif" \
-  --stride 1
 
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_hdf5_camera.py \
@@ -328,14 +318,6 @@ python3 python/plot_hdf5_camera.py \
   --event-id "$LACT_SELECTED_EVENT_ID" \
   --quantity pe \
   --output "$PLOT_EVENT_DIR/obstruction_nsb_trigger/all_tel_final_pe"
-MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
-python3 python/plot_hdf5_waveform_gif.py \
-  run_logs/official_tests/corsika/camera_obstruction_nsb_trigger_dense.h5 \
-  --event-id "$LACT_SELECTED_EVENT_ID" \
-  --quantity pe \
-  --output-dir "$PLOT_EVENT_DIR/obstruction_nsb_trigger/waveform_final_pe_frames" \
-  --gif "$PLOT_EVENT_DIR/obstruction_nsb_trigger/all_tel_final_pe_gif" \
-  --stride 1
 
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_hdf5_camera.py \
