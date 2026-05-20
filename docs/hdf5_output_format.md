@@ -300,7 +300,7 @@ output:
 ```ini
 waveform.enabled=true
 waveform.source=pe             # or photon_count
-waveform.time_bin_width_ns=1
+waveform.time_bin_width_ns=5
 waveform.time_window_start_ns=0
 waveform.time_window_end_ns=100
 ```

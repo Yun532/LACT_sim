@@ -494,13 +494,13 @@ cfg 逐项解释：
   `0.8 p.e./pixel`。
 - `trigger.config=../trigger/example_simple_multiplicity.cfg`: 启用简单 trigger。
 - `source.max_shower_events=1`: 这个 official 项是 CORSIKA waveform smoke test，
-  只跑 1 个 shower，避免 1 ns waveform 输出过大。
+  只跑 1 个 shower，避免 waveform 输出过大。
 - `trigger.pixel_threshold_pe=10`: official smoke test 使用 10 p.e. 像素阈值。
 - `output.hdf5_write_components=true`: 写出 `cherenkov_pe`、`nsb_pe` 和最终 `pe`。
 - `output.save_only_triggered=true`: 只保存触发望远镜图像，减少输出体积。
 - `output.write_pixel_time_stats=true`: 写出逐像素时间均值和 RMS。
 - `waveform.enabled=true`、`waveform.source=pe`: 写出 p.e. proxy waveform。
-- `waveform.time_bin_width_ns=1`: official NSB/trigger GIF 使用 1 ns 时间 bin。
+- `waveform.time_bin_width_ns=5`: official NSB/trigger GIF 使用 5 ns 时间 bin。
 - 其它镜面、相机、SiPM、EventIO 配置与完美相机测试相同。
 
 单独运行：

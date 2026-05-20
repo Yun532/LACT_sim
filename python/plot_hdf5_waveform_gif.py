@@ -41,6 +41,35 @@ def output_gif_path(gif_arg, output_dir, image, quantity, multiple):
     )
 
 
+def infer_uniform_bin_width_ns(time_edges):
+    if len(time_edges) < 2:
+        raise SystemExit("waveforms/time_edges_ns must contain at least two edges.")
+    widths = time_edges[1:] - time_edges[:-1]
+    width = float(widths.mean())
+    if abs(float(widths.max()) - width) > 1e-6 or abs(float(widths.min()) - width) > 1e-6:
+        raise SystemExit("non-uniform waveform time bins are not supported for rebinning.")
+    return width
+
+
+def combine_bin_count(args, time_edges):
+    if args.combine_bins < 1:
+        raise SystemExit("--combine-bins must be >= 1")
+    if args.combine_width_ns is None:
+        return args.combine_bins
+    if args.combine_bins != 1:
+        raise SystemExit("Use only one of --combine-bins or --combine-width-ns.")
+    if args.combine_width_ns <= 0:
+        raise SystemExit("--combine-width-ns must be > 0")
+    base_width = infer_uniform_bin_width_ns(time_edges)
+    bins = int(round(args.combine_width_ns / base_width))
+    if bins < 1 or abs(bins * base_width - args.combine_width_ns) > 1e-6:
+        raise SystemExit(
+            f"--combine-width-ns={args.combine_width_ns} is not an integer multiple "
+            f"of the HDF5 bin width {base_width:g} ns."
+        )
+    return bins
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Plot time-binned proxy waveform frames from LACT_sim HDF5."
@@ -59,7 +88,19 @@ def main():
     )
     parser.add_argument("--output-dir", default="waveform_frames")
     parser.add_argument("--gif", default=None, help="optional animated GIF path")
-    parser.add_argument("--stride", type=int, default=1, help="plot every Nth time bin")
+    parser.add_argument("--stride", type=int, default=1, help="plot every Nth rebinned frame")
+    parser.add_argument(
+        "--combine-bins",
+        type=int,
+        default=1,
+        help="sum this many consecutive waveform bins before plotting each frame",
+    )
+    parser.add_argument(
+        "--combine-width-ns",
+        type=float,
+        default=None,
+        help="sum bins into this time width, e.g. 5 for 5 ns frames",
+    )
     parser.add_argument("--dpi", type=int, default=180)
     parser.add_argument("--raw-camera-xy", action="store_true")
     args = parser.parse_args()
@@ -89,8 +130,9 @@ def main():
         images = find_images(index, event_id, args.telescope_id, args.image_index)
         camera = h5["camera/pixels"][:]
         pixel_axis = h5["waveforms/pixel_id_axis"][:]
-        time_centers = h5["waveforms/time_centers_ns"][:]
+        time_edges = h5["waveforms/time_edges_ns"][:]
         waveform = h5[dataset_name]
+        combine_bins = combine_bin_count(args, time_edges)
 
         all_saved = []
         gif_outputs = []
@@ -113,8 +155,10 @@ def main():
             )
             image_frame_dir.mkdir(parents=True, exist_ok=True)
             saved = []
-            for bin_index in range(0, waveform.shape[1], args.stride):
-                values = waveform[image_index, bin_index, :]
+            frame_index = 0
+            for bin_index in range(0, waveform.shape[1], combine_bins * args.stride):
+                end_bin = min(bin_index + combine_bins, waveform.shape[1])
+                values = waveform[image_index, bin_index:end_bin, :].sum(axis=0)
                 values_by_pixel = {int(pid): float(v) for pid, v in zip(pixel_axis, values)}
                 fig = draw_camera(
                     camera,
@@ -125,14 +169,17 @@ def main():
                     display_basis,
                 )
                 ax = fig.axes[0]
+                t0 = float(time_edges[bin_index])
+                t1 = float(time_edges[end_bin])
                 ax.set_title(
                     f"event {int(image['event_id'])}, telescope {int(image['telescope_id']) + 1}, "
-                    f"t = {float(time_centers[bin_index]):.2f} ns"
+                    f"t = {t0:.2f}..{t1:.2f} ns"
                 )
-                out = output_frame_path(image_frame_dir, image, args.quantity, bin_index)
+                out = output_frame_path(image_frame_dir, image, args.quantity, frame_index)
                 fig.savefig(out, bbox_inches="tight")
                 plt.close(fig)
                 saved.append(out)
+                frame_index += 1
             all_saved.extend(saved)
 
             gif_path = output_gif_path(args.gif, out_dir, image, args.quantity, multiple)
