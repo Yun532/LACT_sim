@@ -209,6 +209,73 @@ def _read_facets_csv(path):
     return facets
 
 
+def _parse_vec3_text(text, fallback):
+    if text is None:
+        return np.array(fallback, dtype=float)
+    parts = [part.strip() for part in text.split(",") if part.strip()]
+    if len(parts) != 3:
+        raise ValueError(f"expected 3 vector components, got: {text}")
+    return np.array([float(part) for part in parts], dtype=float)
+
+
+def _design_normal_to_focus(center, focus):
+    to_source = np.array([0.0, 0.0, 1.0], dtype=float)
+    to_focus = _normalize(focus - center)
+    return _normalize(to_source + to_focus)
+
+
+def _build_generated_facets(cfg):
+    dish_type = cfg.get("dish.type", "DaviesCotton").strip().lower()
+    telescope_focal_length = float(cfg.get("dish.telescope_focal_length", 5.0))
+    dish_shape_length = float(cfg.get("dish.dish_shape_length", telescope_focal_length))
+    dish_radius = float(cfg.get("dish.dish_radius", 2.0))
+    vertex = _parse_vec3_text(cfg.get("dish.vertex"), [0.0, 0.0, 0.0])
+
+    facet_spacing = float(cfg.get("facet.spacing", 0.55))
+    facet_radius = float(cfg.get("facet.radius", 0.22))
+    shape = cfg.get("facet.aperture_shape", "Circular").strip().lower()
+    surface_type = cfg.get("facet.surface_type", "Spherical").strip()
+    focus = vertex + np.array([0.0, 0.0, telescope_focal_length], dtype=float)
+
+    if facet_spacing <= 0.0:
+        raise ValueError("facet.spacing must be > 0 for generated mirrors")
+
+    facets = []
+    nmax = int(math.ceil(dish_radius / facet_spacing))
+    for iy in range(-nmax, nmax + 1):
+        for ix in range(-nmax, nmax + 1):
+            x = ix * facet_spacing
+            y = iy * facet_spacing
+            if math.hypot(x, y) > dish_radius:
+                continue
+
+            if dish_type in {"daviescotton", "davies-cotton", "dc"}:
+                z = vertex[2]
+                if x * x + y * y < dish_shape_length * dish_shape_length:
+                    z = focus[2] - math.sqrt(dish_shape_length * dish_shape_length - x * x - y * y)
+                center = vertex + np.array([x, y, z - vertex[2]], dtype=float)
+                radius_of_curvature = 2.0 * telescope_focal_length
+            elif dish_type in {"parabolic", "paraboloid"}:
+                z = vertex[2] + (x * x + y * y) / (4.0 * dish_shape_length)
+                center = np.array([vertex[0] + x, vertex[1] + y, z], dtype=float)
+                radius_of_curvature = 2.0 * float(np.linalg.norm(focus - center))
+            else:
+                raise ValueError(f"unsupported dish.type for python plotting: {cfg.get('dish.type')}")
+
+            facets.append({
+                "id": len(facets),
+                "center": center,
+                "normal": _design_normal_to_focus(center, focus),
+                "shape": shape,
+                "size1": facet_radius,
+                "size2": 0.0,
+                "rotation": 0.0,
+                "surface_type": surface_type,
+                "radius_of_curvature": radius_of_curvature,
+            })
+    return facets
+
+
 def load_facets_csv(path):
     return _read_facets_csv(Path(path))
 
@@ -283,6 +350,9 @@ def load_facets_from_scoped_mirror_cfg(cfg_path, cfg):
     if mode == "csv":
         mirror_path = resolve_workspace_path(cfg_path, cfg["mirror.csv_path"])
         return _read_facets_csv(mirror_path)
+
+    if mode in {"generated", "auto"}:
+        return _build_generated_facets(cfg)
 
     if mode not in {"elevation_series", "series"}:
         raise ValueError(f"unsupported mirror.mode for python plotting: {mode}")

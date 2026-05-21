@@ -253,21 +253,30 @@ std::optional<RayTracer::MirrorIntersection>
 RayTracer::intersectParaboloid(const Vec3& p0, const Vec3& d, const MirrorTile& tile)
 {
     // 连续理想抛物面测试：
-    // 顶点在 tile.center，轴沿 +z
-    double f = tile.radius_of_curvature;
-    if (f <= 0.0) {
+    // 顶点在 tile.center，轴沿 tile.normal。
+    double f = tile.focal_length();
+    if (!std::isfinite(f) || f <= 0.0) {
         return std::nullopt;
     }
 
+    Vec3 axis = tile.normal.normalized();
+    Vec3 u = tile.aperture_u_axis.norm2() > 0.0
+        ? tile.aperture_u_axis.normalized()
+        : ((std::abs(axis.z) < 0.9) ? Vec3{0.0, 0.0, 1.0}
+                                    : Vec3{0.0, 1.0, 0.0}).cross(axis).normalized();
+    Vec3 v = tile.aperture_v_axis.norm2() > 0.0
+        ? tile.aperture_v_axis.normalized()
+        : axis.cross(u).normalized();
+
     Vec3 q0 = p0 - tile.center;
 
-    double x0 = q0.x;
-    double y0 = q0.y;
-    double z0 = q0.z;
+    double x0 = q0.dot(u);
+    double y0 = q0.dot(v);
+    double z0 = q0.dot(axis);
 
-    double dx = d.x;
-    double dy = d.y;
-    double dz = d.z;
+    double dx = d.dot(u);
+    double dy = d.dot(v);
+    double dz = d.dot(axis);
 
     double A = dx * dx + dy * dy;
     double B = 2.0 * (x0 * dx + y0 * dy - 2.0 * f * dz);
@@ -307,19 +316,26 @@ RayTracer::intersectParaboloid(const Vec3& p0, const Vec3& d, const MirrorTile& 
 
     Vec3 p = p0 + d * t;
     Vec3 q = p - tile.center;
+    double x = q.dot(u);
+    double y = q.dot(v);
+    double z = q.dot(axis);
 
-    double r2 = q.x * q.x + q.y * q.y;
+    double r2 = x * x + y * y;
     if (std::sqrt(r2) > tile.aperture_radius || !insideAperture(q, tile.normal, tile)) {
         return std::nullopt;
     }
 
+    if (z < -1e-9) {
+        return std::nullopt;
+    }
+
     // F = x^2 + y^2 - 4 f z = 0
-    Vec3 n_local{2.0 * q.x, 2.0 * q.y, -4.0 * f};
+    Vec3 n_global = (u * (2.0 * x) + v * (2.0 * y) - axis * (4.0 * f)).normalized();
 
     MirrorIntersection out;
     out.t = t;
     out.point = p;
-    out.normal = n_local.normalized();
+    out.normal = n_global;
     return out;
 }
 
