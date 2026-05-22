@@ -374,14 +374,33 @@ CorsikaTraceOutputConfig buildCorsikaTraceOutputConfig(
     return out;
 }
 
+std::string normalizeWaveformTimeReference(std::string value)
+{
+    value = lowerCopy(trim(value));
+    if (value.empty() || value == "absolute") {
+        return "absolute";
+    }
+    if (value == "image_mean" || value == "image-mean") {
+        return "image_mean";
+    }
+    if (value == "image_first" ||
+        value == "image-first" ||
+        value == "first_cherenkov" ||
+        value == "first-cherenkov") {
+        return "image_first";
+    }
+    throw std::runtime_error(
+        "waveform.time_reference must be absolute, image_mean, or image_first");
+}
+
 WaveformOutputConfig buildWaveformOutputConfig(
     const std::map<std::string, std::string>& cfg)
 {
     WaveformOutputConfig out;
     out.enabled = getBool(cfg, "waveform.enabled", out.enabled);
     out.source = lowerCopy(trim(getString(cfg, "waveform.source", out.source)));
-    out.time_reference = lowerCopy(trim(getString(
-        cfg, "waveform.time_reference", out.time_reference)));
+    out.time_reference = normalizeWaveformTimeReference(
+        getString(cfg, "waveform.time_reference", out.time_reference));
     out.time_bin_width_ns =
         getDouble(cfg, "waveform.time_bin_width_ns", out.time_bin_width_ns);
     out.time_window_start_ns =
@@ -390,9 +409,6 @@ WaveformOutputConfig buildWaveformOutputConfig(
         getDouble(cfg, "waveform.time_window_end_ns", out.time_window_end_ns);
     if (out.source.empty()) {
         out.source = "none";
-    }
-    if (out.time_reference.empty()) {
-        out.time_reference = "absolute";
     }
     if (out.enabled) {
         if (!(out.source == "photon_count" || out.source == "pe" ||
@@ -411,24 +427,6 @@ WaveformOutputConfig buildWaveformOutputConfig(
         if (out.time_window_end_ns <= out.time_window_start_ns) {
             throw std::runtime_error(
                 "waveform.time_window_end_ns must be greater than waveform.time_window_start_ns");
-        }
-        if (!(out.time_reference == "absolute" ||
-              out.time_reference == "image_mean" ||
-              out.time_reference == "image-mean" ||
-              out.time_reference == "image_first" ||
-              out.time_reference == "image-first" ||
-              out.time_reference == "first_cherenkov" ||
-              out.time_reference == "first-cherenkov")) {
-            throw std::runtime_error(
-                "waveform.time_reference must be absolute, image_mean, or image_first");
-        }
-        if (out.time_reference == "image-mean") {
-            out.time_reference = "image_mean";
-        }
-        if (out.time_reference == "image-first" ||
-            out.time_reference == "first_cherenkov" ||
-            out.time_reference == "first-cherenkov") {
-            out.time_reference = "image_first";
         }
     }
     return out;
