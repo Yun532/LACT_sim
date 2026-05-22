@@ -123,7 +123,13 @@ def main():
             total += hist
         ax.stairs(total, time_edges, color="#1f77b4", linewidth=1.8, fill=True, alpha=0.28)
         ax.stairs(total, time_edges, color="#1f77b4", linewidth=1.8)
-        ax.set_xlabel("time - image mean [ns]" if time_reference == "image_mean" else "time [ns]")
+        if time_reference == "image_first":
+            xlabel = "time - T0 [ns]"
+        elif time_reference == "image_mean":
+            xlabel = "time - image mean [ns]"
+        else:
+            xlabel = "time [ns]"
+        ax.set_xlabel(xlabel)
         ax.set_ylabel(quantity_label(args.quantity))
         event = int(rows[0][0]["event_id"])
         ax.set_title(f"event {event} arrival-time histogram{title_suffix}")

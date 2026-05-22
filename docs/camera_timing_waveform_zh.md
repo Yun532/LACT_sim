@@ -38,10 +38,10 @@ output.write_pixel_time_stats=true
 ```ini
 waveform.enabled=true
 waveform.source=pe             # 可选 pe 或 photon_count
-waveform.time_reference=image_mean # 可选 absolute 或 image_mean
+waveform.time_reference=image_first # 可选 absolute、image_mean 或 image_first
 waveform.time_bin_width_ns=1
-waveform.time_window_start_ns=-20
-waveform.time_window_end_ns=120
+waveform.time_window_start_ns=-5
+waveform.time_window_end_ns=20
 ```
 
 输出：
@@ -71,15 +71,15 @@ Poisson 采样，并写入 `/waveforms/nsb_pe`；最终 `/images/dense/nsb_pe`
 对 CORSIKA 相机 GIF，推荐：
 
 ```ini
-waveform.time_reference=image_mean
-waveform.time_window_start_ns=-20
-waveform.time_window_end_ns=120
+waveform.time_reference=image_first
+waveform.time_window_start_ns=-5
+waveform.time_window_end_ns=20
 ```
 
-这种模式在保存 HDF5 时先用每个 event/telescope 图像自己的
-`/images/index.time_mean_ns` 作为参考时间，再把光子填入 waveform bin。
-`/waveforms/reference_time_ns` 会逐 image 记录被减掉的平均时间。这样 HDF5
-不用把绝对时间窗开得很宽，也不会因为某台望远镜的 CORSIKA 原始时间是负数而
+这种模式在保存 HDF5 时先用每个 event/telescope 图像自己的第一个
+Cherenkov 光子到达时间 `/images/index.time_first_ns` 作为 T0，再把光子填入
+waveform bin。`/waveforms/reference_time_ns` 会逐 image 记录被减掉的 T0。
+这样 HDF5 不用把绝对时间窗开得很宽，也不会因为某台望远镜的 CORSIKA 原始时间是负数而
 把主峰裁掉。
 
 如果设置：

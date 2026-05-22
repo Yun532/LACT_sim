@@ -150,6 +150,7 @@ shower before selecting an array-offset stream.
   total_signal
   time_mean_ns
   time_rms_ns
+  time_first_ns
 
 /images/sparse/pixels
   pixel_id
@@ -301,10 +302,10 @@ output:
 ```ini
 waveform.enabled=true
 waveform.source=pe             # or photon_count
-waveform.time_reference=absolute # or image_mean
+waveform.time_reference=absolute # or image_mean or image_first
 waveform.time_bin_width_ns=1
-waveform.time_window_start_ns=-20
-waveform.time_window_end_ns=120
+waveform.time_window_start_ns=-5
+waveform.time_window_end_ns=20
 ```
 
 `waveform.source=photon_count` writes `/waveforms/photon_count`;
@@ -319,9 +320,11 @@ The pixel order is `/waveforms/pixel_id_axis`, and time bins are described by
 `waveform.time_reference=absolute`, those edges are in the CORSIKA/EventIO
 absolute time coordinate plus optical propagation. If
 `waveform.time_reference=image_mean`, every image uses its own
-`/images/index.time_mean_ns` as the reference time; the stored waveform time
-axis is then relative to that image mean, and `/waveforms/reference_time_ns`
-records the subtracted value for each image.
+`/images/index.time_mean_ns` as the reference time. If
+`waveform.time_reference=image_first`, every image uses
+`/images/index.time_first_ns`, the first Cherenkov photon arrival time at that
+camera, as T0. In both relative modes, `/waveforms/reference_time_ns` records
+the subtracted absolute value for each image.
 
 This proxy waveform does not include a real SiPM/electronics response. If NSB is
 enabled together with `waveform.source=pe`, the constant-rate NSB model is
@@ -329,8 +332,8 @@ sampled independently in every time bin, and the dense `/images/dense/nsb_pe`
 image is the time integral of `/waveforms/nsb_pe`. Cherenkov photons outside
 the configured waveform time window are not written to
 `/waveforms/cherenkov_pe`. For CORSIKA camera GIF checks, prefer
-`waveform.time_reference=image_mean` so a compact window such as `-20..120 ns`
-can still cover each telescope image.
+`waveform.time_reference=image_first` with a compact window such as
+`-5..20 ns`; the GIF time axis is then `T - T0`.
 
 ## Trigger Tables
 

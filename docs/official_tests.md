@@ -500,12 +500,12 @@ cfg 逐项解释：
 - `output.save_only_triggered=true`: 只保存触发望远镜图像，减少输出体积。
 - `output.write_pixel_time_stats=true`: 写出逐像素时间均值和 RMS。
 - `waveform.enabled=true`、`waveform.source=pe`: 写出 p.e. proxy waveform。
-- `waveform.time_reference=image_mean`: 保存 waveform 时先减去每台望远镜图像的
-  `time_mean_ns`，并在 `/waveforms/reference_time_ns` 中记录该参考时间。这样
-  GIF 使用紧凑的相对时间窗，不需要把 HDF5 绝对时间窗开得很宽。
+- `waveform.time_reference=image_first`: 保存 waveform 时先减去每台望远镜图像的
+  第一个 Cherenkov 光子到达时间 `time_first_ns`，并在
+  `/waveforms/reference_time_ns` 中记录该参考时间。这样 GIF 使用 `T - T0`
+  的相对时间窗。
 - `waveform.time_bin_width_ns=1`: HDF5 保存 1 ns 时间 bin，保留较细时间信息。
-- 官方 GIF 绘图命令使用 `--combine-width-ns 5`，显示时把 1 ns bin 合并成
-  5 ns 一帧。
+- 官方 GIF 绘图命令直接显示 1 ns/bin，时间窗为 `T0-5 ns` 到 `T0+20 ns`。
 - 其它镜面、相机、SiPM、EventIO 配置与完美相机测试相同。
 
 单独运行：

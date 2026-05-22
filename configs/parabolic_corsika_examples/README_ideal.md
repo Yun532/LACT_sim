@@ -14,7 +14,9 @@
 - `efficiency.config=../efficiency/ideal.cfg`：不引入波长效率曲线。
 - `trigger.config=../trigger/disabled.cfg`：不做 trigger 筛选。
 - `waveform.source=photon_count`：时间序列保存相机收到的光子数，不使用 p.e. 权重。
+- `waveform.time_reference=image_first`：每个 event/telescope 图像以第一个到达相机的 Cherenkov 光子作为 T0。
 - `waveform.time_bin_width_ns=1`：保存 1 ns 一个时间 bin。
+- `waveform.time_window_start_ns=-5` 和 `waveform.time_window_end_ns=20`：保存 `T0-5 ns` 到 `T0+20 ns`。
 - `source.max_shower_events=1`：示例默认只跑第一个 shower event；批量运行时可以删掉或改大。
 
 ## 单独运行

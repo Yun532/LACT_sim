@@ -88,20 +88,27 @@ def time_reference_ns(args, image, stored_reference, stored_reference_times):
     if args.time_reference == "none":
         return 0.0
     if args.time_reference == "stored":
-        if stored_reference == "image_mean":
+        if stored_reference in ("image_mean", "image_first"):
             image_index = int(image["image_index"])
             if stored_reference_times is not None and image_index < len(stored_reference_times):
                 return float(stored_reference_times[image_index])
+            field = "time_first_ns" if stored_reference == "image_first" else "time_mean_ns"
+            if field in (image.dtype.names or ()):
+                return float(image[field])
             return float(image["time_mean_ns"])
         return 0.0
     if args.time_reference == "image-mean":
         return float(image["time_mean_ns"])
+    if args.time_reference == "image-first":
+        if "time_first_ns" in (image.dtype.names or ()):
+            return float(image["time_first_ns"])
+        return 0.0
     raise SystemExit(f"Unsupported --time-reference={args.time_reference}")
 
 
 def frame_center_for_plot(args, t0_ns, t1_ns, ref_ns, stored_reference):
     center = 0.5 * (t0_ns + t1_ns)
-    if args.time_reference == "stored" and stored_reference == "image_mean":
+    if args.time_reference == "stored" and stored_reference in ("image_mean", "image_first"):
         return center
     return center - ref_ns
 
@@ -124,6 +131,16 @@ def time_title(args, t0_ns, t1_ns, ref_ns, stored_reference):
         return (
             f"t - mean = {t0_ns:.2f}..{t1_ns:.2f} ns "
             f"(mean = {ref_ns:.2f} ns)"
+        )
+    if args.time_reference == "stored" and stored_reference == "image_first":
+        return (
+            f"t - T0 = {t0_ns:.2f}..{t1_ns:.2f} ns "
+            f"(T0 = {ref_ns:.2f} ns)"
+        )
+    if args.time_reference == "image-first":
+        return (
+            f"t - T0 = {t0_ns - ref_ns:.2f}..{t1_ns - ref_ns:.2f} ns "
+            f"(T0 = {ref_ns:.2f} ns)"
         )
     return (
         f"t - mean = {t0_ns - ref_ns:.2f}..{t1_ns - ref_ns:.2f} ns "
@@ -164,7 +181,7 @@ def main():
     )
     parser.add_argument(
         "--time-reference",
-        choices=("stored", "none", "image-mean"),
+        choices=("stored", "none", "image-mean", "image-first"),
         default="stored",
         help=(
             "time coordinate used only for plotting labels/windows. 'stored' uses "

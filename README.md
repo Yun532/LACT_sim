@@ -745,9 +745,10 @@ contain only telescope images that pass the simple camera trigger. The full
 trigger decision table is still kept in `/trigger/telescope` and
 `/trigger/array`. With `output.hdf5_write_components=true`, the file also
 contains `/images/dense/cherenkov_pe` and `/images/dense/nsb_pe`.
-The proxy waveform uses `waveform.time_reference=image_mean`, so compact GIF
-frames are saved relative to each telescope image mean time; the subtracted
-absolute reference is stored in `/waveforms/reference_time_ns`.
+The proxy waveform uses `waveform.time_reference=image_first`, so compact GIF
+frames are saved relative to each telescope image first Cherenkov photon time
+T0; the subtracted absolute reference is stored in
+`/waveforms/reference_time_ns`.
 For the benchmark file used in development,
 `lact_prod1_corsika_particle_gamma_energy_1000.0_10000.0_zenith_20.0_azimuth_0.0_run_2418_event_468898.zst`,
 the official script plots all available/triggered telescope images for

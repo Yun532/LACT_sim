@@ -15,7 +15,9 @@
 - `trigger.config=../trigger/example_simple_multiplicity.cfg`：计算简单 multiplicity trigger。
 - `output.save_only_triggered=false`：示例保留所有望远镜图像，方便检查；如只想保存触发图像可改为 `true`。
 - `waveform.source=pe`：时间序列保存经过效率/PDE 后的 p.e.。
+- `waveform.time_reference=image_first`：每个 event/telescope 图像以第一个到达相机的 Cherenkov 光子作为 T0。
 - `waveform.time_bin_width_ns=1`：保存 1 ns 一个时间 bin。
+- `waveform.time_window_start_ns=-5` 和 `waveform.time_window_end_ns=20`：保存 `T0-5 ns` 到 `T0+20 ns`。
 - `source.max_shower_events=1`：示例默认只跑第一个 shower event；批量运行时可以删掉或改大。
 
 ## 单独运行

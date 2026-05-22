@@ -61,6 +61,7 @@ struct TraceSummary {
     double weighted_signal = 0.0;
     double weighted_time_sum = 0.0;
     double weighted_time2_sum = 0.0;
+    double first_cherenkov_time_ns = std::numeric_limits<double>::infinity();
 };
 
 struct TelescopeEventAccumulator {
@@ -82,6 +83,7 @@ struct TelescopeEventAccumulator {
     double weighted_signal = 0.0;
     double weighted_time_sum = 0.0;
     double weighted_time2_sum = 0.0;
+    double first_cherenkov_time_ns = std::numeric_limits<double>::infinity();
 };
 
 using SummaryKey = std::pair<int, int>;
@@ -412,12 +414,21 @@ WaveformOutputConfig buildWaveformOutputConfig(
         }
         if (!(out.time_reference == "absolute" ||
               out.time_reference == "image_mean" ||
-              out.time_reference == "image-mean")) {
+              out.time_reference == "image-mean" ||
+              out.time_reference == "image_first" ||
+              out.time_reference == "image-first" ||
+              out.time_reference == "first_cherenkov" ||
+              out.time_reference == "first-cherenkov")) {
             throw std::runtime_error(
-                "waveform.time_reference must be absolute or image_mean");
+                "waveform.time_reference must be absolute, image_mean, or image_first");
         }
         if (out.time_reference == "image-mean") {
             out.time_reference = "image_mean";
+        }
+        if (out.time_reference == "image-first" ||
+            out.time_reference == "first_cherenkov" ||
+            out.time_reference == "first-cherenkov") {
+            out.time_reference = "image_first";
         }
     }
     return out;
@@ -470,6 +481,12 @@ bool waveformUsesImageMeanReference(const WaveformOutputConfig& cfg)
     return cfg.enabled && cfg.time_reference == "image_mean";
 }
 
+bool waveformUsesImageReference(const WaveformOutputConfig& cfg)
+{
+    return cfg.enabled &&
+        (cfg.time_reference == "image_mean" || cfg.time_reference == "image_first");
+}
+
 std::uint64_t mixNsbSeed(std::uint64_t seed, std::uint64_t value)
 {
     seed ^= value + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
@@ -510,7 +527,7 @@ void accumulateWaveformHit(std::map<WaveformKey, WaveformPixelAccumulator>& wave
         return;
     }
     const double pe = hit.weight * hit.relative_efficiency;
-    if (waveformUsesImageMeanReference(cfg)) {
+    if (waveformUsesImageReference(cfg)) {
         raw_waveform_hits.push_back(RawWaveformHit{
             event_id,
             telescope_id,
@@ -1300,6 +1317,7 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             double total_signal;
             float time_mean_ns;
             float time_rms_ns;
+            float time_first_ns;
         };
         std::vector<SparsePixelRow> sparse_rows;
         std::vector<ImageIndexRow> image_rows;
@@ -1341,12 +1359,16 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
 
             float mean = 0.0f;
             float rms = 0.0f;
+            float first = 0.0f;
             auto summary_it = summaries.find(key);
             if (summary_it != summaries.end()) {
                 const auto& s = summary_it->second;
                 total_signal = s.weighted_signal;
                 total_pe = s.weighted_signal;
                 total_photons = static_cast<double>(s.hit_camera);
+                if (std::isfinite(s.first_cherenkov_time_ns)) {
+                    first = static_cast<float>(s.first_cherenkov_time_ns);
+                }
                 if (s.weighted_signal > 0.0) {
                     const double m = s.weighted_time_sum / s.weighted_signal;
                     const double v = std::max(0.0, s.weighted_time2_sum / s.weighted_signal - m * m);
@@ -1367,6 +1389,7 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                 total_signal,
                 mean,
                 rms,
+                first,
             });
         }
 
@@ -1818,6 +1841,8 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                   HOFFSET(ImageIndexRow, time_mean_ns), H5T_NATIVE_FLOAT);
         H5Tinsert(image_type, "time_rms_ns",
                   HOFFSET(ImageIndexRow, time_rms_ns), H5T_NATIVE_FLOAT);
+        H5Tinsert(image_type, "time_first_ns",
+                  HOFFSET(ImageIndexRow, time_first_ns), H5T_NATIVE_FLOAT);
         writeCompound1D(images_group, "index", image_type, image_rows);
         H5Tclose(image_type);
 
@@ -1918,10 +1943,15 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                 }] = row;
             }
             std::vector<double> waveform_reference_time_ns(n_images, 0.0);
-            if (waveformUsesImageMeanReference(waveform_cfg)) {
+            if (waveformUsesImageReference(waveform_cfg)) {
                 for (std::size_t row = 0; row < image_rows.size(); ++row) {
-                    waveform_reference_time_ns[row] =
-                        static_cast<double>(image_rows[row].time_mean_ns);
+                    if (waveform_cfg.time_reference == "image_first") {
+                        waveform_reference_time_ns[row] =
+                            static_cast<double>(image_rows[row].time_first_ns);
+                    } else {
+                        waveform_reference_time_ns[row] =
+                            static_cast<double>(image_rows[row].time_mean_ns);
+                    }
                 }
             }
 
@@ -1963,7 +1993,7 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                     }
                 }
             }
-            if (waveformUsesImageMeanReference(waveform_cfg)) {
+            if (waveformUsesImageReference(waveform_cfg)) {
                 for (const auto& hit : raw_waveform_hits) {
                     const auto image_it = image_row_by_key.find({
                         hit.event_id, hit.telescope_id});
@@ -2193,7 +2223,11 @@ std::string formatStreamSummaryLine(const TraceSummary& s,
     value << (camera_enabled ? " pe=" : " signal=")
           << doubleToString(s.weighted_signal, 3)
           << " time_mean_ns=" << doubleToString(mean, 3)
-          << " time_rms_ns=" << doubleToString(std::sqrt(var), 3);
+          << " time_rms_ns=" << doubleToString(std::sqrt(var), 3)
+          << " time_first_ns="
+          << (std::isfinite(s.first_cherenkov_time_ns)
+                  ? doubleToString(s.first_cherenkov_time_ns, 3)
+                  : "nan");
     return value.str();
 }
 
@@ -2233,7 +2267,11 @@ std::string formatTelescopeEventLine(const TelescopeEventAccumulator& s,
     value << (camera_enabled ? " pe=" : " signal=")
           << doubleToString(s.weighted_signal, 3)
           << " time_mean_ns=" << doubleToString(mean, 3)
-          << " time_rms_ns=" << doubleToString(std::sqrt(var), 3);
+          << " time_rms_ns=" << doubleToString(std::sqrt(var), 3)
+          << " time_first_ns="
+          << (std::isfinite(s.first_cherenkov_time_ns)
+                  ? doubleToString(s.first_cherenkov_time_ns, 3)
+                  : "nan");
     return value.str();
 }
 
@@ -2244,8 +2282,8 @@ void printTraceStreamSummary(const std::map<SummaryKey, TraceSummary>& summaries
     printSection("Per-stream summary");
     printField("columns",
                camera_enabled
-                   ? "event_id shower_event array_id telescope input_bunches input_photons hit_output hit_camera accepted unique_pixels pe time_mean_ns time_rms_ns"
-                   : "event_id shower_event array_id telescope input_bunches input_photons hit_output signal time_mean_ns time_rms_ns");
+                   ? "event_id shower_event array_id telescope input_bunches input_photons hit_output hit_camera accepted unique_pixels pe time_mean_ns time_rms_ns time_first_ns"
+                   : "event_id shower_event array_id telescope input_bunches input_photons hit_output signal time_mean_ns time_rms_ns time_first_ns");
 
     for (const auto& kv : summaries) {
         const auto& s = kv.second;
@@ -2281,6 +2319,7 @@ void printEventSummary(const std::map<SummaryKey, TraceSummary>& summaries,
         double weighted_signal = 0.0;
         double weighted_time_sum = 0.0;
         double weighted_time2_sum = 0.0;
+        double first_cherenkov_time_ns = std::numeric_limits<double>::infinity();
     };
 
     std::map<int, EventAggregate> events;
@@ -2307,13 +2346,15 @@ void printEventSummary(const std::map<SummaryKey, TraceSummary>& summaries,
         e.weighted_signal += s.weighted_signal;
         e.weighted_time_sum += s.weighted_time_sum;
         e.weighted_time2_sum += s.weighted_time2_sum;
+        e.first_cherenkov_time_ns =
+            std::min(e.first_cherenkov_time_ns, s.first_cherenkov_time_ns);
     }
 
     printSection("Per-event summary");
     printField("columns",
                camera_enabled
-                   ? "event_id shower_event array_id energy_gev core_N_m core_E_m core_source telescopes input_bunches input_photons blocked hit_output hit_camera accepted pe time_mean_ns time_rms_ns"
-                   : "event_id shower_event array_id energy_gev core_N_m core_E_m core_source telescopes input_bunches input_photons blocked hit_output signal time_mean_ns time_rms_ns");
+                   ? "event_id shower_event array_id energy_gev core_N_m core_E_m core_source telescopes input_bunches input_photons blocked hit_output hit_camera accepted pe time_mean_ns time_rms_ns time_first_ns"
+                   : "event_id shower_event array_id energy_gev core_N_m core_E_m core_source telescopes input_bunches input_photons blocked hit_output signal time_mean_ns time_rms_ns time_first_ns");
     for (const auto& kv : events) {
         const auto& e = kv.second;
         const OutputEventMetadata meta = outputEventMetadata(e.event_id, event_id_mode, metadata);
@@ -2360,7 +2401,11 @@ void printEventSummary(const std::map<SummaryKey, TraceSummary>& summaries,
         value << (camera_enabled ? " pe=" : " signal=")
               << doubleToString(e.weighted_signal, 3)
               << " time_mean_ns=" << doubleToString(mean, 3)
-              << " time_rms_ns=" << doubleToString(std::sqrt(var), 3);
+              << " time_rms_ns=" << doubleToString(std::sqrt(var), 3)
+              << " time_first_ns="
+              << (std::isfinite(e.first_cherenkov_time_ns)
+                      ? doubleToString(e.first_cherenkov_time_ns, 3)
+                      : "nan");
         printField("event", value.str());
     }
 }
@@ -2790,8 +2835,8 @@ int main(int argc, char** argv) {
             printField("event_status", "completed");
             printField("telescope_columns",
                        camera_cfg.enabled
-                           ? "telescope output_events input_bunches input_photons hit_mirror hit_output hit_camera accepted lost unique_pixels pe time_mean_ns time_rms_ns"
-                           : "telescope output_events input_bunches input_photons hit_mirror hit_output signal time_mean_ns time_rms_ns");
+                           ? "telescope output_events input_bunches input_photons hit_mirror hit_output hit_camera accepted lost unique_pixels pe time_mean_ns time_rms_ns time_first_ns"
+                           : "telescope output_events input_bunches input_photons hit_mirror hit_output signal time_mean_ns time_rms_ns time_first_ns");
             std::uint64_t input_bunches = 0;
             double input_photons = 0.0;
             std::uint64_t blocked = 0;
@@ -2840,6 +2885,8 @@ int main(int argc, char** argv) {
                 tel.weighted_signal += s.weighted_signal;
                 tel.weighted_time_sum += s.weighted_time_sum;
                 tel.weighted_time2_sum += s.weighted_time2_sum;
+                tel.first_cherenkov_time_ns =
+                    std::min(tel.first_cherenkov_time_ns, s.first_cherenkov_time_ns);
             }
             for (const auto& kv : telescopes) {
                 printField("telescope",
@@ -2956,6 +3003,8 @@ int main(int argc, char** argv) {
             summary.weighted_signal += signal;
             summary.weighted_time_sum += signal * hit.time_ns;
             summary.weighted_time2_sum += signal * hit.time_ns * hit.time_ns;
+            summary.first_cherenkov_time_ns =
+                std::min(summary.first_cherenkov_time_ns, hit.time_ns);
 
             accumulatePixelHit(pixels, bunch.event_id, bunch.telescope_id, hit);
             accumulateWaveformHit(waveforms,
