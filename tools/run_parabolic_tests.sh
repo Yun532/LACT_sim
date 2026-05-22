@@ -311,7 +311,7 @@ error.random_seed=987654321
 error.facet_radial_position_sigma_m=0.002
 error.facet_normal_sigma_deg=0.01
 error.reflect_direction_sigma_deg=0.0179
-error.radius_curvature_sigma_m=0.02
+error.radius_of_curvature_sigma_m=0.02
 error.reflectivity_scale_sigma=0.02
 trigger.pixel_threshold_pe=10
 CFG
