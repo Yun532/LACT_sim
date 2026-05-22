@@ -7,6 +7,8 @@
 
 两个测试的 waveform 都使用 `waveform.time_reference=image_first`，也就是每个 event/telescope 以第一个到达相机的 Cherenkov 光子作为 T0，并保存 `T0-5 ns` 到 `T0+20 ns`。
 
+两个示例默认都会处理输入 CORSIKA 文件中的全部 shower event 和全部 array/core offset。若只想快速试跑，可在对应 cfg 中临时加入 `source.max_shower_events=1`。
+
 推荐一键运行：
 
 ```bash

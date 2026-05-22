@@ -18,7 +18,12 @@
 - `waveform.time_reference=image_first`：每个 event/telescope 图像以第一个到达相机的 Cherenkov 光子作为 T0。
 - `waveform.time_bin_width_ns=1`：保存 1 ns 一个时间 bin。
 - `waveform.time_window_start_ns=-5` 和 `waveform.time_window_end_ns=20`：保存 `T0-5 ns` 到 `T0+20 ns`。
-- `source.max_shower_events=1`：示例默认只跑第一个 shower event；批量运行时可以删掉或改大。
+
+默认会处理 CORSIKA 文件中的全部 shower event 和全部 array/core offset。若只想快速测试前几个 shower，可在 cfg 里临时加入：
+
+```ini
+source.max_shower_events=1
+```
 
 ## 单独运行
 
