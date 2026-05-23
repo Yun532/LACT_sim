@@ -280,6 +280,19 @@ source.filter_shower_event_id=327666
 `source.max_shower_events=N` streams only the first `N` matching shower events.
 `source.filter_shower_event_id=ID` keeps only one original CORSIKA shower event.
 
+To measure where a long CORSIKA run spends time, enable the lightweight
+profiler:
+
+```ini
+profile.enabled=true
+```
+
+The final log will include a `[Profile]` block with coarse timings for EventIO
+streaming, coordinate transforms, optical tracing, obstruction checks, camera
+response, accumulation, and HDF5 writing. `eventio_stream_s` is wall time for
+streaming plus callback processing; the sub-stage timings inside the callback
+are not exclusive.
+
 ## Test 1: Perfect Optics Whiteboard Spots
 
 This test uses the ideal 1229 mirror geometry, no structural deformation, and a

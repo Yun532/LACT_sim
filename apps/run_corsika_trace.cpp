@@ -42,6 +42,21 @@ struct CollectorDebugConfig {
     std::uint64_t max_photons = 100000;
 };
 
+struct ProfileConfig {
+    bool enabled = false;
+};
+
+struct ProfileStats {
+    double eventio_stream_s = 0.0;
+    double transform_s = 0.0;
+    double trace_to_plane_s = 0.0;
+    double obstruction_s = 0.0;
+    double camera_response_s = 0.0;
+    double whiteboard_accumulate_s = 0.0;
+    double camera_accumulate_s = 0.0;
+    double hdf5_write_s = 0.0;
+};
+
 struct TraceSummary {
     int event_id = 0;
     int telescope_id = 0;
@@ -440,6 +455,21 @@ CollectorDebugConfig buildCollectorDebugConfig(
     out.photon_csv = getString(cfg, "collector.debug_photon_csv", out.photon_csv);
     out.max_photons = getUInt64(cfg, "collector.debug_max_photons", out.max_photons);
     return out;
+}
+
+ProfileConfig buildProfileConfig(const std::map<std::string, std::string>& cfg)
+{
+    ProfileConfig out;
+    out.enabled = getBool(cfg, "profile.enabled", out.enabled);
+    return out;
+}
+
+void addElapsed(ProfileStats& stats,
+                double ProfileStats::*field,
+                const std::chrono::steady_clock::time_point& start)
+{
+    stats.*field +=
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
 }
 
 bool outputWantsCsv(const CorsikaTraceOutputConfig& cfg)
@@ -2585,6 +2615,9 @@ void printCorsikaOpticalConfiguration(
                    ? "reserved real electronics waveform"
                    : "proxy time-binned camera output");
 
+    printSection("Profile");
+    printField("enabled", getBool(cfg, "profile.enabled", false) ? "true" : "false");
+
     printSection("NSB");
     printField("enabled", nsb_cfg.enabled ? "true" : "false");
     printField("model", nsb_cfg.model);
@@ -2667,6 +2700,31 @@ void printCorsikaOpticalConfiguration(
     printField("not included", missing);
 }
 
+void printProfileStats(const ProfileStats& stats, double trace_time_s)
+{
+    printSection("Profile");
+    printField("note",
+               "eventio_stream_s is wall time for streaming plus callback processing; "
+               "sub-stage times are measured inside that callback and are not exclusive");
+    if (trace_time_s <= 0.0) {
+        trace_time_s = 1.0;
+    }
+    auto print_item = [trace_time_s](const std::string& name, double seconds) {
+        std::ostringstream value;
+        value << doubleToString(seconds, 6)
+              << " (" << doubleToString(100.0 * seconds / trace_time_s, 2) << "%)";
+        printField(name, value.str());
+    };
+    print_item("eventio_stream_s", stats.eventio_stream_s);
+    print_item("transform_s", stats.transform_s);
+    print_item("trace_to_plane_s", stats.trace_to_plane_s);
+    print_item("obstruction_s", stats.obstruction_s);
+    print_item("camera_response_s", stats.camera_response_s);
+    print_item("whiteboard_accumulate_s", stats.whiteboard_accumulate_s);
+    print_item("camera_accumulate_s", stats.camera_accumulate_s);
+    print_item("hdf5_write_s", stats.hdf5_write_s);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -2735,6 +2793,8 @@ int main(int argc, char** argv) {
         CorsikaTraceOutputConfig output_cfg = buildCorsikaTraceOutputConfig(cfg);
         WaveformOutputConfig waveform_cfg = buildWaveformOutputConfig(cfg);
         CollectorDebugConfig collector_debug_cfg = buildCollectorDebugConfig(cfg);
+        ProfileConfig profile_cfg = buildProfileConfig(cfg);
+        ProfileStats profile_stats;
         const bool save_csv = outputWantsCsv(output_cfg);
         const bool save_hdf5 = outputWantsHdf5(output_cfg);
         if (save_hdf5) {
@@ -2916,8 +2976,15 @@ int main(int argc, char** argv) {
         };
 
         auto processBunch = [&](const PhotonBunch& raw_bunch) {
+            std::chrono::steady_clock::time_point t_step;
+            if (profile_cfg.enabled) {
+                t_step = std::chrono::steady_clock::now();
+            }
             const PhotonBunch bunch = transformEventIOBunchToTraceFrame(
                 raw_bunch, telescope_cfg, metadata, source_runtime_cfg);
+            if (profile_cfg.enabled) {
+                addElapsed(profile_stats, &ProfileStats::transform_s, t_step);
+            }
             ++photon_index;
             const int shower_event =
                 showerEventFromOutputEvent(bunch.event_id, source_runtime_cfg.event_id_mode);
@@ -2941,34 +3008,61 @@ int main(int argc, char** argv) {
             photon.normalizeDirection();
             photon.weight *= bunch.multiplicity;
 
+            if (profile_cfg.enabled) {
+                t_step = std::chrono::steady_clock::now();
+            }
             OpticalSurfaceHit hit = tracer.traceToPlane(photon, mirrors, plane, eff);
+            if (profile_cfg.enabled) {
+                addElapsed(profile_stats, &ProfileStats::trace_to_plane_s, t_step);
+            }
             if (hit.hit_mirror) {
                 summary.hit_mirror_before_obstruction += 1;
                 if (hit.hit_surface) {
                     summary.hit_output_before_obstruction += 1;
                 }
+                if (profile_cfg.enabled) {
+                    t_step = std::chrono::steady_clock::now();
+                }
                 if (incomingSegmentBlockedByObstruction(photon.pos, hit.mirror_point,
                                                         obstruction, nullptr)) {
+                    if (profile_cfg.enabled) {
+                        addElapsed(profile_stats, &ProfileStats::obstruction_s, t_step);
+                    }
                     summary.blocked_by_obstruction += 1;
                     summary.blocked_incoming += 1;
                     return;
+                }
+                if (profile_cfg.enabled) {
+                    addElapsed(profile_stats, &ProfileStats::obstruction_s, t_step);
                 }
                 summary.hit_mirror += 1;
             }
             if (!hit.hit_surface) {
                 return;
             }
+            if (profile_cfg.enabled) {
+                t_step = std::chrono::steady_clock::now();
+            }
             if (segmentBlockedByObstruction(hit.mirror_point, hit.surface_point,
                                             obstruction, nullptr)) {
+                if (profile_cfg.enabled) {
+                    addElapsed(profile_stats, &ProfileStats::obstruction_s, t_step);
+                }
                 summary.blocked_by_obstruction += 1;
                 summary.blocked_reflected += 1;
                 return;
+            }
+            if (profile_cfg.enabled) {
+                addElapsed(profile_stats, &ProfileStats::obstruction_s, t_step);
             }
 
             summary.hit_output_plane += 1;
             const double base_signal = hit.weight * hit.relative_efficiency;
 
             if (!camera_cfg.enabled) {
+                if (profile_cfg.enabled) {
+                    t_step = std::chrono::steady_clock::now();
+                }
                 if (save_hdf5) {
                     whiteboard_hits.push_back(makeWhiteboardHdf5Row(bunch, photon_index, hit));
                 }
@@ -2978,10 +3072,19 @@ int main(int argc, char** argv) {
                 summary.weighted_signal += base_signal;
                 summary.weighted_time_sum += base_signal * hit.time_ns;
                 summary.weighted_time2_sum += base_signal * hit.time_ns * hit.time_ns;
+                if (profile_cfg.enabled) {
+                    addElapsed(profile_stats, &ProfileStats::whiteboard_accumulate_s, t_step);
+                }
                 return;
             }
 
+            if (profile_cfg.enabled) {
+                t_step = std::chrono::steady_clock::now();
+            }
             applyCameraResponse(camera, light_collector.get(), plane, sipm_cfg, electronics, hit);
+            if (profile_cfg.enabled) {
+                addElapsed(profile_stats, &ProfileStats::camera_response_s, t_step);
+            }
             appendCollectorDebugPhoton(collector_debug_rows,
                                        collector_debug_cfg,
                                        bunch.event_id,
@@ -3004,6 +3107,9 @@ int main(int argc, char** argv) {
             summary.first_cherenkov_time_ns =
                 std::min(summary.first_cherenkov_time_ns, hit.time_ns);
 
+            if (profile_cfg.enabled) {
+                t_step = std::chrono::steady_clock::now();
+            }
             accumulatePixelHit(pixels, bunch.event_id, bunch.telescope_id, hit);
             accumulateWaveformHit(waveforms,
                                   raw_waveform_hits,
@@ -3011,8 +3117,12 @@ int main(int argc, char** argv) {
                                   bunch.event_id,
                                   bunch.telescope_id,
                                   hit);
+            if (profile_cfg.enabled) {
+                addElapsed(profile_stats, &ProfileStats::camera_accumulate_s, t_step);
+            }
         };
 
+        const auto t_stream_start = std::chrono::steady_clock::now();
         EventIOStreamStats stream_stats = streamEventIOPhotonBunches(
             eventio_cfg,
             processBunch,
@@ -3024,6 +3134,9 @@ int main(int argc, char** argv) {
                 printField(progress.final ? "stream_done" : "stream_progress",
                            value.str());
             });
+        if (profile_cfg.enabled) {
+            addElapsed(profile_stats, &ProfileStats::eventio_stream_s, t_stream_start);
+        }
         printRunningEventSummary(active_shower_event);
         const auto t_trace_done = std::chrono::steady_clock::now();
 
@@ -3043,6 +3156,7 @@ int main(int argc, char** argv) {
             printSection("HDF5 output");
             printField("status", "writing HDF5 trace file");
             printField("path", output_cfg.hdf5_path);
+            const auto t_hdf5_start = std::chrono::steady_clock::now();
             writeNativeTraceHdf5(output_cfg,
                                  waveform_cfg,
                                  argv[1],
@@ -3063,6 +3177,9 @@ int main(int argc, char** argv) {
                                  waveforms,
                                  raw_waveform_hits,
                                  whiteboard_hits);
+            if (profile_cfg.enabled) {
+                addElapsed(profile_stats, &ProfileStats::hdf5_write_s, t_hdf5_start);
+            }
             printField("status", "HDF5 trace file written");
         }
 #endif
@@ -3112,6 +3229,9 @@ int main(int argc, char** argv) {
         printSection("Timing");
         printField("trace_time_s", doubleToString(elapsedSeconds(t_trace_start, t_trace_done)));
         printField("total_time_s", doubleToString(elapsedSeconds(t_start, t_done)));
+        if (profile_cfg.enabled) {
+            printProfileStats(profile_stats, elapsedSeconds(t_trace_start, t_trace_done));
+        }
         printSection("Machine-readable summary");
         std::cout << "input_bunches=" << stream_stats.photon_bunches << "\n";
         std::cout << "shower_events=" << metadata.events.size() << "\n";

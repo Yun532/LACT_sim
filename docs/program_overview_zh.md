@@ -77,6 +77,14 @@ camera_nsb_trigger_dense.h5
 camera_full_response_dense.h5
 ```
 
+长时间 CORSIKA 运行可以临时打开轻量 profiling：
+
+```ini
+profile.enabled=true
+```
+
+运行结束时 log 会增加 `[Profile]` 段，粗略统计 EventIO streaming、坐标变换、光追、遮挡、相机响应、累积和 HDF5 写入耗时。`eventio_stream_s` 是 streaming 加 callback 处理的墙钟时间；其余子阶段是在 callback 内部测量的耗时，因此这些百分比不是互斥分解，主要用于判断瓶颈大概在哪里。
+
 白板调试仍推荐 CSV，因为它保存逐光子命中点，便于看 PSF 和 spot 结构：
 
 ```text
