@@ -1,113 +1,100 @@
-# LACT_sim
+# LACT_sim 用户版 v1.0
 
-LACT_sim is a C++ optical ray-tracing program for the LACT 1229 mirror layout.
-It supports:
+这是 LACT 光学模拟程序的最简用户版本，只保留两个常用入口：
 
-- perfect optical tests with synthetic parallel light and finite-distance point sources
-- elevation-dependent structural deformation of mirror facets
-- direct CORSIKA/EventIO photon-bunch input through the vendored hessioxxx library
-- whiteboard output-plane images
-- the current `new_camera` square-pixel camera, light collector, SiPM, and p.e. output
+1. 平行光白板测试：`configs/examples/parallel_light.cfg`
+2. CORSIKA/EventIO 完整相机响应：`configs/examples/full_response_corsika.cfg`
 
-Generated build folders, logs, CSV outputs, and plots are intentionally not part
-of the source package. They can be regenerated with the commands below.
+用户版不包含开发测试、额外示例和详细开发文档。核心源码仍保留在 `src/`、`include/` 和 `apps/` 中，并保留了两个常用画图脚本用于检查输出结果。
 
-## Chinese Overview
-
-For a compact Chinese guide to the program flow, coordinate conventions, core
-functions, output files, and current physics boundaries, see:
+## 目录说明
 
 ```text
-docs/program_overview_zh.md
+apps/                         两个可执行程序入口
+  run_optical_sim.cpp          平行光、点源、CSV 光子等非 CORSIKA 光学模拟
+  run_corsika_trace.cpp        CORSIKA/EventIO 输入的完整响应模拟
+
+configs/examples/             用户直接运行和修改的两个 cfg
+configs/mirror_1229_facets.csv 1229 面镜片布局
+configs/cameras/              new_camera 像素布局
+configs/efficiency/           SiPM PDE 曲线
+
+external/hessioxxx/            CORSIKA/EventIO 读取所需的 hessioxxx
+tools/build_hessio.sh          编译 hessioxxx 的辅助脚本
+tools/ensure_hdf5.sh           检查 HDF5；缺失时尝试自动安装
+python/                        平行光光斑和 CORSIKA 相机图像画图脚本
 ```
 
-## Repository Layout
+## 编译
 
-```text
-apps/        C++ executables and tests
-configs/     mirror, source, output, camera, electronics, and official-test configs
-docs/        coordinate-system and EventIO notes
-include/     public C++ headers
-python/      plotting and conversion utilities
-src/         C++ implementation
-tools/       build and reproduction scripts
-external/    vendored hessioxxx source and metadata
-```
-
-## Server Build
-
-From the repository root:
-
-```bash
-cd /path/to/LACT_sim
-```
-
-For a normal server build with CORSIKA/EventIO support:
+在仓库根目录运行：
 
 ```bash
 make
-make test
 ```
 
-This builds the vendored hessioxxx library first, configures CMake in `build/`,
-builds LACT_sim, and runs the CTest suite. The generated executables are linked
-with a build-tree runtime path pointing at:
+这会先编译 `external/hessioxxx/source`，然后在 `build/` 下生成：
 
 ```text
-external/hessioxxx/source/lib
+build/run_optical_sim
+build/run_corsika_trace
 ```
 
-so in the normal in-place build you do not need to re-export `LD_LIBRARY_PATH`
-in every new terminal. If you move the compiled `build/` directory to another
-location, rebuild from the repository root.
-
-For optical tests that do not need CORSIKA/EventIO:
+如果只想编译平行光示例、不需要 CORSIKA/EventIO 支持，可以运行：
 
 ```bash
 make no-hessio
-ctest --test-dir build --output-on-failure
 ```
 
-For CORSIKA/EventIO input and dense HDF5 camera output, install the HDF5 C
-development package on the server first.  Common examples:
+这时只会生成 `build/run_optical_sim`，不会生成 `run_corsika_trace`。
+
+默认 `make` 会检查 HDF5 C 库。若系统没有 HDF5，`tools/ensure_hdf5.sh` 会尝试用当前系统包管理器自动安装：
+
+```text
+macOS:          brew install hdf5
+Ubuntu/Debian:  sudo apt-get install -y libhdf5-dev
+Fedora/RHEL:    sudo dnf/yum install -y hdf5-devel
+```
+
+如果机器没有下载或安装权限，脚本会报错退出。正式完整响应建议使用 HDF5 输出。
+
+如果暂时没有可用的 HDF5，或者 macOS 上 HDF5 与编译器架构不一致，可以先关闭 HDF5：
+
+```bash
+make LACT_ENABLE_HDF5=OFF
+```
+
+这种情况下 CORSIKA 示例的 `output.format` 需要改成 `csv`，不要使用 `hdf5`。
+
+在 macOS 上，Makefile 会默认使用当前机器架构设置 `CMAKE_OSX_ARCHITECTURES`。如果你明确需要指定架构，可以这样运行：
+
+```bash
+make CMAKE_OSX_ARCHITECTURES=arm64
+```
+
+或：
+
+```bash
+make CMAKE_OSX_ARCHITECTURES=x86_64
+```
+
+常见依赖：
 
 ```bash
 # Ubuntu/Debian
 sudo apt-get install cmake g++ make zlib1g-dev libhdf5-dev
 
-# CentOS/RHEL-like systems
+# CentOS/RHEL-like
 sudo yum install cmake gcc-c++ make zlib-devel hdf5-devel
 ```
 
-The `make` command above is equivalent to:
+画图脚本需要额外的 Python 包：
 
 ```bash
-tools/build_hessio.sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-  -DHESSIO_ROOT="$PWD/external/hessioxxx/source"
-cmake --build build -j4
-ctest --test-dir build --output-on-failure
+python3 -m pip install -r requirements.txt
 ```
 
-Native HDF5 camera output is enabled automatically when the HDF5 C library is
-available. Check the CMake output for a line like `Found HDF5`. To force a
-CSV-only build, add:
-
-```bash
--DLACT_ENABLE_HDF5=OFF
-```
-
-If you build hessioxxx manually, make sure these folders exist first:
-
-```bash
-mkdir -p external/hessioxxx/source/out \
-         external/hessioxxx/source/bin \
-         external/hessioxxx/source/lib
-make -C external/hessioxxx/source
-```
-
-If a system strips or ignores executable RPATHs, set the runtime library path
-manually before running EventIO executables.
+macOS 或 Linux 如果运行时找不到 `libhessio`，可以手动设置库路径。
 
 Linux:
 
@@ -121,830 +108,180 @@ macOS:
 export DYLD_LIBRARY_PATH="$PWD/external/hessioxxx/source/lib:${DYLD_LIBRARY_PATH:-}"
 ```
 
-To rebuild from scratch:
+## 示例 1：平行光白板测试
+
+运行：
 
 ```bash
-make clean      # remove the LACT_sim CMake build directory
-make            # configure and build again
+build/run_optical_sim configs/examples/parallel_light.cfg
 ```
 
-To also remove hessioxxx build products:
-
-```bash
-make distclean
-make
-```
-
-For server plotting without a display, use:
-
-```bash
-export MPLBACKEND=Agg
-export MPLCONFIGDIR=/tmp
-```
-
-## One-Command Reproduction
-
-The helper script rebuilds the C++ code, runs tests, runs the official optical
-cases, and plots the standard figures.
-
-For a cfg-by-cfg explanation of every official test, including independent run
-commands and expected outputs, see
-[`docs/official_tests.md`](docs/official_tests.md).
-
-Without CORSIKA:
-
-```bash
-tools/run_official_tests.sh --no-corsika
-```
-
-With CORSIKA/EventIO:
-
-```bash
-tools/run_official_tests.sh --corsika-file /path/to/input.zst
-```
-
-Outputs are written under:
+输出：
 
 ```text
-run_logs/official_tests/
+run_logs/parallel_light/hits.csv
 ```
 
-The sections below show the same tests as explicit commands.
+这个例子使用理想平行光照射 1229 面镜片布局，然后把反射光打到焦平面白板上。它适合用来检查镜面布局、焦距、光斑位置和基本光追是否正常。
 
-## Configuring CORSIKA Pointing
+画出焦平面光斑：
 
-For CORSIKA/EventIO runs, the input file gives photon positions and directions
-in the CORSIKA IACT horizontal frame. LACT_sim then rotates those photons into
-the telescope-local optical frame using the telescope pointing in the cfg.
-Use `run_corsika_trace` for these runs; `run_optical_sim` is for synthetic and
-PhotonCsv optical debugging and rejects `source.mode=EventIO`.
+```bash
+python3 python/plot_spot_histogram.py \
+  run_logs/parallel_light/hits.csv \
+  --output run_logs/parallel_light/spot_histogram.png \
+  --title "Parallel light spot"
+```
+
+如果提示缺少 Python 包，先运行 `python3 -m pip install -r requirements.txt`。
+
+### parallel_light.cfg 怎么改
+
+```ini
+telescope.pointing_az_deg=0
+telescope.pointing_el_deg=90
+```
+
+望远镜指向。`pointing_el_deg=90` 表示指向天顶。平行光源定义在望远镜本地坐标中，改指向后程序会整体变换坐标。
+
+```ini
+mirror.csv_path=configs/mirror_1229_facets.csv
+```
+
+镜片布局 CSV。一般不用改；如果要测试新的镜面排布，换成新的 CSV 路径。
+
+```ini
+source.n_bunches=1000000
+source.beam_radius_m=4
+source.beam_direction=0,0,-1
+source.random_seed=1229
+```
+
+平行光设置。`n_bunches` 是光子束数量，越大统计越稳定但越慢。`beam_radius_m` 是入射光束半径。`beam_direction=0,0,-1` 表示沿望远镜光轴入射。
+
+```ini
+output.plane_point=0,0,-8
+output.csv=run_logs/parallel_light/hits.csv
+```
+
+白板输出平面和输出 CSV。当前焦距是 8 m，所以白板放在 `z=-8`。如果修改焦距，要同步检查这里。
+
+## 示例 2：CORSIKA 完整相机响应
+
+运行：
+
+```bash
+build/run_corsika_trace configs/examples/full_response_corsika.cfg /path/to/input.zst
+```
+
+第二个参数是 CORSIKA/EventIO 文件路径。也可以把路径直接写进 cfg 的 `source.eventio_path`，但推荐命令行传入，方便重复跑不同输入文件。
+
+输出默认在：
+
+```text
+run_logs/full_response_corsika/corsika_trace.h5
+run_logs/full_response_corsika/camera_pixel_image.csv
+run_logs/full_response_corsika/corsika_trace_summary.csv
+```
+
+### full_response_corsika.cfg 怎么改
 
 ```ini
 telescope.pointing_az_deg=0
 telescope.pointing_el_deg=70
+```
+
+望远镜指向。CORSIKA 常给出 `zenith` 和 `azimuth`，这里需要填：
+
+```text
+pointing_el_deg = 90 - zenith
+pointing_az_deg = azimuth
+```
+
+例如 CORSIKA 输入是 `zenith=20 deg, azimuth=0 deg`，则写：
+
+```ini
+telescope.pointing_az_deg=0
+telescope.pointing_el_deg=70
+```
+
+```ini
+mirror.csv_path=configs/mirror_1229_facets.csv
+camera.csv_path=configs/cameras/new_camera_pixels.csv
+```
+
+望远镜结构文件。`mirror.csv_path` 是镜片布局，`camera.csv_path` 是相机像素布局。用户替换结构时主要改这两个路径。
+
+```ini
+camera.collector=bezier
+camera.collector_exit_size_m=0.0130
+camera.collector_height_m=0.0297
+```
+
+光收集器设置。默认使用 new_camera 的 Bezier 型光收集器参数。
+
+```ini
+sipm.size_m=0.0130
+sipm.pde=configs/efficiency/sipm_pde.csv
+```
+
+SiPM 设置。`sipm.pde` 是波长相关探测效率曲线。如果想先做理想光子计数，可以注释掉 `sipm.pde`。
+
+```ini
+source.mode=EventIO
 source.eventio_coordinate_frame=corsika_iact
+source.use_eventio_telescope_position=true
 ```
 
-Use the CORSIKA run direction to set these values. If the CORSIKA file name or
-input card says:
-
-```text
-zenith = Z deg
-azimuth = A deg
-```
-
-then use:
+CORSIKA/EventIO 输入设置。通常不用改。`corsika_iact` 表示按 hessio/CORSIKA IACT 光子束坐标约定读入，再根据望远镜指向旋转到 LACT 本地光学坐标。
 
 ```ini
-telescope.pointing_el_deg = 90 - Z
-telescope.pointing_az_deg = A
+# source.max_shower_events=1
+# source.filter_shower_event_id=327666
 ```
 
-For example:
-
-```text
-zenith_20 azimuth_0
-```
-
-becomes:
+调试大文件时可以打开这些选项，只跑一个 shower 或筛选指定 shower。
 
 ```ini
-telescope.pointing_az_deg=0
-telescope.pointing_el_deg=70
-```
-
-The azimuth convention is the hessio/sim_telarray-compatible one documented in
-`docs/coordinate_systems.md`: `0 deg` points along array `+X` / North, and
-`90 deg` points toward East, represented as array `-Y` in the CORSIKA frame.
-
-The generic frame used by `run_optical_sim` is different: its
-`buildTelescopeFrame()` helper measures azimuth from global `+x` toward global
-`+y`. That generic frame is kept for local optical tests and should not be used
-as the CORSIKA NWU transform.
-
-For the smallest normal CORSIKA camera run, copy this template and edit only
-pointing plus input/output paths:
-
-```text
-configs/templates/minimal_corsika_camera.cfg
-```
-
-For a more verbose example with all important sections visible, copy:
-
-```text
-configs/examples/corsika_new_user_full.cfg
-```
-
-Example:
-
-```bash
-cp configs/examples/corsika_new_user_full.cfg my_corsika_run.cfg
-```
-
-Then edit:
-
-```ini
-telescope.pointing_az_deg=...
-telescope.pointing_el_deg=...
 output.format=hdf5
-output.hdf5_path=run_logs/my_corsika_run/corsika_trace.h5
+output.hdf5_path=run_logs/full_response_corsika/corsika_trace.h5
+output.pixel_csv=run_logs/full_response_corsika/camera_pixel_image.csv
+output.summary_csv=run_logs/full_response_corsika/corsika_trace_summary.csv
 ```
 
-Optional atmosphere transmission is configured as an extra factor after the
-CORSIKA photons arrive at the telescope plane:
+输出设置。正式结果建议用 HDF5。调试时可以把 `output.format` 改成 `csv` 或 `both`。
 
-```ini
-atmosphere.transmission=none
-atmosphere.transmission=0.92
-atmosphere.transmission=configs/atmosphere/my_transmission.csv
-```
+### 画 CORSIKA 相机图像
 
-The SiPM block converts collected photons into integrated p.e. through
-`sipm.pde`, which can be omitted, set to a constant, or set to a wavelength
-table. Detailed waveform, saturation, crosstalk, afterpulse, and trigger
-electronics are reserved for later replacement with the real implementation.
-
-Run:
-
-```bash
-build/run_corsika_trace my_corsika_run.cfg /path/to/input.zst
-```
-
-For a quick server smoke test on a large CORSIKA file, add one of:
-
-```ini
-source.max_shower_events=1
-source.filter_shower_event_id=327666
-```
-
-`source.max_shower_events=N` streams only the first `N` matching shower events.
-`source.filter_shower_event_id=ID` keeps only one original CORSIKA shower event.
-
-To measure where a long CORSIKA run spends time, enable the lightweight
-profiler:
-
-```ini
-profile.enabled=true
-```
-
-The final log will include a `[Profile]` block with coarse timings for EventIO
-streaming, coordinate transforms, optical tracing, obstruction checks, camera
-response, accumulation, and HDF5 writing. `eventio_stream_s` is wall time for
-streaming plus callback processing; the sub-stage timings inside the callback
-are not exclusive.
-
-## Test 1: Perfect Optics Whiteboard Spots
-
-This test uses the ideal 1229 mirror geometry, no structural deformation, and a
-whiteboard output plane at the 8 m focal plane.
-
-### Parallel Light
-
-Run ray tracing:
-
-```bash
-mkdir -p run_logs/official_tests/perfect_parallel
-build/run_optical_sim configs/official_tests/perfect_parallel_whiteboard.cfg \
-  2>&1 | tee run_logs/official_tests/perfect_parallel/run.log
-```
-
-Plot the whiteboard spot:
-
-```bash
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_spot_histogram.py \
-  run_logs/official_tests/perfect_parallel/hits.csv \
-  --output run_logs/official_tests/perfect_parallel/spot.png \
-  --max-bins 520 \
-  --dpi 350 \
-  --title "Perfect optics: on-axis parallel light"
-```
-
-Main outputs:
-
-```text
-run_logs/official_tests/perfect_parallel/hits.csv
-run_logs/official_tests/perfect_parallel/run.log
-run_logs/official_tests/perfect_parallel/spot.png
-```
-
-### 900 m Point Source
-
-Run ray tracing:
-
-```bash
-mkdir -p run_logs/official_tests/point_900m
-build/run_optical_sim configs/official_tests/perfect_point_900m_whiteboard.cfg \
-  2>&1 | tee run_logs/official_tests/point_900m/run.log
-```
-
-Plot the whiteboard spot:
-
-```bash
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_spot_histogram.py \
-  run_logs/official_tests/point_900m/hits.csv \
-  --output run_logs/official_tests/point_900m/spot.png \
-  --max-bins 520 \
-  --dpi 350 \
-  --title "Perfect optics: 900 m point source"
-```
-
-Main outputs:
-
-```text
-run_logs/official_tests/point_900m/hits.csv
-run_logs/official_tests/point_900m/run.log
-run_logs/official_tests/point_900m/spot.png
-```
-
-## Test 2: Imported 3D Obstruction
-
-This test uses the external simplified 3D obstruction model converted into:
-
-```text
-configs/obstructions/raytrace_final_structure_primitives.csv
-```
-
-It checks both incoming and reflected-ray obstruction. The official smoke test
-keeps four plots: a parallel-light whiteboard spot, a parallel-light mirror-hit
-distribution with projected mirror-facet outlines, a 30 m point-source
-whiteboard spot, and the point-source mirror-hit distribution with projected
-mirror-facet outlines.
-
-Parallel-light obstruction run:
-
-```bash
-mkdir -p run_logs/official_tests/raytrace_structure_parallel
-build/run_optical_sim configs/official_tests/perfect_parallel_raytrace_structure_whiteboard.cfg \
-  2>&1 | tee run_logs/official_tests/raytrace_structure_parallel/run.log
-
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_spot_histogram.py \
-  run_logs/official_tests/raytrace_structure_parallel/hits.csv \
-  --output run_logs/official_tests/raytrace_structure_parallel/spot.png \
-  --max-bins 520 \
-  --dpi 350 \
-  --title "Parallel beam with 3D obstruction"
-
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_mirror_hit_map.py \
-  run_logs/official_tests/raytrace_structure_parallel/hits.csv \
-  --config configs/official_tests/perfect_parallel_raytrace_structure_whiteboard.cfg \
-  --require-surface \
-  --overlay-facets \
-  --output run_logs/official_tests/raytrace_structure_parallel/mirror_hits_with_facet_outlines.png \
-  --dpi 350 \
-  --title "Parallel beam: mirror hit points with facet outlines"
-```
-
-30 m point-source obstruction run:
-
-```bash
-mkdir -p run_logs/official_tests/raytrace_structure_point_30m
-build/run_optical_sim configs/official_tests/point_30m_structure_whiteboard.cfg \
-  2>&1 | tee run_logs/official_tests/raytrace_structure_point_30m/run.log
-
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_spot_histogram.py \
-  run_logs/official_tests/raytrace_structure_point_30m/hits.csv \
-  --output run_logs/official_tests/raytrace_structure_point_30m/spot.png \
-  --max-bins 520 \
-  --dpi 350 \
-  --title "30 m point source with 3D obstruction"
-```
-
-Mirror-hit distribution with projected facet outlines:
-
-```bash
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_mirror_hit_map.py \
-  run_logs/official_tests/raytrace_structure_point_30m/hits.csv \
-  --config configs/official_tests/point_30m_structure_whiteboard.cfg \
-  --require-surface \
-  --overlay-facets \
-  --output run_logs/official_tests/raytrace_structure_point_30m/mirror_hits_with_facet_outlines.png \
-  --dpi 350 \
-  --title "30 m point source: mirror hit points with facet outlines"
-```
-
-Main outputs:
-
-```text
-run_logs/official_tests/raytrace_structure_parallel/spot.png
-run_logs/official_tests/raytrace_structure_parallel/mirror_hits_with_facet_outlines.png
-run_logs/official_tests/raytrace_structure_parallel/layout_3d.png
-run_logs/official_tests/raytrace_structure_parallel/layout_3d.html
-run_logs/official_tests/raytrace_structure_point_30m/spot.png
-run_logs/official_tests/raytrace_structure_point_30m/mirror_hits_with_facet_outlines.png
-```
-
-The obstruction run log also reports true before/after obstruction statistics
-and equivalent collection areas, for example:
-
-```text
-hit_output_before_obstruction
-hit_output_plane
-output_transmission_after_obstruction
-output_loss_fraction_from_obstruction
-source_sampling_area_m2
-output_collecting_area_before_obstruction_m2
-output_collecting_area_after_obstruction_m2
-output_collecting_area_loss_from_obstruction_m2
-```
-
-## Test 3: Structural Deformation Scan
-
-This test enables the elevation-dependent mirror series:
-
-```text
-configs/mirror_1229_elevation_series.csv
-configs/errors/structural_deformation_1229.cfg
-configs/official_tests/deformation_parallel_whiteboard.cfg
-```
-
-The scan interpolates the mirror state at the requested elevation and runs a
-parallel-light whiteboard trace for each elevation.
-
-Run the 0 to 90 degree scan:
-
-```bash
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/run_elevation_parallel_scan.py \
-  --config configs/official_tests/deformation_parallel_whiteboard.cfg \
-  --run-binary build/run_optical_sim \
-  --elevations 0,10,20,30,40,50,60,70,80,90 \
-  --n-bunches 100000 \
-  --output-dir run_logs/official_tests/deformation_scan \
-  --dpi 350
-```
-
-Main outputs:
-
-```text
-run_logs/official_tests/deformation_scan/elevation_scan_metrics.csv
-run_logs/official_tests/deformation_scan/elevation_spot_grid.png
-run_logs/official_tests/deformation_scan/elevation_metrics.png
-run_logs/official_tests/deformation_scan/hits_el_*.csv
-run_logs/official_tests/deformation_scan/run_el_*.log
-```
-
-Plot the 3D mirror and whiteboard layout for selected elevations:
-
-```bash
-mkdir -p run_logs/official_tests/deformation_scan/layouts
-
-for el in 0 20 45 60 90; do
-  MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_optical_layout_3d.py \
-    --config configs/official_tests/deformation_parallel_whiteboard.cfg \
-    --elevation-deg "$el" \
-    --output "run_logs/official_tests/deformation_scan/layouts/layout_el_${el}.png" \
-    --dpi 350 \
-    --ray-stride 2 \
-    --view 32,-58
-done
-```
-
-For a top-view mirror check:
-
-```bash
-for el in 0 20 45 60 90; do
-  MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_mirror_top_view.py \
-    --config configs/official_tests/deformation_parallel_whiteboard.cfg \
-    --elevation-deg "$el" \
-    --frame local \
-    --output "run_logs/official_tests/deformation_scan/layouts/top_el_${el}.png" \
-    --dpi 350
-done
-```
-
-## Test 4: CORSIKA/EventIO to Whiteboard and Camera Images
-
-This test requires the hessio-enabled build. The input file is passed on the
-command line; the configs keep `source.eventio_path` empty.
-
-Recommended CORSIKA coordinate setting:
-
-```ini
-source.eventio_coordinate_frame=corsika_iact
-```
-
-This means photon positions are telescope-relative CORSIKA IACT coordinates,
-then rotated into the LACT local optical frame using the telescope pointing
-configuration. See `docs/coordinate_systems.md` for the full convention.
-
-### Whiteboard Output
-
-Run the CORSIKA whiteboard trace. This official whiteboard config intentionally
-uses CSV because it saves per-photon hit positions for spot inspection:
-
-```bash
-mkdir -p run_logs/official_tests/corsika
-build/run_corsika_trace \
-  configs/official_tests/corsika_whiteboard.cfg \
-  /path/to/input.zst \
-  2>&1 | tee run_logs/official_tests/corsika/whiteboard_run.log
-```
-
-Main outputs:
-
-```text
-run_logs/official_tests/corsika/whiteboard_hits.csv
-run_logs/official_tests/corsika/whiteboard_summary.csv
-run_logs/official_tests/corsika/whiteboard_run.log
-```
-
-The required setting is already in
-`configs/official_tests/corsika_whiteboard.cfg`:
+如果使用 CSV 输出，先确认 cfg 中包含：
 
 ```ini
 output.format=csv
-output.hits_csv=run_logs/official_tests/corsika/whiteboard_hits.csv
-output.summary_csv=run_logs/official_tests/corsika/whiteboard_summary.csv
 ```
 
-Plot by CORSIKA shower-event order and array id. Here `--array-id` is the
-CORSIKA `CSCAT` / `MC_TELOFF` array-use index, not the telescope ID. With
-`source.event_id_mode=event_array100`, output `event_id` is encoded as:
-
-```text
-event_id = shower_event * 100 + array_id
-```
-
-For a file with `CSCAT 10 ...`, the valid array IDs are normally `0..9`.
-The official script now auto-selects one bright event common to all camera HDF5
-outputs and writes it to:
-
-```text
-run_logs/official_tests/corsika/plots/selected_event.env
-```
-
-After sourcing that file, all CORSIKA plots can use the same `event_id`:
-
-```bash
-source run_logs/official_tests/corsika/plots/selected_event.env
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_corsika_trace_output.py \
-  run_logs/official_tests/corsika/whiteboard_hits.csv \
-  --summary-csv run_logs/official_tests/corsika/whiteboard_summary.csv \
-  --event-id "$LACT_SELECTED_EVENT_ID" \
-  --output-dir "run_logs/official_tests/corsika/plots/event_${LACT_SELECTED_EVENT_ID}/whiteboard" \
-  --dpi 350
-```
-
-Add `--telescope-id N` if you only want one telescope. If omitted, the plotting
-script draws all telescopes with matching rows.
-
-If you already know the exact output event id, you can also select it directly:
-
-```bash
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_corsika_trace_output.py \
-  run_logs/official_tests/corsika/whiteboard_hits.csv \
-  --event-id OUTPUT_EVENT_ID \
-  --output-dir run_logs/official_tests/corsika/plots/whiteboard_event_id \
-  --dpi 350
-```
-
-### Dense HDF5 Pixel Camera Output
-
-Run the CORSIKA camera trace. This is the recommended production path: the
-output file contains the static camera/mirror/telescope metadata once, plus one
-full 1616-pixel camera image per event/telescope stream.
-
-```bash
-mkdir -p run_logs/official_tests/corsika
-build/run_corsika_trace \
-  configs/official_tests/corsika_new_camera.cfg \
-  /path/to/input.zst \
-  2>&1 | tee run_logs/official_tests/corsika/camera_run.log
-```
-
-Main outputs:
-
-```text
-run_logs/official_tests/corsika/camera_dense.h5
-run_logs/official_tests/corsika/camera_run.log
-```
-
-The required setting is already in
-`configs/official_tests/corsika_new_camera.cfg`:
+或：
 
 ```ini
-output.format=hdf5
-output.hdf5_path=run_logs/official_tests/corsika/camera_dense.h5
-output.hdf5_storage=dense
+output.format=both
 ```
 
-The dense HDF5 camera image is already after pixel entrance, light collector,
-SiPM, and p.e. conversion when these components are enabled in the config.
-Inside the file:
-
-```text
-/images/dense/pe            [n_images, 1616]
-/images/dense/signal        [n_images, 1616]
-/images/dense/photon_count  [n_images, 1616]
-/camera/pixels              camera geometry
-/telescopes/table           telescope metadata
-/events/table               event_index, event_id
-/metadata/nsb               NSB settings
-/metadata/trigger           trigger settings
-/trigger/telescope          telescope trigger rows
-/trigger/array              array trigger rows
-```
-
-Plot all telescope camera images for the selected CORSIKA event. Omitting
-`--telescope-id` writes one camera PNG for every telescope image available in
-the selected event:
+然后画出某一个 event 的所有望远镜相机图像：
 
 ```bash
-source run_logs/official_tests/corsika/plots/selected_event.env
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
-  run_logs/official_tests/corsika/camera_dense.h5 \
-  --event-id "$LACT_SELECTED_EVENT_ID" \
-  --quantity pe \
-  --output "run_logs/official_tests/corsika/plots/event_${LACT_SELECTED_EVENT_ID}/camera/all_tel_pe" \
-  --dpi 350
+python3 python/plot_corsika_trace_output.py \
+  run_logs/full_response_corsika/camera_pixel_image.csv \
+  --event-number 1 \
+  --camera-csv configs/cameras/new_camera_pixels.csv \
+  --output-dir run_logs/full_response_corsika/plots/event_1
 ```
 
-Add `--telescope-id N` only if you want one telescope:
+如果使用 HDF5 输出，可以直接从 `corsika_trace.h5` 画图：
 
 ```bash
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
-  run_logs/official_tests/corsika/camera_dense.h5 \
-  --event-id "$LACT_SELECTED_EVENT_ID" \
-  --telescope-id 3 \
-  --quantity pe \
-  --output "run_logs/official_tests/corsika/plots/event_${LACT_SELECTED_EVENT_ID}/camera/tel3_pe.png" \
-  --dpi 350
+python3 python/plot_hdf5_camera.py \
+  run_logs/full_response_corsika/corsika_trace.h5 \
+  --event-number 1 \
+  --output run_logs/full_response_corsika/plots/hdf5_event_1
 ```
 
-If you already know the output event id, select it directly:
-
-```bash
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
-  run_logs/official_tests/corsika/camera_dense.h5 \
-  --event-id OUTPUT_EVENT_ID \
-  --telescope-id 7 \
-  --quantity pe \
-  --output run_logs/official_tests/corsika/camera_event_id_tel7_pe.png \
-  --dpi 350
-```
-
-You can also select by the original CORSIKA shower event id, which is often the
-number printed in the EventIO log:
-
-```bash
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
-  run_logs/official_tests/corsika/camera_dense.h5 \
-  --shower-event-id 468898 \
-  --array-id 2 \
-  --telescope-id 3 \
-  --quantity pe \
-  --output run_logs/official_tests/corsika/camera_shower468898_array2_tel3_pe.png \
-  --dpi 350
-```
-
-Plot the full telescope array layout, with North up and East right:
-
-```bash
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_array_layout.py \
-  run_logs/official_tests/corsika/camera_dense.h5 \
-  --output run_logs/official_tests/corsika/array_layout.png \
-  --dpi 350
-```
-
-Plot one event with total p.e. per telescope shown by a logarithmic colorbar.
-For CORSIKA HDF5 files written by the current `run_corsika_trace`, the script
-also marks the core position and draws the horizontal arrival-direction arrow
-from `/events/corsika`. The telescope labels are one-based (`T1`, `T2`, ...),
-while the stored telescope IDs remain zero-based:
-
-```bash
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_array_layout.py \
-  run_logs/official_tests/corsika/camera_dense.h5 \
-  --shower-event-id 468898 \
-  --array-id 2 \
-  --quantity pe \
-  --output run_logs/official_tests/corsika/array_event46889802_pe.png \
-  --dpi 350
-```
-
-For the same event, `--event-id 46889802` is equivalent to
-`--shower-event-id 468898 --array-id 2` because the default CORSIKA setting uses
-`event_id = shower_event * 100 + array_id`. So `46889800` is not a different
-shower from `468898`; it is shower `468898` with array/core-offset stream `0`.
-This is why HDF5 event IDs can look like the log shower ID with two extra
-digits appended.
-
-To inspect several shower cores near the array center, use:
-
-```bash
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_array_layout.py \
-  run_logs/official_tests/corsika/camera_dense.h5 \
-  --show-nearby-cores 6 \
-  --array-only-limits \
-  --output run_logs/official_tests/corsika/array_nearby_cores.png \
-  --dpi 350
-```
-
-For CORSIKA text debugging, set `output.format=csv` or `output.format=both` and
-provide `output.pixel_csv`/`output.summary_csv`.
-
-To run the official NSB + simple-trigger smoke test, use:
-
-```bash
-build/run_corsika_trace \
-  configs/official_tests/corsika_nsb_trigger_camera.cfg \
-  /path/to/input.zst \
-  2>&1 | tee run_logs/official_tests/corsika/camera_nsb_trigger_run.log
-```
-
-This writes `camera_nsb_trigger_dense.h5`, where `/images/dense/pe` includes
-per-pixel integrated Cherenkov plus Poisson NSB p.e. This official smoke test enables
-`output.save_only_triggered=true`, so `/images/index` and `/images/dense/*`
-contain only telescope images that pass the simple camera trigger. The full
-trigger decision table is still kept in `/trigger/telescope` and
-`/trigger/array`. With `output.hdf5_write_components=true`, the file also
-contains `/images/dense/cherenkov_pe` and `/images/dense/nsb_pe`.
-The proxy waveform uses `waveform.time_reference=image_first`, so compact GIF
-frames are saved relative to each telescope image first Cherenkov photon time
-T0; the subtracted absolute reference is stored in
-`/waveforms/reference_time_ns`.
-For the benchmark file used in development,
-`lact_prod1_corsika_particle_gamma_energy_1000.0_10000.0_zenith_20.0_azimuth_0.0_run_2418_event_468898.zst`,
-the official script plots all available/triggered telescope images for
-`shower-event-number=1, array-id=2`. The NSB+trigger file saves only telescope
-images that pass the trigger, so the number of PNGs may be smaller than the
-full array.
-
-To run the official full-response CORSIKA smoke test, use:
-
-```bash
-build/run_corsika_trace \
-  configs/official_tests/corsika_full_response_camera.cfg \
-  /path/to/input.zst \
-  2>&1 | tee run_logs/official_tests/corsika/camera_full_response_run.log
-```
-
-This writes `camera_full_response_dense.h5`. It enables the current optical
-error paths, the wavelength-dependent mirror reflectivity, filter transmission,
-SiPM PDE curve, and the simple multiplicity trigger. SiPM PDE is configured only
-once in `configs/sipm/new_camera_sipm.cfg` as `sipm.pde`; the electronics module
-is still only a placeholder for future waveform/electronics effects. This test uses
-`output.save_only_triggered=true`, so `/images/dense/*`
-contains only telescope images that pass the trigger. The complete trigger
-decision tables remain in `/trigger/telescope` and `/trigger/array`.
-
-The official one-command script also plots the triggered camera images and the
-array/core layout for the same automatically selected event:
-
-```text
-run_logs/official_tests/corsika/plots/event_<event_id>/full_response/all_tel_pe/
-run_logs/official_tests/corsika/plots/event_<event_id>/layout/core_and_array_pe.png
-```
-
-The random optical error values in
-`configs/errors/full_response_1229.cfg` are reproducible smoke-test values, not
-a calibrated alignment model.
-
-For synthetic sources, `run_optical_sim` also supports compact camera output:
-
-```ini
-output.mode=pixel
-output.pixel_csv=run_logs/my_camera/camera_pixels.csv
-```
-
-Use `output.mode=hits` for a full per-photon whiteboard/camera hit table, or
-`output.mode=both` to write both files.
-
-## HDF5 Packed Output
-
-CSV remains useful for debugging. For CORSIKA camera runs, the C++ program can
-write camera images and static geometry/config directly into one HDF5 file:
-
-```ini
-output.format=hdf5
-output.hdf5_path=run_logs/my_corsika_run/corsika_trace.h5
-output.hdf5_storage=dense
-```
-
-Use `output.format=csv` for text-only debug output, or `output.format=both` to
-write HDF5 plus `output.pixel_csv`/`output.summary_csv` for regression checks.
-For production camera output, `dense` is recommended: each event/telescope image
-is stored as a full 1616-pixel vector, which is the natural format once NSB and
-electronics noise are added. `sparse` is still available for compact no-noise
-debugging, and `both` stores both views.
-
-The Python exporter is still available for converting older CSV outputs:
-
-```bash
-python3 python/export_trace_hdf5.py \
-  --pixel-csv run_logs/half_mirror_50m/camera_pixels.csv \
-  --config configs/experiments/half_mirror_point_50m_new_camera.cfg \
-  --output run_logs/half_mirror_50m/camera_sparse.h5 \
-  --storage sparse
-```
-
-Use `--storage sparse` before NSB/noise, when only hit pixels need to be stored.
-Use `--storage dense` after NSB/noise, when every pixel has a value. Use
-`--storage both` when you want both views.
-
-Plot directly from HDF5, without a separate camera pixel CSV:
-
-```bash
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
-  run_logs/official_tests/corsika/camera_dense.h5 \
-  --shower-event-number 1 \
-  --array-id 0 \
-  --quantity pe \
-  --output run_logs/official_tests/corsika/camera_from_h5.png
-```
-
-Omit `--telescope-id` to plot all telescope images for that event. Add
-`--telescope-id N` when you want one camera only. In these HDF5 plotting
-commands, `--array-id` has the same meaning: it selects the CORSIKA
-array-use/core-offset stream for the chosen original shower event. It is
-separate from `--telescope-id`.
-
-See `docs/hdf5_output_format.md` for the file layout.
-
-## Efficiency Curve Checks
-
-Mirror reflectivity, filter transmission, SiPM PDE, and optional atmosphere
-transmission are wavelength-dependent multiplicative factors. To inspect the
-input tables and the total response curve:
-
-```bash
-MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_efficiency_curves.py \
-  --output-dir run_logs/official_tests/efficiency_curves \
-  2>&1 | tee run_logs/official_tests/efficiency_curves/run.log
-```
-
-This writes one plot per component, `total_efficiency.png`, sampled values in
-`efficiency_curve_samples.csv`, and a short report. See
-`docs/efficiency_validation.md` for the exact interpolation and duplicate-point
-rules.
-
-## Configs Used by the Official Tests
-
-```text
-configs/official_tests/perfect_parallel_whiteboard.cfg
-configs/official_tests/perfect_point_900m_whiteboard.cfg
-configs/official_tests/perfect_parallel_raytrace_structure_whiteboard.cfg
-configs/official_tests/point_30m_structure_whiteboard.cfg
-configs/official_tests/deformation_parallel_whiteboard.cfg
-configs/official_tests/corsika_whiteboard.cfg
-configs/official_tests/corsika_new_camera.cfg
-configs/official_tests/corsika_nsb_trigger_camera.cfg
-configs/official_tests/corsika_obstruction_nsb_trigger_camera.cfg
-configs/official_tests/corsika_full_response_camera.cfg
-```
-
-Core shared components:
-
-```text
-configs/mirrors/mirror_1229_imported.cfg
-configs/mirror_1229_facets.csv
-configs/mirror_1229_elevation_series.csv
-configs/outputs/whiteboard_f8.cfg
-configs/outputs/focal_plane_f8.cfg
-configs/cameras/new_camera.cfg
-configs/cameras/new_camera_pixels.csv
-configs/sipm/ideal_sipm.cfg
-configs/sipm/new_camera_sipm.cfg
-configs/electronics/ideal_pe.cfg
-configs/efficiency/curves_all.cfg
-configs/errors/full_response_1229.cfg
-configs/atmosphere/ideal.cfg
-configs/nsb/ideal.cfg
-configs/trigger/disabled.cfg
-```
-
-Use `configs/sipm/ideal_sipm.cfg` for pure optical/camera tests where the SiPM
-aperture is present but PDE losses are disabled. Use
-`configs/sipm/new_camera_sipm.cfg` for full-response runs with the measured SiPM
-PDE curve.
-
-Reusable starting templates:
-
-```text
-configs/templates/perfect_whiteboard.cfg
-configs/templates/real_camera_pixel.cfg
-configs/templates/corsika_camera.cfg
-configs/templates/minimal_corsika_camera.cfg
-```
-
-## Coordinate Notes
-
-Read this before interpreting off-axis images:
-
-```text
-docs/coordinate_systems.md
-```
-
-Important short version:
-
-- synthetic `source.beam_theta_deg/source.beam_phi_deg` describe photon
-  propagation direction, not the sky-source position
-- `phi=0 deg` starts at local `+x`; `phi=90 deg` points to local `+y`
-- a sky source in `+y` corresponds to photons traveling with a `-y` component
-- the reflecting optical system forms an inverted image on the focal plane
-- camera/whiteboard image coordinates are defined by
-  `output.plane_u_axis` and `output.plane_v_axis`
-- standard 2D plotters use a sky-up display convention when enough pointing
-  metadata or `--config` is provided: display `+y` is the projection of global
-  `+z/up` onto the plotted plane. Use `--raw-camera-xy` in
-  `plot_hdf5_camera.py` when you need stored camera x/y without display
-  rotation.
+这两个脚本沿用开发版的画图风格，会按相机像素布局画相机图像；不指定 `--telescope-id` 时，会把所选 event 里的所有望远镜都画出来。
