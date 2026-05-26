@@ -48,7 +48,6 @@ add_library(lact_sim_core
     src/io/MirrorFacetCsvReader.cpp
     src/app/OpticalSimCommon.cpp
     src/geometry/FacetFactory.cpp
-    src/optics/RayTracer.cpp
     src/optics/OpticalTracer.cpp
 )
 
