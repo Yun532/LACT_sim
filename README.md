@@ -159,6 +159,16 @@ source.random_seed=1229
 
 平行光设置。`n_bunches` 是光子束数量，越大统计越稳定但越慢。`beam_radius_m` 是入射光束半径。`beam_direction=0,0,-1` 表示沿望远镜光轴入射。
 
+如果想把这个例子改成轴上点源，可以参考 cfg 里的中文注释，把 `source.mode` 改成 `PointSource`，并设置：
+
+```ini
+source.source_position=0,0,50
+source.aperture_z=0
+source.aperture_radius_m=4
+```
+
+这表示点源在望远镜本地 `+z` 方向 50 m 处，光子采样目标平面是 `z=0`。
+
 ```ini
 output.plane_point=0,0,-8
 output.csv=run_logs/parallel_light/hits.csv
@@ -167,6 +177,35 @@ output.csv=run_logs/parallel_light/hits.csv
 白板输出平面和输出 CSV。当前焦距是 8 m，所以白板放在 `z=-8`。如果修改焦距，要同步检查这里。
 
 ## 示例 2：CORSIKA 完整相机响应
+
+这个示例包含：
+
+```text
+CORSIKA/EventIO 输入
+1229 镜面光追
+仰角相关结构形变
+小幅随机光学误差
+mirror reflectivity 曲线
+filter transmission 曲线
+new_camera 像素布局
+Bezier light collector
+SiPM PDE
+simple multiplicity trigger
+```
+
+默认会计算 trigger，但不会只保存触发事件：
+
+```ini
+output.save_only_triggered=false
+```
+
+如果正式运行时只想保存触发事件，改成：
+
+```ini
+output.save_only_triggered=true
+```
+
+NSB 默认关闭。建议先确认无 NSB 版本跑通，再按 cfg 里的中文注释打开。
 
 运行：
 
@@ -213,6 +252,22 @@ camera.csv_path=configs/cameras/new_camera_pixels.csv
 望远镜结构文件。`mirror.csv_path` 是镜片布局，`camera.csv_path` 是相机像素布局。用户替换结构时主要改这两个路径。
 
 ```ini
+error.structural_deformation_config=configs/mirrors/mirror_1229_elevation_series.cfg
+error.facet_radial_position_sigma_m=0.002
+error.facet_normal_sigma_deg=0.01
+error.reflect_direction_sigma_deg=0.0179
+```
+
+结构形变和随机误差设置。`structural_deformation_config` 会根据当前望远镜仰角读取 `configs/mirror_1229_elevation_series.csv`。几个 `sigma` 参数是小幅随机扰动，默认值来自开发版 full-response 测试。
+
+```ini
+efficiency.mirror_reflectivity=configs/efficiency/mirror_reflectivity.csv
+efficiency.filter_transmission=configs/efficiency/filter_transmission.csv
+```
+
+镜面反射率和滤光片透过率，按波长插值。
+
+```ini
 camera.collector=bezier
 camera.collector_exit_size_m=0.0130
 camera.collector_height_m=0.0297
@@ -226,6 +281,16 @@ sipm.pde=configs/efficiency/sipm_pde.csv
 ```
 
 SiPM 设置。`sipm.pde` 是波长相关探测效率曲线。如果想先做理想光子计数，可以注释掉 `sipm.pde`。
+
+```ini
+trigger.enabled=true
+trigger.pixel_threshold_pe=10
+trigger.camera_multiplicity=3
+trigger.array_multiplicity=2
+trigger.coincidence_window_ns=50
+```
+
+简单 multiplicity trigger。默认会计算触发结果，但 `output.save_only_triggered=false`，所以第一次检查时不会因为没触发而没有输出。
 
 ```ini
 source.mode=EventIO
