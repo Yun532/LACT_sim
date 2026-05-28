@@ -207,8 +207,15 @@ PhotonBunch transformEventIOBunchToTraceFrame(
     const SourceRuntimeConfig& source_runtime_cfg)
 {
     const std::string frame_name = lowerCopy(trim(source_runtime_cfg.eventio_coordinate_frame));
+    auto apply_2d_plane_z = [&](PhotonBunch& bunch) {
+        if (bunch.eventio_2d && source_runtime_cfg.eventio_2d_input_plane_z_m != 0.0) {
+            bunch.photon.pos.z += source_runtime_cfg.eventio_2d_input_plane_z_m;
+        }
+    };
     if (frame_name == "telescope_local" || frame_name == "local") {
-        return input;
+        PhotonBunch out = input;
+        apply_2d_plane_z(out);
+        return out;
     }
 
     PhotonBunch out = input;
@@ -217,6 +224,7 @@ PhotonBunch transformEventIOBunchToTraceFrame(
         const TelescopeFrame frame = corsikaIactFrame(telescope_cfg);
         out.photon.pos = frame.rotateVectorToLocal(input.photon.pos);
         out.photon.dir = frame.rotateVectorToLocal(input.photon.dir).normalized();
+        apply_2d_plane_z(out);
         return out;
     }
 
@@ -228,6 +236,7 @@ PhotonBunch transformEventIOBunchToTraceFrame(
             source_runtime_cfg.use_eventio_telescope_position);
         out.photon.pos = frame.pointToLocal(input.photon.pos);
         out.photon.dir = frame.rotateVectorToLocal(input.photon.dir).normalized();
+        apply_2d_plane_z(out);
         return out;
     }
 
@@ -252,6 +261,29 @@ int arrayIdFromOutputEvent(int event_id, const std::string& event_id_mode)
         return event_id % 100;
     }
     return 0;
+}
+
+double mirrorFrontReferenceZ(const MirrorLayout& mirrors)
+{
+    double z = -std::numeric_limits<double>::infinity();
+    for (const auto& tile : mirrors.tiles()) {
+        z = std::max(z, tile.center.z);
+    }
+    return std::isfinite(z) ? z : -16.0;
+}
+
+bool shouldBackprojectEventIO2d(const SourceRuntimeConfig& source_runtime_cfg,
+                                const MirrorLayout& mirrors)
+{
+    const std::string mode = lowerCopy(trim(source_runtime_cfg.eventio_2d_plane_mode));
+    if (mode == "backproject") {
+        return true;
+    }
+    if (mode == "forward") {
+        return false;
+    }
+    const double mirror_front_z = mirrorFrontReferenceZ(mirrors);
+    return source_runtime_cfg.eventio_2d_input_plane_z_m <= mirror_front_z + 1e-6;
 }
 
 struct OutputEventMetadata {
@@ -2459,7 +2491,9 @@ void printCorsikaOpticalConfiguration(
     const OpticalEfficiencyConfig& efficiency_cfg,
     const ErrorConfig& error_cfg,
     const ObstructionMask& obstruction,
-    const PropagationConfig& propagation_cfg)
+    const PropagationConfig& propagation_cfg,
+    double eventio_mirror_front_z_m,
+    bool eventio_2d_backproject)
 {
     const std::string mirror_mode = lowerCopy(getString(cfg, "mirror.mode", "generated"));
     const std::string mirror_csv = getString(cfg, "mirror.csv_path", "");
@@ -2496,13 +2530,20 @@ void printCorsikaOpticalConfiguration(
     printField("eventio_path", source_runtime_cfg.eventio_path);
     printField("event_id_mode", source_runtime_cfg.event_id_mode);
     printField("eventio_coordinate_frame", source_runtime_cfg.eventio_coordinate_frame);
+    printField("eventio_2d_input_plane_z_m",
+               doubleToString(source_runtime_cfg.eventio_2d_input_plane_z_m));
+    printField("eventio_2d_plane_mode", source_runtime_cfg.eventio_2d_plane_mode);
+    printField("eventio_mirror_front_z_m", doubleToString(eventio_mirror_front_z_m));
+    printField("eventio_2d_trace_direction",
+               eventio_2d_backproject ? "backproject_to_mirror_then_reflect"
+                                      : "forward_to_mirror_then_reflect");
     printField("coordinate_interpretation",
                lowerCopy(trim(source_runtime_cfg.eventio_coordinate_frame)) == "corsika_iact"
-                   ? "CORSIKA IACT x/y are telescope-relative horizontal coordinates; cx/cy/cz are rotated to telescope-local optical coordinates"
+                   ? "CORSIKA IACT x/y are telescope-relative horizontal coordinates; cx/cy/cz are rotated to telescope-local optical coordinates; 2D bunches start at local z=source.eventio_2d_input_plane_z_m"
                    : (lowerCopy(trim(source_runtime_cfg.eventio_coordinate_frame)) == "telescope_local" ||
                               lowerCopy(trim(source_runtime_cfg.eventio_coordinate_frame)) == "local"
-                          ? "EventIO photon positions/directions are already in telescope-local optical coordinates"
-                          : "EventIO photon positions/directions are global array coordinates and will be transformed to telescope-local coordinates"));
+                          ? "EventIO photon positions/directions are already in telescope-local optical coordinates; 2D bunches start at local z=source.eventio_2d_input_plane_z_m"
+                          : "EventIO photon positions/directions are global array coordinates and will be transformed to telescope-local coordinates; 2D bunches start at local z=source.eventio_2d_input_plane_z_m"));
     printField("eventio_telescope_position",
                source_runtime_cfg.use_eventio_telescope_position
                    ? "use EventIO telescope table"
@@ -2790,6 +2831,9 @@ int main(int argc, char** argv) {
         OpticalTracer tracer(propagation_cfg.speed_of_light_m_per_ns,
                              error_cfg.reflect_direction_sigma_deg * DEG_TO_RAD,
                              error_cfg.random_seed);
+        const double eventio_mirror_front_z_m = mirrorFrontReferenceZ(mirrors);
+        const bool eventio_2d_backproject =
+            shouldBackprojectEventIO2d(source_runtime_cfg, mirrors);
         CorsikaTraceOutputConfig output_cfg = buildCorsikaTraceOutputConfig(cfg);
         WaveformOutputConfig waveform_cfg = buildWaveformOutputConfig(cfg);
         CollectorDebugConfig collector_debug_cfg = buildCollectorDebugConfig(cfg);
@@ -2847,7 +2891,9 @@ int main(int argc, char** argv) {
                                          efficiency_cfg,
                                          error_cfg,
                                          obstruction,
-                                         propagation_cfg);
+                                         propagation_cfg,
+                                         eventio_mirror_front_z_m,
+                                         eventio_2d_backproject);
         auto eventio_cfg = buildEventIOPhotonConfig(cfg, source_cfg, source_runtime_cfg);
 
         printSection("Run");
@@ -3011,7 +3057,10 @@ int main(int argc, char** argv) {
             if (profile_cfg.enabled) {
                 t_step = std::chrono::steady_clock::now();
             }
-            OpticalSurfaceHit hit = tracer.traceToPlane(photon, mirrors, plane, eff);
+            const bool backproject_this_bunch = bunch.eventio_2d && eventio_2d_backproject;
+            OpticalSurfaceHit hit = backproject_this_bunch
+                                        ? tracer.traceBackprojectedToPlane(photon, mirrors, plane, eff)
+                                        : tracer.traceToPlane(photon, mirrors, plane, eff);
             if (profile_cfg.enabled) {
                 addElapsed(profile_stats, &ProfileStats::trace_to_plane_s, t_step);
             }
@@ -3129,6 +3178,8 @@ int main(int argc, char** argv) {
             [](const EventIOStreamProgress& progress) {
                 std::ostringstream value;
                 value << "photon_bunches=" << progress.photon_bunches
+                      << " photon_bunches_2d=" << progress.photon_bunches_2d
+                      << " photon_bunches_3d=" << progress.photon_bunches_3d
                       << " current_shower_event=" << progress.current_shower_event
                       << " elapsed_s=" << doubleToString(progress.elapsed_s, 3);
                 printField(progress.final ? "stream_done" : "stream_progress",
@@ -3194,6 +3245,12 @@ int main(int argc, char** argv) {
         printField("event_id_mode", source_runtime_cfg.event_id_mode);
         printField("output_format", output_cfg.format);
         printField("input_bunches", intToString(stream_stats.photon_bunches));
+        printField("input_bunches_2d", intToString(stream_stats.photon_bunches_2d));
+        printField("input_bunches_3d", intToString(stream_stats.photon_bunches_3d));
+        printField("input_photon_format",
+                   stream_stats.photon_bunches_2d > 0 && stream_stats.photon_bunches_3d > 0
+                       ? "mixed_2d_3d"
+                       : (stream_stats.photon_bunches_3d > 0 ? "3d" : "2d"));
         printField("telescopes_in_eventio", intToString(metadata.telescopes.size()));
         printField("shower_events", intToString(metadata.events.size()));
         printField("streams", intToString(summaries.size()));

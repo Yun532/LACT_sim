@@ -72,6 +72,8 @@ EventIOMetadata readEventIOMetadata(const EventIOPhotonConfig& cfg);
 
 struct EventIOStreamProgress {
     std::size_t photon_bunches = 0;
+    std::size_t photon_bunches_2d = 0;
+    std::size_t photon_bunches_3d = 0;
     int current_shower_event = 0;
     double elapsed_s = 0.0;
     bool final = false;
@@ -79,6 +81,8 @@ struct EventIOStreamProgress {
 
 struct EventIOStreamStats {
     std::size_t photon_bunches = 0;
+    std::size_t photon_bunches_2d = 0;
+    std::size_t photon_bunches_3d = 0;
 };
 
 using EventIOPhotonCallback = std::function<void(const PhotonBunch&)>;

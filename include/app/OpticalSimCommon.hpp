@@ -180,6 +180,8 @@ struct SourceRuntimeConfig {
     std::string csv_path;
     std::string eventio_path;
     std::string eventio_coordinate_frame = "corsika_iact";
+    double eventio_2d_input_plane_z_m = 0.0;
+    std::string eventio_2d_plane_mode = "auto";
     std::string event_id_mode = "event";
     bool use_eventio_telescope_position = true;
     bool filter_telescope_id = false;

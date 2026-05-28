@@ -169,6 +169,87 @@ OpticalSurfaceHit OpticalTracer::traceToPlane(const Photon& photon,
     return hit;
 }
 
+OpticalSurfaceHit OpticalTracer::traceBackprojectedToPlane(
+    const Photon& photon,
+    const MirrorLayout& mirrors,
+    const OutputPlane& plane_in,
+    const OpticalEfficiency& eff) const
+{
+    OpticalSurfaceHit hit;
+
+    if (mirrors.empty()) return hit;
+
+    OutputPlane plane = plane_in;
+    if (plane.u_axis.norm2() <= 0.0 || plane.v_axis.norm2() <= 0.0) {
+        plane.buildLocalFrame();
+    } else {
+        plane.normal = plane.normal.normalized();
+        plane.u_axis = plane.u_axis.normalized();
+        plane.v_axis = plane.v_axis.normalized();
+    }
+
+    const Vec3 reverse_dir = photon.dir * -1.0;
+    double best_t = std::numeric_limits<double>::max();
+    const MirrorTile* best_tile = nullptr;
+    MirrorIntersection best_sol;
+
+    for (const auto& tile : mirrors.tiles()) {
+        auto sol = intersectMirror(photon.pos, reverse_dir, tile);
+        if (!sol.has_value()) continue;
+
+        if (sol->t < best_t) {
+            best_t = sol->t;
+            best_tile = &tile;
+            best_sol = *sol;
+        }
+    }
+
+    if (!best_tile) {
+        return hit;
+    }
+
+    hit.hit_mirror = true;
+    hit.mirror_id = best_tile->id;
+    hit.mirror_point = best_sol.point;
+
+    Vec3 n = best_sol.normal.normalized();
+    Vec3 out_dir = reflectDirection(photon.dir, n);
+    std::uint64_t scatter_seed = random_seed_;
+    scatter_seed = mixSeed(scatter_seed, static_cast<std::uint64_t>(best_tile->id + 1));
+    scatter_seed = mixSeed(scatter_seed, hashDouble(photon.pos.x));
+    scatter_seed = mixSeed(scatter_seed, hashDouble(photon.pos.y));
+    scatter_seed = mixSeed(scatter_seed, hashDouble(photon.pos.z));
+    scatter_seed = mixSeed(scatter_seed, hashDouble(photon.dir.x));
+    scatter_seed = mixSeed(scatter_seed, hashDouble(photon.dir.y));
+    scatter_seed = mixSeed(scatter_seed, hashDouble(photon.dir.z));
+    out_dir = perturbDirection(out_dir, reflect_direction_sigma_rad_, scatter_seed);
+
+    auto surf_sol = intersectOutputPlane(best_sol.point, out_dir, plane);
+    if (!surf_sol.has_value()) {
+        return hit;
+    }
+
+    const auto& [ts, surf_p] = *surf_sol;
+    hit.hit_surface = true;
+    hit.surface_point = surf_p;
+    hit.out_dir = out_dir;
+
+    Vec3 rel = surf_p - plane.point;
+    hit.u_m = rel.dot(plane.u_axis);
+    hit.v_m = rel.dot(plane.v_axis);
+
+    hit.time_ns = photon.time_ns + (ts - best_sol.t) / speed_of_light_m_per_ns_;
+    hit.wavelength_nm = photon.wavelength_nm;
+    hit.weight = photon.weight;
+
+    double cosang = std::clamp(std::abs(out_dir.dot(plane.normal.normalized())), 0.0, 1.0);
+    double incidence_angle = std::acos(cosang);
+    hit.relative_efficiency = best_tile->reflectivity_scale *
+                              eff.total(photon.wavelength_nm, incidence_angle);
+
+    return hit;
+}
+
 std::optional<OpticalTracer::MirrorIntersection>
 OpticalTracer::intersectMirror(const Vec3& p0, const Vec3& d, const MirrorTile& tile)
 {

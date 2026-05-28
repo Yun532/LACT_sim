@@ -1395,6 +1395,16 @@ SourceRuntimeConfig buildSourceRuntimeConfig(const std::map<std::string, std::st
     runtime.eventio_coordinate_frame =
         getString(cfg, "source.eventio_coordinate_frame",
                   runtime.use_eventio ? "corsika_iact" : "telescope_local");
+    runtime.eventio_2d_input_plane_z_m =
+        getDouble(cfg, "source.eventio_2d_input_plane_z_m", 0.0);
+    runtime.eventio_2d_plane_mode =
+        lowerCopy(getString(cfg, "source.eventio_2d_plane_mode", "auto"));
+    if (runtime.eventio_2d_plane_mode != "auto" &&
+        runtime.eventio_2d_plane_mode != "forward" &&
+        runtime.eventio_2d_plane_mode != "backproject") {
+        throw std::runtime_error(
+            "source.eventio_2d_plane_mode must be auto, forward, or backproject");
+    }
     runtime.use_eventio_telescope_position =
         getBool(cfg, "source.use_eventio_telescope_position", true);
     runtime.csv_local_telescope_frame =

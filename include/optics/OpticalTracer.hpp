@@ -20,6 +20,14 @@ public:
                                    const OutputPlane& plane,
                                    const OpticalEfficiency& eff) const;
 
+    // For photon coordinates recorded on a plane behind the mirror surface.
+    // First back-project along -dir to find the mirror hit, subtract that
+    // propagation time from photon.time_ns, then reflect to the output plane.
+    OpticalSurfaceHit traceBackprojectedToPlane(const Photon& photon,
+                                                const MirrorLayout& mirrors,
+                                                const OutputPlane& plane,
+                                                const OpticalEfficiency& eff) const;
+
 private:
     struct MirrorIntersection {
         double t = 0.0;
