@@ -188,17 +188,17 @@ OpticalSurfaceHit OpticalTracer::traceBackprojectedToPlane(
         plane.v_axis = plane.v_axis.normalized();
     }
 
-    const Vec3 reverse_dir = photon.dir * -1.0;
-    double best_t = std::numeric_limits<double>::max();
+    double best_abs_t = std::numeric_limits<double>::max();
     const MirrorTile* best_tile = nullptr;
     MirrorIntersection best_sol;
 
     for (const auto& tile : mirrors.tiles()) {
-        auto sol = intersectMirror(photon.pos, reverse_dir, tile);
+        auto sol = intersectMirror(photon.pos, photon.dir, tile, true);
         if (!sol.has_value()) continue;
 
-        if (sol->t < best_t) {
-            best_t = sol->t;
+        const double abs_t = std::abs(sol->t);
+        if (abs_t < best_abs_t) {
+            best_abs_t = abs_t;
             best_tile = &tile;
             best_sol = *sol;
         }
@@ -238,7 +238,7 @@ OpticalSurfaceHit OpticalTracer::traceBackprojectedToPlane(
     hit.u_m = rel.dot(plane.u_axis);
     hit.v_m = rel.dot(plane.v_axis);
 
-    hit.time_ns = photon.time_ns + (ts - best_sol.t) / speed_of_light_m_per_ns_;
+    hit.time_ns = photon.time_ns + (best_sol.t + ts) / speed_of_light_m_per_ns_;
     hit.wavelength_nm = photon.wavelength_nm;
     hit.weight = photon.weight;
 
@@ -251,22 +251,24 @@ OpticalSurfaceHit OpticalTracer::traceBackprojectedToPlane(
 }
 
 std::optional<OpticalTracer::MirrorIntersection>
-OpticalTracer::intersectMirror(const Vec3& p0, const Vec3& d, const MirrorTile& tile)
+OpticalTracer::intersectMirror(const Vec3& p0, const Vec3& d, const MirrorTile& tile,
+                               bool allow_negative_t)
 {
     switch (tile.type) {
         case SurfaceType::Planar:
-            return intersectPlaneDisk(p0, d, tile);
+            return intersectPlaneDisk(p0, d, tile, allow_negative_t);
         case SurfaceType::Spherical:
-            return intersectSphericalFacet(p0, d, tile);
+            return intersectSphericalFacet(p0, d, tile, allow_negative_t);
         case SurfaceType::Parabolic:
-            return intersectParaboloid(p0, d, tile);
+            return intersectParaboloid(p0, d, tile, allow_negative_t);
         default:
             return std::nullopt;
     }
 }
 
 std::optional<OpticalTracer::MirrorIntersection>
-OpticalTracer::intersectPlaneDisk(const Vec3& p0, const Vec3& d, const MirrorTile& tile)
+OpticalTracer::intersectPlaneDisk(const Vec3& p0, const Vec3& d, const MirrorTile& tile,
+                                  bool allow_negative_t)
 {
     Vec3 n = tile.normal.normalized();
     double denom = d.dot(n);
@@ -276,7 +278,8 @@ OpticalTracer::intersectPlaneDisk(const Vec3& p0, const Vec3& d, const MirrorTil
     }
 
     double t = (tile.center - p0).dot(n) / denom;
-    if (t <= 0.0) {
+    if ((!allow_negative_t && t <= 0.0) ||
+        (allow_negative_t && std::abs(t) <= EPS)) {
         return std::nullopt;
     }
 
@@ -295,7 +298,8 @@ OpticalTracer::intersectPlaneDisk(const Vec3& p0, const Vec3& d, const MirrorTil
 }
 
 std::optional<OpticalTracer::MirrorIntersection>
-OpticalTracer::intersectSphericalFacet(const Vec3& p0, const Vec3& d, const MirrorTile& tile)
+OpticalTracer::intersectSphericalFacet(const Vec3& p0, const Vec3& d, const MirrorTile& tile,
+                                       bool allow_negative_t)
 {
     // 这里直接使用镜片曲率半径 R，而不是先从 focal length 换算。
     double R = tile.radius_of_curvature;
@@ -325,7 +329,10 @@ OpticalTracer::intersectSphericalFacet(const Vec3& p0, const Vec3& d, const Mirr
     double t2 = (-B + sqrt_disc) / (2.0 * A);
 
     auto try_root = [&](double t) -> std::optional<MirrorIntersection> {
-        if (t <= 0.0) return std::nullopt;
+        if ((!allow_negative_t && t <= 0.0) ||
+            (allow_negative_t && std::abs(t) <= EPS)) {
+            return std::nullopt;
+        }
 
         Vec3 p = p0 + d * t;
         Vec3 rel = p - tile.center;
@@ -358,6 +365,10 @@ OpticalTracer::intersectSphericalFacet(const Vec3& p0, const Vec3& d, const Mirr
     if (sol1 && !sol2) return sol1;
     if (!sol1 && sol2) return sol2;
 
+    if (allow_negative_t) {
+        return (std::abs(sol1->t) < std::abs(sol2->t)) ? sol1 : sol2;
+    }
+
     double a1 = std::abs((sol1->point - tile.center).dot(n0));
     double a2 = std::abs((sol2->point - tile.center).dot(n0));
 
@@ -365,7 +376,8 @@ OpticalTracer::intersectSphericalFacet(const Vec3& p0, const Vec3& d, const Mirr
 }
 
 std::optional<OpticalTracer::MirrorIntersection>
-OpticalTracer::intersectParaboloid(const Vec3& p0, const Vec3& d, const MirrorTile& tile)
+OpticalTracer::intersectParaboloid(const Vec3& p0, const Vec3& d, const MirrorTile& tile,
+                                   bool allow_negative_t)
 {
     // 连续理想抛物面测试
     // 这里 tile.radius_of_curvature 不适用，仍然需要一个抛物面焦距参数。
@@ -405,7 +417,8 @@ OpticalTracer::intersectParaboloid(const Vec3& p0, const Vec3& d, const MirrorTi
             return std::nullopt;
         }
         t = -C / B;
-        if (t <= 0.0) {
+        if ((!allow_negative_t && t <= 0.0) ||
+            (allow_negative_t && std::abs(t) <= EPS)) {
             return std::nullopt;
         }
     } else {
@@ -418,13 +431,15 @@ OpticalTracer::intersectParaboloid(const Vec3& p0, const Vec3& d, const MirrorTi
         double t1 = (-B - sqrt_disc) / (2.0 * A);
         double t2 = (-B + sqrt_disc) / (2.0 * A);
 
-        bool ok1 = (t1 > 0.0);
-        bool ok2 = (t2 > 0.0);
+        bool ok1 = allow_negative_t ? (std::abs(t1) > EPS) : (t1 > 0.0);
+        bool ok2 = allow_negative_t ? (std::abs(t2) > EPS) : (t2 > 0.0);
 
         if (!ok1 && !ok2) {
             return std::nullopt;
         } else if (ok1 && ok2) {
-            t = std::min(t1, t2);
+            t = allow_negative_t
+                    ? (std::abs(t1) < std::abs(t2) ? t1 : t2)
+                    : std::min(t1, t2);
         } else {
             t = ok1 ? t1 : t2;
         }

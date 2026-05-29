@@ -688,6 +688,8 @@ void writeCorsikaWhiteboardHeader(std::ofstream& ofs)
     ofs << std::setprecision(10);
     ofs << "event_id,telescope_id,photon_index,mirror_id,"
         << "surface_x_m,surface_y_m,surface_z_m,"
+        << "mirror_x_m,mirror_y_m,mirror_z_m,"
+        << "input_x_m,input_y_m,input_z_m,"
         << "u_m,v_m,dir_x,dir_y,dir_z,"
         << "time_ns,wavelength_nm,weight,relative_efficiency,"
         << "signal_weight\n";
@@ -706,6 +708,12 @@ void writeCorsikaWhiteboardHit(std::ofstream& ofs,
         << hit.surface_point.x << ","
         << hit.surface_point.y << ","
         << hit.surface_point.z << ","
+        << hit.mirror_point.x << ","
+        << hit.mirror_point.y << ","
+        << hit.mirror_point.z << ","
+        << bunch.photon.pos.x << ","
+        << bunch.photon.pos.y << ","
+        << bunch.photon.pos.z << ","
         << hit.u_m << ","
         << hit.v_m << ","
         << hit.out_dir.x << ","
@@ -2535,7 +2543,7 @@ void printCorsikaOpticalConfiguration(
     printField("eventio_2d_plane_mode", source_runtime_cfg.eventio_2d_plane_mode);
     printField("eventio_mirror_front_z_m", doubleToString(eventio_mirror_front_z_m));
     printField("eventio_2d_trace_direction",
-               eventio_2d_backproject ? "backproject_to_mirror_then_reflect"
+               eventio_2d_backproject ? "signed_line_to_mirror_then_reflect"
                                       : "forward_to_mirror_then_reflect");
     printField("coordinate_interpretation",
                lowerCopy(trim(source_runtime_cfg.eventio_coordinate_frame)) == "corsika_iact"

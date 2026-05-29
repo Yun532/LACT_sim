@@ -20,9 +20,10 @@ public:
                                    const OutputPlane& plane,
                                    const OpticalEfficiency& eff) const;
 
-    // For photon coordinates recorded on a plane behind the mirror surface.
-    // First back-project along -dir to find the mirror hit, subtract that
-    // propagation time from photon.time_ns, then reflect to the output plane.
+    // 用于处理平移后的 2D EventIO 记录平面。
+    // 镜面交点在完整直线 p + t*dir 上寻找，因此 t 可以为正
+    // （从记录平面继续向前传播）或为负（记录平面已经在镜面之后）。
+    // 反射仍然使用原始入射方向 photon.dir，时间计算中保留 t 的符号。
     OpticalSurfaceHit traceBackprojectedToPlane(const Photon& photon,
                                                 const MirrorLayout& mirrors,
                                                 const OutputPlane& plane,
@@ -36,16 +37,20 @@ private:
     };
 
     static std::optional<MirrorIntersection>
-    intersectMirror(const Vec3& p0, const Vec3& d, const MirrorTile& tile);
+    intersectMirror(const Vec3& p0, const Vec3& d, const MirrorTile& tile,
+                    bool allow_negative_t = false);
 
     static std::optional<MirrorIntersection>
-    intersectPlaneDisk(const Vec3& p0, const Vec3& d, const MirrorTile& tile);
+    intersectPlaneDisk(const Vec3& p0, const Vec3& d, const MirrorTile& tile,
+                       bool allow_negative_t = false);
 
     static std::optional<MirrorIntersection>
-    intersectSphericalFacet(const Vec3& p0, const Vec3& d, const MirrorTile& tile);
+    intersectSphericalFacet(const Vec3& p0, const Vec3& d, const MirrorTile& tile,
+                            bool allow_negative_t = false);
 
     static std::optional<MirrorIntersection>
-    intersectParaboloid(const Vec3& p0, const Vec3& d, const MirrorTile& tile);
+    intersectParaboloid(const Vec3& p0, const Vec3& d, const MirrorTile& tile,
+                        bool allow_negative_t = false);
 
     static std::optional<std::pair<double, Vec3>>
     intersectOutputPlane(const Vec3& p0, const Vec3& d, const OutputPlane& plane);
