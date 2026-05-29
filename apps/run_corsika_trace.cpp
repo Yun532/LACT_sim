@@ -209,7 +209,12 @@ PhotonBunch transformEventIOBunchToTraceFrame(
     const std::string frame_name = lowerCopy(trim(source_runtime_cfg.eventio_coordinate_frame));
     auto apply_2d_plane_z = [&](PhotonBunch& bunch) {
         if (bunch.eventio_2d && source_runtime_cfg.eventio_2d_input_plane_z_m != 0.0) {
-            bunch.photon.pos.z += source_runtime_cfg.eventio_2d_input_plane_z_m;
+            // 2D EventIO stores x/y only.  After rotating horizontal CORSIKA
+            // coordinates into the telescope-local frame, the transformed
+            // point still lies on the original horizontal plane, whose local
+            // z varies with x/y for tilted telescopes.  A configured 2D input
+            // plane is instead a telescope-local plane, so set z explicitly.
+            bunch.photon.pos.z = source_runtime_cfg.eventio_2d_input_plane_z_m;
         }
     };
     if (frame_name == "telescope_local" || frame_name == "local") {
@@ -688,6 +693,8 @@ void writeCorsikaWhiteboardHeader(std::ofstream& ofs)
     ofs << std::setprecision(10);
     ofs << "event_id,telescope_id,photon_index,mirror_id,"
         << "surface_x_m,surface_y_m,surface_z_m,"
+        << "mirror_x_m,mirror_y_m,mirror_z_m,"
+        << "input_x_m,input_y_m,input_z_m,"
         << "u_m,v_m,dir_x,dir_y,dir_z,"
         << "time_ns,wavelength_nm,weight,relative_efficiency,"
         << "signal_weight\n";
@@ -706,6 +713,12 @@ void writeCorsikaWhiteboardHit(std::ofstream& ofs,
         << hit.surface_point.x << ","
         << hit.surface_point.y << ","
         << hit.surface_point.z << ","
+        << hit.mirror_point.x << ","
+        << hit.mirror_point.y << ","
+        << hit.mirror_point.z << ","
+        << bunch.photon.pos.x << ","
+        << bunch.photon.pos.y << ","
+        << bunch.photon.pos.z << ","
         << hit.u_m << ","
         << hit.v_m << ","
         << hit.out_dir.x << ","
