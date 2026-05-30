@@ -22,6 +22,7 @@
 #include "io/SurfaceHitCsvWriter.hpp"
 #include "io/SyntheticPhotonSource.hpp"
 #include "optics/OpticalEfficiency.hpp"
+#include "optics/AtmosphereTransmission.hpp"
 #include "optics/OpticalSurfaceHit.hpp"
 #include "optics/OpticalTracer.hpp"
 #include "optics/OutputPlane.hpp"

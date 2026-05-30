@@ -47,6 +47,22 @@ CSV tables use:
 wavelength_nm,transmission
 ```
 
+For a MODTRAN total optical-depth table, use:
+
+```ini
+atmosphere.model=modtran_tau
+atmosphere.tau_table=configs/atmosphere/atm_trans_4400_1_10_0_0_4400.dat
+atmosphere.ground_altitude_km=4.4
+atmosphere.slant_correction=secant
+atmosphere.min_cos_theta=0.2
+```
+
+The table is interpreted as `tau_total(lambda, emission_altitude -> ground)`,
+and runtime transmission is `T=exp(-tau_total)`. The secant correction uses the
+global photon direction with `cos(theta)=-dir.z`; below `min_cos_theta`, the
+configured large-angle behavior prevents extrapolating the vertical table too
+far.
+
 For formal production, this CSV should come from the same atmospheric profile
 used in the CORSIKA run, or from a clearly documented site measurement/model.
 Until that source is fixed, the recommended benchmark setting is

@@ -248,6 +248,9 @@ PhotonBunch makeBunch(const struct bunch& b,
     out.event_id = event_id;
     out.telescope_id = telescope_id;
     out.eventio_2d = true;
+    if (std::isfinite(b.zem) && b.zem > 0.0) {
+        out.emission_altitude_km = b.zem * 1.0e-5;
+    }
     return out;
 }
 

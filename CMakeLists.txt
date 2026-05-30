@@ -49,6 +49,7 @@ add_library(simlite_core
     src/io/MirrorFacetCsvReader.cpp
     src/app/OpticalSimCommon.cpp
     src/geometry/FacetFactory.cpp
+    src/optics/AtmosphereTransmission.cpp
     src/optics/RayTracer.cpp
     src/optics/OpticalTracer.cpp
 )
@@ -150,6 +151,23 @@ add_executable(test_efficiency_curves
 )
 target_link_libraries(test_efficiency_curves PRIVATE simlite_core)
 add_test(NAME test_efficiency_curves COMMAND test_efficiency_curves)
+
+add_executable(test_atmosphere_transmission
+    apps/test_atmosphere_transmission.cpp
+)
+target_link_libraries(test_atmosphere_transmission PRIVATE simlite_core)
+add_test(NAME test_atmosphere_transmission
+         COMMAND test_atmosphere_transmission
+         ${CMAKE_CURRENT_SOURCE_DIR}/configs/atmosphere/atm_trans_4400_1_10_0_0_4400.dat)
+
+add_executable(test_atmosphere_absorption_distribution
+    apps/test_atmosphere_absorption_distribution.cpp
+)
+target_link_libraries(test_atmosphere_absorption_distribution PRIVATE simlite_core)
+add_test(NAME test_atmosphere_absorption_distribution
+         COMMAND test_atmosphere_absorption_distribution
+         ${CMAKE_CURRENT_SOURCE_DIR}/configs/atmosphere/atm_trans_4400_1_10_0_0_4400.dat
+         ${CMAKE_CURRENT_BINARY_DIR}/test_outputs/atmosphere_absorption_distribution.csv)
 
 add_executable(scan_light_collector_angular_response
     apps/scan_light_collector_angular_response.cpp

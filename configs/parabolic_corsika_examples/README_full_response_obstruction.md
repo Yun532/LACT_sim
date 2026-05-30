@@ -12,6 +12,7 @@
 - `obstruction.config=../obstructions/raytrace_final_structure.cfg`：加入相机到镜面之间的 3D 遮挡结构。
 - `sipm.config=../sipm/new_camera_sipm.cfg`：使用真实相机 SiPM 配置，PDE 在这里设置。
 - `efficiency.config=../efficiency/curves_all.cfg`：使用镜面反射率和滤光片透过率曲线。
+- `atmosphere.config=../atmosphere/modtran_4400_desert.cfg`：使用 MODTRAN 总光学厚度大气吸收。
 - `trigger.config=../trigger/example_simple_multiplicity.cfg`：计算简单 multiplicity trigger。
 - `output.save_only_triggered=false`：示例保留所有望远镜图像，方便检查；如只想保存触发图像可改为 `true`。
 - `waveform.source=pe`：时间序列保存经过效率/PDE 后的 p.e.。

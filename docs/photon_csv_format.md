@@ -17,7 +17,7 @@ x_m,y_m,z_m,dir_x,dir_y,dir_z
 ## Optional Columns
 
 ```text
-time_ns,wavelength_nm,weight,multiplicity,event_id,telescope_id
+time_ns,wavelength_nm,weight,multiplicity,event_id,telescope_id,emission_altitude_km
 ```
 
 If an optional column is absent, the source config supplies the default value:
@@ -32,6 +32,9 @@ telescope_id=0
 ```
 
 `weight * multiplicity` is applied to the photon before optical propagation.
+`emission_altitude_km` is used by MODTRAN tau atmosphere tables; omit it when
+atmosphere modeling is disabled or when the atmosphere config supplies an
+explicit default emission altitude.
 
 ## Coordinate Convention
 

@@ -259,6 +259,9 @@ void mergeComponentConfig(std::map<std::string, std::string>& dst,
             scoped == "obstruction.primitives_csv") {
             value = resolveRelativePath(path, value);
         }
+        if (scoped == "atmosphere.tau_table") {
+            value = resolveRelativePath(path, value);
+        }
         dst[scoped] = value;
     }
 

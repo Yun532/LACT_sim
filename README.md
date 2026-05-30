@@ -250,14 +250,24 @@ output.format=hdf5
 output.hdf5_path=run_logs/my_corsika_run/corsika_trace.h5
 ```
 
-Optional atmosphere transmission is configured as an extra factor after the
-CORSIKA photons arrive at the telescope plane:
+Optional atmosphere transmission can still be configured as a simple
+wavelength-only extra factor:
 
 ```ini
 atmosphere.transmission=none
 atmosphere.transmission=0.92
 atmosphere.transmission=configs/atmosphere/my_transmission.csv
 ```
+
+For height- and wavelength-dependent MODTRAN total optical depth, use:
+
+```ini
+atmosphere.config=configs/atmosphere/modtran_4400_desert.cfg
+```
+
+This applies `T=exp(-tau_total)` before telescope optics. EventIO photon
+bunches use their emission height when present; PhotonCsv input can provide an
+optional `emission_altitude_km` column.
 
 The SiPM block converts collected photons into integrated p.e. through
 `sipm.pde`, which can be omitted, set to a constant, or set to a wavelength
@@ -780,8 +790,9 @@ build/run_corsika_trace \
 
 This writes `camera_full_response_dense.h5`. It enables the current optical
 error paths, the wavelength-dependent mirror reflectivity, filter transmission,
-SiPM PDE curve, and the simple multiplicity trigger. SiPM PDE is configured only
-once in `configs/sipm/new_camera_sipm.cfg` as `sipm.pde`; the electronics module
+SiPM PDE curve, MODTRAN atmosphere absorption, and the simple multiplicity
+trigger. SiPM PDE is configured only once in
+`configs/sipm/new_camera_sipm.cfg` as `sipm.pde`; the electronics module
 is still only a placeholder for future waveform/electronics effects. This test uses
 `output.save_only_triggered=true`, so `/images/dense/*`
 contains only telescope images that pass the trigger. The complete trigger
@@ -907,7 +918,7 @@ configs/sipm/new_camera_sipm.cfg
 configs/electronics/ideal_pe.cfg
 configs/efficiency/curves_all.cfg
 configs/errors/full_response_1229.cfg
-configs/atmosphere/ideal.cfg
+configs/atmosphere/modtran_4400_desert.cfg
 configs/nsb/ideal.cfg
 configs/trigger/disabled.cfg
 ```

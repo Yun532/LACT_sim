@@ -56,7 +56,7 @@ output、camera、sipm、NSB、trigger 等模块 cfg。每个 official cfg 只�
   Bezier square-cone 光收集器和 `true_reflect` 材料。
 - `sipm.config`: SiPM 有效面积和 PDE。理想测试用 `ideal_sipm.cfg`，PDE 不启用。
 - `efficiency.config`: 镜面反射率、滤光片透过率等效率曲线。
-- `atmosphere.config`: CORSIKA 到达望远镜之后的额外大气透过率。`ideal.cfg` 表示不额外衰减。
+- `atmosphere.config`: 大气透过率/光学厚度配置。`ideal.cfg` 表示不额外衰减；full-response 测试使用 `modtran_4400_desert.cfg`。
 - `nsb.config`: 夜空背景光。`ideal.cfg` 表示关闭。
 - `trigger.config`: 简单 multiplicity trigger。`disabled.cfg` 表示关闭。
 - `obstruction.config`: 3D 遮挡模型。
@@ -576,6 +576,7 @@ cfg 逐项解释：
 - `telescope.pointing_el_deg=70`: 望远镜仰角 70 度，结构形变会按这个仰角取值。
 - `error.config=../errors/full_response_1229.cfg`: 启用仰角相关结构形变和小随机误差。
 - `efficiency.config=../efficiency/curves_all.cfg`: 启用镜面反射率和滤光片透过率曲线。
+- `atmosphere.config=../atmosphere/modtran_4400_desert.cfg`: 启用 MODTRAN 总光学厚度大气吸收。
 - `sipm.config=../sipm/new_camera_sipm.cfg`: 启用 SiPM PDE 曲线。
 - `nsb.config=../nsb/ideal.cfg`: NSB 关闭。
 - `trigger.config=../trigger/example_simple_multiplicity.cfg`: trigger 开启。

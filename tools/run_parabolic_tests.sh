@@ -305,6 +305,7 @@ cat >> "$CFG_DIR/corsika_obstruction_nsb_trigger_camera.cfg" <<CFG
 trigger.pixel_threshold_pe=10
 CFG
 cat >> "$CFG_DIR/corsika_full_response_camera.cfg" <<CFG
+atmosphere.config=../../../configs/atmosphere/modtran_4400_desert.cfg
 # Parabolic full-response keeps the common efficiency/PDE/trigger chain but
 # does not use the 1229 structural-deformation series.
 error.random_seed=987654321

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <random>
 #include <tuple>
@@ -44,6 +45,23 @@ struct CollectorDebugConfig {
 
 struct ProfileConfig {
     bool enabled = false;
+};
+
+struct AtmosphereHistogramConfig {
+    bool enabled = false;
+    std::string csv_path = "atmosphere_height_histogram.csv";
+    double min_altitude_km = 4.4;
+    double max_altitude_km = 100.0;
+    double bin_width_km = 1.0;
+};
+
+struct AtmosphereHistogramBin {
+    double low_km = 0.0;
+    double high_km = 0.0;
+    std::uint64_t bunches = 0;
+    double before_weight = 0.0;
+    double after_weight = 0.0;
+    double theory_weight = 0.0;
 };
 
 struct ProfileStats {
@@ -494,6 +512,112 @@ ProfileConfig buildProfileConfig(const std::map<std::string, std::string>& cfg)
     ProfileConfig out;
     out.enabled = getBool(cfg, "profile.enabled", out.enabled);
     return out;
+}
+
+AtmosphereHistogramConfig buildAtmosphereHistogramConfig(
+    const std::map<std::string, std::string>& cfg)
+{
+    AtmosphereHistogramConfig out;
+    out.csv_path = getString(
+        cfg,
+        "atmosphere.height_histogram_csv",
+        getString(cfg, "atmosphere.histogram_csv", ""));
+    out.enabled = !isDisabledText(out.csv_path);
+    out.min_altitude_km =
+        getDouble(cfg, "atmosphere.histogram_min_altitude_km", out.min_altitude_km);
+    out.max_altitude_km =
+        getDouble(cfg, "atmosphere.histogram_max_altitude_km", out.max_altitude_km);
+    out.bin_width_km =
+        getDouble(cfg, "atmosphere.histogram_bin_width_km", out.bin_width_km);
+    if (out.enabled) {
+        if (out.bin_width_km <= 0.0) {
+            throw std::runtime_error("atmosphere histogram bin width must be positive");
+        }
+        if (out.max_altitude_km <= out.min_altitude_km) {
+            throw std::runtime_error("atmosphere histogram max altitude must exceed min altitude");
+        }
+    }
+    return out;
+}
+
+std::vector<AtmosphereHistogramBin> makeAtmosphereHistogramBins(
+    const AtmosphereHistogramConfig& cfg)
+{
+    std::vector<AtmosphereHistogramBin> bins;
+    if (!cfg.enabled) {
+        return bins;
+    }
+    for (double low = cfg.min_altitude_km; low < cfg.max_altitude_km;
+         low += cfg.bin_width_km) {
+        bins.push_back({low, std::min(cfg.max_altitude_km, low + cfg.bin_width_km)});
+    }
+    return bins;
+}
+
+void accumulateAtmosphereHistogram(std::vector<AtmosphereHistogramBin>& bins,
+                                   const AtmosphereHistogramConfig& cfg,
+                                   double altitude_km,
+                                   double before_weight,
+                                   double after_weight,
+                                   double theory_weight)
+{
+    if (!cfg.enabled || bins.empty() || !std::isfinite(altitude_km)) {
+        return;
+    }
+    if (altitude_km < cfg.min_altitude_km || altitude_km >= cfg.max_altitude_km) {
+        return;
+    }
+    std::size_t index = static_cast<std::size_t>(
+        (altitude_km - cfg.min_altitude_km) / cfg.bin_width_km);
+    if (index >= bins.size()) {
+        index = bins.size() - 1;
+    }
+    auto& bin = bins[index];
+    bin.bunches += 1;
+    bin.before_weight += before_weight;
+    bin.after_weight += after_weight;
+    bin.theory_weight += theory_weight;
+}
+
+void writeAtmosphereHistogramCsv(const AtmosphereHistogramConfig& cfg,
+                                 const std::vector<AtmosphereHistogramBin>& bins)
+{
+    if (!cfg.enabled) {
+        return;
+    }
+    const std::filesystem::path out_path(cfg.csv_path);
+    if (out_path.has_parent_path()) {
+        std::filesystem::create_directories(out_path.parent_path());
+    }
+    std::ofstream out(cfg.csv_path);
+    if (!out) {
+        throw std::runtime_error("failed to write atmosphere histogram CSV: " +
+                                 cfg.csv_path);
+    }
+    out << "altitude_low_km,altitude_high_km,altitude_center_km,bunches,"
+        << "before_weight,after_weight,theory_weight,transmission,"
+        << "theory_transmission,relative_error\n";
+    for (const auto& bin : bins) {
+        const double center = 0.5 * (bin.low_km + bin.high_km);
+        const double transmission =
+            bin.before_weight > 0.0 ? bin.after_weight / bin.before_weight : 0.0;
+        const double theory_transmission =
+            bin.before_weight > 0.0 ? bin.theory_weight / bin.before_weight : 0.0;
+        const double relative_error =
+            bin.theory_weight > 0.0
+                ? (bin.after_weight - bin.theory_weight) / bin.theory_weight
+                : 0.0;
+        out << bin.low_km << ','
+            << bin.high_km << ','
+            << center << ','
+            << bin.bunches << ','
+            << bin.before_weight << ','
+            << bin.after_weight << ','
+            << bin.theory_weight << ','
+            << transmission << ','
+            << theory_transmission << ','
+            << relative_error << '\n';
+    }
 }
 
 void addElapsed(ProfileStats& stats,
@@ -2497,6 +2621,7 @@ void printCorsikaOpticalConfiguration(
     const NsbConfig& nsb_cfg,
     const TriggerConfig& trigger_cfg,
     const OpticalEfficiencyConfig& efficiency_cfg,
+    const AtmosphereTransmissionConfig& atmosphere_cfg,
     const ErrorConfig& error_cfg,
     const ObstructionMask& obstruction,
     const PropagationConfig& propagation_cfg,
@@ -2666,6 +2791,9 @@ void printCorsikaOpticalConfiguration(
 
     printSection("Profile");
     printField("enabled", getBool(cfg, "profile.enabled", false) ? "true" : "false");
+    printField("atmosphere_height_histogram",
+               getString(cfg, "atmosphere.height_histogram_csv",
+                         getString(cfg, "atmosphere.histogram_csv", "off")));
 
     printSection("NSB");
     printField("enabled", nsb_cfg.enabled ? "true" : "false");
@@ -2690,6 +2818,7 @@ void printCorsikaOpticalConfiguration(
     printField("filter_transmission",
                factorDescription(efficiency_cfg.filter_transmission));
     printField("atmosphere", factorDescription(efficiency_cfg.atmosphere_transmission));
+    printField("atmosphere_model", atmosphereTransmissionDescription(atmosphere_cfg));
     printField("funnel_acceptance",
                efficiency_cfg.use_funnel_acceptance ? "cos(theta)" : "not set -> 1");
 
@@ -2834,8 +2963,10 @@ int main(int argc, char** argv) {
         auto light_collector = buildLightCollector(camera_cfg, camera);
         MirrorLayout mirrors = makeMirrorLayoutFromFacets(facets);
         OpticalEfficiencyConfig efficiency_cfg = buildEfficiencyConfig(cfg);
+        AtmosphereTransmissionConfig atmosphere_cfg = buildAtmosphereTransmissionConfig(cfg);
         PropagationConfig propagation_cfg = buildPropagationConfig(cfg);
         OpticalEfficiency eff(efficiency_cfg);
+        AtmosphereTransmission atmosphere(atmosphere_cfg);
         OpticalTracer tracer(propagation_cfg.speed_of_light_m_per_ns,
                              error_cfg.reflect_direction_sigma_deg * DEG_TO_RAD,
                              error_cfg.random_seed);
@@ -2846,6 +2977,10 @@ int main(int argc, char** argv) {
         WaveformOutputConfig waveform_cfg = buildWaveformOutputConfig(cfg);
         CollectorDebugConfig collector_debug_cfg = buildCollectorDebugConfig(cfg);
         ProfileConfig profile_cfg = buildProfileConfig(cfg);
+        AtmosphereHistogramConfig atmosphere_histogram_cfg =
+            buildAtmosphereHistogramConfig(cfg);
+        std::vector<AtmosphereHistogramBin> atmosphere_histogram =
+            makeAtmosphereHistogramBins(atmosphere_histogram_cfg);
         ProfileStats profile_stats;
         const bool save_csv = outputWantsCsv(output_cfg);
         const bool save_hdf5 = outputWantsHdf5(output_cfg);
@@ -2897,6 +3032,7 @@ int main(int argc, char** argv) {
                                          nsb_cfg,
                                          trigger_cfg,
                                          efficiency_cfg,
+                                         atmosphere_cfg,
                                          error_cfg,
                                          obstruction,
                                          propagation_cfg,
@@ -3061,6 +3197,31 @@ int main(int argc, char** argv) {
             Photon photon = bunch.photon;
             photon.normalizeDirection();
             photon.weight *= bunch.multiplicity;
+            const double atmosphere_weight_before = photon.weight;
+            if (atmosphere.enabled()) {
+                const Vec3 global_dir = telescope_frame.rotateVector(photon.dir).normalized();
+                const double atmosphere_t =
+                    atmosphere.transmission(photon.wavelength_nm,
+                                            bunch.emission_altitude_km,
+                                            global_dir);
+                photon.weight *= atmosphere_t;
+                accumulateAtmosphereHistogram(atmosphere_histogram,
+                                              atmosphere_histogram_cfg,
+                                              bunch.emission_altitude_km,
+                                              atmosphere_weight_before,
+                                              photon.weight,
+                                              atmosphere_weight_before * atmosphere_t);
+                if (photon.weight <= 0.0) {
+                    return;
+                }
+            } else {
+                accumulateAtmosphereHistogram(atmosphere_histogram,
+                                              atmosphere_histogram_cfg,
+                                              bunch.emission_altitude_km,
+                                              atmosphere_weight_before,
+                                              photon.weight,
+                                              atmosphere_weight_before);
+            }
 
             if (profile_cfg.enabled) {
                 t_step = std::chrono::steady_clock::now();
@@ -3209,6 +3370,12 @@ int main(int argc, char** argv) {
             writeCollectorDebugCsv(collector_debug_cfg, collector_debug_rows);
             printField("rows", intToString(static_cast<std::uint64_t>(
                                    collector_debug_rows.size())));
+        }
+        if (atmosphere_histogram_cfg.enabled) {
+            printSection("Atmosphere histogram");
+            printField("status", "writing height histogram");
+            printField("path", atmosphere_histogram_cfg.csv_path);
+            writeAtmosphereHistogramCsv(atmosphere_histogram_cfg, atmosphere_histogram);
         }
 #ifdef LACT_HAS_HDF5
         if (save_hdf5) {
