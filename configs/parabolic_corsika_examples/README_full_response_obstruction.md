@@ -19,8 +19,8 @@
 - `waveform.time_reference=image_first`：每个 event/telescope 图像以第一个到达相机的 Cherenkov 光子作为 T0。
 - `waveform.time_bin_width_ns=1`：保存 1 ns 一个时间 bin。
 - `waveform.time_window_start_ns=-5` 和 `waveform.time_window_end_ns=20`：保存 `T0-5 ns` 到 `T0+20 ns`。
-- `source.eventio_2d_input_plane_z_m=-16`：若输入 CORSIKA/EventIO 是 2D photon bunch，则把光子 `x/y` 放在本地 `z=-16 m` 镜面侧平面。
-- `source.eventio_2d_plane_mode=auto`：程序会自动选择回投到镜面再反射的追迹方式。
+- `source.eventio_2d_input_plane_z_m=0`：若输入 CORSIKA/EventIO 是 2D photon bunch，则把光子 `x/y` 放在望远镜本地默认 `z=0 m` 输入平面。
+- `source.eventio_2d_plane_mode=auto`：程序按输入平面位置自动选择追迹方式；这里不再使用之前调试用的 `z=-16 m` 平面。
 
 默认会处理 CORSIKA 文件中的全部 shower event 和全部 array/core offset。若只想快速测试前几个 shower，可在 cfg 里临时加入：
 
