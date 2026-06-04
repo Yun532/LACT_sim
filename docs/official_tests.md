@@ -92,6 +92,7 @@ CSV 图需要传入对应 `--config` 才能知道 pointing；镜面命中图还�
 6. 支架形变 0 到 90 度仰角扫描。
 7. 光收集器角响应测试。
 8. 效率曲线验证测试。
+9. NSB 光谱 rate 验证测试。
 
 如果没有 `--no-corsika`，脚本还会继续运行：
 
@@ -156,6 +157,53 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_efficiency_curves.py \
 实际使用的曲线。同一波长有多个输入值时，程序会先取平均再插值；这个行为由 C++ 测试
 `test_efficiency_curves` 锁定。更详细的说明见
 `docs/efficiency_validation.md`。
+
+## 0.5 NSB 光谱 rate 验证测试
+
+脚本会在非 CORSIKA 阶段运行：
+
+```bash
+mkdir -p run_logs/official_tests/nsb_spectral
+
+build/compute_nsb_rate configs/nsb/spectral_rate_check_with_obstruction.cfg \
+  2>&1 | tee run_logs/official_tests/nsb_spectral/run.log
+
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_nsb_spectral_rate.py \
+  --effective-area-m2 22.606448 \
+  --output run_logs/official_tests/nsb_spectral/nsb_spectral_response.png \
+  --diagnostic-csv run_logs/official_tests/nsb_spectral/diagnostic.csv \
+  --summary run_logs/official_tests/nsb_spectral/summary.txt \
+  2>&1 | tee run_logs/official_tests/nsb_spectral/plot.log
+```
+
+测试内容：读取 SkyCalc LoNS 光谱、真实镜面反射率、滤光片透过率和 SiPM PDE，
+先独立计算 `rate_pe_per_ns_per_pixel`，再画理论光谱/效率曲线，并用 Poisson
+抽样检查实际注入分布是否符合理论均值。
+
+默认输入：
+
+- `configs/nsb/nsb_spectrum.csv`: notebook/SkyCalc 生成的 dark/no-moon LoNS 光谱，
+  单位是 `ph / (s nm sr m^2)`。
+- `configs/nsb/spectral_skycalc_dark_with_obstruction.cfg`: NSB spectral 配置，固定
+  有效面积为 `22.606448 m^2`，对应 official 平行光遮挡测试得到的面积。
+- `configs/efficiency/mirror_reflectivity.csv`: 镜面反射率。
+- `configs/efficiency/filter_transmission.csv`: 滤光片透过率。
+- `configs/efficiency/sipm_pde.csv`: SiPM PDE。
+
+输出：
+
+- `run_logs/official_tests/nsb_spectral/run.log`: 独立 C++ rate 计算结果。
+- `run_logs/official_tests/nsb_spectral/nsb_spectral_response.png`: LoNS、效率曲线、
+  `LoNS × total efficiency` 和 Poisson 理论/模拟对比图。
+- `run_logs/official_tests/nsb_spectral/diagnostic.csv`: 逐波长诊断表。
+- `run_logs/official_tests/nsb_spectral/summary.txt`: rate、面积、像素立体角和抽样均值。
+
+当前 dark/no-moon、考虑遮挡的默认结果约为：
+
+```text
+rate_pe_per_ns_per_pixel = 0.074375315
+mean_pe_per_pixel_25ns   = 1.859382882
+```
 
 ## 1. 完美平行光白板测试
 
@@ -484,14 +532,17 @@ cfg:
 configs/official_tests/corsika_nsb_trigger_camera.cfg
 ```
 
-测试内容：在完美相机链路基础上加入常数 NSB 和简单 multiplicity trigger，检查 HDF5
-中的 Cherenkov/NSB/final p.e. 分量和 trigger 表。
+测试内容：在相机链路基础上加入 SkyCalc LoNS 光谱 NSB 和简单 multiplicity trigger，
+检查 HDF5 中的 Cherenkov/NSB/final p.e. 分量和 trigger 表。
 
 cfg 逐项解释：
 
-- `nsb.config=../nsb/example_constant_rate.cfg`: 启用常数 NSB。
-  当前参数为 `rate_pe_per_ns_per_pixel=0.05`、`window_ns=16`，所以平均
-  `0.8 p.e./pixel`。
+- `sipm.config=../sipm/new_camera_sipm.cfg` 和
+  `efficiency.config=../efficiency/curves_all.cfg`: 使用真实 SiPM PDE、镜面反射率
+  和滤光片曲线。
+- `nsb.config=../nsb/spectral_skycalc_dark_no_obstruction.cfg`: 启用无月 SkyCalc LoNS
+  光谱 NSB。固定有效面积为 `28.304744 m^2`，程序自动用相机像素尺寸和焦距计算
+  `pixel_solid_angle`，得到约 `0.09312 p.e./ns/pixel`。
 - `trigger.config=../trigger/example_simple_multiplicity.cfg`: 启用简单 trigger。
 - `source.max_shower_events=1`: 这个 official 项是 CORSIKA waveform smoke test，
   只跑 1 个 shower，避免 waveform 输出过大。
@@ -506,7 +557,7 @@ cfg 逐项解释：
   的相对时间窗。
 - `waveform.time_bin_width_ns=1`: HDF5 保存 1 ns 时间 bin，保留较细时间信息。
 - 官方 GIF 绘图命令直接显示 1 ns/bin，时间窗为 `T0-5 ns` 到 `T0+20 ns`。
-- 其它镜面、相机、SiPM、EventIO 配置与完美相机测试相同。
+- 其它镜面、相机、EventIO 配置与完美相机测试相同。
 
 单独运行：
 
@@ -539,7 +590,12 @@ cfg 逐项解释：
 
 - `obstruction.config=../obstructions/raytrace_final_structure.cfg`: 启用 3D 遮挡模型。
   正常模式下，被遮挡光子在进入相机前被丢弃。
-- `nsb.config=../nsb/example_constant_rate.cfg`: 加常数 NSB。
+- `sipm.config=../sipm/new_camera_sipm.cfg` 和
+  `efficiency.config=../efficiency/curves_all.cfg`: 使用真实 SiPM PDE、镜面反射率
+  和滤光片曲线。
+- `nsb.config=../nsb/spectral_skycalc_dark_with_obstruction.cfg`: 加无月 SkyCalc LoNS
+  光谱 NSB。固定有效面积为 `22.606448 m^2`，对应遮挡后的 official 平行光面积，
+  程序算得约 `0.07438 p.e./ns/pixel`。
 - `trigger.config=../trigger/example_simple_multiplicity.cfg`: 启用 trigger。
 - `trigger.pixel_threshold_pe=10`: 像素阈值 10 p.e.。
 - `output.hdf5_path=run_logs/official_tests/corsika/camera_obstruction_nsb_trigger_dense.h5`:

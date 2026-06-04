@@ -154,6 +154,13 @@ struct NsbConfig {
     double rate_pe_per_ns_per_pixel = 0.0;
     double window_ns = 16.0;
     std::uint64_t seed = 12345ULL;
+    std::string spectrum_csv;
+    std::string spectrum_unit = "ph_s_nm_sr_m2";
+    double effective_area_m2 = 0.0;
+    std::string pixel_solid_angle = "auto";
+    double pixel_solid_angle_sr = 0.0;
+    bool computed_from_spectrum = false;
+    double spectral_integral_pe_s_sr_m2 = 0.0;
 };
 
 struct TriggerConfig {
@@ -291,6 +298,10 @@ CameraConfig buildCameraConfig(const std::map<std::string, std::string>& cfg);
 SipmConfig buildSipmConfig(const std::map<std::string, std::string>& cfg);
 ElectronicsConfig buildElectronicsConfig(const std::map<std::string, std::string>& cfg);
 NsbConfig buildNsbConfig(const std::map<std::string, std::string>& cfg);
+void resolveNsbSpectralRate(NsbConfig& nsb,
+                            const OpticalEfficiencyConfig& efficiency_cfg,
+                            const CameraGeometry& camera,
+                            const TelescopeConfig& telescope);
 TriggerConfig buildTriggerConfig(const std::map<std::string, std::string>& cfg);
 CameraGeometry buildCameraGeometry(const CameraConfig& cfg);
 double cameraPixelSizeForCollector(const CameraConfig& cfg, const CameraGeometry& camera);

@@ -1,6 +1,6 @@
 # 抛物面 CORSIKA full-response + 遮挡测试
 
-这个测试使用同一个 6 m 圆形抛物面镜，但打开更完整的响应链：遮挡模型、光收集器、镜面反射率、滤光片透过率、SiPM PDE、小误差项和简单 trigger。NSB 默认关闭，因此图像和时间分布只对应 Cherenkov 光经过光学系统后的 p.e.。
+这个测试使用同一个 6 m 圆形抛物面镜，但打开更完整的响应链：遮挡模型、光收集器、镜面反射率、滤光片透过率、SiPM PDE、SkyCalc spectral NSB、小误差项和简单 trigger。图像和时间序列中的 `pe` 包含 Cherenkov p.e. 与 NSB p.e. 的总和；若需要分量检查，可看 HDF5 中的 `cherenkov_pe` 和 `nsb_pe`。
 
 ## 配置文件
 
@@ -13,6 +13,7 @@
 - `sipm.config=../sipm/new_camera_sipm.cfg`：使用真实相机 SiPM 配置，PDE 在这里设置。
 - `efficiency.config=../efficiency/curves_all.cfg`：使用镜面反射率和滤光片透过率曲线。
 - `atmosphere.config=../atmosphere/modtran_4400_desert.cfg`：使用 MODTRAN 总光学厚度大气吸收。
+- `nsb.config=../nsb/spectral_skycalc_dark_with_obstruction.cfg`：使用无月 SkyCalc LoNS 光谱 NSB，固定有效面积为 `22.606448 m^2`，程序算得约 `0.07438 p.e./ns/pixel`。
 - `trigger.config=../trigger/example_simple_multiplicity.cfg`：计算简单 multiplicity trigger。
 - `output.save_only_triggered=false`：示例保留所有望远镜图像，方便检查；如只想保存触发图像可改为 `true`。
 - `waveform.source=pe`：时间序列保存经过效率/PDE 后的 p.e.。

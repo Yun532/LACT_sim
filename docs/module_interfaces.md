@@ -170,7 +170,7 @@ the combined efficiency before running a full response simulation.
 
 ## NSB
 
-The first NSB implementation is a constant-rate Poisson model:
+The simplest NSB implementation is a constant-rate Poisson model:
 
 ```ini
 nsb.enabled=false
@@ -187,6 +187,23 @@ It applies only to dense pixel-camera HDF5 output. The final
 sampled per waveform time bin using `rate_pe_per_ns_per_pixel *
 waveform.time_bin_width_ns`; otherwise it is sampled once per pixel with
 `rate_pe_per_ns_per_pixel * nsb.window_ns`.
+
+The spectral model computes the same `rate_pe_per_ns_per_pixel` from a LoNS
+spectrum, a fixed effective area, the camera pixel solid angle, and the
+configured optical efficiency curves:
+
+```ini
+nsb.enabled=true
+nsb.model=spectral_flux
+nsb.spectrum_csv=configs/nsb/nsb_spectrum.csv
+nsb.spectrum_unit=ph_s_nm_sr_m2
+nsb.effective_area_m2=22.606448
+nsb.pixel_solid_angle=auto
+```
+
+`pixel_solid_angle=auto` uses the first configured camera pixel size and the
+telescope focal length. The computed rate is printed in the run log and stored
+under `/metadata/nsb` in HDF5 output.
 
 ## Trigger
 

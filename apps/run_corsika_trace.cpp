@@ -1297,6 +1297,16 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                              doubleToString(nsb_cfg.rate_pe_per_ns_per_pixel));
         writeStringAttribute(nsb_group, "window_ns", doubleToString(nsb_cfg.window_ns));
         writeStringAttribute(nsb_group, "seed", intToString(nsb_cfg.seed));
+        writeStringAttribute(nsb_group, "spectrum_csv", nsb_cfg.spectrum_csv);
+        writeStringAttribute(nsb_group, "spectrum_unit", nsb_cfg.spectrum_unit);
+        writeStringAttribute(nsb_group, "effective_area_m2",
+                             doubleToString(nsb_cfg.effective_area_m2));
+        writeStringAttribute(nsb_group, "pixel_solid_angle_sr",
+                             doubleToString(nsb_cfg.pixel_solid_angle_sr));
+        writeStringAttribute(nsb_group, "computed_from_spectrum",
+                             nsb_cfg.computed_from_spectrum ? "true" : "false");
+        writeStringAttribute(nsb_group, "spectral_integral_pe_s_sr_m2",
+                             doubleToString(nsb_cfg.spectral_integral_pe_s_sr_m2));
         H5Gclose(nsb_group);
 
         hid_t trigger_group_meta = H5Gcreate2(metadata_group, "trigger",
@@ -2802,6 +2812,16 @@ void printCorsikaOpticalConfiguration(
                doubleToString(nsb_cfg.rate_pe_per_ns_per_pixel));
     printField("window_ns", doubleToString(nsb_cfg.window_ns));
     printField("seed", intToString(nsb_cfg.seed));
+    if (nsb_cfg.model == "spectral_flux") {
+        printField("spectrum_csv", nsb_cfg.spectrum_csv);
+        printField("spectrum_unit", nsb_cfg.spectrum_unit);
+        printField("effective_area_m2", doubleToString(nsb_cfg.effective_area_m2));
+        printField("pixel_solid_angle_sr", doubleToString(nsb_cfg.pixel_solid_angle_sr));
+        printField("computed_from_spectrum",
+                   nsb_cfg.computed_from_spectrum ? "true" : "false");
+        printField("spectral_integral_pe_s_sr_m2",
+                   doubleToString(nsb_cfg.spectral_integral_pe_s_sr_m2));
+    }
 
     printSection("Trigger");
     printField("enabled", trigger_cfg.enabled ? "true" : "false");
@@ -2963,6 +2983,7 @@ int main(int argc, char** argv) {
         auto light_collector = buildLightCollector(camera_cfg, camera);
         MirrorLayout mirrors = makeMirrorLayoutFromFacets(facets);
         OpticalEfficiencyConfig efficiency_cfg = buildEfficiencyConfig(cfg);
+        resolveNsbSpectralRate(nsb_cfg, efficiency_cfg, camera, telescope_cfg);
         AtmosphereTransmissionConfig atmosphere_cfg = buildAtmosphereTransmissionConfig(cfg);
         PropagationConfig propagation_cfg = buildPropagationConfig(cfg);
         OpticalEfficiency eff(efficiency_cfg);

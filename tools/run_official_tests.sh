@@ -42,6 +42,7 @@ mkdir -p run_logs/official_tests/deformation_scan
 mkdir -p run_logs/official_tests/corsika/plots
 mkdir -p run_logs/official_tests/collector_angular_response
 mkdir -p run_logs/official_tests/efficiency_curves
+mkdir -p run_logs/official_tests/nsb_spectral
 
 if [[ "$RUN_CORSIKA" -eq 0 ]]; then
   cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DLACT_ENABLE_HESSIO=OFF
@@ -145,6 +146,16 @@ python3 python/plot_efficiency_curves.py \
   --output-dir run_logs/official_tests/efficiency_curves \
   --dpi 350 \
   2>&1 | tee run_logs/official_tests/efficiency_curves/run.log
+
+"$BUILD_DIR/compute_nsb_rate" configs/nsb/spectral_rate_check_with_obstruction.cfg \
+  2>&1 | tee run_logs/official_tests/nsb_spectral/run.log
+MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
+python3 python/plot_nsb_spectral_rate.py \
+  --effective-area-m2 22.606448 \
+  --output run_logs/official_tests/nsb_spectral/nsb_spectral_response.png \
+  --diagnostic-csv run_logs/official_tests/nsb_spectral/diagnostic.csv \
+  --summary run_logs/official_tests/nsb_spectral/summary.txt \
+  2>&1 | tee run_logs/official_tests/nsb_spectral/plot.log
 
 if [[ "$RUN_CORSIKA" -eq 0 ]]; then
   echo "Skipping CORSIKA/EventIO tests (--no-corsika)."

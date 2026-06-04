@@ -888,6 +888,29 @@ This writes one plot per component, `total_efficiency.png`, sampled values in
 `docs/efficiency_validation.md` for the exact interpolation and duplicate-point
 rules.
 
+## NSB Spectral Rate Check
+
+The official NSB smoke tests now use a SkyCalc LoNS spectrum instead of a
+hand-written constant rate. To inspect the standalone rate calculation:
+
+```bash
+mkdir -p run_logs/official_tests/nsb_spectral
+
+build/compute_nsb_rate configs/nsb/spectral_rate_check_with_obstruction.cfg \
+  2>&1 | tee run_logs/official_tests/nsb_spectral/run.log
+
+MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_nsb_spectral_rate.py \
+  --effective-area-m2 22.606448 \
+  --output run_logs/official_tests/nsb_spectral/nsb_spectral_response.png \
+  --diagnostic-csv run_logs/official_tests/nsb_spectral/diagnostic.csv \
+  --summary run_logs/official_tests/nsb_spectral/summary.txt \
+  2>&1 | tee run_logs/official_tests/nsb_spectral/plot.log
+```
+
+The default dark-sky, obstruction-aware result is about
+`0.074375315 pe/ns/pixel`. See `docs/nsb_spectral_model_zh.md` for the
+LoNS unit conversion, fixed effective areas, and validation plot details.
+
 ## Configs Used by the Official Tests
 
 ```text

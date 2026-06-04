@@ -262,6 +262,9 @@ void mergeComponentConfig(std::map<std::string, std::string>& dst,
         if (scoped == "atmosphere.tau_table") {
             value = resolveRelativePath(path, value);
         }
+        if (scoped == "nsb.spectrum_csv") {
+            value = resolveRelativePath(path, value);
+        }
         dst[scoped] = value;
     }
 
@@ -1661,9 +1664,19 @@ NsbConfig buildNsbConfig(const std::map<std::string, std::string>& cfg) {
         getDouble(cfg, "nsb.rate_pe_per_ns_per_pixel", nsb.rate_pe_per_ns_per_pixel);
     nsb.window_ns = getDouble(cfg, "nsb.window_ns", nsb.window_ns);
     nsb.seed = getUInt64(cfg, "nsb.seed", nsb.seed);
+    nsb.spectrum_csv = getString(cfg, "nsb.spectrum_csv", nsb.spectrum_csv);
+    nsb.spectrum_unit =
+        lowerCopy(trim(getString(cfg, "nsb.spectrum_unit", nsb.spectrum_unit)));
+    nsb.effective_area_m2 =
+        getDouble(cfg, "nsb.effective_area_m2", nsb.effective_area_m2);
+    nsb.pixel_solid_angle =
+        lowerCopy(trim(getString(cfg, "nsb.pixel_solid_angle", nsb.pixel_solid_angle)));
+    nsb.pixel_solid_angle_sr =
+        getDouble(cfg, "nsb.pixel_solid_angle_sr", nsb.pixel_solid_angle_sr);
 
-    if (!(nsb.model == "constant_rate" || nsb.model == "none" || nsb.model == "off")) {
-        throw std::runtime_error("nsb.model must be constant_rate or none");
+    if (!(nsb.model == "constant_rate" || nsb.model == "spectral_flux" ||
+          nsb.model == "none" || nsb.model == "off")) {
+        throw std::runtime_error("nsb.model must be constant_rate, spectral_flux, or none");
     }
     if (!std::isfinite(nsb.rate_pe_per_ns_per_pixel) ||
         nsb.rate_pe_per_ns_per_pixel < 0.0) {
@@ -1672,10 +1685,116 @@ NsbConfig buildNsbConfig(const std::map<std::string, std::string>& cfg) {
     if (!std::isfinite(nsb.window_ns) || nsb.window_ns < 0.0) {
         throw std::runtime_error("nsb.window_ns must be finite and >= 0");
     }
+    if (!std::isfinite(nsb.effective_area_m2) || nsb.effective_area_m2 < 0.0) {
+        throw std::runtime_error("nsb.effective_area_m2 must be finite and >= 0");
+    }
+    if (!std::isfinite(nsb.pixel_solid_angle_sr) || nsb.pixel_solid_angle_sr < 0.0) {
+        throw std::runtime_error("nsb.pixel_solid_angle_sr must be finite and >= 0");
+    }
+    if (!(nsb.pixel_solid_angle == "auto" || nsb.pixel_solid_angle == "manual" ||
+          nsb.pixel_solid_angle == "fixed")) {
+        throw std::runtime_error("nsb.pixel_solid_angle must be auto, manual, or fixed");
+    }
+    if (!(nsb.spectrum_unit == "ph_s_nm_sr_m2" ||
+          nsb.spectrum_unit == "photons_m2_s_sr_nm")) {
+        throw std::runtime_error(
+            "nsb.spectrum_unit must be ph_s_nm_sr_m2 or photons_m2_s_sr_nm");
+    }
+    if (nsb.model == "spectral_flux") {
+        if (trim(nsb.spectrum_csv).empty()) {
+            throw std::runtime_error("nsb.spectrum_csv is required for nsb.model=spectral_flux");
+        }
+        if (nsb.effective_area_m2 <= 0.0) {
+            throw std::runtime_error(
+                "nsb.effective_area_m2 must be > 0 for nsb.model=spectral_flux");
+        }
+    }
     if (isDisabledText(nsb.model)) {
         nsb.enabled = false;
     }
     return nsb;
+}
+
+std::vector<std::pair<double, double>> readNsbSpectrumCsv(const std::string& path)
+{
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error("failed to open NSB spectrum CSV: " + path);
+    }
+    std::vector<std::pair<double, double>> rows;
+    std::string line;
+    while (std::getline(in, line)) {
+        line = trim(line);
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+        const auto cells = splitCsvCells(line);
+        if (cells.size() < 2) {
+            continue;
+        }
+        double wavelength = 0.0;
+        double flux = 0.0;
+        if (!parseDoubleStrict(cells[0], wavelength) ||
+            !parseDoubleStrict(cells[1], flux)) {
+            continue;
+        }
+        if (!std::isfinite(wavelength) || !std::isfinite(flux) ||
+            wavelength <= 0.0 || flux < 0.0) {
+            throw std::runtime_error("invalid NSB spectrum row in " + path + ": " + line);
+        }
+        rows.push_back({wavelength, flux});
+    }
+    if (rows.size() < 2) {
+        throw std::runtime_error("NSB spectrum needs at least two numeric rows: " + path);
+    }
+    std::sort(rows.begin(), rows.end());
+    return rows;
+}
+
+void resolveNsbSpectralRate(NsbConfig& nsb,
+                            const OpticalEfficiencyConfig& efficiency_cfg,
+                            const CameraGeometry& camera,
+                            const TelescopeConfig& telescope)
+{
+    nsb.computed_from_spectrum = false;
+    nsb.spectral_integral_pe_s_sr_m2 = 0.0;
+    if (!nsb.enabled || nsb.model != "spectral_flux") {
+        return;
+    }
+
+    if (nsb.pixel_solid_angle == "auto") {
+        if (camera.size() == 0) {
+            throw std::runtime_error(
+                "nsb.pixel_solid_angle=auto requires a configured camera");
+        }
+        const double pixel_size_m = camera.pixels().front().size;
+        if (!std::isfinite(pixel_size_m) || pixel_size_m <= 0.0 ||
+            !std::isfinite(telescope.focal_length_m) || telescope.focal_length_m <= 0.0) {
+            throw std::runtime_error(
+                "cannot compute automatic NSB pixel solid angle from camera/focal length");
+        }
+        nsb.pixel_solid_angle_sr =
+            (pixel_size_m / telescope.focal_length_m) *
+            (pixel_size_m / telescope.focal_length_m);
+    } else if (nsb.pixel_solid_angle_sr <= 0.0) {
+        throw std::runtime_error(
+            "nsb.pixel_solid_angle_sr must be > 0 when nsb.pixel_solid_angle is manual/fixed");
+    }
+
+    OpticalEfficiency efficiency(efficiency_cfg);
+    const auto spectrum = readNsbSpectrumCsv(nsb.spectrum_csv);
+    double integral = 0.0;
+    for (std::size_t i = 1; i < spectrum.size(); ++i) {
+        const double w0 = spectrum[i - 1].first;
+        const double w1 = spectrum[i].first;
+        const double f0 = spectrum[i - 1].second * efficiency.total(w0, 0.0);
+        const double f1 = spectrum[i].second * efficiency.total(w1, 0.0);
+        integral += 0.5 * (f0 + f1) * (w1 - w0);
+    }
+    nsb.spectral_integral_pe_s_sr_m2 = integral;
+    nsb.rate_pe_per_ns_per_pixel =
+        1.0e-9 * integral * nsb.effective_area_m2 * nsb.pixel_solid_angle_sr;
+    nsb.computed_from_spectrum = true;
 }
 
 TriggerConfig buildTriggerConfig(const std::map<std::string, std::string>& cfg) {

@@ -43,6 +43,7 @@ mkdir -p run_logs/parabolic_tests/raytrace_structure_parallel
 mkdir -p run_logs/parabolic_tests/raytrace_structure_point_30m
 mkdir -p run_logs/parabolic_tests/elevation_scan
 mkdir -p run_logs/parabolic_tests/corsika
+mkdir -p run_logs/parabolic_tests/nsb_spectral
 
 write_common_whiteboard_cfg() {
   local path="$1"
@@ -185,6 +186,16 @@ python3 python/run_elevation_parallel_scan.py \
   --n-bunches 100000 \
   --output-dir run_logs/parabolic_tests/elevation_scan
 
+"$BUILD_DIR/compute_nsb_rate" configs/nsb/spectral_rate_check_with_obstruction.cfg \
+  2>&1 | tee run_logs/parabolic_tests/nsb_spectral/run.log
+MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
+python3 python/plot_nsb_spectral_rate.py \
+  --effective-area-m2 22.606448 \
+  --output run_logs/parabolic_tests/nsb_spectral/nsb_spectral_response.png \
+  --diagnostic-csv run_logs/parabolic_tests/nsb_spectral/diagnostic.csv \
+  --summary run_logs/parabolic_tests/nsb_spectral/summary.txt \
+  2>&1 | tee run_logs/parabolic_tests/nsb_spectral/plot.log
+
 if [[ "$RUN_CORSIKA" -eq 0 ]]; then
   echo "Skipping CORSIKA/EventIO tests (--no-corsika)."
   exit 0
@@ -287,11 +298,11 @@ write_corsika_camera_cfg "$CFG_DIR/corsika_new_camera.cfg" \
   "" "false" "false" "false"
 write_corsika_camera_cfg "$CFG_DIR/corsika_nsb_trigger_camera.cfg" \
   "run_logs/parabolic_tests/corsika/camera_nsb_trigger_dense.h5" \
-  "ideal_sipm.cfg" "ideal.cfg" "example_constant_rate.cfg" "example_simple_multiplicity.cfg" \
+  "new_camera_sipm.cfg" "curves_all.cfg" "spectral_skycalc_dark_no_obstruction.cfg" "example_simple_multiplicity.cfg" \
   "" "true" "true" "true" "1"
 write_corsika_camera_cfg "$CFG_DIR/corsika_obstruction_nsb_trigger_camera.cfg" \
   "run_logs/parabolic_tests/corsika/camera_obstruction_nsb_trigger_dense.h5" \
-  "ideal_sipm.cfg" "ideal.cfg" "example_constant_rate.cfg" "example_simple_multiplicity.cfg" \
+  "new_camera_sipm.cfg" "curves_all.cfg" "spectral_skycalc_dark_with_obstruction.cfg" "example_simple_multiplicity.cfg" \
   "obstruction.config=../../../configs/obstructions/raytrace_final_structure.cfg" \
   "true" "true" "true" "1"
 write_corsika_camera_cfg "$CFG_DIR/corsika_full_response_camera.cfg" \

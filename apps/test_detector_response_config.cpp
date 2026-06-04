@@ -56,6 +56,22 @@ int main()
     ok &= check(std::abs(nsb.window_ns - 20.0) < 1e-12, "NSB window parsed");
     ok &= check(nsb.seed == 7, "NSB seed parsed");
 
+    std::map<std::string, std::string> spectral_nsb_cfg{
+        {"nsb.enabled", "true"},
+        {"nsb.model", "spectral_flux"},
+        {"nsb.spectrum_csv", "configs/nsb/nsb_spectrum.csv"},
+        {"nsb.spectrum_unit", "ph_s_nm_sr_m2"},
+        {"nsb.effective_area_m2", "22.606448"},
+        {"nsb.pixel_solid_angle", "auto"},
+    };
+    auto spectral_nsb = buildNsbConfig(spectral_nsb_cfg);
+    ok &= check(spectral_nsb.enabled, "spectral NSB enabled parsed");
+    ok &= check(spectral_nsb.model == "spectral_flux", "spectral NSB model parsed");
+    ok &= check(spectral_nsb.spectrum_csv == "configs/nsb/nsb_spectrum.csv",
+                "spectral NSB spectrum path parsed");
+    ok &= check(std::abs(spectral_nsb.effective_area_m2 - 22.606448) < 1e-12,
+                "spectral NSB effective area parsed");
+
     auto trigger_default = buildTriggerConfig({});
     ok &= check(!trigger_default.enabled, "trigger should default to disabled");
     ok &= check(std::abs(trigger_default.pixel_threshold_pe - 5.0) < 1e-12,
@@ -78,6 +94,8 @@ int main()
                 "coincidence window parsed");
 
     ok &= expectInvalid({{"nsb.rate_pe_per_ns_per_pixel", "-1"}}, "negative NSB rate");
+    ok &= expectInvalid({{"nsb.enabled", "true"}, {"nsb.model", "spectral_flux"}},
+                        "spectral NSB missing spectrum");
     ok &= expectInvalid({{"trigger.camera_multiplicity", "0"}}, "zero camera multiplicity");
 
     std::cout << "detector response config checks passed\n";

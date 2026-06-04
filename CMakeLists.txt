@@ -72,6 +72,11 @@ add_executable(run_optical_sim
 )
 target_link_libraries(run_optical_sim PRIVATE simlite_core)
 
+add_executable(compute_nsb_rate
+    apps/compute_nsb_rate.cpp
+)
+target_link_libraries(compute_nsb_rate PRIVATE simlite_core)
+
 if(LACT_HAS_HESSIO)
     add_executable(run_corsika_trace
         apps/run_corsika_trace.cpp
@@ -151,6 +156,11 @@ add_executable(test_efficiency_curves
 )
 target_link_libraries(test_efficiency_curves PRIVATE simlite_core)
 add_test(NAME test_efficiency_curves COMMAND test_efficiency_curves)
+
+add_test(NAME compute_nsb_rate_spectral
+         COMMAND compute_nsb_rate ${CMAKE_CURRENT_SOURCE_DIR}/configs/nsb/spectral_rate_check_with_obstruction.cfg)
+set_tests_properties(compute_nsb_rate_spectral PROPERTIES
+                     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_executable(test_atmosphere_transmission
     apps/test_atmosphere_transmission.cpp
