@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <random>
 #include <tuple>
@@ -44,6 +45,23 @@ struct CollectorDebugConfig {
 
 struct ProfileConfig {
     bool enabled = false;
+};
+
+struct AtmosphereHistogramConfig {
+    bool enabled = false;
+    std::string csv_path = "atmosphere_height_histogram.csv";
+    double min_altitude_km = 4.4;
+    double max_altitude_km = 100.0;
+    double bin_width_km = 1.0;
+};
+
+struct AtmosphereHistogramBin {
+    double low_km = 0.0;
+    double high_km = 0.0;
+    std::uint64_t bunches = 0;
+    double before_weight = 0.0;
+    double after_weight = 0.0;
+    double theory_weight = 0.0;
 };
 
 struct ProfileStats {
@@ -207,8 +225,15 @@ PhotonBunch transformEventIOBunchToTraceFrame(
     const SourceRuntimeConfig& source_runtime_cfg)
 {
     const std::string frame_name = lowerCopy(trim(source_runtime_cfg.eventio_coordinate_frame));
+    auto apply_2d_plane_z = [&](PhotonBunch& bunch) {
+        if (bunch.eventio_2d && source_runtime_cfg.eventio_2d_input_plane_z_m != 0.0) {
+            bunch.photon.pos.z += source_runtime_cfg.eventio_2d_input_plane_z_m;
+        }
+    };
     if (frame_name == "telescope_local" || frame_name == "local") {
-        return input;
+        PhotonBunch out = input;
+        apply_2d_plane_z(out);
+        return out;
     }
 
     PhotonBunch out = input;
@@ -217,6 +242,7 @@ PhotonBunch transformEventIOBunchToTraceFrame(
         const TelescopeFrame frame = corsikaIactFrame(telescope_cfg);
         out.photon.pos = frame.rotateVectorToLocal(input.photon.pos);
         out.photon.dir = frame.rotateVectorToLocal(input.photon.dir).normalized();
+        apply_2d_plane_z(out);
         return out;
     }
 
@@ -228,6 +254,7 @@ PhotonBunch transformEventIOBunchToTraceFrame(
             source_runtime_cfg.use_eventio_telescope_position);
         out.photon.pos = frame.pointToLocal(input.photon.pos);
         out.photon.dir = frame.rotateVectorToLocal(input.photon.dir).normalized();
+        apply_2d_plane_z(out);
         return out;
     }
 
@@ -252,6 +279,29 @@ int arrayIdFromOutputEvent(int event_id, const std::string& event_id_mode)
         return event_id % 100;
     }
     return 0;
+}
+
+double mirrorFrontReferenceZ(const MirrorLayout& mirrors)
+{
+    double z = -std::numeric_limits<double>::infinity();
+    for (const auto& tile : mirrors.tiles()) {
+        z = std::max(z, tile.center.z);
+    }
+    return std::isfinite(z) ? z : -16.0;
+}
+
+bool shouldBackprojectEventIO2d(const SourceRuntimeConfig& source_runtime_cfg,
+                                const MirrorLayout& mirrors)
+{
+    const std::string mode = lowerCopy(trim(source_runtime_cfg.eventio_2d_plane_mode));
+    if (mode == "backproject") {
+        return true;
+    }
+    if (mode == "forward") {
+        return false;
+    }
+    const double mirror_front_z = mirrorFrontReferenceZ(mirrors);
+    return source_runtime_cfg.eventio_2d_input_plane_z_m <= mirror_front_z + 1e-6;
 }
 
 struct OutputEventMetadata {
@@ -464,6 +514,112 @@ ProfileConfig buildProfileConfig(const std::map<std::string, std::string>& cfg)
     return out;
 }
 
+AtmosphereHistogramConfig buildAtmosphereHistogramConfig(
+    const std::map<std::string, std::string>& cfg)
+{
+    AtmosphereHistogramConfig out;
+    out.csv_path = getString(
+        cfg,
+        "atmosphere.height_histogram_csv",
+        getString(cfg, "atmosphere.histogram_csv", ""));
+    out.enabled = !isDisabledText(out.csv_path);
+    out.min_altitude_km =
+        getDouble(cfg, "atmosphere.histogram_min_altitude_km", out.min_altitude_km);
+    out.max_altitude_km =
+        getDouble(cfg, "atmosphere.histogram_max_altitude_km", out.max_altitude_km);
+    out.bin_width_km =
+        getDouble(cfg, "atmosphere.histogram_bin_width_km", out.bin_width_km);
+    if (out.enabled) {
+        if (out.bin_width_km <= 0.0) {
+            throw std::runtime_error("atmosphere histogram bin width must be positive");
+        }
+        if (out.max_altitude_km <= out.min_altitude_km) {
+            throw std::runtime_error("atmosphere histogram max altitude must exceed min altitude");
+        }
+    }
+    return out;
+}
+
+std::vector<AtmosphereHistogramBin> makeAtmosphereHistogramBins(
+    const AtmosphereHistogramConfig& cfg)
+{
+    std::vector<AtmosphereHistogramBin> bins;
+    if (!cfg.enabled) {
+        return bins;
+    }
+    for (double low = cfg.min_altitude_km; low < cfg.max_altitude_km;
+         low += cfg.bin_width_km) {
+        bins.push_back({low, std::min(cfg.max_altitude_km, low + cfg.bin_width_km)});
+    }
+    return bins;
+}
+
+void accumulateAtmosphereHistogram(std::vector<AtmosphereHistogramBin>& bins,
+                                   const AtmosphereHistogramConfig& cfg,
+                                   double altitude_km,
+                                   double before_weight,
+                                   double after_weight,
+                                   double theory_weight)
+{
+    if (!cfg.enabled || bins.empty() || !std::isfinite(altitude_km)) {
+        return;
+    }
+    if (altitude_km < cfg.min_altitude_km || altitude_km >= cfg.max_altitude_km) {
+        return;
+    }
+    std::size_t index = static_cast<std::size_t>(
+        (altitude_km - cfg.min_altitude_km) / cfg.bin_width_km);
+    if (index >= bins.size()) {
+        index = bins.size() - 1;
+    }
+    auto& bin = bins[index];
+    bin.bunches += 1;
+    bin.before_weight += before_weight;
+    bin.after_weight += after_weight;
+    bin.theory_weight += theory_weight;
+}
+
+void writeAtmosphereHistogramCsv(const AtmosphereHistogramConfig& cfg,
+                                 const std::vector<AtmosphereHistogramBin>& bins)
+{
+    if (!cfg.enabled) {
+        return;
+    }
+    const std::filesystem::path out_path(cfg.csv_path);
+    if (out_path.has_parent_path()) {
+        std::filesystem::create_directories(out_path.parent_path());
+    }
+    std::ofstream out(cfg.csv_path);
+    if (!out) {
+        throw std::runtime_error("failed to write atmosphere histogram CSV: " +
+                                 cfg.csv_path);
+    }
+    out << "altitude_low_km,altitude_high_km,altitude_center_km,bunches,"
+        << "before_weight,after_weight,theory_weight,transmission,"
+        << "theory_transmission,relative_error\n";
+    for (const auto& bin : bins) {
+        const double center = 0.5 * (bin.low_km + bin.high_km);
+        const double transmission =
+            bin.before_weight > 0.0 ? bin.after_weight / bin.before_weight : 0.0;
+        const double theory_transmission =
+            bin.before_weight > 0.0 ? bin.theory_weight / bin.before_weight : 0.0;
+        const double relative_error =
+            bin.theory_weight > 0.0
+                ? (bin.after_weight - bin.theory_weight) / bin.theory_weight
+                : 0.0;
+        out << bin.low_km << ','
+            << bin.high_km << ','
+            << center << ','
+            << bin.bunches << ','
+            << bin.before_weight << ','
+            << bin.after_weight << ','
+            << bin.theory_weight << ','
+            << transmission << ','
+            << theory_transmission << ','
+            << relative_error << '\n';
+    }
+}
+
 void addElapsed(ProfileStats& stats,
                 double ProfileStats::*field,
                 const std::chrono::steady_clock::time_point& start)
@@ -656,6 +812,8 @@ void writeCorsikaWhiteboardHeader(std::ofstream& ofs)
     ofs << std::setprecision(10);
     ofs << "event_id,telescope_id,photon_index,mirror_id,"
         << "surface_x_m,surface_y_m,surface_z_m,"
+        << "mirror_x_m,mirror_y_m,mirror_z_m,"
+        << "input_x_m,input_y_m,input_z_m,"
         << "u_m,v_m,dir_x,dir_y,dir_z,"
         << "time_ns,wavelength_nm,weight,relative_efficiency,"
         << "signal_weight\n";
@@ -674,6 +832,12 @@ void writeCorsikaWhiteboardHit(std::ofstream& ofs,
         << hit.surface_point.x << ","
         << hit.surface_point.y << ","
         << hit.surface_point.z << ","
+        << hit.mirror_point.x << ","
+        << hit.mirror_point.y << ","
+        << hit.mirror_point.z << ","
+        << bunch.photon.pos.x << ","
+        << bunch.photon.pos.y << ","
+        << bunch.photon.pos.z << ","
         << hit.u_m << ","
         << hit.v_m << ","
         << hit.out_dir.x << ","
@@ -1133,6 +1297,16 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                              doubleToString(nsb_cfg.rate_pe_per_ns_per_pixel));
         writeStringAttribute(nsb_group, "window_ns", doubleToString(nsb_cfg.window_ns));
         writeStringAttribute(nsb_group, "seed", intToString(nsb_cfg.seed));
+        writeStringAttribute(nsb_group, "spectrum_csv", nsb_cfg.spectrum_csv);
+        writeStringAttribute(nsb_group, "spectrum_unit", nsb_cfg.spectrum_unit);
+        writeStringAttribute(nsb_group, "effective_area_m2",
+                             doubleToString(nsb_cfg.effective_area_m2));
+        writeStringAttribute(nsb_group, "pixel_solid_angle_sr",
+                             doubleToString(nsb_cfg.pixel_solid_angle_sr));
+        writeStringAttribute(nsb_group, "computed_from_spectrum",
+                             nsb_cfg.computed_from_spectrum ? "true" : "false");
+        writeStringAttribute(nsb_group, "spectral_integral_pe_s_sr_m2",
+                             doubleToString(nsb_cfg.spectral_integral_pe_s_sr_m2));
         H5Gclose(nsb_group);
 
         hid_t trigger_group_meta = H5Gcreate2(metadata_group, "trigger",
@@ -2457,9 +2631,12 @@ void printCorsikaOpticalConfiguration(
     const NsbConfig& nsb_cfg,
     const TriggerConfig& trigger_cfg,
     const OpticalEfficiencyConfig& efficiency_cfg,
+    const AtmosphereTransmissionConfig& atmosphere_cfg,
     const ErrorConfig& error_cfg,
     const ObstructionMask& obstruction,
-    const PropagationConfig& propagation_cfg)
+    const PropagationConfig& propagation_cfg,
+    double eventio_mirror_front_z_m,
+    bool eventio_2d_backproject)
 {
     const std::string mirror_mode = lowerCopy(getString(cfg, "mirror.mode", "generated"));
     const std::string mirror_csv = getString(cfg, "mirror.csv_path", "");
@@ -2496,13 +2673,20 @@ void printCorsikaOpticalConfiguration(
     printField("eventio_path", source_runtime_cfg.eventio_path);
     printField("event_id_mode", source_runtime_cfg.event_id_mode);
     printField("eventio_coordinate_frame", source_runtime_cfg.eventio_coordinate_frame);
+    printField("eventio_2d_input_plane_z_m",
+               doubleToString(source_runtime_cfg.eventio_2d_input_plane_z_m));
+    printField("eventio_2d_plane_mode", source_runtime_cfg.eventio_2d_plane_mode);
+    printField("eventio_mirror_front_z_m", doubleToString(eventio_mirror_front_z_m));
+    printField("eventio_2d_trace_direction",
+               eventio_2d_backproject ? "signed_line_to_mirror_then_reflect"
+                                      : "forward_to_mirror_then_reflect");
     printField("coordinate_interpretation",
                lowerCopy(trim(source_runtime_cfg.eventio_coordinate_frame)) == "corsika_iact"
-                   ? "CORSIKA IACT x/y are telescope-relative horizontal coordinates; cx/cy/cz are rotated to telescope-local optical coordinates"
+                   ? "CORSIKA IACT x/y are telescope-relative horizontal coordinates; cx/cy/cz are rotated to telescope-local optical coordinates; 2D bunches start at local z=source.eventio_2d_input_plane_z_m"
                    : (lowerCopy(trim(source_runtime_cfg.eventio_coordinate_frame)) == "telescope_local" ||
                               lowerCopy(trim(source_runtime_cfg.eventio_coordinate_frame)) == "local"
-                          ? "EventIO photon positions/directions are already in telescope-local optical coordinates"
-                          : "EventIO photon positions/directions are global array coordinates and will be transformed to telescope-local coordinates"));
+                          ? "EventIO photon positions/directions are already in telescope-local optical coordinates; 2D bunches start at local z=source.eventio_2d_input_plane_z_m"
+                          : "EventIO photon positions/directions are global array coordinates and will be transformed to telescope-local coordinates; 2D bunches start at local z=source.eventio_2d_input_plane_z_m"));
     printField("eventio_telescope_position",
                source_runtime_cfg.use_eventio_telescope_position
                    ? "use EventIO telescope table"
@@ -2617,6 +2801,9 @@ void printCorsikaOpticalConfiguration(
 
     printSection("Profile");
     printField("enabled", getBool(cfg, "profile.enabled", false) ? "true" : "false");
+    printField("atmosphere_height_histogram",
+               getString(cfg, "atmosphere.height_histogram_csv",
+                         getString(cfg, "atmosphere.histogram_csv", "off")));
 
     printSection("NSB");
     printField("enabled", nsb_cfg.enabled ? "true" : "false");
@@ -2625,6 +2812,16 @@ void printCorsikaOpticalConfiguration(
                doubleToString(nsb_cfg.rate_pe_per_ns_per_pixel));
     printField("window_ns", doubleToString(nsb_cfg.window_ns));
     printField("seed", intToString(nsb_cfg.seed));
+    if (nsb_cfg.model == "spectral_flux") {
+        printField("spectrum_csv", nsb_cfg.spectrum_csv);
+        printField("spectrum_unit", nsb_cfg.spectrum_unit);
+        printField("effective_area_m2", doubleToString(nsb_cfg.effective_area_m2));
+        printField("pixel_solid_angle_sr", doubleToString(nsb_cfg.pixel_solid_angle_sr));
+        printField("computed_from_spectrum",
+                   nsb_cfg.computed_from_spectrum ? "true" : "false");
+        printField("spectral_integral_pe_s_sr_m2",
+                   doubleToString(nsb_cfg.spectral_integral_pe_s_sr_m2));
+    }
 
     printSection("Trigger");
     printField("enabled", trigger_cfg.enabled ? "true" : "false");
@@ -2641,6 +2838,7 @@ void printCorsikaOpticalConfiguration(
     printField("filter_transmission",
                factorDescription(efficiency_cfg.filter_transmission));
     printField("atmosphere", factorDescription(efficiency_cfg.atmosphere_transmission));
+    printField("atmosphere_model", atmosphereTransmissionDescription(atmosphere_cfg));
     printField("funnel_acceptance",
                efficiency_cfg.use_funnel_acceptance ? "cos(theta)" : "not set -> 1");
 
@@ -2785,15 +2983,25 @@ int main(int argc, char** argv) {
         auto light_collector = buildLightCollector(camera_cfg, camera);
         MirrorLayout mirrors = makeMirrorLayoutFromFacets(facets);
         OpticalEfficiencyConfig efficiency_cfg = buildEfficiencyConfig(cfg);
+        resolveNsbSpectralRate(nsb_cfg, efficiency_cfg, camera, telescope_cfg);
+        AtmosphereTransmissionConfig atmosphere_cfg = buildAtmosphereTransmissionConfig(cfg);
         PropagationConfig propagation_cfg = buildPropagationConfig(cfg);
         OpticalEfficiency eff(efficiency_cfg);
+        AtmosphereTransmission atmosphere(atmosphere_cfg);
         OpticalTracer tracer(propagation_cfg.speed_of_light_m_per_ns,
                              error_cfg.reflect_direction_sigma_deg * DEG_TO_RAD,
                              error_cfg.random_seed);
+        const double eventio_mirror_front_z_m = mirrorFrontReferenceZ(mirrors);
+        const bool eventio_2d_backproject =
+            shouldBackprojectEventIO2d(source_runtime_cfg, mirrors);
         CorsikaTraceOutputConfig output_cfg = buildCorsikaTraceOutputConfig(cfg);
         WaveformOutputConfig waveform_cfg = buildWaveformOutputConfig(cfg);
         CollectorDebugConfig collector_debug_cfg = buildCollectorDebugConfig(cfg);
         ProfileConfig profile_cfg = buildProfileConfig(cfg);
+        AtmosphereHistogramConfig atmosphere_histogram_cfg =
+            buildAtmosphereHistogramConfig(cfg);
+        std::vector<AtmosphereHistogramBin> atmosphere_histogram =
+            makeAtmosphereHistogramBins(atmosphere_histogram_cfg);
         ProfileStats profile_stats;
         const bool save_csv = outputWantsCsv(output_cfg);
         const bool save_hdf5 = outputWantsHdf5(output_cfg);
@@ -2845,9 +3053,12 @@ int main(int argc, char** argv) {
                                          nsb_cfg,
                                          trigger_cfg,
                                          efficiency_cfg,
+                                         atmosphere_cfg,
                                          error_cfg,
                                          obstruction,
-                                         propagation_cfg);
+                                         propagation_cfg,
+                                         eventio_mirror_front_z_m,
+                                         eventio_2d_backproject);
         auto eventio_cfg = buildEventIOPhotonConfig(cfg, source_cfg, source_runtime_cfg);
 
         printSection("Run");
@@ -3007,11 +3218,39 @@ int main(int argc, char** argv) {
             Photon photon = bunch.photon;
             photon.normalizeDirection();
             photon.weight *= bunch.multiplicity;
+            const double atmosphere_weight_before = photon.weight;
+            if (atmosphere.enabled()) {
+                const Vec3 global_dir = telescope_frame.rotateVector(photon.dir).normalized();
+                const double atmosphere_t =
+                    atmosphere.transmission(photon.wavelength_nm,
+                                            bunch.emission_altitude_km,
+                                            global_dir);
+                photon.weight *= atmosphere_t;
+                accumulateAtmosphereHistogram(atmosphere_histogram,
+                                              atmosphere_histogram_cfg,
+                                              bunch.emission_altitude_km,
+                                              atmosphere_weight_before,
+                                              photon.weight,
+                                              atmosphere_weight_before * atmosphere_t);
+                if (photon.weight <= 0.0) {
+                    return;
+                }
+            } else {
+                accumulateAtmosphereHistogram(atmosphere_histogram,
+                                              atmosphere_histogram_cfg,
+                                              bunch.emission_altitude_km,
+                                              atmosphere_weight_before,
+                                              photon.weight,
+                                              atmosphere_weight_before);
+            }
 
             if (profile_cfg.enabled) {
                 t_step = std::chrono::steady_clock::now();
             }
-            OpticalSurfaceHit hit = tracer.traceToPlane(photon, mirrors, plane, eff);
+            const bool backproject_this_bunch = bunch.eventio_2d && eventio_2d_backproject;
+            OpticalSurfaceHit hit = backproject_this_bunch
+                                        ? tracer.traceBackprojectedToPlane(photon, mirrors, plane, eff)
+                                        : tracer.traceToPlane(photon, mirrors, plane, eff);
             if (profile_cfg.enabled) {
                 addElapsed(profile_stats, &ProfileStats::trace_to_plane_s, t_step);
             }
@@ -3129,6 +3368,8 @@ int main(int argc, char** argv) {
             [](const EventIOStreamProgress& progress) {
                 std::ostringstream value;
                 value << "photon_bunches=" << progress.photon_bunches
+                      << " photon_bunches_2d=" << progress.photon_bunches_2d
+                      << " photon_bunches_3d=" << progress.photon_bunches_3d
                       << " current_shower_event=" << progress.current_shower_event
                       << " elapsed_s=" << doubleToString(progress.elapsed_s, 3);
                 printField(progress.final ? "stream_done" : "stream_progress",
@@ -3150,6 +3391,12 @@ int main(int argc, char** argv) {
             writeCollectorDebugCsv(collector_debug_cfg, collector_debug_rows);
             printField("rows", intToString(static_cast<std::uint64_t>(
                                    collector_debug_rows.size())));
+        }
+        if (atmosphere_histogram_cfg.enabled) {
+            printSection("Atmosphere histogram");
+            printField("status", "writing height histogram");
+            printField("path", atmosphere_histogram_cfg.csv_path);
+            writeAtmosphereHistogramCsv(atmosphere_histogram_cfg, atmosphere_histogram);
         }
 #ifdef LACT_HAS_HDF5
         if (save_hdf5) {
@@ -3194,6 +3441,12 @@ int main(int argc, char** argv) {
         printField("event_id_mode", source_runtime_cfg.event_id_mode);
         printField("output_format", output_cfg.format);
         printField("input_bunches", intToString(stream_stats.photon_bunches));
+        printField("input_bunches_2d", intToString(stream_stats.photon_bunches_2d));
+        printField("input_bunches_3d", intToString(stream_stats.photon_bunches_3d));
+        printField("input_photon_format",
+                   stream_stats.photon_bunches_2d > 0 && stream_stats.photon_bunches_3d > 0
+                       ? "mixed_2d_3d"
+                       : (stream_stats.photon_bunches_3d > 0 ? "3d" : "2d"));
         printField("telescopes_in_eventio", intToString(metadata.telescopes.size()));
         printField("shower_events", intToString(metadata.events.size()));
         printField("streams", intToString(summaries.size()));

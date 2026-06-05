@@ -40,8 +40,10 @@ int main(int argc, char** argv) {
         applyTelescopeFrame(facets, plane, telescope_frame);
         MirrorLayout mirrors = makeMirrorLayoutFromFacets(facets);
         OpticalEfficiencyConfig efficiency_cfg = buildEfficiencyConfig(cfg);
+        AtmosphereTransmissionConfig atmosphere_cfg = buildAtmosphereTransmissionConfig(cfg);
         PropagationConfig propagation_cfg = buildPropagationConfig(cfg);
         OpticalEfficiency eff(efficiency_cfg);
+        AtmosphereTransmission atmosphere(atmosphere_cfg);
         std::string output_csv = getString(cfg, "output.csv", "surface_hits.csv");
         std::string output_pixel_csv = getString(cfg, "output.pixel_csv", "camera_pixel_image.csv");
         const std::string output_mode = lowerCopy(trim(getString(cfg, "output.mode", "hits")));
@@ -264,6 +266,8 @@ int main(int argc, char** argv) {
                    factorDescription(efficiency_cfg.filter_transmission));
         printField("atmosphere",
                    factorDescription(efficiency_cfg.atmosphere_transmission));
+        printField("atmosphere_model",
+                   atmosphereTransmissionDescription(atmosphere_cfg));
         printField("funnel_acceptance",
                    efficiency_cfg.use_funnel_acceptance ? "cos(theta)" : "not set -> 1");
 
@@ -373,6 +377,14 @@ int main(int argc, char** argv) {
             if ((!source_runtime_cfg.use_photon_csv && !source_runtime_cfg.use_eventio) ||
                 source_runtime_cfg.csv_local_telescope_frame) {
                 applyTelescopeFrame(photon, telescope_frame);
+            }
+            if (atmosphere.enabled()) {
+                photon.weight *= atmosphere.transmission(photon.wavelength_nm,
+                                                         bunch.emission_altitude_km,
+                                                         photon.dir);
+                if (photon.weight <= 0.0) {
+                    continue;
+                }
             }
 
             OpticalSurfaceHit hit = tracer.traceToPlane(photon, mirrors, plane, eff);

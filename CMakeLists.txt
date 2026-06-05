@@ -48,6 +48,7 @@ add_library(lact_sim_core
     src/io/MirrorFacetCsvReader.cpp
     src/app/OpticalSimCommon.cpp
     src/geometry/FacetFactory.cpp
+    src/optics/AtmosphereTransmission.cpp
     src/optics/OpticalTracer.cpp
 )
 
@@ -60,6 +61,9 @@ endif()
 
 add_executable(run_optical_sim apps/run_optical_sim.cpp)
 target_link_libraries(run_optical_sim PRIVATE lact_sim_core)
+
+add_executable(compute_nsb_rate apps/compute_nsb_rate.cpp)
+target_link_libraries(compute_nsb_rate PRIVATE lact_sim_core)
 
 if(LACT_HAS_HESSIO)
     add_executable(run_corsika_trace apps/run_corsika_trace.cpp)

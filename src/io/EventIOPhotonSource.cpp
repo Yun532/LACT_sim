@@ -247,6 +247,10 @@ PhotonBunch makeBunch(const struct bunch& b,
     out.multiplicity = b.photons * cfg.default_multiplicity;
     out.event_id = event_id;
     out.telescope_id = telescope_id;
+    out.eventio_2d = true;
+    if (std::isfinite(b.zem) && b.zem > 0.0) {
+        out.emission_altitude_km = b.zem * 1.0e-5;
+    }
     return out;
 }
 
@@ -265,6 +269,7 @@ PhotonBunch makeBunch3d(const struct bunch3d& b,
     out.multiplicity = b.photons * cfg.default_multiplicity;
     out.event_id = event_id;
     out.telescope_id = telescope_id;
+    out.eventio_2d = false;
     return out;
 }
 
@@ -272,7 +277,8 @@ int readPhotonBlock(IO_BUFFER* iobuf,
                     int current_event_id,
                     const EventIOPhotonConfig& cfg,
                     const EventIOPhotonCallback& on_bunch,
-                    std::size_t& emitted)
+                    std::size_t& emitted,
+                    std::size_t& emitted_2d)
 {
     int array_id = 0;
     int telescope_id = 0;
@@ -335,6 +341,7 @@ int readPhotonBlock(IO_BUFFER* iobuf,
         }
         on_bunch(makeBunch(b, event_id, telescope_id, cfg));
         ++emitted;
+        ++emitted_2d;
     }
 
     return get_item_end(iobuf, &item_header);
@@ -344,7 +351,8 @@ int readPhoton3dBlock(IO_BUFFER* iobuf,
                       int current_event_id,
                       const EventIOPhotonConfig& cfg,
                       const EventIOPhotonCallback& on_bunch,
-                      std::size_t& emitted)
+                      std::size_t& emitted,
+                      std::size_t& emitted_3d)
 {
     int array_id = 0;
     int telescope_id = 0;
@@ -370,6 +378,7 @@ int readPhoton3dBlock(IO_BUFFER* iobuf,
     for (int i = 0; i < nbunches; ++i) {
         on_bunch(makeBunch3d(bunches[static_cast<std::size_t>(i)], event_id, telescope_id, cfg));
         ++emitted;
+        ++emitted_3d;
     }
     return 0;
 }
@@ -378,7 +387,7 @@ int readTelArray(IO_BUFFER* iobuf,
                  int current_event_id,
                  const EventIOPhotonConfig& cfg,
                  const EventIOPhotonCallback& on_bunch,
-                 std::size_t& emitted)
+                 EventIOStreamStats& stats)
 {
     IO_ITEM_HEADER array_header;
     int array_id = 0;
@@ -389,9 +398,11 @@ int readTelArray(IO_BUFFER* iobuf,
     int type = 0;
     while ((type = next_subitem_type(iobuf)) > 0) {
         if (type == IO_TYPE_MC_PHOTONS) {
-            rc = readPhotonBlock(iobuf, current_event_id, cfg, on_bunch, emitted);
+            rc = readPhotonBlock(iobuf, current_event_id, cfg, on_bunch,
+                                 stats.photon_bunches, stats.photon_bunches_2d);
         } else if (type == IO_TYPE_MC_PHOTONS3D) {
-            rc = readPhoton3dBlock(iobuf, current_event_id, cfg, on_bunch, emitted);
+            rc = readPhoton3dBlock(iobuf, current_event_id, cfg, on_bunch,
+                                   stats.photon_bunches, stats.photon_bunches_3d);
         } else {
             rc = skip_subitem(iobuf);
         }
@@ -573,7 +584,7 @@ EventIOStreamStats streamEventIOPhotonBunches(
                     break;
                 }
                 rc = readTelArray(iobuf.ptr, current_event_id, cfg, on_bunch,
-                                  stats.photon_bunches);
+                                  stats);
                 break;
             case IO_TYPE_MC_PHOTONS:
                 if (stop_after_current_block) {
@@ -581,7 +592,7 @@ EventIOStreamStats streamEventIOPhotonBunches(
                     break;
                 }
                 rc = readPhotonBlock(iobuf.ptr, current_event_id, cfg, on_bunch,
-                                     stats.photon_bunches);
+                                     stats.photon_bunches, stats.photon_bunches_2d);
                 break;
             case IO_TYPE_MC_PHOTONS3D:
                 if (stop_after_current_block) {
@@ -589,7 +600,7 @@ EventIOStreamStats streamEventIOPhotonBunches(
                     break;
                 }
                 rc = readPhoton3dBlock(iobuf.ptr, current_event_id, cfg, on_bunch,
-                                       stats.photon_bunches);
+                                       stats.photon_bunches, stats.photon_bunches_3d);
                 break;
             default:
                 rc = 0;
@@ -603,7 +614,12 @@ EventIOStreamStats streamEventIOPhotonBunches(
             const auto now = std::chrono::steady_clock::now();
             const double elapsed_s =
                 std::chrono::duration<double>(now - load_start).count();
-            on_progress({stats.photon_bunches, current_event_id, elapsed_s, false});
+            on_progress({stats.photon_bunches,
+                         stats.photon_bunches_2d,
+                         stats.photon_bunches_3d,
+                         current_event_id,
+                         elapsed_s,
+                         false});
             next_report_rows += 1000000;
         }
     }
@@ -617,7 +633,12 @@ EventIOStreamStats streamEventIOPhotonBunches(
         const auto load_done = std::chrono::steady_clock::now();
         const double elapsed_s =
             std::chrono::duration<double>(load_done - load_start).count();
-        on_progress({stats.photon_bunches, current_event_id, elapsed_s, true});
+        on_progress({stats.photon_bunches,
+                     stats.photon_bunches_2d,
+                     stats.photon_bunches_3d,
+                     current_event_id,
+                     elapsed_s,
+                     true});
     }
     return stats;
 }

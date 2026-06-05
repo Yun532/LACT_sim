@@ -10,14 +10,17 @@
 ## 目录说明
 
 ```text
-apps/                         两个可执行程序入口
+apps/                         程序入口和小工具
   run_optical_sim.cpp          平行光、点源、CSV 光子等非 CORSIKA 光学模拟
   run_corsika_trace.cpp        CORSIKA/EventIO 输入的完整响应模拟
+  compute_nsb_rate.cpp         从夜天光谱估算每像素 NSB rate
 
 configs/examples/             用户直接运行和修改的两个 cfg
 configs/mirror_1229_facets.csv 1229 面镜片布局
 configs/cameras/              new_camera 像素布局
 configs/efficiency/           SiPM PDE 曲线
+configs/atmosphere/           MODTRAN 大气透过率表
+configs/nsb/                  夜天光谱和 NSB 示例
 
 external/hessioxxx/            CORSIKA/EventIO 读取所需的 hessioxxx
 tools/build_hessio.sh          编译 hessioxxx 的辅助脚本
@@ -38,6 +41,7 @@ make
 ```text
 build/run_optical_sim
 build/run_corsika_trace
+build/compute_nsb_rate
 ```
 
 如果只想编译平行光示例、不需要 CORSIKA/EventIO 支持，可以运行：
@@ -283,6 +287,56 @@ sipm.pde=configs/efficiency/sipm_pde.csv
 SiPM 设置。`sipm.pde` 是波长相关探测效率曲线。如果想先做理想光子计数，可以注释掉 `sipm.pde`。
 
 ```ini
+atmosphere.transmission=none
+```
+
+大气额外透过率默认关闭。CORSIKA 光子通常已经是到达望远镜附近的光子；如果需要额外使用 MODTRAN 表，可以在 cfg 里改成：
+
+```ini
+atmosphere.config=configs/atmosphere/modtran_4400_desert.cfg
+```
+
+这个表会按光子波长和发射高度计算 `exp(-tau)`。如果输入 EventIO 里没有可用的发射高度，开启 MODTRAN 后程序会报错提醒。
+
+```ini
+nsb.enabled=false
+nsb.model=constant_rate
+```
+
+NSB 默认关闭。简单常数模型可以直接设置：
+
+```ini
+nsb.enabled=true
+nsb.model=constant_rate
+nsb.rate_pe_per_ns_per_pixel=0.05
+nsb.window_ns=16
+```
+
+如果希望从夜天光谱自动估算 rate，可以用 spectral 模型：
+
+```ini
+nsb.enabled=true
+nsb.model=spectral_flux
+nsb.spectrum_csv=configs/nsb/nsb_spectrum_skycalc_dark.csv
+nsb.spectrum_unit=ph_s_nm_sr_m2
+nsb.effective_area_m2=28.304744
+nsb.pixel_solid_angle=auto
+nsb.window_ns=16
+```
+
+可以先单独检查 spectral NSB 算出来的 rate：
+
+```bash
+build/compute_nsb_rate configs/examples/full_response_corsika.cfg
+```
+
+注意：`full_response_corsika.cfg` 默认 `nsb.enabled=false`。要检查 spectral NSB 时，先按 cfg 里的中文注释打开 `nsb.model=spectral_flux`，或者把 cfg 中的 NSB 部分替换为：
+
+```ini
+nsb.config=configs/nsb/spectral_skycalc_dark_no_obstruction.cfg
+```
+
+```ini
 trigger.enabled=true
 trigger.pixel_threshold_pe=10
 trigger.camera_multiplicity=3
@@ -296,9 +350,13 @@ trigger.coincidence_window_ns=50
 source.mode=EventIO
 source.eventio_coordinate_frame=corsika_iact
 source.use_eventio_telescope_position=true
+source.eventio_2d_input_plane_z_m=0
+source.eventio_2d_plane_mode=auto
 ```
 
 CORSIKA/EventIO 输入设置。通常不用改。`corsika_iact` 表示按 hessio/CORSIKA IACT 光子束坐标约定读入，再根据望远镜指向旋转到 LACT 本地光学坐标。
+
+`eventio_2d_input_plane_z_m` 用于 2D EventIO photon bunch，表示记录平面在望远镜本地坐标的 z 位置。默认 `0`。`eventio_2d_plane_mode=auto` 会自动判断向前追迹还是回投到镜面；只有明确知道输入平面约定时才需要改成 `forward` 或 `backproject`。
 
 ```ini
 # source.max_shower_events=1

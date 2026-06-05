@@ -145,6 +145,9 @@ void PhotonCsvSource::load() {
             optionalInt(cells, header, "event_id", cfg_.default_event_id);
         bunch.telescope_id =
             optionalInt(cells, header, "telescope_id", cfg_.default_telescope_id);
+        bunch.emission_altitude_km =
+            optionalDouble(cells, header, "emission_altitude_km",
+                           bunch.emission_altitude_km);
 
         if (cfg_.filter_telescope_id &&
             bunch.telescope_id != cfg_.selected_telescope_id) {
