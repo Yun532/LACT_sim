@@ -46,6 +46,14 @@ bool disabledText(const std::string& text)
            value == "false" || value == "no";
 }
 
+double altitudeKmToLogCm(double altitude_km)
+{
+    if (!std::isfinite(altitude_km) || altitude_km <= 0.0) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return std::log10(altitude_km * 1.0e5);
+}
+
 std::string getStringLocal(const std::map<std::string, std::string>& cfg,
                            const std::string& key,
                            const std::string& fallback)
@@ -99,12 +107,24 @@ void AtmosphereTransmission::loadModtranTauTable(const std::string& path)
 
     std::vector<double> rows;
     std::string line;
+    double table_h2_km = std::numeric_limits<double>::quiet_NaN();
     while (std::getline(ifs, line)) {
         const std::string trimmed = trimCopy(line);
         if (trimmed.empty()) {
             continue;
         }
         if (trimmed.rfind("# H2=", 0) == 0) {
+            const auto h2_pos = trimmed.find("H2=");
+            const auto h2_end = trimmed.find(',', h2_pos == std::string::npos ? 0 : h2_pos);
+            if (h2_pos != std::string::npos && h2_end != std::string::npos) {
+                const std::string h2_text =
+                    trimCopy(trimmed.substr(h2_pos + 3, h2_end - (h2_pos + 3)));
+                double h2_value = 0.0;
+                if (parseDoubleLocal(h2_text, h2_value)) {
+                    table_h2_km = h2_value;
+                    altitudes_km_.push_back(table_h2_km);
+                }
+            }
             const auto h1_pos = trimmed.find("H1=");
             if (h1_pos == std::string::npos) {
                 continue;
@@ -126,6 +146,9 @@ void AtmosphereTransmission::loadModtranTauTable(const std::string& path)
             continue;
         }
         wavelengths_nm_.push_back(wavelength);
+        if (std::isfinite(table_h2_km)) {
+            rows.push_back(0.0);
+        }
         double value = 0.0;
         while (ss >> value) {
             rows.push_back(value);
@@ -143,6 +166,14 @@ void AtmosphereTransmission::loadModtranTauTable(const std::string& path)
         throw std::runtime_error(oss.str());
     }
     tau_ = std::move(rows);
+    log_altitudes_cm_.reserve(altitudes_km_.size());
+    for (double altitude_km : altitudes_km_) {
+        const double log_altitude = altitudeKmToLogCm(altitude_km);
+        if (!std::isfinite(log_altitude)) {
+            throw std::runtime_error("atmosphere tau table has invalid altitude");
+        }
+        log_altitudes_cm_.push_back(log_altitude);
+    }
 }
 
 AtmosphereTransmission::LookupIndex
@@ -204,7 +235,7 @@ double AtmosphereTransmission::tauAt(std::size_t iw, std::size_t ih) const
 double AtmosphereTransmission::interpolateTau(double wavelength_nm, double altitude_km) const
 {
     const LookupIndex wi = locate(wavelengths_nm_, wavelength_nm);
-    const LookupIndex hi = locate(altitudes_km_, altitude_km);
+    const LookupIndex hi = locate(log_altitudes_cm_, altitudeKmToLogCm(altitude_km));
     if (!wi.valid || !hi.valid) {
         return std::numeric_limits<double>::infinity();
     }

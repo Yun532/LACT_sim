@@ -41,7 +41,7 @@ int main(int argc, char** argv)
     const double wavelength_nm = 440.0;
     const double before = 10000.0;
     const std::vector<double> heights_km{
-        4.45, 4.6, 5.0, 6.5, 10.0, 20.0, 40.0, 100.0};
+        4.4, 4.45, 4.6, 5.0, 6.5, 10.0, 20.0, 40.0, 100.0};
 
     std::vector<Row> rows;
     rows.reserve(heights_km.size());

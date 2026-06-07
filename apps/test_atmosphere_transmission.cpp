@@ -37,6 +37,20 @@ int main(int argc, char** argv)
     AtmosphereTransmission atm(cfg);
 
     bool ok = true;
+    const double at_ground = atm.transmission(440.0, 4.4, {0.0, 0.0, -1.0});
+    ok &= check(nearlyEqual(at_ground, 1.0, 1e-12),
+                "H2 ground altitude has zero optical depth");
+
+    const double low_altitude_km = 4.425;
+    const double low_frac =
+        (std::log10(low_altitude_km * 1.0e5) - std::log10(4.4e5)) /
+        (std::log10(4.45e5) - std::log10(4.4e5));
+    const double low_expected_tau = low_frac * 0.003406;
+    const double low_vertical =
+        atm.transmission(440.0, low_altitude_km, {0.0, 0.0, -1.0});
+    ok &= check(nearlyEqual(low_vertical, std::exp(-low_expected_tau), 1e-8),
+                "low-altitude tau uses log-height interpolation from H2");
+
     const double vertical = atm.transmission(440.0, 100.0, {0.0, 0.0, -1.0});
     ok &= check(nearlyEqual(vertical, std::exp(-0.207110), 1e-8),
                 "440 nm, 100 km vertical transmission");
