@@ -14,6 +14,10 @@ struct EventIOPhotonConfig {
     bool local_telescope_frame = true;
     std::string event_id_mode = "event";
     double default_wavelength_nm = 400.0;
+    std::string missing_wavelength_model = "cherenkov";
+    double missing_wavelength_min_nm = 260.0;
+    double missing_wavelength_max_nm = 1000.0;
+    std::uint64_t missing_wavelength_seed = 246813579ULL;
     double default_time_ns = 0.0;
     double default_weight = 1.0;
     double default_multiplicity = 1.0;

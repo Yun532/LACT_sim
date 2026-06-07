@@ -44,6 +44,7 @@ private:
     AtmosphereTransmissionConfig cfg_;
     std::vector<double> wavelengths_nm_;
     std::vector<double> altitudes_km_;
+    std::vector<double> log_altitudes_cm_;
     std::vector<double> tau_;
 
     void loadModtranTauTable(const std::string& path);

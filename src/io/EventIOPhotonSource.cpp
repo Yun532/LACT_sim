@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstdio>
+#include <cstdint>
 #include <iostream>
 #include <limits>
 #include <set>
@@ -78,6 +79,98 @@ bool keepRow(int event_id, int shower_event_id, int telescope_id, const EventIOP
         return false;
     }
     return true;
+}
+
+std::uint64_t mixSeed(std::uint64_t seed, std::uint64_t value)
+{
+    seed ^= value + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
+    return seed;
+}
+
+std::uint64_t hashDouble(double value)
+{
+    if (!std::isfinite(value)) {
+        return 0x9e3779b97f4a7c15ULL;
+    }
+    return static_cast<std::uint64_t>(std::llround(value * 1000000.0));
+}
+
+double unitRandom01(std::uint64_t seed)
+{
+    // SplitMix64 gives a deterministic pseudo-random value from bunch identity,
+    // independent of streaming order and filtering.
+    seed += 0x9e3779b97f4a7c15ULL;
+    seed = (seed ^ (seed >> 30U)) * 0xbf58476d1ce4e5b9ULL;
+    seed = (seed ^ (seed >> 27U)) * 0x94d049bb133111ebULL;
+    seed = seed ^ (seed >> 31U);
+    constexpr double denom = 1.0 / 9007199254740992.0; // 2^53
+    return static_cast<double>(seed >> 11U) * denom;
+}
+
+double sampleMissingWavelength(double x,
+                               double y,
+                               double cx,
+                               double cy,
+                               double ctime,
+                               double photons,
+                               int event_id,
+                               int telescope_id,
+                               const EventIOPhotonConfig& cfg)
+{
+    const std::string model = lowerCopy(cfg.missing_wavelength_model);
+    if (model.empty() || model == "default" || model == "fixed" ||
+        model == "constant" || model == "none" || model == "off") {
+        return cfg.default_wavelength_nm;
+    }
+
+    const double lo = cfg.missing_wavelength_min_nm;
+    const double hi = cfg.missing_wavelength_max_nm;
+    if (!std::isfinite(lo) || !std::isfinite(hi) || lo <= 0.0 || hi <= lo) {
+        throw std::runtime_error(
+            "source.missing_wavelength_min_nm/max_nm must be finite with 0 < min < max");
+    }
+
+    std::uint64_t seed = cfg.missing_wavelength_seed;
+    seed = mixSeed(seed, static_cast<std::uint64_t>(event_id + 1000003));
+    seed = mixSeed(seed, static_cast<std::uint64_t>(telescope_id + 10007));
+    seed = mixSeed(seed, hashDouble(x));
+    seed = mixSeed(seed, hashDouble(y));
+    seed = mixSeed(seed, hashDouble(cx));
+    seed = mixSeed(seed, hashDouble(cy));
+    seed = mixSeed(seed, hashDouble(ctime));
+    seed = mixSeed(seed, hashDouble(photons));
+    const double u = std::min(1.0 - 1e-16, std::max(1e-16, unitRandom01(seed)));
+
+    if (model == "uniform") {
+        return lo + u * (hi - lo);
+    }
+    if (model == "cherenkov" || model == "cherenkov_1_over_lambda2" ||
+        model == "1_over_lambda2" || model == "one_over_lambda2") {
+        const double inv_lo = 1.0 / lo;
+        const double inv_hi = 1.0 / hi;
+        return 1.0 / (inv_lo - u * (inv_lo - inv_hi));
+    }
+
+    throw std::runtime_error("unsupported source.missing_wavelength_model: " +
+                             cfg.missing_wavelength_model);
+}
+
+double eventioWavelengthOrSample(double raw_lambda,
+                                 double x,
+                                 double y,
+                                 double cx,
+                                 double cy,
+                                 double ctime,
+                                 double photons,
+                                 int event_id,
+                                 int telescope_id,
+                                 const EventIOPhotonConfig& cfg)
+{
+    if (raw_lambda > 0.0) {
+        return raw_lambda;
+    }
+    return sampleMissingWavelength(x, y, cx, cy, ctime, photons,
+                                   event_id, telescope_id, cfg);
 }
 
 int selectedShowerEventId(const EventIOPhotonConfig& cfg) {
@@ -242,7 +335,9 @@ PhotonBunch makeBunch(const struct bunch& b,
     out.photon.dir = {b.cx, b.cy, downwardDirZ(b.cx, b.cy)};
     out.photon.normalizeDirection();
     out.photon.time_ns = b.ctime;
-    out.photon.wavelength_nm = b.lambda > 0.0 ? b.lambda : cfg.default_wavelength_nm;
+    out.photon.wavelength_nm =
+        eventioWavelengthOrSample(b.lambda, b.x, b.y, b.cx, b.cy, b.ctime, b.photons,
+                                  event_id, telescope_id, cfg);
     out.photon.weight = cfg.default_weight;
     out.multiplicity = b.photons * cfg.default_multiplicity;
     out.event_id = event_id;
@@ -264,7 +359,9 @@ PhotonBunch makeBunch3d(const struct bunch3d& b,
     out.photon.dir = {b.cx, b.cy, b.cz};
     out.photon.normalizeDirection();
     out.photon.time_ns = b.ctime;
-    out.photon.wavelength_nm = b.lambda > 0.0 ? b.lambda : cfg.default_wavelength_nm;
+    out.photon.wavelength_nm =
+        eventioWavelengthOrSample(b.lambda, b.x, b.y, b.cx, b.cy, b.ctime, b.photons,
+                                  event_id, telescope_id, cfg);
     out.photon.weight = cfg.default_weight;
     out.multiplicity = b.photons * cfg.default_multiplicity;
     out.event_id = event_id;

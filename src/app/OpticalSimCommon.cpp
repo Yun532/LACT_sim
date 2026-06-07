@@ -1445,6 +1445,21 @@ EventIOPhotonConfig buildEventIOPhotonConfig(const std::map<std::string, std::st
     eventio.local_telescope_frame = runtime_cfg.csv_local_telescope_frame;
     eventio.event_id_mode = runtime_cfg.event_id_mode;
     eventio.default_wavelength_nm = source_cfg.wavelength_nm;
+    eventio.missing_wavelength_model =
+        getString(cfg, "source.missing_wavelength_model",
+                  getString(cfg, "source.eventio_missing_wavelength_model",
+                            eventio.missing_wavelength_model));
+    eventio.missing_wavelength_min_nm =
+        getDouble(cfg, "source.missing_wavelength_min_nm",
+                  getDouble(cfg, "source.wavelength_min_nm",
+                            eventio.missing_wavelength_min_nm));
+    eventio.missing_wavelength_max_nm =
+        getDouble(cfg, "source.missing_wavelength_max_nm",
+                  getDouble(cfg, "source.wavelength_max_nm",
+                            eventio.missing_wavelength_max_nm));
+    eventio.missing_wavelength_seed =
+        getUInt64(cfg, "source.missing_wavelength_seed",
+                  eventio.missing_wavelength_seed);
     eventio.default_time_ns = source_cfg.time_ns;
     eventio.default_weight = source_cfg.photon_weight;
     eventio.default_multiplicity = source_cfg.multiplicity;

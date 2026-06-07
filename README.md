@@ -350,11 +350,20 @@ trigger.coincidence_window_ns=50
 source.mode=EventIO
 source.eventio_coordinate_frame=corsika_iact
 source.use_eventio_telescope_position=true
+source.missing_wavelength_model=cherenkov
 source.eventio_2d_input_plane_z_m=0
 source.eventio_2d_plane_mode=auto
 ```
 
 CORSIKA/EventIO 输入设置。通常不用改。`corsika_iact` 表示按 hessio/CORSIKA IACT 光子束坐标约定读入，再根据望远镜指向旋转到 LACT 本地光学坐标。
+
+`missing_wavelength_model=cherenkov` 用于处理 EventIO photon bunch 中 `lambda=0` 或缺失波长的情况。程序会按 `1/lambda^2` 随机补波长，波长范围优先从 CORSIKA input card 的 `CWAVLG` 行读取；如果输入文件没有 `CWAVLG`，可以在 cfg 里手动设置：
+
+```ini
+source.missing_wavelength_min_nm=260
+source.missing_wavelength_max_nm=1000
+source.missing_wavelength_seed=246813579
+```
 
 `eventio_2d_input_plane_z_m` 用于 2D EventIO photon bunch，表示记录平面在望远镜本地坐标的 z 位置。默认 `0`。`eventio_2d_plane_mode=auto` 会自动判断向前追迹还是回投到镜面；只有明确知道输入平面约定时才需要改成 `forward` 或 `backproject`。
 
