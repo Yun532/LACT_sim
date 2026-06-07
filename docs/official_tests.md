@@ -634,6 +634,9 @@ cfg 逐项解释：
 - `efficiency.config=../efficiency/curves_all.cfg`: 启用镜面反射率和滤光片透过率曲线。
 - `atmosphere.config=../atmosphere/modtran_4400_desert.cfg`: 启用 MODTRAN 总光学厚度大气吸收。
 - `sipm.config=../sipm/new_camera_sipm.cfg`: 启用 SiPM PDE 曲线。
+- `source.missing_wavelength_model=cherenkov`: 当 EventIO photon bunch 的 `lambda=0`
+  时，按 `1/lambda^2` 的 Cherenkov 光谱采样波长；范围自动来自 CORSIKA
+  input card 的 `CWAVLG`。
 - `nsb.config=../nsb/ideal.cfg`: NSB 关闭。
 - `trigger.config=../trigger/example_simple_multiplicity.cfg`: trigger 开启。
 - `trigger.pixel_threshold_pe=10`: official 阈值设为 10 p.e.。

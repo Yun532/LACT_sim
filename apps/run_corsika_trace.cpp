@@ -9,7 +9,9 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <optional>
 #include <random>
+#include <sstream>
 #include <tuple>
 
 using namespace lact;
@@ -41,6 +43,11 @@ struct CollectorDebugConfig {
     bool photon_output = false;
     std::string photon_csv = "collector_debug_photons.csv";
     std::uint64_t max_photons = 100000;
+};
+
+struct WavelengthRange {
+    double min_nm = 0.0;
+    double max_nm = 0.0;
 };
 
 struct ProfileConfig {
@@ -395,6 +402,49 @@ void printEventIOMetadataSummary(const EventIOMetadata& metadata)
     }
     if (hidden_input_lines > 0) {
         printField("input_hidden_path_lines", intToString(hidden_input_lines));
+    }
+}
+
+std::optional<WavelengthRange> wavelengthRangeFromInputCard(
+    const EventIOMetadata& metadata)
+{
+    for (const auto& line : metadata.input_lines) {
+        std::istringstream iss(line);
+        std::string key;
+        if (!(iss >> key)) {
+            continue;
+        }
+        if (lowerCopy(key) != "cwavlg") {
+            continue;
+        }
+        WavelengthRange range;
+        if (iss >> range.min_nm >> range.max_nm &&
+            std::isfinite(range.min_nm) && std::isfinite(range.max_nm) &&
+            range.min_nm > 0.0 && range.max_nm > range.min_nm) {
+            return range;
+        }
+    }
+    return std::nullopt;
+}
+
+bool hasExplicitMissingWavelengthRange(const std::map<std::string, std::string>& cfg)
+{
+    return cfg.find("source.missing_wavelength_min_nm") != cfg.end() ||
+           cfg.find("source.missing_wavelength_max_nm") != cfg.end() ||
+           cfg.find("source.wavelength_min_nm") != cfg.end() ||
+           cfg.find("source.wavelength_max_nm") != cfg.end();
+}
+
+void applyEventIOWavelengthMetadata(EventIOPhotonConfig& eventio_cfg,
+                                    const EventIOMetadata& metadata,
+                                    const std::map<std::string, std::string>& cfg)
+{
+    if (hasExplicitMissingWavelengthRange(cfg)) {
+        return;
+    }
+    if (auto range = wavelengthRangeFromInputCard(metadata)) {
+        eventio_cfg.missing_wavelength_min_nm = range->min_nm;
+        eventio_cfg.missing_wavelength_max_nm = range->max_nm;
     }
 }
 
@@ -2635,6 +2685,8 @@ void printCorsikaOpticalConfiguration(
     const ErrorConfig& error_cfg,
     const ObstructionMask& obstruction,
     const PropagationConfig& propagation_cfg,
+    const EventIOPhotonConfig& eventio_cfg,
+    const std::string& missing_wavelength_range_source,
     double eventio_mirror_front_z_m,
     bool eventio_2d_backproject)
 {
@@ -2702,6 +2754,19 @@ void printCorsikaOpticalConfiguration(
                    ? intToString(source_runtime_cfg.max_shower_events)
                    : "off");
     printField("default_wavelength_nm", doubleToString(source_cfg.wavelength_nm));
+    printField("missing_wavelength_model", eventio_cfg.missing_wavelength_model);
+    const std::string wavelength_model = lowerCopy(trim(eventio_cfg.missing_wavelength_model));
+    if (wavelength_model != "default" &&
+        wavelength_model != "fixed" &&
+        wavelength_model != "constant" &&
+        wavelength_model != "none" &&
+        wavelength_model != "off") {
+        printField("missing_wavelength_range_nm",
+                   doubleToString(eventio_cfg.missing_wavelength_min_nm) + " .. " +
+                       doubleToString(eventio_cfg.missing_wavelength_max_nm));
+        printField("missing_wavelength_range_source", missing_wavelength_range_source);
+        printField("missing_wavelength_seed", intToString(eventio_cfg.missing_wavelength_seed));
+    }
     printField("default_weight", doubleToString(source_cfg.photon_weight));
     printField("default_multiplicity", doubleToString(source_cfg.multiplicity));
 
@@ -3002,6 +3067,7 @@ int main(int argc, char** argv) {
             buildAtmosphereHistogramConfig(cfg);
         std::vector<AtmosphereHistogramBin> atmosphere_histogram =
             makeAtmosphereHistogramBins(atmosphere_histogram_cfg);
+        auto eventio_cfg = buildEventIOPhotonConfig(cfg, source_cfg, source_runtime_cfg);
         ProfileStats profile_stats;
         const bool save_csv = outputWantsCsv(output_cfg);
         const bool save_hdf5 = outputWantsHdf5(output_cfg);
@@ -3035,6 +3101,19 @@ int main(int argc, char** argv) {
         }
         if (component_paths.source.empty()) printField("source", "inline EventIO settings");
 
+        printSection("Run");
+        printField("status", "reading EventIO metadata");
+        std::cerr << "run_corsika_trace: reading EventIO metadata from "
+                  << eventio_cfg.path << "\n";
+        EventIOMetadata metadata = readEventIOMetadata(eventio_cfg);
+        const bool explicit_wavelength_range = hasExplicitMissingWavelengthRange(cfg);
+        const bool has_cwavlg = wavelengthRangeFromInputCard(metadata).has_value();
+        applyEventIOWavelengthMetadata(eventio_cfg, metadata, cfg);
+        const std::string missing_wavelength_range_source =
+            explicit_wavelength_range ? "cfg"
+                                      : (has_cwavlg ? "EventIO input card CWAVLG"
+                                                   : "built-in default");
+
         printCorsikaOpticalConfiguration(cfg,
                                          telescope_cfg,
                                          telescope_frame,
@@ -3057,15 +3136,11 @@ int main(int argc, char** argv) {
                                          error_cfg,
                                          obstruction,
                                          propagation_cfg,
+                                         eventio_cfg,
+                                         missing_wavelength_range_source,
                                          eventio_mirror_front_z_m,
                                          eventio_2d_backproject);
-        auto eventio_cfg = buildEventIOPhotonConfig(cfg, source_cfg, source_runtime_cfg);
 
-        printSection("Run");
-        printField("status", "reading EventIO metadata");
-        std::cerr << "run_corsika_trace: reading EventIO metadata from "
-                  << eventio_cfg.path << "\n";
-	    EventIOMetadata metadata = readEventIOMetadata(eventio_cfg);
 	    printEventIOMetadataSummary(metadata);
 	    printField("status", "streaming EventIO photon bunches and tracing");
         std::cerr << "run_corsika_trace: streaming photon bunches; "

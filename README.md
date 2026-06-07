@@ -530,6 +530,7 @@ Recommended CORSIKA coordinate setting:
 
 ```ini
 source.eventio_coordinate_frame=corsika_iact
+source.missing_wavelength_model=cherenkov
 ```
 
 This means photon positions are telescope-relative CORSIKA IACT coordinates,

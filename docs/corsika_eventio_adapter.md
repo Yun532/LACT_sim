@@ -149,10 +149,21 @@ source.mode=EventIO
 source.eventio_path=
 source.event_id_mode=event_array100
 source.eventio_coordinate_frame=corsika_iact
+source.missing_wavelength_model=cherenkov
 source.use_eventio_telescope_position=true
 source.filter_event_id=100
 source.filter_telescope_id=0
 ```
+
+Many CORSIKA IACT/EventIO photon bunch files store `lambda=0` for Cherenkov
+photon bunches. In that case LACT_sim does not use a fixed 400 nm wavelength by
+default. It samples the missing wavelength from
+`dN/dlambda proportional to 1/lambda^2`. The wavelength range is read
+automatically from the EventIO input-card `CWAVLG min max` line. If `CWAVLG` is
+missing, the built-in fallback is 260-1000 nm. Set
+`source.missing_wavelength_model=default` to force the old fixed
+`source.wavelength_nm` fallback, or set `source.missing_wavelength_min_nm` and
+`source.missing_wavelength_max_nm` to override the `CWAVLG` range.
 
 `run_optical_sim` is intentionally limited to synthetic and PhotonCsv optical
 debugging. It rejects `source.mode=EventIO` so raw EventIO files cannot bypass
