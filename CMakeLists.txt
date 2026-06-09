@@ -50,7 +50,6 @@ add_library(simlite_core
     src/app/OpticalSimCommon.cpp
     src/geometry/FacetFactory.cpp
     src/optics/AtmosphereTransmission.cpp
-    src/optics/RayTracer.cpp
     src/optics/OpticalTracer.cpp
 )
 
