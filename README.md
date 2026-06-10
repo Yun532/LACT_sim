@@ -97,6 +97,74 @@ CSV-only build, add:
 -DLACT_ENABLE_HDF5=OFF
 ```
 
+Optional pylast-oriented ROOT output is enabled when ROOT is available at CMake
+configure time. ROOT is not vendored under `external/`; use a system, module, or
+conda ROOT installation. LACT_sim requires ROOT 6.24 or newer for this output.
+Common setup patterns:
+
+```bash
+# Cluster module, if available
+module load root
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DLACT_ENABLE_ROOT=ON
+
+# Explicit ROOT install
+source /path/to/root/bin/thisroot.sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DLACT_ENABLE_ROOT=ON \
+  -DROOT_DIR="$(root-config --cmakedir)"
+
+# If your root-config has no --cmakedir option
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DLACT_ENABLE_ROOT=ON \
+  -DCMAKE_PREFIX_PATH="$(root-config --prefix)"
+
+# Conda/mamba ROOT plus quick-look plotting tools
+mamba create -n lact-root -c conda-forge root cmake compilers hdf5 zlib uproot matplotlib numpy
+mamba activate lact-root
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DLACT_ENABLE_ROOT=ON \
+  -DROOT_DIR="$(root-config --cmakedir)"
+```
+
+If ROOT is not found, the build continues with ROOT output disabled. To force a
+build without ROOT probing:
+
+```bash
+make no-root
+# or:
+cmake -S . -B build -DLACT_ENABLE_ROOT=OFF
+```
+
+The ROOT output is an additional `run_corsika_trace` product for pylast adapter
+workflows:
+
+```ini
+output.lact_root_enabled=true
+output.lact_root_path=run_logs/my_corsika_run/lact_events.root
+output.lact_profile=image_pe       # or timeseries_pe
+```
+
+`image_pe` stores integrated p.e. camera images. `timeseries_pe` additionally
+stores sparse p.e. time-series waveforms and per-pixel `time_peak_ns`. Both are
+intended to map to pylast R1; pylast may derive DL0 from them.
+
+For server setup and quick-look validation plots, see
+`docs/server_root_output_check_zh.md`. The plotting helper is:
+
+```bash
+python/plot_lact_root_output.py run_logs/my_corsika_run/lact_events.root \
+  --outdir run_logs/my_corsika_run/root_quicklook
+```
+
+A runnable ROOT quick-look config is available at
+`configs/examples/corsika_lact_root_quicklook.cfg`:
+
+```bash
+./build/run_corsika_trace \
+  configs/examples/corsika_lact_root_quicklook.cfg \
+  /path/to/input.simtel.zst
+```
+
 If you build hessioxxx manually, make sure these folders exist first:
 
 ```bash

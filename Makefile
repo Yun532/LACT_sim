@@ -12,7 +12,7 @@ HESSIO_ROOT ?= $(CURDIR)/external/hessioxxx/source
 CMAKE ?= cmake
 JOBS ?= $(shell command -v nproc >/dev/null 2>&1 && nproc || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
-.PHONY: all hessio configure build test clean distclean no-hessio
+.PHONY: all hessio configure build test clean distclean no-hessio no-root
 
 all: build
 
@@ -30,6 +30,10 @@ test: build
 
 no-hessio:
 	$(CMAKE) -S . -B "$(BUILD_DIR)" -DCMAKE_BUILD_TYPE="$(BUILD_TYPE)" -DLACT_ENABLE_HESSIO=OFF
+	$(CMAKE) --build "$(BUILD_DIR)" -j$(JOBS)
+
+no-root: hessio
+	$(CMAKE) -S . -B "$(BUILD_DIR)" -DCMAKE_BUILD_TYPE="$(BUILD_TYPE)" -DHESSIO_ROOT="$(HESSIO_ROOT)" -DLACT_ENABLE_ROOT=OFF
 	$(CMAKE) --build "$(BUILD_DIR)" -j$(JOBS)
 
 clean:

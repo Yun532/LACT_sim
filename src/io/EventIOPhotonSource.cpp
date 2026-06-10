@@ -1,5 +1,6 @@
 #include "io/EventIOPhotonSource.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <chrono>
 #include <cstdlib>
@@ -15,9 +16,11 @@
 extern "C" {
 #include "initial.h"
 #include "io_basic.h"
+#include "io_hess.h"
 #include "mc_tel.h"
 FILE* fileopen(const char* fname, const char* mode);
 int fileclose(FILE* f);
+int read_simtel_mc_shower(IO_BUFFER* iobuf, MCShower* mcs);
 }
 
 namespace {
@@ -210,6 +213,21 @@ int readCurrentEventId(IO_BUFFER* iobuf, int item_type, int& current_event_id) {
     return 0;
 }
 
+EventIOEventHeader& eventHeaderForShower(EventIOMetadata& metadata, int shower_event_id)
+{
+    auto it = std::find_if(
+        metadata.events.begin(), metadata.events.end(),
+        [shower_event_id](const EventIOEventHeader& event) {
+            return event.shower_event_id == shower_event_id;
+        });
+    if (it != metadata.events.end()) {
+        return *it;
+    }
+    metadata.events.push_back(EventIOEventHeader{});
+    metadata.events.back().shower_event_id = shower_event_id;
+    return metadata.events.back();
+}
+
 int readEventHeaderMetadata(IO_BUFFER* iobuf,
                             int item_type,
                             int selected_shower_event_id,
@@ -223,21 +241,64 @@ int readEventHeaderMetadata(IO_BUFFER* iobuf,
     }
     if (item_type == IO_TYPE_MC_EVTH) {
         current_event_id = static_cast<int>(Nint(data[1]));
-        EventIOEventHeader event;
+        EventIOEventHeader& event = eventHeaderForShower(metadata, current_event_id);
         event.shower_event_id = current_event_id;
         event.primary_type = static_cast<int>(Nint(data[2]));
         event.energy_gev = data[3];
         event.theta_deg = data[10] * RAD_TO_DEG;
         event.phi_deg = data[11] * RAD_TO_DEG;
+        event.altitude_deg = 90.0 - event.theta_deg;
         event.azimuth_north_to_east_deg = (data[92] - data[11] + M_PI) * RAD_TO_DEG;
         event.core_x_m = data[98] * 0.01;
         event.core_y_m = data[118] * 0.01;
         event.array_rotation_deg = data[92] * RAD_TO_DEG;
-        metadata.events.push_back(event);
         if (current_event_id == selected_shower_event_id) {
             metadata.selected_event = event;
         }
     }
+    return 0;
+}
+
+void freeMcShowerProfileContent(MCShower& shower)
+{
+    const int n_profiles = std::min(shower.num_profiles, H_MAX_PROFILE);
+    for (int i = 0; i < n_profiles; ++i) {
+        if (shower.profile[i].content != nullptr) {
+            free(shower.profile[i].content);
+            shower.profile[i].content = nullptr;
+            shower.profile[i].max_steps = 0;
+        }
+    }
+}
+
+int readSimtelMcShowerMetadata(IO_BUFFER* iobuf,
+                               int selected_shower_event_id,
+                               EventIOMetadata& metadata)
+{
+    MCShower shower{};
+    int rc = read_simtel_mc_shower(iobuf, &shower);
+    if (rc < 0) {
+        freeMcShowerProfileContent(shower);
+        return rc;
+    }
+
+    EventIOEventHeader& event = eventHeaderForShower(metadata, shower.shower_num);
+    event.shower_event_id = shower.shower_num;
+    event.primary_type = shower.primary_id;
+    event.energy_gev = shower.energy * 1000.0;
+    event.altitude_deg = shower.altitude * RAD_TO_DEG;
+    event.theta_deg = 90.0 - event.altitude_deg;
+    event.azimuth_north_to_east_deg = shower.azimuth * RAD_TO_DEG;
+    event.h_first_int_m = shower.h_first_int;
+    event.x_max_g_cm2 = shower.xmax;
+    event.h_max_m = shower.hmax;
+    event.starting_grammage_g_cm2 = shower.depth_start;
+    event.has_simtel_mc_shower = true;
+    if (shower.shower_num == selected_shower_event_id) {
+        metadata.selected_event = event;
+    }
+
+    freeMcShowerProfileContent(shower);
     return 0;
 }
 
@@ -594,6 +655,10 @@ EventIOMetadata readEventIOMetadata(const EventIOPhotonConfig& cfg) {
                 rc = readEventHeaderMetadata(iobuf.ptr, static_cast<int>(item_header.type),
                                              selected_shower_event_id, current_event_id,
                                              metadata);
+                break;
+            case IO_TYPE_SIMTEL_MC_SHOWER:
+                rc = readSimtelMcShowerMetadata(iobuf.ptr, selected_shower_event_id,
+                                                metadata);
                 break;
             case IO_TYPE_MC_TELOFF:
                 rc = readArrayOffsetsMetadata(iobuf.ptr, current_event_id,

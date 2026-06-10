@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
+#include <limits>
 #include <map>
 #include <optional>
 #include <string>
@@ -53,10 +55,16 @@ struct EventIOEventHeader {
     double energy_gev = 0.0;
     double theta_deg = 0.0;
     double phi_deg = 0.0;
+    double altitude_deg = std::numeric_limits<double>::quiet_NaN();
     double azimuth_north_to_east_deg = 0.0;
     double core_x_m = 0.0;
     double core_y_m = 0.0;
     double array_rotation_deg = 0.0;
+    double h_first_int_m = std::numeric_limits<double>::quiet_NaN();
+    double x_max_g_cm2 = std::numeric_limits<double>::quiet_NaN();
+    double h_max_m = std::numeric_limits<double>::quiet_NaN();
+    double starting_grammage_g_cm2 = std::numeric_limits<double>::quiet_NaN();
+    bool has_simtel_mc_shower = false;
 };
 
 struct EventIOMetadata {

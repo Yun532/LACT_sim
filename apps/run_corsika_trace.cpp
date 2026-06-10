@@ -1,7 +1,12 @@
 #include "app/OpticalSimCommon.hpp"
+#include "io/CorsikaTraceOutputTypes.hpp"
 
 #ifdef LACT_HAS_HDF5
 #include <hdf5.h>
+#endif
+
+#ifdef LACT_HAS_ROOT
+#include "io/LactEventRootWriter.hpp"
 #endif
 
 #include <algorithm>
@@ -11,33 +16,13 @@
 #include <limits>
 #include <optional>
 #include <random>
+#include <set>
 #include <sstream>
 #include <tuple>
 
 using namespace lact;
 
 namespace {
-
-struct CorsikaTraceOutputConfig {
-    std::string hits_csv = "corsika_whiteboard_hits.csv";
-    std::string pixel_csv = "corsika_pixel_image.csv";
-    std::string summary_csv = "corsika_trace_summary.csv";
-    std::string hdf5_path = "corsika_trace.h5";
-    std::string format = "hdf5";
-    std::string hdf5_storage = "dense";
-    bool hdf5_write_components = false;
-    bool save_only_triggered = false;
-    bool write_pixel_time_stats = false;
-};
-
-struct WaveformOutputConfig {
-    bool enabled = false;
-    std::string source = "none";
-    std::string time_reference = "absolute";
-    double time_bin_width_ns = 1.0;
-    double time_window_start_ns = 0.0;
-    double time_window_end_ns = 100.0;
-};
 
 struct CollectorDebugConfig {
     bool photon_output = false;
@@ -82,28 +67,6 @@ struct ProfileStats {
     double hdf5_write_s = 0.0;
 };
 
-struct TraceSummary {
-    int event_id = 0;
-    int telescope_id = 0;
-    std::uint64_t input_bunches = 0;
-    double input_photons = 0.0;
-    std::uint64_t blocked_by_obstruction = 0;
-    std::uint64_t blocked_incoming = 0;
-    std::uint64_t blocked_reflected = 0;
-    std::uint64_t hit_mirror_before_obstruction = 0;
-    std::uint64_t hit_output_before_obstruction = 0;
-    std::uint64_t hit_mirror = 0;
-    std::uint64_t hit_output_plane = 0;
-    std::uint64_t hit_camera = 0;
-    std::uint64_t accepted_camera = 0;
-    std::uint64_t lost_between_pixels = 0;
-    std::set<int> unique_pixels;
-    double weighted_signal = 0.0;
-    double weighted_time_sum = 0.0;
-    double weighted_time2_sum = 0.0;
-    double first_cherenkov_time_ns = std::numeric_limits<double>::infinity();
-};
-
 struct TelescopeEventAccumulator {
     int telescope_id = 0;
     std::set<int> output_events;
@@ -124,28 +87,6 @@ struct TelescopeEventAccumulator {
     double weighted_time_sum = 0.0;
     double weighted_time2_sum = 0.0;
     double first_cherenkov_time_ns = std::numeric_limits<double>::infinity();
-};
-
-using SummaryKey = std::pair<int, int>;
-
-using WaveformKey = std::tuple<int, int, int, int>;
-
-struct WaveformPixelAccumulator {
-    int event_id = 0;
-    int telescope_id = 0;
-    int pixel_id = -1;
-    int time_bin = -1;
-    std::uint64_t photon_count = 0;
-    double pe = 0.0;
-};
-
-struct RawWaveformHit {
-    int event_id = 0;
-    int telescope_id = 0;
-    int pixel_id = -1;
-    double time_ns = 0.0;
-    std::uint64_t photon_count = 0;
-    double pe = 0.0;
 };
 
 struct CollectorDebugPhotonRow {
@@ -458,6 +399,12 @@ CorsikaTraceOutputConfig buildCorsikaTraceOutputConfig(
     out.summary_csv = getString(cfg, "output.summary_csv", out.summary_csv);
     out.hdf5_path = getString(cfg, "output.hdf5_path",
                               getString(cfg, "output.h5_path", out.hdf5_path));
+    out.lact_root_enabled =
+        getBool(cfg, "output.lact_root_enabled", out.lact_root_enabled);
+    out.lact_root_path =
+        getString(cfg, "output.lact_root_path", out.lact_root_path);
+    out.lact_profile =
+        lowerCopy(trim(getString(cfg, "output.lact_profile", out.lact_profile)));
     out.format = lowerCopy(trim(getString(cfg, "output.format", out.format)));
     out.hdf5_storage =
         lowerCopy(trim(getString(cfg, "output.hdf5_storage", out.hdf5_storage)));
@@ -477,6 +424,15 @@ CorsikaTraceOutputConfig buildCorsikaTraceOutputConfig(
     if (!(out.format == "hdf5" || out.format == "h5" ||
           out.format == "csv" || out.format == "both")) {
         throw std::runtime_error("output.format must be hdf5, csv, or both");
+    }
+    if (out.lact_profile.empty()) {
+        out.lact_profile = "image_pe";
+    }
+    if (!(out.lact_profile == "image_pe" ||
+          out.lact_profile == "timeseries_pe" ||
+          out.lact_profile == "debug_full")) {
+        throw std::runtime_error(
+            "output.lact_profile must be image_pe, timeseries_pe, or debug_full");
     }
     if (out.hdf5_storage.empty()) {
         out.hdf5_storage = "dense";
@@ -686,6 +642,11 @@ bool outputWantsCsv(const CorsikaTraceOutputConfig& cfg)
 bool outputWantsHdf5(const CorsikaTraceOutputConfig& cfg)
 {
     return cfg.format == "hdf5" || cfg.format == "h5" || cfg.format == "both";
+}
+
+bool outputWantsLactRoot(const CorsikaTraceOutputConfig& cfg)
+{
+    return cfg.lact_root_enabled;
 }
 
 std::size_t waveformBinCount(const WaveformOutputConfig& cfg)
@@ -2792,6 +2753,10 @@ void printCorsikaOpticalConfiguration(
     if (outputWantsCsv(output_cfg)) {
         printField("summary_csv", output_cfg.summary_csv);
     }
+    if (outputWantsLactRoot(output_cfg)) {
+        printField("lact_root_path", output_cfg.lact_root_path);
+        printField("lact_profile", output_cfg.lact_profile);
+    }
 
     printSection("Camera");
     printField("enabled", camera_cfg.enabled ? "true" : "false");
@@ -3071,11 +3036,19 @@ int main(int argc, char** argv) {
         ProfileStats profile_stats;
         const bool save_csv = outputWantsCsv(output_cfg);
         const bool save_hdf5 = outputWantsHdf5(output_cfg);
+        const bool save_lact_root = outputWantsLactRoot(output_cfg);
         if (save_hdf5) {
 #ifndef LACT_HAS_HDF5
             throw std::runtime_error(
                 "output.format requests HDF5, but this build was configured without HDF5. "
                 "Install HDF5 and re-run CMake, or set output.format=csv.");
+#endif
+        }
+        if (save_lact_root) {
+#ifndef LACT_HAS_ROOT
+            throw std::runtime_error(
+                "output.lact_root_enabled=true, but this build was configured without ROOT. "
+                "Load/install ROOT >= 6.24 and re-run CMake, or disable output.lact_root_enabled.");
 #endif
         }
 
@@ -3505,6 +3478,30 @@ int main(int argc, char** argv) {
             printField("status", "HDF5 trace file written");
         }
 #endif
+#ifdef LACT_HAS_ROOT
+        if (save_lact_root) {
+            printSection("lact_event ROOT output");
+            printField("status", "writing lact_event ROOT file");
+            printField("path", output_cfg.lact_root_path);
+            printField("profile", output_cfg.lact_profile);
+            writeLactEventRoot(output_cfg,
+                               waveform_cfg,
+                               argv[1],
+                               cfg,
+                               source_runtime_cfg,
+                               telescope_cfg,
+                               metadata,
+                               camera,
+                               facets,
+                               nsb_cfg,
+                               trigger_cfg,
+                               summaries,
+                               pixels,
+                               waveforms,
+                               raw_waveform_hits);
+            printField("status", "lact_event ROOT file written");
+        }
+#endif
         if (save_csv) {
             writeSummaryCsv(output_cfg.summary_csv, summaries);
         }
@@ -3543,6 +3540,9 @@ int main(int argc, char** argv) {
         if (save_hdf5) {
             printField("hdf5_path", output_cfg.hdf5_path);
         }
+        if (save_lact_root) {
+            printField("lact_root_path", output_cfg.lact_root_path);
+        }
         if (save_csv) {
             printField("summary_csv", output_cfg.summary_csv);
             if (camera_cfg.enabled) {
@@ -3567,6 +3567,9 @@ int main(int argc, char** argv) {
         std::cout << "camera_enabled=" << (camera_cfg.enabled ? 1 : 0) << "\n";
         if (save_hdf5) {
             std::cout << "hdf5_path=" << output_cfg.hdf5_path << "\n";
+        }
+        if (save_lact_root) {
+            std::cout << "lact_root_path=" << output_cfg.lact_root_path << "\n";
         }
         if (save_csv) {
             std::cout << "summary_csv=" << output_cfg.summary_csv << "\n";
