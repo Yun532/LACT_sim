@@ -163,6 +163,21 @@ local +x : local camera/image horizontal axis chosen from the pointing basis
 local +y : completes a right-handed frame
 ```
 
+The figure below is a concrete visual check for the generic telescope frame at
+`telescope.pointing_el_deg=0` and `telescope.pointing_az_deg=90`.  It marks the
+global axes, the telescope-local optical axes, and the camera/output-plane
+`u/v` axes.  In this edge-on pointing case, the local optical `+z` axis is
+horizontal, while the plotted sky-up direction is the global `+Z`.
+
+![3D coordinate-system check for el=0 deg, az=90 deg](assets/coordinate_system_el0_az90.png)
+
+The second view includes the mirror, camera plane, and camera axes used by the
+layout visualizer.  The optical code and the plotting code use the same
+telescope-local basis; display-only plot rotations are applied only to make the
+global sky/up direction appear upward in 2D figures.
+
+![Mirror and camera axes for el=0 deg, az=90 deg](assets/layout_el0_az90_3d_camera_axes.png)
+
 For:
 
 ```ini

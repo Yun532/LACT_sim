@@ -38,6 +38,8 @@ __pycache__/
 !configs/**/*.csv
 !configs/**/*.cfg
 !docs/**/*.md
+!docs/assets/
+!docs/assets/*.png
 !external/hessioxxx/hessioxxx.tar.gz
 !external/hessioxxx/sha256.sum
 external/hessioxxx/source/bin/
