@@ -159,8 +159,8 @@ run_logs/lact_root_quicklook/corsika_trace_summary.csv
 ```
 
 这个配置基于 `configs/official_tests/corsika_full_response_camera.cfg`，保留结构变形、
-光学误差、反射率/滤光片/SiPM PDE、new_camera 和 multiplicity trigger；同时用
-`configs/nsb/ideal.cfg` 关闭 NSB，并输出：
+光学误差、反射率/滤光片/SiPM PDE、new_camera、结构遮挡和 multiplicity trigger；
+同时用 `configs/nsb/ideal.cfg` 关闭 NSB，并输出：
 
 ```text
 run_logs/lact_root_full_response/lact_events.root
