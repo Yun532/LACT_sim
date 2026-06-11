@@ -150,6 +150,24 @@ run_logs/lact_root_quicklook/corsika_trace.h5
 run_logs/lact_root_quicklook/corsika_trace_summary.csv
 ```
 
+如果要用最新 full-response 链路、但不引入 NSB，推荐改用：
+
+```bash
+./build/run_corsika_trace \
+  configs/examples/corsika_lact_root_full_response.cfg \
+  /path/to/input.simtel.zst
+```
+
+这个配置基于 `configs/official_tests/corsika_full_response_camera.cfg`，保留结构变形、
+光学误差、反射率/滤光片/SiPM PDE、new_camera 和 multiplicity trigger；同时用
+`configs/nsb/ideal.cfg` 关闭 NSB，并输出：
+
+```text
+run_logs/lact_root_full_response/lact_events.root
+run_logs/lact_root_full_response/corsika_trace.h5
+run_logs/lact_root_full_response/corsika_trace_summary.csv
+```
+
 脚本：
 
 ```bash
