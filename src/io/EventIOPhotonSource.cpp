@@ -252,7 +252,63 @@ int readEventHeaderMetadata(IO_BUFFER* iobuf,
         event.core_x_m = data[98] * 0.01;
         event.core_y_m = data[118] * 0.01;
         event.array_rotation_deg = data[92] * RAD_TO_DEG;
+        if (std::isfinite(data[6]) && data[6] != 0.0) {
+            event.h_first_int_m = std::fabs(data[6]) * 0.01;
+        }
         if (current_event_id == selected_shower_event_id) {
+            metadata.selected_event = event;
+        }
+    }
+    return 0;
+}
+
+int readLongitudinalMetadata(IO_BUFFER* iobuf,
+                             int selected_shower_event_id,
+                             EventIOMetadata& metadata)
+{
+    constexpr int kMaxProfiles = 16;
+    constexpr int kMaxDepthBins = 10000;
+
+    int event_id = 0;
+    int profile_type = 0;
+    int n_profiles = 0;
+    int n_depth_bins = 0;
+    double depth_step_g_cm2 = 0.0;
+    std::vector<double> data(kMaxProfiles * kMaxDepthBins, 0.0);
+    const int rc = read_shower_longitudinal(iobuf, &event_id, &profile_type,
+                                            data.data(), kMaxDepthBins,
+                                            &n_profiles, &n_depth_bins,
+                                            &depth_step_g_cm2, kMaxProfiles);
+    if (rc < 0) {
+        return rc;
+    }
+    if (profile_type != 1 || n_profiles <= 0 || n_depth_bins <= 0 ||
+        depth_step_g_cm2 <= 0.0) {
+        return 0;
+    }
+
+    EventIOEventHeader& event = eventHeaderForShower(metadata, event_id);
+    event.shower_event_id = event_id;
+
+    int max_bin = -1;
+    double max_value = -1.0;
+    for (int bin = 0; bin < n_depth_bins; ++bin) {
+        double value = 0.0;
+        if (n_profiles > 2) {
+            value = data[1 * kMaxDepthBins + bin] + data[2 * kMaxDepthBins + bin];
+        } else {
+            for (int profile = 0; profile < n_profiles; ++profile) {
+                value += data[profile * kMaxDepthBins + bin];
+            }
+        }
+        if (value > max_value) {
+            max_value = value;
+            max_bin = bin;
+        }
+    }
+    if (max_bin >= 0 && max_value > 0.0) {
+        event.x_max_g_cm2 = (static_cast<double>(max_bin) + 0.5) * depth_step_g_cm2;
+        if (event_id == selected_shower_event_id) {
             metadata.selected_event = event;
         }
     }
@@ -659,6 +715,10 @@ EventIOMetadata readEventIOMetadata(const EventIOPhotonConfig& cfg) {
             case IO_TYPE_SIMTEL_MC_SHOWER:
                 rc = readSimtelMcShowerMetadata(iobuf.ptr, selected_shower_event_id,
                                                 metadata);
+                break;
+            case IO_TYPE_MC_LONGI:
+                rc = readLongitudinalMetadata(iobuf.ptr, selected_shower_event_id,
+                                              metadata);
                 break;
             case IO_TYPE_MC_TELOFF:
                 rc = readArrayOffsetsMetadata(iobuf.ptr, current_event_id,
