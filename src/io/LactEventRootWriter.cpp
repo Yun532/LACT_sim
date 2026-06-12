@@ -619,6 +619,10 @@ void writeLactEventRoot(const CorsikaTraceOutputConfig& output_cfg,
     double x_max_g_cm2 = std::numeric_limits<double>::quiet_NaN();
     double h_max_m = std::numeric_limits<double>::quiet_NaN();
     double starting_grammage_g_cm2 = std::numeric_limits<double>::quiet_NaN();
+    double ground_gammas = std::numeric_limits<double>::quiet_NaN();
+    double ground_electrons = std::numeric_limits<double>::quiet_NaN();
+    double ground_hadrons = std::numeric_limits<double>::quiet_NaN();
+    double ground_muons = std::numeric_limits<double>::quiet_NaN();
     corsika_tree.Branch("event_id", &root_event_id);
     corsika_tree.Branch("shower_event_id", &shower_event_id);
     corsika_tree.Branch("array_id", &array_id);
@@ -636,6 +640,10 @@ void writeLactEventRoot(const CorsikaTraceOutputConfig& output_cfg,
     corsika_tree.Branch("x_max_g_cm2", &x_max_g_cm2);
     corsika_tree.Branch("h_max_m", &h_max_m);
     corsika_tree.Branch("starting_grammage_g_cm2", &starting_grammage_g_cm2);
+    corsika_tree.Branch("ground_gammas", &ground_gammas);
+    corsika_tree.Branch("ground_electrons", &ground_electrons);
+    corsika_tree.Branch("ground_hadrons", &ground_hadrons);
+    corsika_tree.Branch("ground_muons", &ground_muons);
     corsika_tree.Branch("has_simtel_mc_shower", &has_simtel_mc_shower);
     std::set<long long> written_events;
     for (const auto& obs : prepared.observations) {
@@ -658,6 +666,10 @@ void writeLactEventRoot(const CorsikaTraceOutputConfig& output_cfg,
         x_max_g_cm2 = std::numeric_limits<double>::quiet_NaN();
         h_max_m = std::numeric_limits<double>::quiet_NaN();
         starting_grammage_g_cm2 = std::numeric_limits<double>::quiet_NaN();
+        ground_gammas = std::numeric_limits<double>::quiet_NaN();
+        ground_electrons = std::numeric_limits<double>::quiet_NaN();
+        ground_hadrons = std::numeric_limits<double>::quiet_NaN();
+        ground_muons = std::numeric_limits<double>::quiet_NaN();
         has_simtel_mc_shower = false;
         auto event_it = std::find_if(
             metadata.events.begin(), metadata.events.end(),
@@ -676,6 +688,10 @@ void writeLactEventRoot(const CorsikaTraceOutputConfig& output_cfg,
             x_max_g_cm2 = event_it->x_max_g_cm2;
             h_max_m = event_it->h_max_m;
             starting_grammage_g_cm2 = event_it->starting_grammage_g_cm2;
+            ground_gammas = event_it->ground_gammas;
+            ground_electrons = event_it->ground_electrons;
+            ground_hadrons = event_it->ground_hadrons;
+            ground_muons = event_it->ground_muons;
             has_simtel_mc_shower = event_it->has_simtel_mc_shower;
         }
         corsika_tree.Fill();

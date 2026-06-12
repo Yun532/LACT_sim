@@ -1909,6 +1909,14 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             double core_x_north_m;
             double core_y_west_m;
             double array_rotation_deg;
+            double h_first_int_m;
+            double x_max_g_cm2;
+            double h_max_m;
+            double starting_grammage_g_cm2;
+            double ground_gammas;
+            double ground_electrons;
+            double ground_hadrons;
+            double ground_muons;
         };
         struct CorsikaShowerRow {
             std::int32_t shower_event_id;
@@ -1920,6 +1928,14 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             double core_x_north_m;
             double core_y_west_m;
             double array_rotation_deg;
+            double h_first_int_m;
+            double x_max_g_cm2;
+            double h_max_m;
+            double starting_grammage_g_cm2;
+            double ground_gammas;
+            double ground_electrons;
+            double ground_hadrons;
+            double ground_muons;
         };
         std::vector<EventRow> event_rows;
         std::vector<CorsikaEventRow> corsika_event_rows;
@@ -1959,6 +1975,14 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                     event_meta.core_x_north_m,
                     event_meta.core_y_west_m,
                     event_it->array_rotation_deg,
+                    event_it->h_first_int_m,
+                    event_it->x_max_g_cm2,
+                    event_it->h_max_m,
+                    event_it->starting_grammage_g_cm2,
+                    event_it->ground_gammas,
+                    event_it->ground_electrons,
+                    event_it->ground_hadrons,
+                    event_it->ground_muons,
                 });
             }
         }
@@ -1994,6 +2018,22 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                       HOFFSET(CorsikaEventRow, core_y_west_m), H5T_NATIVE_DOUBLE);
             H5Tinsert(corsika_event_type, "array_rotation_deg",
                       HOFFSET(CorsikaEventRow, array_rotation_deg), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "h_first_int_m",
+                      HOFFSET(CorsikaEventRow, h_first_int_m), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "x_max_g_cm2",
+                      HOFFSET(CorsikaEventRow, x_max_g_cm2), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "h_max_m",
+                      HOFFSET(CorsikaEventRow, h_max_m), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "starting_grammage_g_cm2",
+                      HOFFSET(CorsikaEventRow, starting_grammage_g_cm2), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "ground_gammas",
+                      HOFFSET(CorsikaEventRow, ground_gammas), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "ground_electrons",
+                      HOFFSET(CorsikaEventRow, ground_electrons), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "ground_hadrons",
+                      HOFFSET(CorsikaEventRow, ground_hadrons), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "ground_muons",
+                      HOFFSET(CorsikaEventRow, ground_muons), H5T_NATIVE_DOUBLE);
             writeCompound1D(events_group, "corsika", corsika_event_type,
                             corsika_event_rows);
             H5Tclose(corsika_event_type);
@@ -2012,6 +2052,14 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                     event.core_x_m,
                     event.core_y_m,
                     event.array_rotation_deg,
+                    event.h_first_int_m,
+                    event.x_max_g_cm2,
+                    event.h_max_m,
+                    event.starting_grammage_g_cm2,
+                    event.ground_gammas,
+                    event.ground_electrons,
+                    event.ground_hadrons,
+                    event.ground_muons,
                 });
             }
             hid_t corsika_shower_type =
@@ -2035,6 +2083,22 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                       HOFFSET(CorsikaShowerRow, core_y_west_m), H5T_NATIVE_DOUBLE);
             H5Tinsert(corsika_shower_type, "array_rotation_deg",
                       HOFFSET(CorsikaShowerRow, array_rotation_deg), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_shower_type, "h_first_int_m",
+                      HOFFSET(CorsikaShowerRow, h_first_int_m), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_shower_type, "x_max_g_cm2",
+                      HOFFSET(CorsikaShowerRow, x_max_g_cm2), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_shower_type, "h_max_m",
+                      HOFFSET(CorsikaShowerRow, h_max_m), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_shower_type, "starting_grammage_g_cm2",
+                      HOFFSET(CorsikaShowerRow, starting_grammage_g_cm2), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_shower_type, "ground_gammas",
+                      HOFFSET(CorsikaShowerRow, ground_gammas), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_shower_type, "ground_electrons",
+                      HOFFSET(CorsikaShowerRow, ground_electrons), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_shower_type, "ground_hadrons",
+                      HOFFSET(CorsikaShowerRow, ground_hadrons), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_shower_type, "ground_muons",
+                      HOFFSET(CorsikaShowerRow, ground_muons), H5T_NATIVE_DOUBLE);
             writeCompound1D(events_group, "corsika_showers", corsika_shower_type,
                             corsika_shower_rows);
             H5Tclose(corsika_shower_type);

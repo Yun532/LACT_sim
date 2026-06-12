@@ -64,13 +64,23 @@ struct EventIOEventHeader {
     double x_max_g_cm2 = std::numeric_limits<double>::quiet_NaN();
     double h_max_m = std::numeric_limits<double>::quiet_NaN();
     double starting_grammage_g_cm2 = std::numeric_limits<double>::quiet_NaN();
+    double ground_gammas = std::numeric_limits<double>::quiet_NaN();
+    double ground_electrons = std::numeric_limits<double>::quiet_NaN();
+    double ground_hadrons = std::numeric_limits<double>::quiet_NaN();
+    double ground_muons = std::numeric_limits<double>::quiet_NaN();
     bool has_simtel_mc_shower = false;
+};
+
+struct EventIOAtmosphereSample {
+    double altitude_m = 0.0;
+    double thickness_g_cm2 = 0.0;
 };
 
 struct EventIOMetadata {
     std::vector<std::string> input_lines;
     std::vector<EventIOTelescopePosition> telescopes;
     std::vector<EventIOEventHeader> events;
+    std::vector<EventIOAtmosphereSample> atmosphere;
     std::optional<EventIOEventHeader> selected_event;
     std::optional<EventIOArrayOffsets> selected_event_offsets;
     std::map<int, EventIOArrayOffsets> array_offsets_by_shower;

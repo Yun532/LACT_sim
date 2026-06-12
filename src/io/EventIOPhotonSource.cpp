@@ -201,6 +201,87 @@ int selectedArrayId(const EventIOPhotonConfig& cfg) {
     return 0;
 }
 
+double interpolateAtmosphereThickness(const EventIOMetadata& metadata,
+                                      double altitude_m)
+{
+    if (!std::isfinite(altitude_m) || metadata.atmosphere.size() < 2) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    const auto& table = metadata.atmosphere;
+    if (altitude_m <= table.front().altitude_m) {
+        return table.front().thickness_g_cm2;
+    }
+    if (altitude_m >= table.back().altitude_m) {
+        return table.back().thickness_g_cm2;
+    }
+    for (std::size_t i = 1; i < table.size(); ++i) {
+        const auto& lo = table[i - 1];
+        const auto& hi = table[i];
+        if (altitude_m <= hi.altitude_m) {
+            const double frac =
+                (altitude_m - lo.altitude_m) / (hi.altitude_m - lo.altitude_m);
+            return lo.thickness_g_cm2 +
+                   frac * (hi.thickness_g_cm2 - lo.thickness_g_cm2);
+        }
+    }
+    return std::numeric_limits<double>::quiet_NaN();
+}
+
+double interpolateAtmosphereHeight(const EventIOMetadata& metadata,
+                                   double thickness_g_cm2)
+{
+    if (!std::isfinite(thickness_g_cm2) || metadata.atmosphere.size() < 2) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    const auto& table = metadata.atmosphere;
+    for (std::size_t i = 1; i < table.size(); ++i) {
+        const auto& lower_alt = table[i - 1];
+        const auto& upper_alt = table[i];
+        const double thick_hi = lower_alt.thickness_g_cm2;
+        const double thick_lo = upper_alt.thickness_g_cm2;
+        if (thickness_g_cm2 <= thick_hi && thickness_g_cm2 >= thick_lo) {
+            const double frac =
+                (thickness_g_cm2 - thick_hi) / (thick_lo - thick_hi);
+            return lower_alt.altitude_m +
+                   frac * (upper_alt.altitude_m - lower_alt.altitude_m);
+        }
+    }
+    if (thickness_g_cm2 > table.front().thickness_g_cm2) {
+        return table.front().altitude_m;
+    }
+    return table.back().altitude_m;
+}
+
+void fillDerivedAtmosphericTruth(EventIOMetadata& metadata, EventIOEventHeader& event)
+{
+    if (!std::isfinite(event.starting_grammage_g_cm2) &&
+        std::isfinite(event.h_first_int_m)) {
+        event.starting_grammage_g_cm2 =
+            interpolateAtmosphereThickness(metadata, event.h_first_int_m);
+    }
+    if (!std::isfinite(event.h_max_m) && std::isfinite(event.x_max_g_cm2)) {
+        event.h_max_m = interpolateAtmosphereHeight(metadata, event.x_max_g_cm2);
+    }
+}
+
+void fillDerivedAtmosphericTruth(EventIOMetadata& metadata)
+{
+    for (auto& event : metadata.events) {
+        fillDerivedAtmosphericTruth(metadata, event);
+    }
+    if (metadata.selected_event) {
+        auto it = std::find_if(
+            metadata.events.begin(), metadata.events.end(),
+            [&metadata](const EventIOEventHeader& event) {
+                return event.shower_event_id ==
+                       metadata.selected_event->shower_event_id;
+            });
+        if (it != metadata.events.end()) {
+            metadata.selected_event = *it;
+        }
+    }
+}
+
 int readCurrentEventId(IO_BUFFER* iobuf, int item_type, int& current_event_id) {
     real data[273];
     int rc = read_tel_block(iobuf, item_type, data, 273);
@@ -255,6 +336,17 @@ int readEventHeaderMetadata(IO_BUFFER* iobuf,
         if (std::isfinite(data[6]) && data[6] != 0.0) {
             event.h_first_int_m = std::fabs(data[6]) * 0.01;
         }
+        fillDerivedAtmosphericTruth(metadata, event);
+        if (current_event_id == selected_shower_event_id) {
+            metadata.selected_event = event;
+        }
+    } else if (item_type == IO_TYPE_MC_EVTE) {
+        current_event_id = static_cast<int>(Nint(data[1]));
+        EventIOEventHeader& event = eventHeaderForShower(metadata, current_event_id);
+        event.ground_gammas = data[2];
+        event.ground_electrons = data[3];
+        event.ground_hadrons = data[4];
+        event.ground_muons = data[5];
         if (current_event_id == selected_shower_event_id) {
             metadata.selected_event = event;
         }
@@ -308,10 +400,41 @@ int readLongitudinalMetadata(IO_BUFFER* iobuf,
     }
     if (max_bin >= 0 && max_value > 0.0) {
         event.x_max_g_cm2 = (static_cast<double>(max_bin) + 0.5) * depth_step_g_cm2;
+        fillDerivedAtmosphericTruth(metadata, event);
         if (event_id == selected_shower_event_id) {
             metadata.selected_event = event;
         }
     }
+    return 0;
+}
+
+int readAtmosphereMetadata(IO_BUFFER* iobuf, EventIOMetadata& metadata)
+{
+    AtmProf atmosphere{};
+    const int rc = read_atmprof(iobuf, &atmosphere);
+    if (rc < 0) {
+        return rc;
+    }
+
+    metadata.atmosphere.clear();
+    metadata.atmosphere.reserve(atmosphere.n_alt);
+    for (unsigned i = 0; i < atmosphere.n_alt; ++i) {
+        metadata.atmosphere.push_back(EventIOAtmosphereSample{
+            atmosphere.alt_km[i] * 1000.0,
+            atmosphere.thick[i],
+        });
+    }
+    std::sort(metadata.atmosphere.begin(), metadata.atmosphere.end(),
+              [](const auto& a, const auto& b) {
+                  return a.altitude_m < b.altitude_m;
+              });
+    fillDerivedAtmosphericTruth(metadata);
+
+    if (atmosphere.atmprof_fname != nullptr) free(atmosphere.atmprof_fname);
+    if (atmosphere.alt_km != nullptr) free(atmosphere.alt_km);
+    if (atmosphere.rho != nullptr) free(atmosphere.rho);
+    if (atmosphere.thick != nullptr) free(atmosphere.thick);
+    if (atmosphere.refidx_m1 != nullptr) free(atmosphere.refidx_m1);
     return 0;
 }
 
@@ -700,6 +823,9 @@ EventIOMetadata readEventIOMetadata(const EventIOPhotonConfig& cfg) {
         switch (static_cast<int>(item_header.type)) {
             case IO_TYPE_MC_INPUTCFG:
                 rc = readInputLinesMetadata(iobuf.ptr, metadata);
+                break;
+            case IO_TYPE_MC_ATMPROF:
+                rc = readAtmosphereMetadata(iobuf.ptr, metadata);
                 break;
             case IO_TYPE_MC_TELPOS:
                 rc = readTelescopePositionsMetadata(iobuf.ptr, metadata);
