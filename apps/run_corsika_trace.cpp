@@ -410,6 +410,8 @@ CorsikaTraceOutputConfig buildCorsikaTraceOutputConfig(
         lowerCopy(trim(getString(cfg, "output.hdf5_storage", out.hdf5_storage)));
     out.hdf5_write_components =
         getBool(cfg, "output.hdf5_write_components", out.hdf5_write_components);
+    out.hdf5_write_waveforms =
+        getBool(cfg, "output.hdf5_write_waveforms", out.hdf5_write_waveforms);
     out.save_only_triggered =
         getBool(cfg, "output.save_only_triggered", out.save_only_triggered);
     out.write_pixel_time_stats =
@@ -422,8 +424,9 @@ CorsikaTraceOutputConfig buildCorsikaTraceOutputConfig(
         out.format = "hdf5";
     }
     if (!(out.format == "hdf5" || out.format == "h5" ||
-          out.format == "csv" || out.format == "both")) {
-        throw std::runtime_error("output.format must be hdf5, csv, or both");
+          out.format == "csv" || out.format == "both" ||
+          out.format == "root" || out.format == "none")) {
+        throw std::runtime_error("output.format must be hdf5, csv, both, root, or none");
     }
     if (out.lact_profile.empty()) {
         out.lact_profile = "image_pe";
@@ -1188,6 +1191,8 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                              output_cfg.write_pixel_time_stats ? "true" : "false");
         writeStringAttribute(file, "waveform_enabled",
                              waveform_cfg.enabled ? "true" : "false");
+        writeStringAttribute(file, "hdf5_write_waveforms",
+                             output_cfg.hdf5_write_waveforms ? "true" : "false");
         writeStringAttribute(file, "event_id_mode", source_runtime_cfg.event_id_mode);
         writeStringAttribute(file, "source_eventio_path", source_runtime_cfg.eventio_path);
 
@@ -2134,7 +2139,7 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         }
         H5Gclose(images_group);
 
-        if (waveform_cfg.enabled && have_camera_axis) {
+        if (waveform_cfg.enabled && output_cfg.hdf5_write_waveforms && have_camera_axis) {
             const std::size_t n_images = image_rows.size();
             const std::size_t n_pixels = camera_rows.size();
             const std::size_t n_bins = waveformBinCount(waveform_cfg);
@@ -2740,6 +2745,8 @@ void printCorsikaOpticalConfiguration(
         printField("hdf5_storage", output_cfg.hdf5_storage);
         printField("hdf5_write_components",
                    output_cfg.hdf5_write_components ? "true" : "false");
+        printField("hdf5_write_waveforms",
+                   output_cfg.hdf5_write_waveforms ? "true" : "false");
         printField("save_only_triggered",
                    output_cfg.save_only_triggered ? "true" : "false");
         printField("write_pixel_time_stats",

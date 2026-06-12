@@ -104,6 +104,14 @@ output.lact_root_path=run_logs/my_corsika_run/lact_events.root
 output.lact_profile=timeseries_pe
 ```
 
+如果只想写 ROOT，不写 HDF5/CSV：
+
+```ini
+output.format=root
+output.lact_root_enabled=true
+output.lact_root_path=run_logs/my_corsika_run/lact_events.root
+```
+
 如果只需要积分图像：
 
 ```ini
@@ -167,6 +175,14 @@ run_logs/lact_root_full_response/lact_events.root
 run_logs/lact_root_full_response/corsika_trace.h5
 run_logs/lact_root_full_response/corsika_trace_summary.csv
 ```
+
+为了避免 HDF5 dense waveform 过大，这个配置中：
+
+```ini
+output.hdf5_write_waveforms=false
+```
+
+HDF5 保持普通 image/summary 输出，pylast 需要的 p.e. 时间序列只写入 ROOT。
 
 脚本：
 
