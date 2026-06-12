@@ -440,6 +440,10 @@ LactRootPreparedData prepareLactRootObservations(
                 std::isfinite(obs.time_peak_ns) ? obs.time_peak_ns : obs.time_mean_ns;
         }
 
+        if (output_cfg.save_only_triggered && trigger_cfg.enabled && !obs.triggered) {
+            continue;
+        }
+
         if (write_time_series && !waveform_pe.empty()) {
             LactRootWaveform wf;
             wf.event_id = event_id;
