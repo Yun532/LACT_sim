@@ -262,6 +262,14 @@ LactRootPreparedData prepareLactRootObservations(
         }
     }
 
+    struct PreparedObservation {
+        LactRootObservation observation;
+        LactRootWaveform waveform;
+        bool has_waveform = false;
+    };
+    std::vector<PreparedObservation> candidates;
+    std::map<int, int> triggered_telescopes_by_event;
+    candidates.reserve(image_keys.size());
     prepared.observations.reserve(image_keys.size());
     prepared.waveforms.reserve(write_time_series ? image_keys.size() : 0);
     for (const auto& key : image_keys) {
@@ -438,12 +446,10 @@ LactRootPreparedData prepareLactRootObservations(
         if (obs.triggered) {
             obs.trigger_time_ns =
                 std::isfinite(obs.time_peak_ns) ? obs.time_peak_ns : obs.time_mean_ns;
+            triggered_telescopes_by_event[event_id] += 1;
         }
 
-        if (output_cfg.save_only_triggered && trigger_cfg.enabled && !obs.triggered) {
-            continue;
-        }
-
+        PreparedObservation candidate;
         if (write_time_series && !waveform_pe.empty()) {
             LactRootWaveform wf;
             wf.event_id = event_id;
@@ -459,10 +465,26 @@ LactRootPreparedData prepareLactRootObservations(
                     wf.pe.push_back(static_cast<float>(pe));
                 }
             }
-            prepared.waveforms.push_back(std::move(wf));
+            candidate.waveform = std::move(wf);
+            candidate.has_waveform = true;
         }
 
-        prepared.observations.push_back(std::move(obs));
+        candidate.observation = std::move(obs);
+        candidates.push_back(std::move(candidate));
+    }
+
+    for (auto& candidate : candidates) {
+        if (output_cfg.save_only_triggered && trigger_cfg.enabled) {
+            const int n_triggered =
+                triggered_telescopes_by_event[candidate.observation.event_id];
+            if (n_triggered <= 0) {
+                continue;
+            }
+        }
+        if (candidate.has_waveform) {
+            prepared.waveforms.push_back(std::move(candidate.waveform));
+        }
+        prepared.observations.push_back(std::move(candidate.observation));
     }
 
     return prepared;
@@ -470,145 +492,27 @@ LactRootPreparedData prepareLactRootObservations(
 
 } // namespace
 
-void writeLactEventRoot(const CorsikaTraceOutputConfig& output_cfg,
-                        const WaveformOutputConfig& waveform_cfg,
-                        const std::string& main_config_path,
-                        const std::map<std::string, std::string>& cfg,
-                        const SourceRuntimeConfig& source_runtime_cfg,
-                        const TelescopeConfig& telescope_cfg,
-                        const EventIOMetadata& metadata,
-                        const CameraGeometry& camera,
-                        const std::vector<MirrorFacet>& facets,
-                        const NsbConfig& nsb_cfg,
-                        const TriggerConfig& trigger_cfg,
-                        const std::map<SummaryKey, TraceSummary>& summaries,
-                        const std::map<PixelKey, PixelAccumulator>& pixels,
-                        const std::map<WaveformKey, WaveformPixelAccumulator>& waveforms,
-                        const std::vector<RawWaveformHit>& raw_waveform_hits)
-{
-    const std::filesystem::path out_path(output_cfg.lact_root_path);
-    if (out_path.has_parent_path()) {
-        std::filesystem::create_directories(out_path.parent_path());
-    }
+struct LactEventRootStreamWriter::Impl {
+    CorsikaTraceOutputConfig output_cfg;
+    WaveformOutputConfig waveform_cfg;
+    SourceRuntimeConfig source_runtime_cfg;
+    TelescopeConfig telescope_cfg;
+    EventIOMetadata metadata;
+    CameraGeometry camera;
+    NsbConfig nsb_cfg;
+    TriggerConfig trigger_cfg;
+    std::unique_ptr<TFile> file;
+    std::unique_ptr<TTree> corsika_tree;
+    std::unique_ptr<TTree> observation_tree;
+    std::unique_ptr<TTree> waveform_config_tree;
+    std::unique_ptr<TTree> waveform_tree;
+    std::unique_ptr<TTree> trace_tree;
+    bool finished = false;
+    bool waveform_config_written = false;
+    std::set<long long> written_events;
 
-    LactRootPreparedData prepared = prepareLactRootObservations(
-        output_cfg, waveform_cfg, nsb_cfg, trigger_cfg, camera,
-        summaries, pixels, waveforms, raw_waveform_hits);
-
-    std::unique_ptr<TFile> file(TFile::Open(output_cfg.lact_root_path.c_str(), "RECREATE"));
-    if (!file || file->IsZombie()) {
-        throw std::runtime_error("failed to create lact_event ROOT file: " +
-                                 output_cfg.lact_root_path);
-    }
-
-    std::string schema_name = "lact_event_root";
-    int schema_version = 1;
-    std::string profile = output_cfg.lact_profile;
-    std::string producer = "LACT_sim";
-    std::string producer_version = "unknown";
-    std::string source_kind = "EventIO";
-    std::string source_path = source_runtime_cfg.eventio_path;
-    std::string source_sha256;
     int run_id = 0;
-    std::string coordinate_convention = "CORSIKA IACT NWU; azimuth North-to-East";
-    std::string event_id_mode = source_runtime_cfg.event_id_mode;
-    std::string config_text = lactRootReadTextIfExists(main_config_path);
-    std::ostringstream expanded;
-    for (const auto& kv : cfg) expanded << kv.first << '=' << kv.second << '\n';
-    std::string expanded_config_text = expanded.str();
 
-    TTree config_tree("config", "LACT_sim lact_event ROOT configuration");
-    config_tree.Branch("schema_name", &schema_name);
-    config_tree.Branch("schema_version", &schema_version);
-    config_tree.Branch("profile", &profile);
-    config_tree.Branch("producer", &producer);
-    config_tree.Branch("producer_version", &producer_version);
-    config_tree.Branch("source_kind", &source_kind);
-    config_tree.Branch("source_path", &source_path);
-    config_tree.Branch("source_sha256", &source_sha256);
-    config_tree.Branch("run_id", &run_id);
-    config_tree.Branch("coordinate_convention", &coordinate_convention);
-    config_tree.Branch("event_id_mode", &event_id_mode);
-    config_tree.Branch("config_text", &config_text);
-    config_tree.Branch("expanded_config_text", &expanded_config_text);
-    config_tree.Fill();
-    config_tree.Write();
-
-    int camera_id = 0;
-    TTree camera_tree("camera_pixels", "Camera pixel geometry");
-    int pixel_id = 0;
-    double pixel_x_m = 0.0, pixel_y_m = 0.0, pixel_size_m = 0.0;
-    int pixel_shape_code = 0;
-    camera_tree.Branch("camera_id", &camera_id);
-    camera_tree.Branch("pixel_id", &pixel_id);
-    camera_tree.Branch("x_m", &pixel_x_m);
-    camera_tree.Branch("y_m", &pixel_y_m);
-    camera_tree.Branch("size_m", &pixel_size_m);
-    camera_tree.Branch("shape_code", &pixel_shape_code);
-    for (const auto& pixel : camera.pixels()) {
-        pixel_id = pixel.id;
-        pixel_x_m = pixel.center.x;
-        pixel_y_m = pixel.center.y;
-        pixel_size_m = pixel.size;
-        pixel_shape_code = lactRootPixelShapeCode(pixel.shape);
-        camera_tree.Fill();
-    }
-    camera_tree.Write();
-
-    TTree optics_tree("optics", "Optics descriptions");
-    int optics_id = 0;
-    std::string optics_name = telescope_cfg.name.empty() ? "LACT" : telescope_cfg.name;
-    int num_mirrors = static_cast<int>(facets.size());
-    double mirror_area_m2 = 0.0;
-    for (const auto& facet : facets) mirror_area_m2 += mirrorFacetArea(facet);
-    double equivalent_focal_length_m = telescope_cfg.focal_length_m;
-    double effective_focal_length_m = telescope_cfg.focal_length_m;
-    optics_tree.Branch("optics_id", &optics_id);
-    optics_tree.Branch("name", &optics_name);
-    optics_tree.Branch("num_mirrors", &num_mirrors);
-    optics_tree.Branch("mirror_area_m2", &mirror_area_m2);
-    optics_tree.Branch("equivalent_focal_length_m", &equivalent_focal_length_m);
-    optics_tree.Branch("effective_focal_length_m", &effective_focal_length_m);
-    optics_tree.Fill();
-    optics_tree.Write();
-
-    TTree telescope_tree("telescopes", "Telescope positions and pointing");
-    int telescope_id = 0;
-    std::string telescope_name = telescope_cfg.name;
-    double array_x_north_m = 0.0, array_y_west_m = 0.0, array_z_up_m = 0.0;
-    double radius_m = 0.0;
-    double pointing_az_deg = telescope_cfg.pointing_az_deg;
-    double pointing_el_deg = telescope_cfg.pointing_el_deg;
-    telescope_tree.Branch("telescope_id", &telescope_id);
-    telescope_tree.Branch("name", &telescope_name);
-    telescope_tree.Branch("array_x_north_m", &array_x_north_m);
-    telescope_tree.Branch("array_y_west_m", &array_y_west_m);
-    telescope_tree.Branch("array_z_up_m", &array_z_up_m);
-    telescope_tree.Branch("radius_m", &radius_m);
-    telescope_tree.Branch("pointing_az_deg", &pointing_az_deg);
-    telescope_tree.Branch("pointing_el_deg", &pointing_el_deg);
-    telescope_tree.Branch("camera_id", &camera_id);
-    telescope_tree.Branch("optics_id", &optics_id);
-    if (!metadata.telescopes.empty()) {
-        for (const auto& tel : metadata.telescopes) {
-            telescope_id = tel.telescope_id;
-            array_x_north_m = tel.x_m;
-            array_y_west_m = tel.y_m;
-            array_z_up_m = tel.z_m;
-            radius_m = tel.radius_m;
-            telescope_tree.Fill();
-        }
-    } else {
-        telescope_id = telescope_cfg.id;
-        array_x_north_m = telescope_cfg.position_m.x;
-        array_y_west_m = telescope_cfg.position_m.y;
-        array_z_up_m = telescope_cfg.position_m.z;
-        radius_m = 0.0;
-        telescope_tree.Fill();
-    }
-    telescope_tree.Write();
-
-    TTree corsika_tree("corsika_events", "CORSIKA event truth/provenance");
     long long root_event_id = 0;
     int shower_event_id = 0, array_id = 0, primary_type = 0;
     bool has_simtel_mc_shower = false;
@@ -623,82 +527,7 @@ void writeLactEventRoot(const CorsikaTraceOutputConfig& output_cfg,
     double ground_electrons = std::numeric_limits<double>::quiet_NaN();
     double ground_hadrons = std::numeric_limits<double>::quiet_NaN();
     double ground_muons = std::numeric_limits<double>::quiet_NaN();
-    corsika_tree.Branch("event_id", &root_event_id);
-    corsika_tree.Branch("shower_event_id", &shower_event_id);
-    corsika_tree.Branch("array_id", &array_id);
-    corsika_tree.Branch("run_id", &run_id);
-    corsika_tree.Branch("primary_type", &primary_type);
-    corsika_tree.Branch("energy_gev", &energy_gev);
-    corsika_tree.Branch("theta_deg", &theta_deg);
-    corsika_tree.Branch("phi_deg", &phi_deg);
-    corsika_tree.Branch("azimuth_north_to_east_deg", &azimuth_north_to_east_deg);
-    corsika_tree.Branch("altitude_deg", &altitude_deg);
-    corsika_tree.Branch("core_x_north_m", &core_x_north_m);
-    corsika_tree.Branch("core_y_west_m", &core_y_west_m);
-    corsika_tree.Branch("array_rotation_deg", &array_rotation_deg);
-    corsika_tree.Branch("h_first_int_m", &h_first_int_m);
-    corsika_tree.Branch("x_max_g_cm2", &x_max_g_cm2);
-    corsika_tree.Branch("h_max_m", &h_max_m);
-    corsika_tree.Branch("starting_grammage_g_cm2", &starting_grammage_g_cm2);
-    corsika_tree.Branch("ground_gammas", &ground_gammas);
-    corsika_tree.Branch("ground_electrons", &ground_electrons);
-    corsika_tree.Branch("ground_hadrons", &ground_hadrons);
-    corsika_tree.Branch("ground_muons", &ground_muons);
-    corsika_tree.Branch("has_simtel_mc_shower", &has_simtel_mc_shower);
-    std::set<long long> written_events;
-    for (const auto& obs : prepared.observations) {
-        if (!written_events.insert(obs.event_id).second) continue;
-        const auto event_meta = outputEventMetadata(
-            static_cast<int>(obs.event_id), source_runtime_cfg.event_id_mode, metadata);
-        shower_event_id = event_meta.shower_event;
-        array_id = event_meta.array_id;
-        root_event_id = obs.event_id;
-        primary_type = 0;
-        energy_gev = event_meta.energy_gev;
-        theta_deg = std::numeric_limits<double>::quiet_NaN();
-        phi_deg = std::numeric_limits<double>::quiet_NaN();
-        azimuth_north_to_east_deg = event_meta.azimuth_north_to_east_deg;
-        core_x_north_m = event_meta.core_x_north_m;
-        core_y_west_m = event_meta.core_y_west_m;
-        array_rotation_deg = std::numeric_limits<double>::quiet_NaN();
-        altitude_deg = std::numeric_limits<double>::quiet_NaN();
-        h_first_int_m = std::numeric_limits<double>::quiet_NaN();
-        x_max_g_cm2 = std::numeric_limits<double>::quiet_NaN();
-        h_max_m = std::numeric_limits<double>::quiet_NaN();
-        starting_grammage_g_cm2 = std::numeric_limits<double>::quiet_NaN();
-        ground_gammas = std::numeric_limits<double>::quiet_NaN();
-        ground_electrons = std::numeric_limits<double>::quiet_NaN();
-        ground_hadrons = std::numeric_limits<double>::quiet_NaN();
-        ground_muons = std::numeric_limits<double>::quiet_NaN();
-        has_simtel_mc_shower = false;
-        auto event_it = std::find_if(
-            metadata.events.begin(), metadata.events.end(),
-            [shower_event_id](const EventIOEventHeader& event) {
-                return event.shower_event_id == shower_event_id;
-            });
-        if (event_it != metadata.events.end()) {
-            primary_type = event_it->primary_type;
-            theta_deg = event_it->theta_deg;
-            phi_deg = event_it->phi_deg;
-            altitude_deg = std::isfinite(event_it->altitude_deg)
-                ? event_it->altitude_deg
-                : 90.0 - event_it->theta_deg;
-            array_rotation_deg = event_it->array_rotation_deg;
-            h_first_int_m = event_it->h_first_int_m;
-            x_max_g_cm2 = event_it->x_max_g_cm2;
-            h_max_m = event_it->h_max_m;
-            starting_grammage_g_cm2 = event_it->starting_grammage_g_cm2;
-            ground_gammas = event_it->ground_gammas;
-            ground_electrons = event_it->ground_electrons;
-            ground_hadrons = event_it->ground_hadrons;
-            ground_muons = event_it->ground_muons;
-            has_simtel_mc_shower = event_it->has_simtel_mc_shower;
-        }
-        corsika_tree.Fill();
-    }
-    corsika_tree.Write();
 
-    TTree observation_tree("observations", "Event-telescope integrated p.e. observations");
     long long obs_event_id = 0;
     int obs_telescope_id = 0;
     bool triggered = false;
@@ -712,25 +541,313 @@ void writeLactEventRoot(const CorsikaTraceOutputConfig& output_cfg,
     double time_rms_ns = 0.0, time_peak_ns = 0.0, impact_parameter_m = 0.0;
     int n_pixels_above_threshold = 0;
     double trigger_time_ns = 0.0;
-    observation_tree.Branch("event_id", &obs_event_id);
-    observation_tree.Branch("telescope_id", &obs_telescope_id);
-    observation_tree.Branch("triggered", &triggered);
-    observation_tree.Branch("n_pixels_camera", &n_pixels_camera);
-    observation_tree.Branch("n_pixels_saved", &n_pixels_saved);
-    observation_tree.Branch("pixel_id", &obs_pixel_id);
-    observation_tree.Branch("image_pe", &image_pe);
-    observation_tree.Branch("image_time_mean_ns", &image_time_mean_ns);
-    observation_tree.Branch("image_time_rms_ns", &image_time_rms_ns);
-    observation_tree.Branch("image_time_peak_ns", &image_time_peak_ns);
-    observation_tree.Branch("total_pe", &total_pe);
-    observation_tree.Branch("time_first_ns", &time_first_ns);
-    observation_tree.Branch("time_mean_ns", &time_mean_ns);
-    observation_tree.Branch("time_rms_ns", &time_rms_ns);
-    observation_tree.Branch("time_peak_ns", &time_peak_ns);
-    observation_tree.Branch("impact_parameter_m", &impact_parameter_m);
-    observation_tree.Branch("n_pixels_above_threshold", &n_pixels_above_threshold);
-    observation_tree.Branch("trigger_time_ns", &trigger_time_ns);
-    for (const auto& obs : prepared.observations) {
+
+    bool waveform_enabled = true;
+    std::string waveform_source;
+    std::string time_reference;
+    double time_bin_width_ns = 0.0;
+    double time_window_start_ns = 0.0;
+    double time_window_end_ns = 0.0;
+    int n_time_bins = 0;
+    std::vector<double> time_edges_ns;
+    std::vector<double> time_centers_ns;
+
+    long long wf_event_id = 0;
+    int wf_telescope_id = 0, wf_n_pixels_camera = 0, wf_n_time_bins = 0;
+    std::vector<int> wf_pixel_id;
+    std::vector<unsigned short> wf_time_bin;
+    std::vector<float> wf_pe;
+
+    long long trace_event_id = 0;
+    int trace_telescope_id = 0;
+    unsigned long long input_bunches = 0;
+    double input_photons = 0.0;
+    unsigned long long blocked_by_obstruction = 0, blocked_incoming = 0;
+    unsigned long long blocked_reflected = 0, hit_mirror = 0, hit_output_plane = 0;
+    unsigned long long hit_camera = 0, accepted_camera = 0, lost_between_pixels = 0;
+    int unique_hit_pixels = 0;
+    double signal_pe = 0.0, trace_time_mean_ns = 0.0, trace_time_rms_ns = 0.0;
+
+    Impl(const CorsikaTraceOutputConfig &output_cfg_in,
+         const WaveformOutputConfig &waveform_cfg_in,
+         const std::string &main_config_path,
+         const std::map<std::string, std::string> &cfg,
+         const SourceRuntimeConfig &source_runtime_cfg_in,
+         const TelescopeConfig &telescope_cfg_in,
+         const EventIOMetadata &metadata_in, const CameraGeometry &camera_in,
+         const std::vector<MirrorFacet> &facets, const NsbConfig &nsb_cfg_in,
+         const TriggerConfig &trigger_cfg_in)
+        : output_cfg(output_cfg_in), waveform_cfg(waveform_cfg_in),
+          source_runtime_cfg(source_runtime_cfg_in),
+          telescope_cfg(telescope_cfg_in), metadata(metadata_in),
+          camera(camera_in), nsb_cfg(nsb_cfg_in), trigger_cfg(trigger_cfg_in) {
+      const std::filesystem::path out_path(output_cfg.lact_root_path);
+      if (out_path.has_parent_path()) {
+        std::filesystem::create_directories(out_path.parent_path());
+      }
+
+      file.reset(TFile::Open(output_cfg.lact_root_path.c_str(), "RECREATE"));
+      if (!file || file->IsZombie()) {
+        throw std::runtime_error("failed to create lact_event ROOT file: " +
+                                 output_cfg.lact_root_path);
+      }
+
+      std::string schema_name = "lact_event_root";
+      int schema_version = 1;
+      std::string profile = output_cfg.lact_profile;
+      std::string producer = "LACT_sim";
+      std::string producer_version = "unknown";
+      std::string source_kind = "EventIO";
+      std::string source_path = source_runtime_cfg.eventio_path;
+      std::string source_sha256;
+      run_id = 0;
+      std::string coordinate_convention =
+          "CORSIKA IACT NWU; azimuth North-to-East";
+      std::string event_id_mode = source_runtime_cfg.event_id_mode;
+      std::string config_text = lactRootReadTextIfExists(main_config_path);
+      std::ostringstream expanded;
+      for (const auto &kv : cfg)
+        expanded << kv.first << '=' << kv.second << '\n';
+      std::string expanded_config_text = expanded.str();
+
+      TTree config_tree("config", "LACT_sim lact_event ROOT configuration");
+      config_tree.Branch("schema_name", &schema_name);
+      config_tree.Branch("schema_version", &schema_version);
+      config_tree.Branch("profile", &profile);
+      config_tree.Branch("producer", &producer);
+      config_tree.Branch("producer_version", &producer_version);
+      config_tree.Branch("source_kind", &source_kind);
+      config_tree.Branch("source_path", &source_path);
+      config_tree.Branch("source_sha256", &source_sha256);
+      config_tree.Branch("run_id", &run_id);
+      config_tree.Branch("coordinate_convention", &coordinate_convention);
+      config_tree.Branch("event_id_mode", &event_id_mode);
+      config_tree.Branch("config_text", &config_text);
+      config_tree.Branch("expanded_config_text", &expanded_config_text);
+      config_tree.Fill();
+      config_tree.Write();
+
+      int camera_id = 0;
+      TTree camera_tree("camera_pixels", "Camera pixel geometry");
+      int pixel_id = 0;
+      double pixel_x_m = 0.0, pixel_y_m = 0.0, pixel_size_m = 0.0;
+      int pixel_shape_code = 0;
+      camera_tree.Branch("camera_id", &camera_id);
+      camera_tree.Branch("pixel_id", &pixel_id);
+      camera_tree.Branch("x_m", &pixel_x_m);
+      camera_tree.Branch("y_m", &pixel_y_m);
+      camera_tree.Branch("size_m", &pixel_size_m);
+      camera_tree.Branch("shape_code", &pixel_shape_code);
+      for (const auto &pixel : camera.pixels()) {
+        pixel_id = pixel.id;
+        pixel_x_m = pixel.center.x;
+        pixel_y_m = pixel.center.y;
+        pixel_size_m = pixel.size;
+        pixel_shape_code = lactRootPixelShapeCode(pixel.shape);
+        camera_tree.Fill();
+      }
+      camera_tree.Write();
+
+      TTree optics_tree("optics", "Optics descriptions");
+      int optics_id = 0;
+      std::string optics_name =
+          telescope_cfg.name.empty() ? "LACT" : telescope_cfg.name;
+      int num_mirrors = static_cast<int>(facets.size());
+      double mirror_area_m2 = 0.0;
+      for (const auto &facet : facets)
+        mirror_area_m2 += mirrorFacetArea(facet);
+      double equivalent_focal_length_m = telescope_cfg.focal_length_m;
+      double effective_focal_length_m = telescope_cfg.focal_length_m;
+      optics_tree.Branch("optics_id", &optics_id);
+      optics_tree.Branch("name", &optics_name);
+      optics_tree.Branch("num_mirrors", &num_mirrors);
+      optics_tree.Branch("mirror_area_m2", &mirror_area_m2);
+      optics_tree.Branch("equivalent_focal_length_m",
+                         &equivalent_focal_length_m);
+      optics_tree.Branch("effective_focal_length_m", &effective_focal_length_m);
+      optics_tree.Fill();
+      optics_tree.Write();
+
+      TTree telescope_tree("telescopes", "Telescope positions and pointing");
+      int telescope_id = 0;
+      std::string telescope_name = telescope_cfg.name;
+      double array_x_north_m = 0.0, array_y_west_m = 0.0, array_z_up_m = 0.0;
+      double radius_m = 0.0;
+      double pointing_az_deg = telescope_cfg.pointing_az_deg;
+      double pointing_el_deg = telescope_cfg.pointing_el_deg;
+      telescope_tree.Branch("telescope_id", &telescope_id);
+      telescope_tree.Branch("name", &telescope_name);
+      telescope_tree.Branch("array_x_north_m", &array_x_north_m);
+      telescope_tree.Branch("array_y_west_m", &array_y_west_m);
+      telescope_tree.Branch("array_z_up_m", &array_z_up_m);
+      telescope_tree.Branch("radius_m", &radius_m);
+      telescope_tree.Branch("pointing_az_deg", &pointing_az_deg);
+      telescope_tree.Branch("pointing_el_deg", &pointing_el_deg);
+      telescope_tree.Branch("camera_id", &camera_id);
+      telescope_tree.Branch("optics_id", &optics_id);
+      if (!metadata.telescopes.empty()) {
+        for (const auto &tel : metadata.telescopes) {
+          telescope_id = tel.telescope_id;
+          array_x_north_m = tel.x_m;
+          array_y_west_m = tel.y_m;
+          array_z_up_m = tel.z_m;
+          radius_m = tel.radius_m;
+          telescope_tree.Fill();
+        }
+      } else {
+        telescope_id = telescope_cfg.id;
+        array_x_north_m = telescope_cfg.position_m.x;
+        array_y_west_m = telescope_cfg.position_m.y;
+        array_z_up_m = telescope_cfg.position_m.z;
+        radius_m = 0.0;
+        telescope_tree.Fill();
+      }
+      telescope_tree.Write();
+
+      corsika_tree = std::make_unique<TTree>("corsika_events",
+                                             "CORSIKA event truth/provenance");
+      corsika_tree->SetDirectory(nullptr);
+      corsika_tree->Branch("event_id", &root_event_id);
+      corsika_tree->Branch("shower_event_id", &shower_event_id);
+      corsika_tree->Branch("array_id", &array_id);
+      corsika_tree->Branch("run_id", &run_id);
+      corsika_tree->Branch("primary_type", &primary_type);
+      corsika_tree->Branch("energy_gev", &energy_gev);
+      corsika_tree->Branch("theta_deg", &theta_deg);
+      corsika_tree->Branch("phi_deg", &phi_deg);
+      corsika_tree->Branch("azimuth_north_to_east_deg",
+                           &azimuth_north_to_east_deg);
+      corsika_tree->Branch("altitude_deg", &altitude_deg);
+      corsika_tree->Branch("core_x_north_m", &core_x_north_m);
+      corsika_tree->Branch("core_y_west_m", &core_y_west_m);
+      corsika_tree->Branch("array_rotation_deg", &array_rotation_deg);
+      corsika_tree->Branch("h_first_int_m", &h_first_int_m);
+      corsika_tree->Branch("x_max_g_cm2", &x_max_g_cm2);
+      corsika_tree->Branch("h_max_m", &h_max_m);
+      corsika_tree->Branch("starting_grammage_g_cm2", &starting_grammage_g_cm2);
+      corsika_tree->Branch("ground_gammas", &ground_gammas);
+      corsika_tree->Branch("ground_electrons", &ground_electrons);
+      corsika_tree->Branch("ground_hadrons", &ground_hadrons);
+      corsika_tree->Branch("ground_muons", &ground_muons);
+      corsika_tree->Branch("has_simtel_mc_shower", &has_simtel_mc_shower);
+
+      observation_tree = std::make_unique<TTree>(
+          "observations", "Event-telescope integrated p.e. observations");
+      observation_tree->SetDirectory(nullptr);
+      observation_tree->Branch("event_id", &obs_event_id);
+      observation_tree->Branch("telescope_id", &obs_telescope_id);
+      observation_tree->Branch("triggered", &triggered);
+      observation_tree->Branch("n_pixels_camera", &n_pixels_camera);
+      observation_tree->Branch("n_pixels_saved", &n_pixels_saved);
+      observation_tree->Branch("pixel_id", &obs_pixel_id);
+      observation_tree->Branch("image_pe", &image_pe);
+      observation_tree->Branch("image_time_mean_ns", &image_time_mean_ns);
+      observation_tree->Branch("image_time_rms_ns", &image_time_rms_ns);
+      observation_tree->Branch("image_time_peak_ns", &image_time_peak_ns);
+      observation_tree->Branch("total_pe", &total_pe);
+      observation_tree->Branch("time_first_ns", &time_first_ns);
+      observation_tree->Branch("time_mean_ns", &time_mean_ns);
+      observation_tree->Branch("time_rms_ns", &time_rms_ns);
+      observation_tree->Branch("time_peak_ns", &time_peak_ns);
+      observation_tree->Branch("impact_parameter_m", &impact_parameter_m);
+      observation_tree->Branch("n_pixels_above_threshold",
+                               &n_pixels_above_threshold);
+      observation_tree->Branch("trigger_time_ns", &trigger_time_ns);
+
+      const bool write_time_series =
+          (output_cfg.lact_profile == "timeseries_pe" ||
+           output_cfg.lact_profile == "debug_full") &&
+          waveform_cfg.enabled && waveform_cfg.source == "pe";
+      if (write_time_series) {
+        waveform_tree = std::make_unique<TTree>(
+            "waveforms", "Sparse p.e. waveform COO rows");
+        waveform_tree->SetDirectory(nullptr);
+        waveform_tree->Branch("event_id", &wf_event_id);
+        waveform_tree->Branch("telescope_id", &wf_telescope_id);
+        waveform_tree->Branch("n_pixels_camera", &wf_n_pixels_camera);
+        waveform_tree->Branch("n_time_bins", &wf_n_time_bins);
+        waveform_tree->Branch("pixel_id", &wf_pixel_id);
+        waveform_tree->Branch("time_bin", &wf_time_bin);
+        waveform_tree->Branch("pe", &wf_pe);
+      }
+
+      trace_tree = std::make_unique<TTree>("trace_summary",
+                                           "Event-telescope trace summary");
+      trace_tree->SetDirectory(nullptr);
+      trace_tree->Branch("event_id", &trace_event_id);
+      trace_tree->Branch("telescope_id", &trace_telescope_id);
+      trace_tree->Branch("input_bunches", &input_bunches);
+      trace_tree->Branch("input_photons", &input_photons);
+      trace_tree->Branch("blocked_by_obstruction", &blocked_by_obstruction);
+      trace_tree->Branch("blocked_incoming", &blocked_incoming);
+      trace_tree->Branch("blocked_reflected", &blocked_reflected);
+      trace_tree->Branch("hit_mirror", &hit_mirror);
+      trace_tree->Branch("hit_output_plane", &hit_output_plane);
+      trace_tree->Branch("hit_camera", &hit_camera);
+      trace_tree->Branch("accepted_camera", &accepted_camera);
+      trace_tree->Branch("lost_between_pixels", &lost_between_pixels);
+      trace_tree->Branch("unique_hit_pixels", &unique_hit_pixels);
+      trace_tree->Branch("signal_pe", &signal_pe);
+      trace_tree->Branch("time_mean_ns", &trace_time_mean_ns);
+      trace_tree->Branch("time_rms_ns", &trace_time_rms_ns);
+    }
+
+    void writeCorsikaEvent(long long event_id) {
+      if (!written_events.insert(event_id).second)
+        return;
+      const auto event_meta =
+          outputEventMetadata(static_cast<int>(event_id),
+                              source_runtime_cfg.event_id_mode, metadata);
+      shower_event_id = event_meta.shower_event;
+      array_id = event_meta.array_id;
+      root_event_id = event_id;
+      primary_type = 0;
+      energy_gev = event_meta.energy_gev;
+      theta_deg = std::numeric_limits<double>::quiet_NaN();
+      phi_deg = std::numeric_limits<double>::quiet_NaN();
+      azimuth_north_to_east_deg = event_meta.azimuth_north_to_east_deg;
+      core_x_north_m = event_meta.core_x_north_m;
+      core_y_west_m = event_meta.core_y_west_m;
+      array_rotation_deg = std::numeric_limits<double>::quiet_NaN();
+      altitude_deg = std::numeric_limits<double>::quiet_NaN();
+      h_first_int_m = std::numeric_limits<double>::quiet_NaN();
+      x_max_g_cm2 = std::numeric_limits<double>::quiet_NaN();
+      h_max_m = std::numeric_limits<double>::quiet_NaN();
+      starting_grammage_g_cm2 = std::numeric_limits<double>::quiet_NaN();
+      ground_gammas = std::numeric_limits<double>::quiet_NaN();
+      ground_electrons = std::numeric_limits<double>::quiet_NaN();
+      ground_hadrons = std::numeric_limits<double>::quiet_NaN();
+      ground_muons = std::numeric_limits<double>::quiet_NaN();
+      has_simtel_mc_shower = false;
+      const int target_shower_event = shower_event_id;
+      auto event_it =
+          std::find_if(metadata.events.begin(), metadata.events.end(),
+                       [target_shower_event](const EventIOEventHeader &event) {
+                         return event.shower_event_id == target_shower_event;
+                       });
+      if (event_it != metadata.events.end()) {
+        primary_type = event_it->primary_type;
+        theta_deg = event_it->theta_deg;
+        phi_deg = event_it->phi_deg;
+        altitude_deg = std::isfinite(event_it->altitude_deg)
+                           ? event_it->altitude_deg
+                           : 90.0 - event_it->theta_deg;
+        array_rotation_deg = event_it->array_rotation_deg;
+        h_first_int_m = event_it->h_first_int_m;
+        x_max_g_cm2 = event_it->x_max_g_cm2;
+        h_max_m = event_it->h_max_m;
+        starting_grammage_g_cm2 = event_it->starting_grammage_g_cm2;
+        ground_gammas = event_it->ground_gammas;
+        ground_electrons = event_it->ground_electrons;
+        ground_hadrons = event_it->ground_hadrons;
+        ground_muons = event_it->ground_muons;
+        has_simtel_mc_shower = event_it->has_simtel_mc_shower;
+      }
+      corsika_tree->Fill();
+    }
+
+    void writeObservation(const LactRootObservation& obs)
+    {
         obs_event_id = obs.event_id;
         obs_telescope_id = obs.telescope_id;
         triggered = obs.triggered;
@@ -749,87 +866,54 @@ void writeLactEventRoot(const CorsikaTraceOutputConfig& output_cfg,
         impact_parameter_m = obs.impact_parameter_m;
         n_pixels_above_threshold = obs.n_pixels_above_threshold;
         trigger_time_ns = obs.trigger_time_ns;
-        observation_tree.Fill();
-    }
-    observation_tree.Write();
-
-    if (!prepared.waveforms.empty()) {
-        TTree waveform_config_tree("waveform_config", "p.e. waveform metadata");
-        bool waveform_enabled = true;
-        std::string waveform_source = waveform_cfg.source;
-        std::string time_reference = waveform_cfg.time_reference;
-        double time_bin_width_ns = waveform_cfg.time_bin_width_ns;
-        double time_window_start_ns = waveform_cfg.time_window_start_ns;
-        double time_window_end_ns = waveform_cfg.time_window_end_ns;
-        int n_time_bins = static_cast<int>(prepared.time_centers_ns.size());
-        std::vector<double> time_edges_ns = prepared.time_edges_ns;
-        std::vector<double> time_centers_ns = prepared.time_centers_ns;
-        waveform_config_tree.Branch("waveform_enabled", &waveform_enabled);
-        waveform_config_tree.Branch("waveform_source", &waveform_source);
-        waveform_config_tree.Branch("time_reference", &time_reference);
-        waveform_config_tree.Branch("time_bin_width_ns", &time_bin_width_ns);
-        waveform_config_tree.Branch("time_window_start_ns", &time_window_start_ns);
-        waveform_config_tree.Branch("time_window_end_ns", &time_window_end_ns);
-        waveform_config_tree.Branch("n_time_bins", &n_time_bins);
-        waveform_config_tree.Branch("time_edges_ns", &time_edges_ns);
-        waveform_config_tree.Branch("time_centers_ns", &time_centers_ns);
-        waveform_config_tree.Fill();
-        waveform_config_tree.Write();
-
-        TTree waveform_tree("waveforms", "Sparse p.e. waveform COO rows");
-        long long wf_event_id = 0;
-        int wf_telescope_id = 0, wf_n_pixels_camera = 0, wf_n_time_bins = 0;
-        std::vector<int> wf_pixel_id;
-        std::vector<unsigned short> wf_time_bin;
-        std::vector<float> wf_pe;
-        waveform_tree.Branch("event_id", &wf_event_id);
-        waveform_tree.Branch("telescope_id", &wf_telescope_id);
-        waveform_tree.Branch("n_pixels_camera", &wf_n_pixels_camera);
-        waveform_tree.Branch("n_time_bins", &wf_n_time_bins);
-        waveform_tree.Branch("pixel_id", &wf_pixel_id);
-        waveform_tree.Branch("time_bin", &wf_time_bin);
-        waveform_tree.Branch("pe", &wf_pe);
-        for (const auto& wf : prepared.waveforms) {
-            wf_event_id = wf.event_id;
-            wf_telescope_id = wf.telescope_id;
-            wf_n_pixels_camera = wf.n_pixels_camera;
-            wf_n_time_bins = wf.n_time_bins;
-            wf_pixel_id = wf.pixel_id;
-            wf_time_bin = wf.time_bin;
-            wf_pe = wf.pe;
-            waveform_tree.Fill();
-        }
-        waveform_tree.Write();
+        observation_tree->Fill();
     }
 
-    TTree trace_tree("trace_summary", "Event-telescope trace summary");
-    long long trace_event_id = 0;
-    int trace_telescope_id = 0;
-    unsigned long long input_bunches = 0;
-    double input_photons = 0.0;
-    unsigned long long blocked_by_obstruction = 0, blocked_incoming = 0;
-    unsigned long long blocked_reflected = 0, hit_mirror = 0, hit_output_plane = 0;
-    unsigned long long hit_camera = 0, accepted_camera = 0, lost_between_pixels = 0;
-    int unique_hit_pixels = 0;
-    double signal_pe = 0.0, trace_time_mean_ns = 0.0, trace_time_rms_ns = 0.0;
-    trace_tree.Branch("event_id", &trace_event_id);
-    trace_tree.Branch("telescope_id", &trace_telescope_id);
-    trace_tree.Branch("input_bunches", &input_bunches);
-    trace_tree.Branch("input_photons", &input_photons);
-    trace_tree.Branch("blocked_by_obstruction", &blocked_by_obstruction);
-    trace_tree.Branch("blocked_incoming", &blocked_incoming);
-    trace_tree.Branch("blocked_reflected", &blocked_reflected);
-    trace_tree.Branch("hit_mirror", &hit_mirror);
-    trace_tree.Branch("hit_output_plane", &hit_output_plane);
-    trace_tree.Branch("hit_camera", &hit_camera);
-    trace_tree.Branch("accepted_camera", &accepted_camera);
-    trace_tree.Branch("lost_between_pixels", &lost_between_pixels);
-    trace_tree.Branch("unique_hit_pixels", &unique_hit_pixels);
-    trace_tree.Branch("signal_pe", &signal_pe);
-    trace_tree.Branch("time_mean_ns", &trace_time_mean_ns);
-    trace_tree.Branch("time_rms_ns", &trace_time_rms_ns);
-    for (const auto& kv : summaries) {
-        const auto& s = kv.second;
+    void writeWaveformConfig(const LactRootPreparedData& prepared)
+    {
+        if (waveform_config_written || prepared.time_centers_ns.empty()) return;
+        waveform_config_tree = std::make_unique<TTree>("waveform_config", "p.e. waveform metadata");
+        waveform_config_tree->SetDirectory(nullptr);
+        waveform_enabled = true;
+        waveform_source = waveform_cfg.source;
+        time_reference = waveform_cfg.time_reference;
+        time_bin_width_ns = waveform_cfg.time_bin_width_ns;
+        time_window_start_ns = waveform_cfg.time_window_start_ns;
+        time_window_end_ns = waveform_cfg.time_window_end_ns;
+        n_time_bins = static_cast<int>(prepared.time_centers_ns.size());
+        time_edges_ns = prepared.time_edges_ns;
+        time_centers_ns = prepared.time_centers_ns;
+        waveform_config_tree->Branch("waveform_enabled", &waveform_enabled);
+        waveform_config_tree->Branch("waveform_source", &waveform_source);
+        waveform_config_tree->Branch("time_reference", &time_reference);
+        waveform_config_tree->Branch("time_bin_width_ns", &time_bin_width_ns);
+        waveform_config_tree->Branch("time_window_start_ns", &time_window_start_ns);
+        waveform_config_tree->Branch("time_window_end_ns", &time_window_end_ns);
+        waveform_config_tree->Branch("n_time_bins", &n_time_bins);
+        waveform_config_tree->Branch("time_edges_ns", &time_edges_ns);
+        waveform_config_tree->Branch("time_centers_ns", &time_centers_ns);
+        waveform_config_tree->Fill();
+        waveform_config_tree->Write();
+        waveform_config_written = true;
+    }
+
+    void writeWaveform(const LactRootWaveform& wf)
+    {
+        if (!waveform_tree) return;
+        wf_event_id = wf.event_id;
+        wf_telescope_id = wf.telescope_id;
+        wf_n_pixels_camera = wf.n_pixels_camera;
+        wf_n_time_bins = wf.n_time_bins;
+        wf_pixel_id = wf.pixel_id;
+        wf_time_bin = wf.time_bin;
+        wf_pe = wf.pe;
+        waveform_tree->Fill();
+    }
+
+    void
+    writeTraceSummary(const std::map<SummaryKey, TraceSummary> &summaries) {
+      for (const auto &kv : summaries) {
+        const auto &s = kv.second;
         trace_event_id = s.event_id;
         trace_telescope_id = s.telescope_id;
         input_bunches = s.input_bunches;
@@ -847,18 +931,120 @@ void writeLactEventRoot(const CorsikaTraceOutputConfig& output_cfg,
         trace_time_mean_ns = std::numeric_limits<double>::quiet_NaN();
         trace_time_rms_ns = std::numeric_limits<double>::quiet_NaN();
         if (s.weighted_signal > 0.0) {
-            trace_time_mean_ns = s.weighted_time_sum / s.weighted_signal;
-            trace_time_rms_ns = std::sqrt(std::max(
-                0.0,
-                s.weighted_time2_sum / s.weighted_signal -
-                    trace_time_mean_ns * trace_time_mean_ns));
+          trace_time_mean_ns = s.weighted_time_sum / s.weighted_signal;
+          trace_time_rms_ns = std::sqrt(
+              std::max(0.0, s.weighted_time2_sum / s.weighted_signal -
+                                trace_time_mean_ns * trace_time_mean_ns));
         }
-        trace_tree.Fill();
+        trace_tree->Fill();
+      }
     }
-    trace_tree.Write();
 
-    file->Write();
-    file->Close();
+    void writeEvent(const std::map<SummaryKey, TraceSummary>& summaries,
+                    const std::map<PixelKey, PixelAccumulator>& pixels,
+                    const std::map<WaveformKey, WaveformPixelAccumulator>& waveforms,
+                    const std::vector<RawWaveformHit>& raw_waveform_hits)
+    {
+        LactRootPreparedData prepared = prepareLactRootObservations(
+            output_cfg, waveform_cfg, nsb_cfg, trigger_cfg, camera,
+            summaries, pixels, waveforms, raw_waveform_hits);
+        writeWaveformConfig(prepared);
+        for (const auto& obs : prepared.observations) {
+            writeCorsikaEvent(obs.event_id);
+            writeObservation(obs);
+        }
+        for (const auto& wf : prepared.waveforms) {
+            writeWaveform(wf);
+        }
+        writeTraceSummary(summaries);
+    }
+
+    void finish()
+    {
+        if (finished) return;
+        file->cd();
+        if (corsika_tree) {
+            corsika_tree->BuildIndex("event_id");
+            corsika_tree->Write();
+        }
+        if (observation_tree) {
+            observation_tree->BuildIndex("event_id", "telescope_id");
+            observation_tree->Write();
+        }
+        if (waveform_tree) {
+            waveform_tree->BuildIndex("event_id", "telescope_id");
+            waveform_tree->Write();
+        }
+        if (trace_tree) {
+            trace_tree->BuildIndex("event_id", "telescope_id");
+            trace_tree->Write();
+        }
+        file->Write();
+        file->Close();
+        finished = true;
+    }
+};
+
+LactEventRootStreamWriter::LactEventRootStreamWriter(
+    const CorsikaTraceOutputConfig& output_cfg,
+    const WaveformOutputConfig& waveform_cfg,
+    const std::string& main_config_path,
+    const std::map<std::string, std::string>& cfg,
+    const SourceRuntimeConfig& source_runtime_cfg,
+    const TelescopeConfig& telescope_cfg,
+    const EventIOMetadata& metadata,
+    const CameraGeometry& camera,
+    const std::vector<MirrorFacet>& facets,
+    const NsbConfig& nsb_cfg,
+    const TriggerConfig& trigger_cfg)
+    : impl_(std::make_unique<Impl>(output_cfg, waveform_cfg, main_config_path, cfg,
+                                   source_runtime_cfg, telescope_cfg, metadata,
+                                   camera, facets, nsb_cfg, trigger_cfg))
+{
+}
+
+LactEventRootStreamWriter::~LactEventRootStreamWriter()
+{
+    if (impl_) {
+        impl_->finish();
+    }
+}
+
+void LactEventRootStreamWriter::writeEvent(
+    const std::map<SummaryKey, TraceSummary>& summaries,
+    const std::map<PixelKey, PixelAccumulator>& pixels,
+    const std::map<WaveformKey, WaveformPixelAccumulator>& waveforms,
+    const std::vector<RawWaveformHit>& raw_waveform_hits)
+{
+    impl_->writeEvent(summaries, pixels, waveforms, raw_waveform_hits);
+}
+
+void LactEventRootStreamWriter::finish()
+{
+    impl_->finish();
+}
+
+void writeLactEventRoot(const CorsikaTraceOutputConfig& output_cfg,
+                        const WaveformOutputConfig& waveform_cfg,
+                        const std::string& main_config_path,
+                        const std::map<std::string, std::string>& cfg,
+                        const SourceRuntimeConfig& source_runtime_cfg,
+                        const TelescopeConfig& telescope_cfg,
+                        const EventIOMetadata& metadata,
+                        const CameraGeometry& camera,
+                        const std::vector<MirrorFacet>& facets,
+                        const NsbConfig& nsb_cfg,
+                        const TriggerConfig& trigger_cfg,
+                        const std::map<SummaryKey, TraceSummary>& summaries,
+                        const std::map<PixelKey, PixelAccumulator>& pixels,
+                        const std::map<WaveformKey, WaveformPixelAccumulator>& waveforms,
+                        const std::vector<RawWaveformHit>& raw_waveform_hits)
+{
+    LactEventRootStreamWriter writer(output_cfg, waveform_cfg, main_config_path, cfg,
+                                     source_runtime_cfg, telescope_cfg, metadata, camera,
+                                     facets, nsb_cfg, trigger_cfg);
+    writer.writeEvent(summaries, pixels, waveforms, raw_waveform_hits);
+    writer.finish();
 }
 
 } // namespace lact

@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <random>
 #include <set>
@@ -3211,9 +3212,107 @@ int main(int argc, char** argv) {
         std::vector<CollectorDebugPhotonRow> collector_debug_rows;
         std::vector<WhiteboardHdf5Row> whiteboard_hits;
 
+#ifdef LACT_HAS_ROOT
+        std::unique_ptr<LactEventRootStreamWriter> lact_root_stream_writer;
+        if (save_lact_root) {
+            printSection("lact_event ROOT output");
+            printField("status", "opening streaming lact_event ROOT writer");
+            printField("path", output_cfg.lact_root_path);
+            printField("profile", output_cfg.lact_profile);
+            lact_root_stream_writer = std::make_unique<LactEventRootStreamWriter>(
+                output_cfg,
+                waveform_cfg,
+                argv[1],
+                cfg,
+                source_runtime_cfg,
+                telescope_cfg,
+                metadata,
+                camera,
+                facets,
+                nsb_cfg,
+                trigger_cfg);
+        }
+#endif
+
         std::uint64_t photon_index = 0;
         int active_shower_event = -1;
+        int active_output_event = -1;
         const auto t_trace_start = std::chrono::steady_clock::now();
+
+        auto writeRootEventIfReady = [&](int event_id) {
+            if (event_id < 0) {
+                return;
+            }
+#ifdef LACT_HAS_ROOT
+            if (!lact_root_stream_writer) {
+                return;
+            }
+            std::map<SummaryKey, TraceSummary> event_summaries;
+            for (const auto& kv : summaries) {
+                if (kv.first.first == event_id) {
+                    event_summaries.insert(kv);
+                }
+            }
+            std::map<PixelKey, PixelAccumulator> event_pixels;
+            for (auto it = pixels.lower_bound(PixelKey{event_id, std::numeric_limits<int>::min(),
+                                                       std::numeric_limits<int>::min()});
+                 it != pixels.end() && std::get<0>(it->first) == event_id;
+                 ++it) {
+                event_pixels.insert(*it);
+            }
+            std::map<WaveformKey, WaveformPixelAccumulator> event_waveforms;
+            for (auto it = waveforms.lower_bound(WaveformKey{
+                     event_id, std::numeric_limits<int>::min(),
+                     std::numeric_limits<int>::min(), std::numeric_limits<int>::min()});
+                 it != waveforms.end() && std::get<0>(it->first) == event_id;
+                 ++it) {
+                event_waveforms.insert(*it);
+            }
+            std::vector<RawWaveformHit> event_raw_waveform_hits;
+            for (const auto& hit : raw_waveform_hits) {
+                if (hit.event_id == event_id) {
+                    event_raw_waveform_hits.push_back(hit);
+                }
+            }
+            lact_root_stream_writer->writeEvent(event_summaries,
+                                                event_pixels,
+                                                event_waveforms,
+                                                event_raw_waveform_hits);
+#endif
+        };
+
+        const bool can_release_streamed_event_data =
+            save_lact_root && !save_hdf5 && !save_csv;
+        auto releaseStreamedEventData = [&](int event_id) {
+            if (!can_release_streamed_event_data || event_id < 0) {
+                return;
+            }
+            for (auto it = pixels.begin(); it != pixels.end();) {
+                if (std::get<0>(it->first) == event_id) {
+                    it = pixels.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            for (auto it = waveforms.begin(); it != waveforms.end();) {
+                if (std::get<0>(it->first) == event_id) {
+                    it = waveforms.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            raw_waveform_hits.erase(
+                std::remove_if(raw_waveform_hits.begin(), raw_waveform_hits.end(),
+                               [event_id](const RawWaveformHit& hit) {
+                                   return hit.event_id == event_id;
+                               }),
+                raw_waveform_hits.end());
+        };
+
+        auto flushOutputEvent = [&](int event_id) {
+            writeRootEventIfReady(event_id);
+            releaseStreamedEventData(event_id);
+        };
 
         auto printRunningEventSummary = [&](int shower_event) {
             if (shower_event < 0) {
@@ -3327,6 +3426,12 @@ int main(int argc, char** argv) {
                 active_shower_event = shower_event;
                 printSection("Event shower_event=" + intToString(shower_event));
                 printField("event_status", "started");
+            }
+            if (active_output_event < 0) {
+                active_output_event = bunch.event_id;
+            } else if (bunch.event_id != active_output_event) {
+                flushOutputEvent(active_output_event);
+                active_output_event = bunch.event_id;
             }
             auto& summary = summaries[{bunch.event_id, bunch.telescope_id}];
             summary.event_id = bunch.event_id;
@@ -3497,6 +3602,7 @@ int main(int argc, char** argv) {
         if (profile_cfg.enabled) {
             addElapsed(profile_stats, &ProfileStats::eventio_stream_s, t_stream_start);
         }
+        flushOutputEvent(active_output_event);
         printRunningEventSummary(active_shower_event);
         const auto t_trace_done = std::chrono::steady_clock::now();
 
@@ -3551,25 +3657,8 @@ int main(int argc, char** argv) {
 #endif
 #ifdef LACT_HAS_ROOT
         if (save_lact_root) {
-            printSection("lact_event ROOT output");
-            printField("status", "writing lact_event ROOT file");
-            printField("path", output_cfg.lact_root_path);
-            printField("profile", output_cfg.lact_profile);
-            writeLactEventRoot(output_cfg,
-                               waveform_cfg,
-                               argv[1],
-                               cfg,
-                               source_runtime_cfg,
-                               telescope_cfg,
-                               metadata,
-                               camera,
-                               facets,
-                               nsb_cfg,
-                               trigger_cfg,
-                               summaries,
-                               pixels,
-                               waveforms,
-                               raw_waveform_hits);
+            printField("status", "finalizing streaming lact_event ROOT file");
+            lact_root_stream_writer->finish();
             printField("status", "lact_event ROOT file written");
         }
 #endif
