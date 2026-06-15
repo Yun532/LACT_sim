@@ -95,8 +95,10 @@ notebook 里的默认绘图对应关系：
 - `LactEventSource` 能正常读出 `simulation`、`r1`、`dl0`、`pointing`。
 - ROOT 文件的 `observations.triggered` 分支存在，例如 event 103 的触发望远镜为
   telescope 1。
-- 当前可视化会优先从 ROOT `observations.triggered` 读取触发望远镜，再 fallback 到
-  `simulation.triggered_tels` 或 `r1.tels`，避免 LACT ROOT 事件误画全部观测望远镜。
+- 当前 `LactEventSource` Python wrapper 会统一提供 `get_triggered_tels(event)`：
+  新 binding 优先使用 `simulation.triggered_tels`，旧本地 build 缺少该属性时才在
+  source 层从 ROOT `observations.triggered` 兜底读取。notebook 和 visualizer 不再
+  自己扫描 ROOT tree。
 - LACT ROOT adapter 可以把 `image_pe` 复制到 `simulation.tels[*].true_image`
   作为兼容字段。`ImageProcessor` 默认保留 source/adapter 已经给出的
   `triggered_tels`；只有显式设置 `poisson_noise > 0` 时，才从 `true_image`
