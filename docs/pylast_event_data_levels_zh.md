@@ -103,3 +103,6 @@ notebook 里的默认绘图对应关系：
   作为兼容字段。`ImageProcessor` 默认保留 source/adapter 已经给出的
   `triggered_tels`；只有显式设置 `poisson_noise > 0` 时，才从 `true_image`
   加 Poisson noise 并用 fake trigger 重算触发望远镜。
+- 为了和 simtelarray 的默认结构一致，LACT adapter 应默认只把
+  `observations.triggered == true` 的 telescope 放进 `r1` 和 `dl0`；
+  非触发 observation 可以留在 `simulation.tels` 中作为兼容/诊断信息。
