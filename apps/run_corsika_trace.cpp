@@ -413,6 +413,9 @@ CorsikaTraceOutputConfig buildCorsikaTraceOutputConfig(
         getBool(cfg, "output.hdf5_write_components", out.hdf5_write_components);
     out.hdf5_write_waveforms =
         getBool(cfg, "output.hdf5_write_waveforms", out.hdf5_write_waveforms);
+    out.lact_root_write_components =
+        getBool(cfg, "output.lact_root_write_components",
+                out.lact_root_write_components);
     out.save_only_triggered =
         getBool(cfg, "output.save_only_triggered", out.save_only_triggered);
     out.write_pixel_time_stats =
@@ -1186,6 +1189,8 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         writeStringAttribute(file, "image_storage", output_cfg.hdf5_storage);
         writeStringAttribute(file, "hdf5_write_components",
                              output_cfg.hdf5_write_components ? "true" : "false");
+        writeStringAttribute(file, "lact_root_write_components",
+                             output_cfg.lact_root_write_components ? "true" : "false");
         writeStringAttribute(file, "save_only_triggered",
                              output_cfg.save_only_triggered ? "true" : "false");
         writeStringAttribute(file, "write_pixel_time_stats",
@@ -2812,6 +2817,8 @@ void printCorsikaOpticalConfiguration(
                    output_cfg.hdf5_write_components ? "true" : "false");
         printField("hdf5_write_waveforms",
                    output_cfg.hdf5_write_waveforms ? "true" : "false");
+        printField("lact_root_write_components",
+                   output_cfg.lact_root_write_components ? "true" : "false");
         printField("save_only_triggered",
                    output_cfg.save_only_triggered ? "true" : "false");
         printField("write_pixel_time_stats",

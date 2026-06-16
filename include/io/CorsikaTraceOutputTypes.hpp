@@ -19,6 +19,7 @@ struct CorsikaTraceOutputConfig {
     std::string hdf5_storage = "dense";
     bool hdf5_write_components = false;
     bool hdf5_write_waveforms = true;
+    bool lact_root_write_components = false;
     bool lact_root_enabled = false;
     bool save_only_triggered = false;
     bool write_pixel_time_stats = false;

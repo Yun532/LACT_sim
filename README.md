@@ -142,11 +142,15 @@ workflows:
 output.lact_root_enabled=true
 output.lact_root_path=run_logs/my_corsika_run/lact_events.root
 output.lact_profile=image_pe       # or timeseries_pe
+output.lact_root_write_components=false
 ```
 
 `image_pe` stores integrated p.e. camera images. `timeseries_pe` additionally
 stores sparse p.e. time-series waveforms and per-pixel `time_peak_ns`. Both are
-intended to map to pylast R1; pylast may derive DL0 from them.
+intended to map to pylast readout layers; pylast may derive DL0 from R1
+waveforms. ROOT observations also include `image_cherenkov_pe` for pylast
+`simulation.true_image`. Set `output.lact_root_write_components=true` to write
+optional diagnostic components such as `image_nsb_pe`.
 
 For server setup and quick-look validation plots, see
 `docs/server_root_output_check_zh.md`. The plotting helper is:

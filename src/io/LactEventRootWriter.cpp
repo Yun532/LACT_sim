@@ -179,6 +179,8 @@ struct LactRootObservation {
     int n_pixels_saved = 0;
     std::vector<int> pixel_id;
     std::vector<float> image_pe;
+    std::vector<float> image_cherenkov_pe;
+    std::vector<float> image_nsb_pe;
     std::vector<float> image_time_mean_ns;
     std::vector<float> image_time_rms_ns;
     std::vector<float> image_time_peak_ns;
@@ -281,9 +283,13 @@ LactRootPreparedData prepareLactRootObservations(
         obs.n_pixels_camera = static_cast<int>(n_pixels);
 
         std::vector<double> image_pe_by_col(n_pixels, 0.0);
+        std::vector<double> image_cherenkov_pe_by_col(n_pixels, 0.0);
+        std::vector<double> image_nsb_pe_by_col(n_pixels, 0.0);
         std::vector<double> time_sum_by_col(n_pixels, 0.0);
         std::vector<double> time2_sum_by_col(n_pixels, 0.0);
         std::vector<double> waveform_pe;
+        std::vector<double> waveform_cherenkov_pe;
+        std::vector<double> waveform_nsb_pe;
         double reference_time_ns = 0.0;
 
         auto summary_it = summaries.find(key);
@@ -303,6 +309,8 @@ LactRootPreparedData prepareLactRootObservations(
 
         if (write_time_series) {
             waveform_pe.assign(n_pixels * n_bins, 0.0);
+            waveform_cherenkov_pe.assign(n_pixels * n_bins, 0.0);
+            waveform_nsb_pe.assign(n_pixels * n_bins, 0.0);
             if (waveform_cfg.time_reference == "image_first" &&
                 std::isfinite(obs.time_first_ns)) {
                 reference_time_ns = obs.time_first_ns;
@@ -320,6 +328,8 @@ LactRootPreparedData prepareLactRootObservations(
                         waveform_cfg, hit.time_ns - reference_time_ns);
                     if (bin < 0) continue;
                     waveform_pe[col_it->second * n_bins + static_cast<std::size_t>(bin)] +=
+                        hit.pe;
+                    waveform_cherenkov_pe[col_it->second * n_bins + static_cast<std::size_t>(bin)] +=
                         hit.pe;
                 }
             } else {
@@ -340,15 +350,19 @@ LactRootPreparedData prepareLactRootObservations(
                     }
                     waveform_pe[col_it->second * n_bins +
                                 static_cast<std::size_t>(w.time_bin)] += w.pe;
+                    waveform_cherenkov_pe[col_it->second * n_bins +
+                                          static_cast<std::size_t>(w.time_bin)] += w.pe;
                 }
             }
 
             if (nsb_cfg.enabled && nsb_cfg.rate_pe_per_ns_per_pixel > 0.0) {
                 for (std::size_t col = 0; col < n_pixels; ++col) {
                     for (std::size_t bin = 0; bin < n_bins; ++bin) {
-                        waveform_pe[col * n_bins + bin] += sampleTimeBinnedNsbPe(
+                        const double nsb_pe = sampleTimeBinnedNsbPe(
                             nsb_cfg, waveform_cfg, event_id, telescope_id,
                             prepared.pixel_axis[col], static_cast<int>(bin));
+                        waveform_pe[col * n_bins + bin] += nsb_pe;
+                        waveform_nsb_pe[col * n_bins + bin] += nsb_pe;
                     }
                 }
             }
@@ -368,6 +382,10 @@ LactRootPreparedData prepareLactRootObservations(
                     }
                 }
                 image_pe_by_col[col] = total;
+                for (std::size_t bin = 0; bin < n_bins; ++bin) {
+                    image_cherenkov_pe_by_col[col] += waveform_cherenkov_pe[col * n_bins + bin];
+                    image_nsb_pe_by_col[col] += waveform_nsb_pe[col * n_bins + bin];
+                }
                 if (total > 0.0 && peak > 0.0) {
                     const double peak_time =
                         reference_time_ns + prepared.time_centers_ns[peak_bin];
@@ -399,8 +417,21 @@ LactRootPreparedData prepareLactRootObservations(
                 if (col_it == pixel_to_col.end()) continue;
                 const std::size_t col = col_it->second;
                 image_pe_by_col[col] = p.pe;
+                image_cherenkov_pe_by_col[col] = p.pe;
                 time_sum_by_col[col] = p.time_sum;
                 time2_sum_by_col[col] = p.time2_sum;
+            }
+            if (nsb_cfg.enabled && nsb_cfg.rate_pe_per_ns_per_pixel > 0.0 &&
+                nsb_cfg.window_ns > 0.0) {
+                WaveformOutputConfig nsb_window_cfg = waveform_cfg;
+                nsb_window_cfg.time_bin_width_ns = nsb_cfg.window_ns;
+                for (std::size_t col = 0; col < n_pixels; ++col) {
+                    const double nsb_pe = sampleTimeBinnedNsbPe(
+                        nsb_cfg, nsb_window_cfg, event_id, telescope_id,
+                        prepared.pixel_axis[col], 0);
+                    image_pe_by_col[col] += nsb_pe;
+                    image_nsb_pe_by_col[col] += nsb_pe;
+                }
             }
         }
 
@@ -409,6 +440,11 @@ LactRootPreparedData prepareLactRootObservations(
             if (pe <= 0.0) continue;
             obs.pixel_id.push_back(prepared.pixel_axis[col]);
             obs.image_pe.push_back(static_cast<float>(pe));
+            obs.image_cherenkov_pe.push_back(
+                static_cast<float>(image_cherenkov_pe_by_col[col]));
+            if (output_cfg.lact_root_write_components) {
+                obs.image_nsb_pe.push_back(static_cast<float>(image_nsb_pe_by_col[col]));
+            }
             const double mean = time_sum_by_col[col] > 0.0
                 ? time_sum_by_col[col] / pe
                 : std::numeric_limits<double>::quiet_NaN();
@@ -534,6 +570,8 @@ struct LactEventRootStreamWriter::Impl {
     int n_pixels_camera = 0, n_pixels_saved = 0;
     std::vector<int> obs_pixel_id;
     std::vector<float> image_pe;
+    std::vector<float> image_cherenkov_pe;
+    std::vector<float> image_nsb_pe;
     std::vector<float> image_time_mean_ns;
     std::vector<float> image_time_rms_ns;
     std::vector<float> image_time_peak_ns;
@@ -741,6 +779,10 @@ struct LactEventRootStreamWriter::Impl {
       observation_tree->Branch("n_pixels_saved", &n_pixels_saved);
       observation_tree->Branch("pixel_id", &obs_pixel_id);
       observation_tree->Branch("image_pe", &image_pe);
+      observation_tree->Branch("image_cherenkov_pe", &image_cherenkov_pe);
+      if (output_cfg.lact_root_write_components) {
+        observation_tree->Branch("image_nsb_pe", &image_nsb_pe);
+      }
       observation_tree->Branch("image_time_mean_ns", &image_time_mean_ns);
       observation_tree->Branch("image_time_rms_ns", &image_time_rms_ns);
       observation_tree->Branch("image_time_peak_ns", &image_time_peak_ns);
@@ -855,6 +897,8 @@ struct LactEventRootStreamWriter::Impl {
         n_pixels_saved = obs.n_pixels_saved;
         obs_pixel_id = obs.pixel_id;
         image_pe = obs.image_pe;
+        image_cherenkov_pe = obs.image_cherenkov_pe;
+        image_nsb_pe = obs.image_nsb_pe;
         image_time_mean_ns = obs.image_time_mean_ns;
         image_time_rms_ns = obs.image_time_rms_ns;
         image_time_peak_ns = obs.image_time_peak_ns;
