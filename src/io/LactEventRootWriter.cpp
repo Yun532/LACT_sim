@@ -9,10 +9,10 @@
 #include <fstream>
 #include <limits>
 #include <memory>
-#include <random>
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_map>
 #include <utility>
 
 namespace lact {
@@ -110,35 +110,6 @@ bool waveformUsesImageReference(const WaveformOutputConfig& cfg)
 {
     return cfg.enabled &&
         (cfg.time_reference == "image_mean" || cfg.time_reference == "image_first");
-}
-
-std::uint64_t mixNsbSeed(std::uint64_t seed, std::uint64_t value)
-{
-    seed ^= value + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
-    return seed;
-}
-
-float sampleTimeBinnedNsbPe(const NsbConfig& nsb_cfg,
-                            const WaveformOutputConfig& waveform_cfg,
-                            int event_id,
-                            int telescope_id,
-                            int pixel_id,
-                            int time_bin)
-{
-    if (!nsb_cfg.enabled || nsb_cfg.rate_pe_per_ns_per_pixel <= 0.0 ||
-        waveform_cfg.time_bin_width_ns <= 0.0) {
-        return 0.0f;
-    }
-    std::uint64_t seed = nsb_cfg.seed;
-    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(
-                                static_cast<std::int64_t>(event_id) + 0x80000000LL));
-    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(telescope_id + 1));
-    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(pixel_id + 1));
-    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(time_bin + 1));
-    std::mt19937_64 rng(seed);
-    std::poisson_distribution<int> poisson(
-        nsb_cfg.rate_pe_per_ns_per_pixel * waveform_cfg.time_bin_width_ns);
-    return static_cast<float>(poisson(rng));
 }
 
 int lactRootPixelShapeCode(PixelShape shape)
@@ -287,9 +258,9 @@ LactRootPreparedData prepareLactRootObservations(
         std::vector<double> image_nsb_pe_by_col(n_pixels, 0.0);
         std::vector<double> time_sum_by_col(n_pixels, 0.0);
         std::vector<double> time2_sum_by_col(n_pixels, 0.0);
-        std::vector<double> waveform_pe;
-        std::vector<double> waveform_cherenkov_pe;
-        std::vector<double> waveform_nsb_pe;
+        std::unordered_map<std::size_t, double> waveform_pe;
+        std::vector<double> waveform_peak_by_col;
+        std::vector<std::size_t> waveform_peak_bin_by_col;
         double reference_time_ns = 0.0;
 
         auto summary_it = summaries.find(key);
@@ -308,9 +279,6 @@ LactRootPreparedData prepareLactRootObservations(
         }
 
         if (write_time_series) {
-            waveform_pe.assign(n_pixels * n_bins, 0.0);
-            waveform_cherenkov_pe.assign(n_pixels * n_bins, 0.0);
-            waveform_nsb_pe.assign(n_pixels * n_bins, 0.0);
             if (waveform_cfg.time_reference == "image_first" &&
                 std::isfinite(obs.time_first_ns)) {
                 reference_time_ns = obs.time_first_ns;
@@ -318,6 +286,23 @@ LactRootPreparedData prepareLactRootObservations(
                        std::isfinite(obs.time_mean_ns)) {
                 reference_time_ns = obs.time_mean_ns;
             }
+
+            std::vector<double> camera_time_series(n_bins, 0.0);
+            auto add_waveform_pe = [&](std::size_t col,
+                                       std::size_t bin,
+                                       double pe,
+                                       double cherenkov_pe,
+                                       double nsb_pe) {
+                if (col >= n_pixels || bin >= n_bins || pe == 0.0) {
+                    return;
+                }
+                const std::size_t index = col * n_bins + bin;
+                waveform_pe[index] += pe;
+                image_pe_by_col[col] += pe;
+                image_cherenkov_pe_by_col[col] += cherenkov_pe;
+                image_nsb_pe_by_col[col] += nsb_pe;
+                camera_time_series[bin] += pe;
+            };
 
             if (waveformUsesImageReference(waveform_cfg)) {
                 for (const auto& hit : raw_waveform_hits) {
@@ -327,10 +312,11 @@ LactRootPreparedData prepareLactRootObservations(
                     const int bin = waveformBinForTime(
                         waveform_cfg, hit.time_ns - reference_time_ns);
                     if (bin < 0) continue;
-                    waveform_pe[col_it->second * n_bins + static_cast<std::size_t>(bin)] +=
-                        hit.pe;
-                    waveform_cherenkov_pe[col_it->second * n_bins + static_cast<std::size_t>(bin)] +=
-                        hit.pe;
+                    add_waveform_pe(col_it->second,
+                                    static_cast<std::size_t>(bin),
+                                    hit.pe,
+                                    hit.pe,
+                                    0.0);
                 }
             } else {
                 const WaveformKey begin_key{
@@ -348,44 +334,40 @@ LactRootPreparedData prepareLactRootObservations(
                         static_cast<std::size_t>(w.time_bin) >= n_bins) {
                         continue;
                     }
-                    waveform_pe[col_it->second * n_bins +
-                                static_cast<std::size_t>(w.time_bin)] += w.pe;
-                    waveform_cherenkov_pe[col_it->second * n_bins +
-                                          static_cast<std::size_t>(w.time_bin)] += w.pe;
+                    add_waveform_pe(col_it->second,
+                                    static_cast<std::size_t>(w.time_bin),
+                                    w.pe,
+                                    w.pe,
+                                    0.0);
                 }
             }
 
-            if (nsb_cfg.enabled && nsb_cfg.rate_pe_per_ns_per_pixel > 0.0) {
-                for (std::size_t col = 0; col < n_pixels; ++col) {
-                    for (std::size_t bin = 0; bin < n_bins; ++bin) {
-                        const double nsb_pe = sampleTimeBinnedNsbPe(
-                            nsb_cfg, waveform_cfg, event_id, telescope_id,
-                            prepared.pixel_axis[col], static_cast<int>(bin));
-                        waveform_pe[col * n_bins + bin] += nsb_pe;
-                        waveform_nsb_pe[col * n_bins + bin] += nsb_pe;
-                    }
+            generateTimeBinnedNsbPe(
+                nsb_cfg,
+                waveform_cfg,
+                event_id,
+                telescope_id,
+                n_pixels,
+                n_bins,
+                [&](std::size_t col, std::size_t bin, float nsb_pe) {
+                    add_waveform_pe(col, bin, nsb_pe, 0.0, nsb_pe);
+                });
+
+            waveform_peak_by_col.assign(n_pixels, -1.0);
+            waveform_peak_bin_by_col.assign(n_pixels, 0);
+            for (const auto& entry : waveform_pe) {
+                const std::size_t col = entry.first / n_bins;
+                const std::size_t bin = entry.first % n_bins;
+                const double pe = entry.second;
+                if (pe > waveform_peak_by_col[col]) {
+                    waveform_peak_by_col[col] = pe;
+                    waveform_peak_bin_by_col[col] = bin;
                 }
             }
-
-            std::vector<double> camera_time_series(n_bins, 0.0);
             for (std::size_t col = 0; col < n_pixels; ++col) {
-                double total = 0.0;
-                double peak = -1.0;
-                std::size_t peak_bin = 0;
-                for (std::size_t bin = 0; bin < n_bins; ++bin) {
-                    const double pe = waveform_pe[col * n_bins + bin];
-                    total += pe;
-                    camera_time_series[bin] += pe;
-                    if (pe > peak) {
-                        peak = pe;
-                        peak_bin = bin;
-                    }
-                }
-                image_pe_by_col[col] = total;
-                for (std::size_t bin = 0; bin < n_bins; ++bin) {
-                    image_cherenkov_pe_by_col[col] += waveform_cherenkov_pe[col * n_bins + bin];
-                    image_nsb_pe_by_col[col] += waveform_nsb_pe[col * n_bins + bin];
-                }
+                const double total = image_pe_by_col[col];
+                const double peak = waveform_peak_by_col[col];
+                const std::size_t peak_bin = waveform_peak_bin_by_col[col];
                 if (total > 0.0 && peak > 0.0) {
                     const double peak_time =
                         reference_time_ns + prepared.time_centers_ns[peak_bin];
@@ -421,18 +403,16 @@ LactRootPreparedData prepareLactRootObservations(
                 time_sum_by_col[col] = p.time_sum;
                 time2_sum_by_col[col] = p.time2_sum;
             }
-            if (nsb_cfg.enabled && nsb_cfg.rate_pe_per_ns_per_pixel > 0.0 &&
-                nsb_cfg.window_ns > 0.0) {
-                WaveformOutputConfig nsb_window_cfg = waveform_cfg;
-                nsb_window_cfg.time_bin_width_ns = nsb_cfg.window_ns;
-                for (std::size_t col = 0; col < n_pixels; ++col) {
-                    const double nsb_pe = sampleTimeBinnedNsbPe(
-                        nsb_cfg, nsb_window_cfg, event_id, telescope_id,
-                        prepared.pixel_axis[col], 0);
+            generateIntegratedNsbPe(
+                nsb_cfg,
+                event_id,
+                telescope_id,
+                n_pixels,
+                nsb_cfg.window_ns,
+                [&](std::size_t col, float nsb_pe) {
                     image_pe_by_col[col] += nsb_pe;
                     image_nsb_pe_by_col[col] += nsb_pe;
-                }
-            }
+                });
         }
 
         for (std::size_t col = 0; col < n_pixels; ++col) {
@@ -455,16 +435,9 @@ LactRootPreparedData prepareLactRootObservations(
             }
             obs.image_time_mean_ns.push_back(static_cast<float>(mean));
             obs.image_time_rms_ns.push_back(static_cast<float>(rms));
-            if (write_time_series && !waveform_pe.empty()) {
-                double peak = -1.0;
-                std::size_t peak_bin = 0;
-                for (std::size_t bin = 0; bin < n_bins; ++bin) {
-                    const double bin_pe = waveform_pe[col * n_bins + bin];
-                    if (bin_pe > peak) {
-                        peak = bin_pe;
-                        peak_bin = bin;
-                    }
-                }
+            if (write_time_series && col < waveform_peak_by_col.size()) {
+                const double peak = waveform_peak_by_col[col];
+                const std::size_t peak_bin = waveform_peak_bin_by_col[col];
                 obs.image_time_peak_ns.push_back(static_cast<float>(
                     peak > 0.0
                         ? reference_time_ns + prepared.time_centers_ns[peak_bin]
@@ -492,14 +465,20 @@ LactRootPreparedData prepareLactRootObservations(
             wf.telescope_id = telescope_id;
             wf.n_pixels_camera = static_cast<int>(n_pixels);
             wf.n_time_bins = static_cast<int>(n_bins);
-            for (std::size_t col = 0; col < n_pixels; ++col) {
-                for (std::size_t bin = 0; bin < n_bins; ++bin) {
-                    const double pe = waveform_pe[col * n_bins + bin];
-                    if (pe <= 0.0) continue;
-                    wf.pixel_id.push_back(prepared.pixel_axis[col]);
-                    wf.time_bin.push_back(static_cast<unsigned short>(bin));
-                    wf.pe.push_back(static_cast<float>(pe));
-                }
+            std::vector<std::size_t> waveform_indices;
+            waveform_indices.reserve(waveform_pe.size());
+            for (const auto& entry : waveform_pe) {
+                waveform_indices.push_back(entry.first);
+            }
+            std::sort(waveform_indices.begin(), waveform_indices.end());
+            for (const std::size_t index : waveform_indices) {
+                const double pe = waveform_pe[index];
+                if (pe <= 0.0) continue;
+                const std::size_t col = index / n_bins;
+                const std::size_t bin = index % n_bins;
+                wf.pixel_id.push_back(prepared.pixel_axis[col]);
+                wf.time_bin.push_back(static_cast<unsigned short>(bin));
+                wf.pe.push_back(static_cast<float>(pe));
             }
             candidate.waveform = std::move(wf);
             candidate.has_waveform = true;
@@ -513,7 +492,8 @@ LactRootPreparedData prepareLactRootObservations(
         if (output_cfg.save_only_triggered && trigger_cfg.enabled) {
             const int n_triggered =
                 triggered_telescopes_by_event[candidate.observation.event_id];
-            if (n_triggered <= 0) {
+            if (n_triggered < trigger_cfg.array_multiplicity ||
+                !candidate.observation.triggered) {
                 continue;
             }
         }

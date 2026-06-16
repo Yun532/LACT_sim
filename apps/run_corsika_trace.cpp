@@ -16,7 +16,6 @@
 #include <limits>
 #include <memory>
 #include <optional>
-#include <random>
 #include <set>
 #include <sstream>
 #include <tuple>
@@ -687,35 +686,6 @@ bool waveformUsesImageReference(const WaveformOutputConfig& cfg)
 {
     return cfg.enabled &&
         (cfg.time_reference == "image_mean" || cfg.time_reference == "image_first");
-}
-
-std::uint64_t mixNsbSeed(std::uint64_t seed, std::uint64_t value)
-{
-    seed ^= value + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
-    return seed;
-}
-
-float sampleTimeBinnedNsbPe(const NsbConfig& nsb_cfg,
-                            const WaveformOutputConfig& waveform_cfg,
-                            int event_id,
-                            int telescope_id,
-                            int pixel_id,
-                            int time_bin)
-{
-    if (!nsb_cfg.enabled || nsb_cfg.rate_pe_per_ns_per_pixel <= 0.0 ||
-        waveform_cfg.time_bin_width_ns <= 0.0) {
-        return 0.0f;
-    }
-    std::uint64_t seed = nsb_cfg.seed;
-    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(
-                                static_cast<std::int64_t>(event_id) + 0x80000000LL));
-    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(telescope_id + 1));
-    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(pixel_id + 1));
-    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(time_bin + 1));
-    std::mt19937_64 rng(seed);
-    std::poisson_distribution<int> poisson(
-        nsb_cfg.rate_pe_per_ns_per_pixel * waveform_cfg.time_bin_width_ns);
-    return static_cast<float>(poisson(rng));
 }
 
 void accumulateWaveformHit(std::map<WaveformKey, WaveformPixelAccumulator>& waveform,
@@ -1677,32 +1647,36 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                     for (const auto& image : image_rows) {
                         const std::size_t row =
                             static_cast<std::size_t>(image.image_index);
-                        for (std::size_t col = 0; col < n_pixels; ++col) {
-                            float nsb_pe = 0.0f;
-                            for (std::size_t bin = 0; bin < n_bins; ++bin) {
-                                nsb_pe += sampleTimeBinnedNsbPe(
-                                    nsb_cfg,
-                                    waveform_cfg,
-                                    static_cast<int>(image.event_id),
-                                    static_cast<int>(image.telescope_id),
-                                    pixel_id_axis[col],
-                                    static_cast<int>(bin));
-                            }
-                            const std::size_t index = row * n_pixels + col;
-                            dense_nsb_pe[index] = nsb_pe;
-                            dense_pe[index] += nsb_pe;
-                            dense_signal[index] += nsb_pe;
-                        }
+                        generateTimeBinnedNsbPe(
+                            nsb_cfg,
+                            waveform_cfg,
+                            static_cast<int>(image.event_id),
+                            static_cast<int>(image.telescope_id),
+                            n_pixels,
+                            n_bins,
+                            [&](std::size_t col, std::size_t, float nsb_pe) {
+                                const std::size_t index = row * n_pixels + col;
+                                dense_nsb_pe[index] += nsb_pe;
+                                dense_pe[index] += nsb_pe;
+                                dense_signal[index] += nsb_pe;
+                            });
                     }
                 } else {
-                    std::mt19937_64 rng(nsb_cfg.seed);
-                    std::poisson_distribution<int> poisson(
-                        nsb_cfg.rate_pe_per_ns_per_pixel * nsb_cfg.window_ns);
-                    for (std::size_t i = 0; i < dense_nsb_pe.size(); ++i) {
-                        const float nsb_pe = static_cast<float>(poisson(rng));
-                        dense_nsb_pe[i] = nsb_pe;
-                        dense_pe[i] += nsb_pe;
-                        dense_signal[i] += nsb_pe;
+                    for (const auto& image : image_rows) {
+                        const std::size_t row =
+                            static_cast<std::size_t>(image.image_index);
+                        generateIntegratedNsbPe(
+                            nsb_cfg,
+                            static_cast<int>(image.event_id),
+                            static_cast<int>(image.telescope_id),
+                            n_pixels,
+                            nsb_cfg.window_ns,
+                            [&](std::size_t col, float nsb_pe) {
+                                const std::size_t i = row * n_pixels + col;
+                                dense_nsb_pe[i] = nsb_pe;
+                                dense_pe[i] += nsb_pe;
+                                dense_signal[i] += nsb_pe;
+                            });
                     }
                 }
             }
@@ -1794,7 +1768,10 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         if (output_cfg.save_only_triggered && trigger_cfg.enabled) {
             std::set<SummaryKey> triggered_image_keys;
             for (const auto& row : telescope_trigger_rows) {
-                if (row.triggered) {
+                const int n_triggered =
+                    triggered_telescopes_by_event[static_cast<int>(row.event_id)];
+                if (row.triggered &&
+                    n_triggered >= trigger_cfg.array_multiplicity) {
                     triggered_image_keys.insert({
                         static_cast<int>(row.event_id),
                         static_cast<int>(row.telescope_id),
@@ -2318,23 +2295,21 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                 nsb_cfg.rate_pe_per_ns_per_pixel > 0.0) {
                 for (std::size_t row = 0; row < image_rows.size(); ++row) {
                     const auto& image = image_rows[row];
-                    for (std::size_t bin = 0; bin < n_bins; ++bin) {
-                        for (std::size_t col = 0; col < n_pixels; ++col) {
-                            const float nsb_pe = sampleTimeBinnedNsbPe(
-                                nsb_cfg,
-                                waveform_cfg,
-                                static_cast<int>(image.event_id),
-                                static_cast<int>(image.telescope_id),
-                                pixel_id_axis[col],
-                                static_cast<int>(bin));
+                    generateTimeBinnedNsbPe(
+                        nsb_cfg,
+                        waveform_cfg,
+                        static_cast<int>(image.event_id),
+                        static_cast<int>(image.telescope_id),
+                        n_pixels,
+                        n_bins,
+                        [&](std::size_t col, std::size_t bin, float nsb_pe) {
                             const std::size_t index =
                                 (row * n_bins + bin) * n_pixels + col;
                             waveform_pe[index] += nsb_pe;
                             if (output_cfg.hdf5_write_components) {
                                 waveform_nsb_pe[index] += nsb_pe;
                             }
-                        }
-                    }
+                        });
                 }
             }
 

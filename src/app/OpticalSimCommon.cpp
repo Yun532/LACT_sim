@@ -17,11 +17,33 @@
 #include <vector>
 
 #include "geometry/MirrorFacetValidation.hpp"
+#include "io/CorsikaTraceOutputTypes.hpp"
 #include "io/MirrorFacetCsvReader.hpp"
 
 namespace lact {
 
 extern const double DEG_TO_RAD = 3.14159265358979323846 / 180.0;
+
+namespace {
+
+std::uint64_t mixNsbSeed(std::uint64_t seed, std::uint64_t value)
+{
+    seed ^= value + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
+    return seed;
+}
+
+std::mt19937_64 makeNsbEventTelescopeRng(const NsbConfig& nsb,
+                                         int event_id,
+                                         int telescope_id)
+{
+    std::uint64_t seed = nsb.seed;
+    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(
+                                static_cast<std::int64_t>(event_id) + 0x80000000LL));
+    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(telescope_id + 1));
+    return std::mt19937_64(seed);
+}
+
+} // namespace
 
 std::string trim(const std::string& s) {
     auto first = std::find_if_not(s.begin(), s.end(), [](unsigned char c) {
@@ -1810,6 +1832,64 @@ void resolveNsbSpectralRate(NsbConfig& nsb,
     nsb.rate_pe_per_ns_per_pixel =
         1.0e-9 * integral * nsb.effective_area_m2 * nsb.pixel_solid_angle_sr;
     nsb.computed_from_spectrum = true;
+}
+
+void generateIntegratedNsbPe(const NsbConfig& nsb,
+                             int event_id,
+                             int telescope_id,
+                             std::size_t n_pixels,
+                             double window_ns,
+                             const std::function<void(std::size_t, float)>& add_sample)
+{
+    if (!nsb.enabled || nsb.rate_pe_per_ns_per_pixel <= 0.0 ||
+        window_ns <= 0.0 || n_pixels == 0) {
+        return;
+    }
+
+    auto rng = makeNsbEventTelescopeRng(nsb, event_id, telescope_id);
+    std::poisson_distribution<int> poisson(nsb.rate_pe_per_ns_per_pixel * window_ns);
+    for (std::size_t col = 0; col < n_pixels; ++col) {
+        const auto pe = static_cast<float>(poisson(rng));
+        if (pe > 0.0f) {
+            add_sample(col, pe);
+        }
+    }
+}
+
+void generateTimeBinnedNsbPe(const NsbConfig& nsb,
+                             const WaveformOutputConfig& waveform_cfg,
+                             int event_id,
+                             int telescope_id,
+                             std::size_t n_pixels,
+                             std::size_t n_bins,
+                             const std::function<void(std::size_t, std::size_t, float)>& add_sample)
+{
+    if (!nsb.enabled || nsb.rate_pe_per_ns_per_pixel <= 0.0 ||
+        waveform_cfg.time_bin_width_ns <= 0.0 || n_pixels == 0 || n_bins == 0) {
+        return;
+    }
+
+    auto rng = makeNsbEventTelescopeRng(nsb, event_id, telescope_id);
+    const double total_mean =
+        nsb.rate_pe_per_ns_per_pixel *
+        waveform_cfg.time_bin_width_ns *
+        static_cast<double>(n_pixels) *
+        static_cast<double>(n_bins);
+    std::poisson_distribution<unsigned long long> total_poisson(total_mean);
+    const auto total_pe = static_cast<std::uint64_t>(total_poisson(rng));
+    if (total_pe == 0) {
+        return;
+    }
+
+    std::uniform_int_distribution<unsigned long long> pixel_dist(
+        0ULL, static_cast<unsigned long long>(n_pixels - 1));
+    std::uniform_int_distribution<unsigned long long> bin_dist(
+        0ULL, static_cast<unsigned long long>(n_bins - 1));
+    for (std::uint64_t i = 0; i < total_pe; ++i) {
+        add_sample(static_cast<std::size_t>(pixel_dist(rng)),
+                   static_cast<std::size_t>(bin_dist(rng)),
+                   1.0f);
+    }
 }
 
 TriggerConfig buildTriggerConfig(const std::map<std::string, std::string>& cfg) {
