@@ -1007,22 +1007,10 @@ struct LactEventRootStreamWriter::Impl {
     {
         if (finished) return;
         file->cd();
-        if (corsika_tree) {
-            corsika_tree->BuildIndex("event_id");
-            corsika_tree->Write();
-        }
-        if (observation_tree) {
-            observation_tree->BuildIndex("event_id", "telescope_id");
-            observation_tree->Write();
-        }
-        if (waveform_tree) {
-            waveform_tree->BuildIndex("event_id", "telescope_id");
-            waveform_tree->Write();
-        }
-        if (trace_tree) {
-            trace_tree->BuildIndex("event_id", "telescope_id");
-            trace_tree->Write();
-        }
+        if (corsika_tree) corsika_tree->Write();
+        if (observation_tree) observation_tree->Write();
+        if (waveform_tree) waveform_tree->Write();
+        if (trace_tree) trace_tree->Write();
         file->Write();
         file->Close();
         finished = true;
