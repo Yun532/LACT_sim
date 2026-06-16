@@ -84,6 +84,19 @@ OutputEventMetadata outputEventMetadata(int event_id,
     return out;
 }
 
+void configureRootTreeAutoFlush(TTree* tree, double auto_flush_mb)
+{
+    if (!tree || auto_flush_mb <= 0.0) {
+        return;
+    }
+    const auto bytes = static_cast<Long64_t>(auto_flush_mb * 1024.0 * 1024.0);
+    if (bytes <= 0) {
+        return;
+    }
+    tree->SetAutoFlush(-bytes);
+    tree->SetAutoSave(-bytes);
+}
+
 std::size_t waveformBinCount(const WaveformOutputConfig& cfg)
 {
     if (!cfg.enabled) {
@@ -525,6 +538,7 @@ struct LactEventRootStreamWriter::Impl {
     std::unique_ptr<TTree> trace_tree;
     bool finished = false;
     bool waveform_config_written = false;
+    int events_since_flush = 0;
     std::set<long long> written_events;
 
     int run_id = 0;
@@ -748,6 +762,8 @@ struct LactEventRootStreamWriter::Impl {
       corsika_tree->Branch("ground_hadrons", &ground_hadrons);
       corsika_tree->Branch("ground_muons", &ground_muons);
       corsika_tree->Branch("has_simtel_mc_shower", &has_simtel_mc_shower);
+      configureRootTreeAutoFlush(corsika_tree.get(),
+                                 output_cfg.lact_root_auto_flush_mb);
 
       observation_tree = std::make_unique<TTree>(
           "observations", "Event-telescope integrated p.e. observations");
@@ -775,6 +791,8 @@ struct LactEventRootStreamWriter::Impl {
       observation_tree->Branch("n_pixels_above_threshold",
                                &n_pixels_above_threshold);
       observation_tree->Branch("trigger_time_ns", &trigger_time_ns);
+      configureRootTreeAutoFlush(observation_tree.get(),
+                                 output_cfg.lact_root_auto_flush_mb);
 
       const bool write_time_series =
           (output_cfg.lact_profile == "timeseries_pe" ||
@@ -791,6 +809,8 @@ struct LactEventRootStreamWriter::Impl {
         waveform_tree->Branch("pixel_id", &wf_pixel_id);
         waveform_tree->Branch("time_bin", &wf_time_bin);
         waveform_tree->Branch("pe", &wf_pe);
+        configureRootTreeAutoFlush(waveform_tree.get(),
+                                   output_cfg.lact_root_auto_flush_mb);
       }
 
       trace_tree = std::make_unique<TTree>("trace_summary",
@@ -812,6 +832,8 @@ struct LactEventRootStreamWriter::Impl {
       trace_tree->Branch("signal_pe", &signal_pe);
       trace_tree->Branch("time_mean_ns", &trace_time_mean_ns);
       trace_tree->Branch("time_rms_ns", &trace_time_rms_ns);
+      configureRootTreeAutoFlush(trace_tree.get(),
+                                 output_cfg.lact_root_auto_flush_mb);
     }
 
     void writeCorsikaEvent(long long event_id) {
@@ -964,6 +986,15 @@ struct LactEventRootStreamWriter::Impl {
       }
     }
 
+    void flushBufferedTrees()
+    {
+        if (corsika_tree) corsika_tree->FlushBaskets();
+        if (observation_tree) observation_tree->FlushBaskets();
+        if (waveform_tree) waveform_tree->FlushBaskets();
+        if (trace_tree) trace_tree->FlushBaskets();
+        if (file) file->Flush();
+    }
+
     void writeEvent(const std::map<SummaryKey, TraceSummary>& summaries,
                     const std::map<PixelKey, PixelAccumulator>& pixels,
                     const std::map<WaveformKey, WaveformPixelAccumulator>& waveforms,
@@ -981,6 +1012,11 @@ struct LactEventRootStreamWriter::Impl {
             writeWaveform(wf);
         }
         writeTraceSummary(summaries);
+        if (output_cfg.lact_root_flush_events > 0 &&
+            ++events_since_flush >= output_cfg.lact_root_flush_events) {
+            flushBufferedTrees();
+            events_since_flush = 0;
+        }
     }
 
     void finish()

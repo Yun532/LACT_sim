@@ -415,6 +415,12 @@ CorsikaTraceOutputConfig buildCorsikaTraceOutputConfig(
     out.lact_root_write_components =
         getBool(cfg, "output.lact_root_write_components",
                 out.lact_root_write_components);
+    out.lact_root_auto_flush_mb =
+        getDouble(cfg, "output.lact_root_auto_flush_mb",
+                  out.lact_root_auto_flush_mb);
+    out.lact_root_flush_events =
+        getInt(cfg, "output.lact_root_flush_events",
+               out.lact_root_flush_events);
     out.save_only_triggered =
         getBool(cfg, "output.save_only_triggered", out.save_only_triggered);
     out.write_pixel_time_stats =
@@ -430,6 +436,13 @@ CorsikaTraceOutputConfig buildCorsikaTraceOutputConfig(
           out.format == "csv" || out.format == "both" ||
           out.format == "root" || out.format == "none")) {
         throw std::runtime_error("output.format must be hdf5, csv, both, root, or none");
+    }
+    if (!std::isfinite(out.lact_root_auto_flush_mb) ||
+        out.lact_root_auto_flush_mb < 0.0) {
+        throw std::runtime_error("output.lact_root_auto_flush_mb must be finite and >= 0");
+    }
+    if (out.lact_root_flush_events < 0) {
+        throw std::runtime_error("output.lact_root_flush_events must be >= 0");
     }
     if (out.lact_profile.empty()) {
         out.lact_profile = "image_pe";
@@ -2810,6 +2823,12 @@ void printCorsikaOpticalConfiguration(
     if (outputWantsLactRoot(output_cfg)) {
         printField("lact_root_path", output_cfg.lact_root_path);
         printField("lact_profile", output_cfg.lact_profile);
+        printField("lact_root_auto_flush_mb",
+                   doubleToString(output_cfg.lact_root_auto_flush_mb));
+        printField("lact_root_flush_events",
+                   output_cfg.lact_root_flush_events > 0
+                       ? intToString(output_cfg.lact_root_flush_events)
+                       : "off");
     }
 
     printSection("Camera");
