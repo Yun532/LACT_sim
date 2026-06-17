@@ -43,6 +43,19 @@ std::mt19937_64 makeNsbEventTelescopeRng(const NsbConfig& nsb,
     return std::mt19937_64(seed);
 }
 
+std::mt19937_64 makeNsbEventTelescopeCellRng(const NsbConfig& nsb,
+                                             int event_id,
+                                             int telescope_id,
+                                             std::size_t cell)
+{
+    std::uint64_t seed = nsb.seed;
+    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(
+                                static_cast<std::int64_t>(event_id) + 0x80000000LL));
+    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(telescope_id + 1));
+    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(cell + 1));
+    return std::mt19937_64(seed);
+}
+
 } // namespace
 
 std::string trim(const std::string& s) {
@@ -1890,6 +1903,27 @@ void generateTimeBinnedNsbPe(const NsbConfig& nsb,
                    static_cast<std::size_t>(bin_dist(rng)),
                    1.0f);
     }
+}
+
+float sampleTimeBinnedNsbPeCell(const NsbConfig& nsb,
+                                const WaveformOutputConfig& waveform_cfg,
+                                int event_id,
+                                int telescope_id,
+                                std::size_t n_pixels,
+                                std::size_t n_bins,
+                                std::size_t col,
+                                std::size_t bin)
+{
+    if (!nsb.enabled || nsb.rate_pe_per_ns_per_pixel <= 0.0 ||
+        waveform_cfg.time_bin_width_ns <= 0.0 ||
+        col >= n_pixels || bin >= n_bins || n_pixels == 0 || n_bins == 0) {
+        return 0.0f;
+    }
+    const std::size_t cell = col * n_bins + bin;
+    auto rng = makeNsbEventTelescopeCellRng(nsb, event_id, telescope_id, cell);
+    std::poisson_distribution<int> poisson(
+        nsb.rate_pe_per_ns_per_pixel * waveform_cfg.time_bin_width_ns);
+    return static_cast<float>(poisson(rng));
 }
 
 TriggerConfig buildTriggerConfig(const std::map<std::string, std::string>& cfg) {

@@ -275,6 +275,7 @@ LactRootPreparedData prepareLactRootObservations(
         std::vector<double> waveform_peak_by_col;
         std::vector<std::size_t> waveform_peak_bin_by_col;
         double reference_time_ns = 0.0;
+        double trigger_time_ns = std::numeric_limits<double>::quiet_NaN();
 
         auto summary_it = summaries.find(key);
         if (summary_it != summaries.end()) {
@@ -355,16 +356,166 @@ LactRootPreparedData prepareLactRootObservations(
                 }
             }
 
-            generateTimeBinnedNsbPe(
-                nsb_cfg,
-                waveform_cfg,
-                event_id,
-                telescope_id,
-                n_pixels,
-                n_bins,
-                [&](std::size_t col, std::size_t bin, float nsb_pe) {
-                    add_waveform_pe(col, bin, nsb_pe, 0.0, nsb_pe);
-                });
+            const std::size_t trigger_window_bins =
+                trigger_cfg.coincidence_window_ns > 0.0
+                    ? std::min(n_bins, std::max<std::size_t>(
+                                      1,
+                                      static_cast<std::size_t>(std::ceil(
+                                          trigger_cfg.coincidence_window_ns /
+                                          waveform_cfg.time_bin_width_ns))))
+                    : n_bins;
+            const auto waveform_pe_at = [&](std::size_t col, std::size_t bin) {
+                const auto it = waveform_pe.find(col * n_bins + bin);
+                return it == waveform_pe.end() ? 0.0 : it->second;
+            };
+            const auto find_best_trigger_window =
+                [&](std::size_t first_window,
+                    std::size_t last_window) -> std::pair<int, std::size_t> {
+                    if (n_bins == 0 || first_window >= n_bins) {
+                        return {0, 0};
+                    }
+                    last_window = std::min(last_window, n_bins - 1);
+                    std::vector<int> pixels_above_threshold_by_window(n_bins, 0);
+                    for (std::size_t col = 0; col < n_pixels; ++col) {
+                        double window_pe = 0.0;
+                        const std::size_t first_end =
+                            std::min(n_bins, first_window + trigger_window_bins);
+                        for (std::size_t bin = first_window; bin < first_end; ++bin) {
+                            window_pe += waveform_pe_at(col, bin);
+                        }
+                        if (window_pe >= trigger_cfg.pixel_threshold_pe) {
+                            ++pixels_above_threshold_by_window[first_window];
+                        }
+                        for (std::size_t window_start = first_window + 1;
+                             window_start <= last_window;
+                             ++window_start) {
+                            window_pe -= waveform_pe_at(col, window_start - 1);
+                            const std::size_t add_bin =
+                                window_start + trigger_window_bins - 1;
+                            if (add_bin < n_bins) {
+                                window_pe += waveform_pe_at(col, add_bin);
+                            }
+                            if (window_pe >= trigger_cfg.pixel_threshold_pe) {
+                                ++pixels_above_threshold_by_window[window_start];
+                            }
+                        }
+                    }
+
+                    int best_pixels_above_threshold = 0;
+                    std::size_t best_trigger_window_start = first_window;
+                    for (std::size_t window_start = first_window;
+                         window_start <= last_window;
+                         ++window_start) {
+                        const int pixels_above_threshold =
+                            pixels_above_threshold_by_window[window_start];
+                        if (pixels_above_threshold > best_pixels_above_threshold) {
+                            best_pixels_above_threshold = pixels_above_threshold;
+                            best_trigger_window_start = window_start;
+                        }
+                    }
+                    return {best_pixels_above_threshold, best_trigger_window_start};
+                };
+
+            double camera_peak = -1.0;
+            std::size_t camera_peak_bin = 0;
+            for (std::size_t bin = 0; bin < n_bins; ++bin) {
+                if (camera_time_series[bin] > camera_peak) {
+                    camera_peak = camera_time_series[bin];
+                    camera_peak_bin = bin;
+                }
+            }
+
+            const auto cherenkov_trigger =
+                find_best_trigger_window(0, n_bins - 1);
+            bool should_add_full_nsb =
+                !output_cfg.save_only_triggered || !trigger_cfg.enabled ||
+                cherenkov_trigger.first >= trigger_cfg.camera_multiplicity;
+            if (!should_add_full_nsb && nsb_cfg.enabled && camera_peak > 0.0) {
+                const std::size_t first_window =
+                    camera_peak_bin >= trigger_window_bins
+                        ? camera_peak_bin - trigger_window_bins + 1
+                        : 0;
+                const std::size_t last_window = std::min(camera_peak_bin, n_bins - 1);
+                const std::size_t first_light_bin = first_window;
+                const std::size_t last_light_bin = std::min(
+                    n_bins - 1,
+                    last_window + trigger_window_bins - 1);
+                const std::size_t light_bin_count =
+                    last_light_bin - first_light_bin + 1;
+                std::vector<float> light_nsb_pe(n_pixels * light_bin_count, 0.0f);
+                for (std::size_t col = 0; col < n_pixels; ++col) {
+                    for (std::size_t offset = 0; offset < light_bin_count; ++offset) {
+                        const std::size_t bin = first_light_bin + offset;
+                        light_nsb_pe[col * light_bin_count + offset] =
+                            sampleTimeBinnedNsbPeCell(
+                                nsb_cfg,
+                                waveform_cfg,
+                                event_id,
+                                telescope_id,
+                                n_pixels,
+                                n_bins,
+                                col,
+                                bin);
+                    }
+                }
+                const auto light_nsb_at = [&](std::size_t col, std::size_t bin) {
+                    if (bin < first_light_bin || bin > last_light_bin) {
+                        return 0.0f;
+                    }
+                    return light_nsb_pe[col * light_bin_count + (bin - first_light_bin)];
+                };
+                int best_pixels_with_light_nsb = 0;
+                std::size_t best_light_window = first_window;
+                for (std::size_t window_start = first_window;
+                     window_start <= last_window;
+                     ++window_start) {
+                    const std::size_t window_end =
+                        std::min(n_bins, window_start + trigger_window_bins);
+                    int pixels_above_threshold = 0;
+                    for (std::size_t col = 0; col < n_pixels; ++col) {
+                        double window_pe = 0.0;
+                        for (std::size_t bin = window_start; bin < window_end; ++bin) {
+                            window_pe += waveform_pe_at(col, bin);
+                            window_pe += light_nsb_at(col, bin);
+                        }
+                        if (window_pe >= trigger_cfg.pixel_threshold_pe) {
+                            ++pixels_above_threshold;
+                        }
+                    }
+                    if (pixels_above_threshold > best_pixels_with_light_nsb) {
+                        best_pixels_with_light_nsb = pixels_above_threshold;
+                        best_light_window = window_start;
+                    }
+                }
+                should_add_full_nsb =
+                    best_pixels_with_light_nsb >= trigger_cfg.camera_multiplicity;
+                if (should_add_full_nsb) {
+                    trigger_time_ns =
+                        reference_time_ns +
+                        prepared.time_centers_ns[std::min(
+                            n_bins - 1,
+                            best_light_window + trigger_window_bins / 2)];
+                }
+            }
+
+            if (should_add_full_nsb) {
+                for (std::size_t col = 0; col < n_pixels; ++col) {
+                    for (std::size_t bin = 0; bin < n_bins; ++bin) {
+                        const float nsb_pe = sampleTimeBinnedNsbPeCell(
+                            nsb_cfg,
+                            waveform_cfg,
+                            event_id,
+                            telescope_id,
+                            n_pixels,
+                            n_bins,
+                            col,
+                            bin);
+                        if (nsb_pe > 0.0f) {
+                            add_waveform_pe(col, bin, nsb_pe, 0.0, nsb_pe);
+                        }
+                    }
+                }
+            }
 
             waveform_peak_by_col.assign(n_pixels, -1.0);
             waveform_peak_bin_by_col.assign(n_pixels, 0);
@@ -389,8 +540,8 @@ LactRootPreparedData prepareLactRootObservations(
                 }
             }
 
-            double camera_peak = -1.0;
-            std::size_t camera_peak_bin = 0;
+            camera_peak = -1.0;
+            camera_peak_bin = 0;
             for (std::size_t bin = 0; bin < n_bins; ++bin) {
                 if (camera_time_series[bin] > camera_peak) {
                     camera_peak = camera_time_series[bin];
@@ -400,6 +551,14 @@ LactRootPreparedData prepareLactRootObservations(
             if (camera_peak > 0.0) {
                 obs.time_peak_ns =
                     reference_time_ns + prepared.time_centers_ns[camera_peak_bin];
+            }
+            const auto final_trigger = find_best_trigger_window(0, n_bins - 1);
+            obs.n_pixels_above_threshold = final_trigger.first;
+            if (!std::isfinite(trigger_time_ns) && final_trigger.first > 0) {
+                const std::size_t trigger_bin = std::min(
+                    n_bins - 1,
+                    final_trigger.second + trigger_window_bins / 2);
+                trigger_time_ns = reference_time_ns + prepared.time_centers_ns[trigger_bin];
             }
         } else {
             const PixelKey begin_key{event_id, telescope_id, std::numeric_limits<int>::min()};
@@ -459,7 +618,9 @@ LactRootPreparedData prepareLactRootObservations(
                 obs.image_time_peak_ns.push_back(std::numeric_limits<float>::quiet_NaN());
             }
             obs.total_pe += pe;
-            if (pe >= trigger_cfg.pixel_threshold_pe) ++obs.n_pixels_above_threshold;
+            if (!write_time_series && pe >= trigger_cfg.pixel_threshold_pe) {
+                ++obs.n_pixels_above_threshold;
+            }
         }
 
         obs.n_pixels_saved = static_cast<int>(obs.pixel_id.size());
@@ -467,7 +628,8 @@ LactRootPreparedData prepareLactRootObservations(
             obs.n_pixels_above_threshold >= trigger_cfg.camera_multiplicity;
         if (obs.triggered) {
             obs.trigger_time_ns =
-                std::isfinite(obs.time_peak_ns) ? obs.time_peak_ns : obs.time_mean_ns;
+                std::isfinite(trigger_time_ns) ? trigger_time_ns :
+                (std::isfinite(obs.time_peak_ns) ? obs.time_peak_ns : obs.time_mean_ns);
             triggered_telescopes_by_event[event_id] += 1;
         }
 

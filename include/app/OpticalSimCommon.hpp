@@ -318,6 +318,14 @@ void generateTimeBinnedNsbPe(const NsbConfig& nsb,
                              std::size_t n_pixels,
                              std::size_t n_bins,
                              const std::function<void(std::size_t, std::size_t, float)>& add_sample);
+float sampleTimeBinnedNsbPeCell(const NsbConfig& nsb,
+                                const WaveformOutputConfig& waveform_cfg,
+                                int event_id,
+                                int telescope_id,
+                                std::size_t n_pixels,
+                                std::size_t n_bins,
+                                std::size_t col,
+                                std::size_t bin);
 TriggerConfig buildTriggerConfig(const std::map<std::string, std::string>& cfg);
 CameraGeometry buildCameraGeometry(const CameraConfig& cfg);
 double cameraPixelSizeForCollector(const CameraConfig& cfg, const CameraGeometry& camera);

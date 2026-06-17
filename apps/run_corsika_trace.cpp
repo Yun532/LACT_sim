@@ -3026,6 +3026,134 @@ void printProfileStats(const ProfileStats& stats, double trace_time_s)
     print_item("hdf5_write_s", stats.hdf5_write_s);
 }
 
+double poissonUpperTail(int threshold, double lambda)
+{
+    if (threshold <= 0) {
+        return 1.0;
+    }
+    if (lambda <= 0.0) {
+        return 0.0;
+    }
+    double term = std::exp(-lambda);
+    double cdf = term;
+    for (int k = 1; k < threshold; ++k) {
+        term *= lambda / static_cast<double>(k);
+        cdf += term;
+    }
+    return std::clamp(1.0 - cdf, 0.0, 1.0);
+}
+
+double binomialUpperTail(int threshold, std::size_t trials, double p)
+{
+    if (threshold <= 0) {
+        return 1.0;
+    }
+    if (trials == 0 || p <= 0.0 || static_cast<std::size_t>(threshold) > trials) {
+        return 0.0;
+    }
+    if (p >= 1.0) {
+        return 1.0;
+    }
+    long double tail = 0.0L;
+    for (std::size_t k = static_cast<std::size_t>(threshold); k <= trials; ++k) {
+        const long double log_term =
+            std::lgamma(static_cast<long double>(trials) + 1.0L) -
+            std::lgamma(static_cast<long double>(k) + 1.0L) -
+            std::lgamma(static_cast<long double>(trials - k) + 1.0L) +
+            static_cast<long double>(k) * std::log(static_cast<long double>(p)) +
+            static_cast<long double>(trials - k) *
+                std::log1p(-static_cast<long double>(p));
+        tail += std::exp(log_term);
+        if (tail >= 1.0L) {
+            return 1.0;
+        }
+    }
+    return static_cast<double>(std::min<long double>(1.0L, tail));
+}
+
+std::string scientificDoubleToString(double value, int precision = 6)
+{
+    std::ostringstream oss;
+    oss << std::scientific << std::setprecision(precision) << value;
+    return oss.str();
+}
+
+void printPureNsbTriggerEstimate(const NsbConfig& nsb_cfg,
+                                 const WaveformOutputConfig& waveform_cfg,
+                                 const TriggerConfig& trigger_cfg,
+                                 std::size_t n_pixels,
+                                 std::size_t n_telescopes)
+{
+    printSection("Pure NSB trigger estimate");
+    if (!nsb_cfg.enabled || nsb_cfg.rate_pe_per_ns_per_pixel <= 0.0 ||
+        !trigger_cfg.enabled || n_pixels == 0) {
+        printField("enabled", "false");
+        printField("reason", "NSB, trigger, or camera pixels disabled");
+        return;
+    }
+
+    const double configured_window_ns =
+        trigger_cfg.coincidence_window_ns > 0.0
+            ? trigger_cfg.coincidence_window_ns
+            : std::max(0.0,
+                       waveform_cfg.time_window_end_ns -
+                           waveform_cfg.time_window_start_ns);
+    const std::size_t window_bins =
+        waveform_cfg.enabled && waveform_cfg.time_bin_width_ns > 0.0
+            ? std::max<std::size_t>(
+                  1,
+                  static_cast<std::size_t>(
+                      std::ceil(configured_window_ns /
+                                waveform_cfg.time_bin_width_ns)))
+            : 1;
+    const double effective_window_ns =
+        waveform_cfg.enabled && waveform_cfg.time_bin_width_ns > 0.0
+            ? static_cast<double>(window_bins) * waveform_cfg.time_bin_width_ns
+            : configured_window_ns;
+    const double full_window_ns =
+        waveform_cfg.enabled
+            ? std::max(0.0,
+                       waveform_cfg.time_window_end_ns -
+                           waveform_cfg.time_window_start_ns)
+            : effective_window_ns;
+    const std::size_t n_windows =
+        waveform_cfg.enabled && waveform_cfg.time_bin_width_ns > 0.0
+            ? static_cast<std::size_t>(std::ceil(
+                  full_window_ns / waveform_cfg.time_bin_width_ns))
+            : 1;
+    const double lambda =
+        nsb_cfg.rate_pe_per_ns_per_pixel * effective_window_ns;
+    const double pixel_prob =
+        poissonUpperTail(static_cast<int>(std::ceil(trigger_cfg.pixel_threshold_pe)),
+                         lambda);
+    const double camera_single_window_prob =
+        binomialUpperTail(trigger_cfg.camera_multiplicity, n_pixels, pixel_prob);
+    const double camera_sliding_upper =
+        std::min(1.0, static_cast<double>(n_windows) * camera_single_window_prob);
+    const double array_upper =
+        n_telescopes > 0
+            ? binomialUpperTail(trigger_cfg.array_multiplicity,
+                                n_telescopes,
+                                camera_sliding_upper)
+            : 0.0;
+
+    printField("enabled", "true");
+    printField("rate_pe_per_ns_per_pixel",
+               doubleToString(nsb_cfg.rate_pe_per_ns_per_pixel));
+    printField("effective_window_ns", doubleToString(effective_window_ns));
+    printField("pixel_threshold_pe", doubleToString(trigger_cfg.pixel_threshold_pe));
+    printField("camera_multiplicity", intToString(trigger_cfg.camera_multiplicity));
+    printField("array_multiplicity", intToString(trigger_cfg.array_multiplicity));
+    printField("n_pixels", intToString(static_cast<std::uint64_t>(n_pixels)));
+    printField("n_telescopes", intToString(static_cast<std::uint64_t>(n_telescopes)));
+    printField("pixel_prob_ge_threshold", scientificDoubleToString(pixel_prob, 6));
+    printField("camera_single_window_prob",
+               scientificDoubleToString(camera_single_window_prob, 6));
+    printField("camera_sliding_upper_prob",
+               scientificDoubleToString(camera_sliding_upper, 6));
+    printField("array_sliding_upper_prob", scientificDoubleToString(array_upper, 6));
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -3188,6 +3316,11 @@ int main(int argc, char** argv) {
                                          eventio_2d_backproject);
 
 	    printEventIOMetadataSummary(metadata);
+        printPureNsbTriggerEstimate(nsb_cfg,
+                                    waveform_cfg,
+                                    trigger_cfg,
+                                    camera.size(),
+                                    metadata.telescopes.size());
 	    printField("status", "streaming EventIO photon bunches and tracing");
         std::cerr << "run_corsika_trace: streaming photon bunches; "
                   << "no full-file photon preload is used\n";
