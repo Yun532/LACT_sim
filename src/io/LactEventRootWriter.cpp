@@ -1,6 +1,7 @@
 #include "io/LactEventRootWriter.hpp"
 
 #include <TFile.h>
+#include <TObject.h>
 #include <TTree.h>
 
 #include <algorithm>
@@ -1150,10 +1151,11 @@ struct LactEventRootStreamWriter::Impl {
 
     void flushBufferedTrees()
     {
+        if (file) file->cd();
         auto flush_tree = [](TTree* tree) {
             if (!tree) return;
             tree->FlushBaskets();
-            tree->AutoSave("SaveSelf");
+            tree->Write("", TObject::kOverwrite);
         };
         flush_tree(corsika_tree.get());
         flush_tree(observation_tree.get());
@@ -1190,10 +1192,10 @@ struct LactEventRootStreamWriter::Impl {
     {
         if (finished) return;
         file->cd();
-        if (corsika_tree) corsika_tree->Write();
-        if (observation_tree) observation_tree->Write();
-        if (waveform_tree) waveform_tree->Write();
-        if (trace_tree) trace_tree->Write();
+        if (corsika_tree) corsika_tree->Write("", TObject::kOverwrite);
+        if (observation_tree) observation_tree->Write("", TObject::kOverwrite);
+        if (waveform_tree) waveform_tree->Write("", TObject::kOverwrite);
+        if (trace_tree) trace_tree->Write("", TObject::kOverwrite);
         file->Write();
         file->Close();
         finished = true;
