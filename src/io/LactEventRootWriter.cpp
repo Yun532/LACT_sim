@@ -1150,10 +1150,15 @@ struct LactEventRootStreamWriter::Impl {
 
     void flushBufferedTrees()
     {
-        if (corsika_tree) corsika_tree->FlushBaskets();
-        if (observation_tree) observation_tree->FlushBaskets();
-        if (waveform_tree) waveform_tree->FlushBaskets();
-        if (trace_tree) trace_tree->FlushBaskets();
+        auto flush_tree = [](TTree* tree) {
+            if (!tree) return;
+            tree->FlushBaskets();
+            tree->AutoSave("SaveSelf");
+        };
+        flush_tree(corsika_tree.get());
+        flush_tree(observation_tree.get());
+        flush_tree(waveform_tree.get());
+        flush_tree(trace_tree.get());
         if (file) file->Flush();
     }
 
