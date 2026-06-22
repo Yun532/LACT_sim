@@ -1,11 +1,12 @@
 # LACT_sim 用户版 v1.0
 
-这是 LACT 光学模拟程序的最简用户版本，只保留两个常用入口：
+这是 LACT 光学模拟程序的简洁用户版本，只保留三个常用入口：
 
 1. 平行光白板测试：`configs/examples/parallel_light.cfg`
 2. CORSIKA/EventIO 完整相机响应：`configs/examples/full_response_corsika.cfg`
+3. CORSIKA/EventIO -> LACT ROOT 输出：`configs/examples/lactroot_only.cfg`
 
-用户版不包含开发测试、额外示例和详细开发文档。核心源码仍保留在 `src/`、`include/` 和 `apps/` 中，并保留了两个常用画图脚本用于检查输出结果。
+用户版不包含开发测试、额外示例和详细开发文档。核心源码仍保留在 `src/`、`include/` 和 `apps/` 中，并保留了常用画图脚本用于检查输出结果。
 
 ## 目录说明
 
@@ -15,7 +16,7 @@ apps/                         程序入口和小工具
   run_corsika_trace.cpp        CORSIKA/EventIO 输入的完整响应模拟
   compute_nsb_rate.cpp         从夜天光谱估算每像素 NSB rate
 
-configs/examples/             用户直接运行和修改的两个 cfg
+configs/examples/             用户直接运行和修改的三个 cfg
 configs/mirror_1229_facets.csv 1229 面镜片布局
 configs/cameras/              new_camera 像素布局
 configs/efficiency/           SiPM PDE 曲线
@@ -69,6 +70,12 @@ make LACT_ENABLE_HDF5=OFF
 ```
 
 这种情况下 CORSIKA 示例的 `output.format` 需要改成 `csv`，不要使用 `hdf5`。
+
+LACT ROOT 输出是可选功能。若系统能找到 ROOT 6.24 或更新版本，`make` 会自动为 `run_corsika_trace` 打开 ROOT 输出；如果找不到 ROOT，普通平行光和 HDF5/CSV 示例仍可编译运行，只是 `lactroot_only.cfg` 不能运行。也可以显式关闭 ROOT 检测：
+
+```bash
+make LACT_ENABLE_ROOT=OFF
+```
 
 在 macOS 上，Makefile 会默认使用当前机器架构设置 `CMAKE_OSX_ARCHITECTURES`。如果你明确需要指定架构，可以这样运行：
 
@@ -382,6 +389,61 @@ output.summary_csv=run_logs/full_response_corsika/corsika_trace_summary.csv
 ```
 
 输出设置。正式结果建议用 HDF5。调试时可以把 `output.format` 改成 `csv` 或 `both`。
+
+## 示例 3：LACT ROOT-only 输出
+
+这个示例基于完整响应链，但只写 LACT ROOT 文件，适合后续接 pylast 或 ROOT quicklook：
+
+```bash
+build/run_corsika_trace configs/examples/lactroot_only.cfg /path/to/input.zst
+```
+
+默认输出：
+
+```text
+run_logs/lactroot_only/lact_events.root
+```
+
+这个 cfg 默认开启：
+
+```text
+MODTRAN atmosphere
+spectral NSB
+simple multiplicity trigger
+timeseries_pe waveform
+```
+
+ROOT 输出相关参数：
+
+```ini
+output.format=root
+output.lact_root_enabled=true
+output.lact_root_path=run_logs/lactroot_only/lact_events.root
+output.lact_profile=timeseries_pe
+output.lact_root_write_components=false
+```
+
+`output.format=root` 表示不写 HDF5/CSV，只写 ROOT。`output.lact_profile=timeseries_pe` 会写适合后续 waveform/readout 检查的 p.e. 时间序列。
+
+第一次检查时默认：
+
+```ini
+output.save_only_triggered=false
+```
+
+这样即使事件没有触发，也不会得到空 ROOT 文件。正式触发样本可以改成：
+
+```ini
+output.save_only_triggered=true
+```
+
+如果只想先检查 ROOT 输出链路、暂时不加 NSB，可以改：
+
+```ini
+nsb.enabled=false
+```
+
+如果没有 ROOT，运行这个 cfg 会提示 `output.lact_root_enabled=true` 但编译时没有启用 ROOT；这时需要安装 ROOT 后重新 `make`，或先运行前两个非 ROOT 示例。
 
 ### 画 CORSIKA 相机图像
 

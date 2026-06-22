@@ -1,7 +1,12 @@
 #include "app/OpticalSimCommon.hpp"
+#include "io/CorsikaTraceOutputTypes.hpp"
 
 #ifdef LACT_HAS_HDF5
 #include <hdf5.h>
+#endif
+
+#ifdef LACT_HAS_ROOT
+#include "io/LactEventRootWriter.hpp"
 #endif
 
 #include <algorithm>
@@ -9,35 +14,15 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <memory>
 #include <optional>
-#include <random>
+#include <set>
 #include <sstream>
 #include <tuple>
 
 using namespace lact;
 
 namespace {
-
-struct CorsikaTraceOutputConfig {
-    std::string hits_csv = "corsika_whiteboard_hits.csv";
-    std::string pixel_csv = "corsika_pixel_image.csv";
-    std::string summary_csv = "corsika_trace_summary.csv";
-    std::string hdf5_path = "corsika_trace.h5";
-    std::string format = "hdf5";
-    std::string hdf5_storage = "dense";
-    bool hdf5_write_components = false;
-    bool save_only_triggered = false;
-    bool write_pixel_time_stats = false;
-};
-
-struct WaveformOutputConfig {
-    bool enabled = false;
-    std::string source = "none";
-    std::string time_reference = "absolute";
-    double time_bin_width_ns = 1.0;
-    double time_window_start_ns = 0.0;
-    double time_window_end_ns = 100.0;
-};
 
 struct CollectorDebugConfig {
     bool photon_output = false;
@@ -82,28 +67,6 @@ struct ProfileStats {
     double hdf5_write_s = 0.0;
 };
 
-struct TraceSummary {
-    int event_id = 0;
-    int telescope_id = 0;
-    std::uint64_t input_bunches = 0;
-    double input_photons = 0.0;
-    std::uint64_t blocked_by_obstruction = 0;
-    std::uint64_t blocked_incoming = 0;
-    std::uint64_t blocked_reflected = 0;
-    std::uint64_t hit_mirror_before_obstruction = 0;
-    std::uint64_t hit_output_before_obstruction = 0;
-    std::uint64_t hit_mirror = 0;
-    std::uint64_t hit_output_plane = 0;
-    std::uint64_t hit_camera = 0;
-    std::uint64_t accepted_camera = 0;
-    std::uint64_t lost_between_pixels = 0;
-    std::set<int> unique_pixels;
-    double weighted_signal = 0.0;
-    double weighted_time_sum = 0.0;
-    double weighted_time2_sum = 0.0;
-    double first_cherenkov_time_ns = std::numeric_limits<double>::infinity();
-};
-
 struct TelescopeEventAccumulator {
     int telescope_id = 0;
     std::set<int> output_events;
@@ -124,28 +87,6 @@ struct TelescopeEventAccumulator {
     double weighted_time_sum = 0.0;
     double weighted_time2_sum = 0.0;
     double first_cherenkov_time_ns = std::numeric_limits<double>::infinity();
-};
-
-using SummaryKey = std::pair<int, int>;
-
-using WaveformKey = std::tuple<int, int, int, int>;
-
-struct WaveformPixelAccumulator {
-    int event_id = 0;
-    int telescope_id = 0;
-    int pixel_id = -1;
-    int time_bin = -1;
-    std::uint64_t photon_count = 0;
-    double pe = 0.0;
-};
-
-struct RawWaveformHit {
-    int event_id = 0;
-    int telescope_id = 0;
-    int pixel_id = -1;
-    double time_ns = 0.0;
-    std::uint64_t photon_count = 0;
-    double pe = 0.0;
 };
 
 struct CollectorDebugPhotonRow {
@@ -458,11 +399,28 @@ CorsikaTraceOutputConfig buildCorsikaTraceOutputConfig(
     out.summary_csv = getString(cfg, "output.summary_csv", out.summary_csv);
     out.hdf5_path = getString(cfg, "output.hdf5_path",
                               getString(cfg, "output.h5_path", out.hdf5_path));
+    out.lact_root_enabled =
+        getBool(cfg, "output.lact_root_enabled", out.lact_root_enabled);
+    out.lact_root_path =
+        getString(cfg, "output.lact_root_path", out.lact_root_path);
+    out.lact_profile =
+        lowerCopy(trim(getString(cfg, "output.lact_profile", out.lact_profile)));
     out.format = lowerCopy(trim(getString(cfg, "output.format", out.format)));
     out.hdf5_storage =
         lowerCopy(trim(getString(cfg, "output.hdf5_storage", out.hdf5_storage)));
     out.hdf5_write_components =
         getBool(cfg, "output.hdf5_write_components", out.hdf5_write_components);
+    out.hdf5_write_waveforms =
+        getBool(cfg, "output.hdf5_write_waveforms", out.hdf5_write_waveforms);
+    out.lact_root_write_components =
+        getBool(cfg, "output.lact_root_write_components",
+                out.lact_root_write_components);
+    out.lact_root_auto_flush_mb =
+        getDouble(cfg, "output.lact_root_auto_flush_mb",
+                  out.lact_root_auto_flush_mb);
+    out.lact_root_flush_events =
+        getInt(cfg, "output.lact_root_flush_events",
+               out.lact_root_flush_events);
     out.save_only_triggered =
         getBool(cfg, "output.save_only_triggered", out.save_only_triggered);
     out.write_pixel_time_stats =
@@ -475,8 +433,25 @@ CorsikaTraceOutputConfig buildCorsikaTraceOutputConfig(
         out.format = "hdf5";
     }
     if (!(out.format == "hdf5" || out.format == "h5" ||
-          out.format == "csv" || out.format == "both")) {
-        throw std::runtime_error("output.format must be hdf5, csv, or both");
+          out.format == "csv" || out.format == "both" ||
+          out.format == "root" || out.format == "none")) {
+        throw std::runtime_error("output.format must be hdf5, csv, both, root, or none");
+    }
+    if (!std::isfinite(out.lact_root_auto_flush_mb) ||
+        out.lact_root_auto_flush_mb < 0.0) {
+        throw std::runtime_error("output.lact_root_auto_flush_mb must be finite and >= 0");
+    }
+    if (out.lact_root_flush_events < 0) {
+        throw std::runtime_error("output.lact_root_flush_events must be >= 0");
+    }
+    if (out.lact_profile.empty()) {
+        out.lact_profile = "image_pe";
+    }
+    if (!(out.lact_profile == "image_pe" ||
+          out.lact_profile == "timeseries_pe" ||
+          out.lact_profile == "debug_full")) {
+        throw std::runtime_error(
+            "output.lact_profile must be image_pe, timeseries_pe, or debug_full");
     }
     if (out.hdf5_storage.empty()) {
         out.hdf5_storage = "dense";
@@ -688,6 +663,11 @@ bool outputWantsHdf5(const CorsikaTraceOutputConfig& cfg)
     return cfg.format == "hdf5" || cfg.format == "h5" || cfg.format == "both";
 }
 
+bool outputWantsLactRoot(const CorsikaTraceOutputConfig& cfg)
+{
+    return cfg.lact_root_enabled;
+}
+
 std::size_t waveformBinCount(const WaveformOutputConfig& cfg)
 {
     if (!cfg.enabled) {
@@ -719,35 +699,6 @@ bool waveformUsesImageReference(const WaveformOutputConfig& cfg)
 {
     return cfg.enabled &&
         (cfg.time_reference == "image_mean" || cfg.time_reference == "image_first");
-}
-
-std::uint64_t mixNsbSeed(std::uint64_t seed, std::uint64_t value)
-{
-    seed ^= value + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
-    return seed;
-}
-
-float sampleTimeBinnedNsbPe(const NsbConfig& nsb_cfg,
-                            const WaveformOutputConfig& waveform_cfg,
-                            int event_id,
-                            int telescope_id,
-                            int pixel_id,
-                            int time_bin)
-{
-    if (!nsb_cfg.enabled || nsb_cfg.rate_pe_per_ns_per_pixel <= 0.0 ||
-        waveform_cfg.time_bin_width_ns <= 0.0) {
-        return 0.0f;
-    }
-    std::uint64_t seed = nsb_cfg.seed;
-    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(
-                                static_cast<std::int64_t>(event_id) + 0x80000000LL));
-    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(telescope_id + 1));
-    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(pixel_id + 1));
-    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(time_bin + 1));
-    std::mt19937_64 rng(seed);
-    std::poisson_distribution<int> poisson(
-        nsb_cfg.rate_pe_per_ns_per_pixel * waveform_cfg.time_bin_width_ns);
-    return static_cast<float>(poisson(rng));
 }
 
 void accumulateWaveformHit(std::map<WaveformKey, WaveformPixelAccumulator>& waveform,
@@ -1221,12 +1172,16 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         writeStringAttribute(file, "image_storage", output_cfg.hdf5_storage);
         writeStringAttribute(file, "hdf5_write_components",
                              output_cfg.hdf5_write_components ? "true" : "false");
+        writeStringAttribute(file, "lact_root_write_components",
+                             output_cfg.lact_root_write_components ? "true" : "false");
         writeStringAttribute(file, "save_only_triggered",
                              output_cfg.save_only_triggered ? "true" : "false");
         writeStringAttribute(file, "write_pixel_time_stats",
                              output_cfg.write_pixel_time_stats ? "true" : "false");
         writeStringAttribute(file, "waveform_enabled",
                              waveform_cfg.enabled ? "true" : "false");
+        writeStringAttribute(file, "hdf5_write_waveforms",
+                             output_cfg.hdf5_write_waveforms ? "true" : "false");
         writeStringAttribute(file, "event_id_mode", source_runtime_cfg.event_id_mode);
         writeStringAttribute(file, "source_eventio_path", source_runtime_cfg.eventio_path);
 
@@ -1705,32 +1660,36 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                     for (const auto& image : image_rows) {
                         const std::size_t row =
                             static_cast<std::size_t>(image.image_index);
-                        for (std::size_t col = 0; col < n_pixels; ++col) {
-                            float nsb_pe = 0.0f;
-                            for (std::size_t bin = 0; bin < n_bins; ++bin) {
-                                nsb_pe += sampleTimeBinnedNsbPe(
-                                    nsb_cfg,
-                                    waveform_cfg,
-                                    static_cast<int>(image.event_id),
-                                    static_cast<int>(image.telescope_id),
-                                    pixel_id_axis[col],
-                                    static_cast<int>(bin));
-                            }
-                            const std::size_t index = row * n_pixels + col;
-                            dense_nsb_pe[index] = nsb_pe;
-                            dense_pe[index] += nsb_pe;
-                            dense_signal[index] += nsb_pe;
-                        }
+                        generateTimeBinnedNsbPe(
+                            nsb_cfg,
+                            waveform_cfg,
+                            static_cast<int>(image.event_id),
+                            static_cast<int>(image.telescope_id),
+                            n_pixels,
+                            n_bins,
+                            [&](std::size_t col, std::size_t, float nsb_pe) {
+                                const std::size_t index = row * n_pixels + col;
+                                dense_nsb_pe[index] += nsb_pe;
+                                dense_pe[index] += nsb_pe;
+                                dense_signal[index] += nsb_pe;
+                            });
                     }
                 } else {
-                    std::mt19937_64 rng(nsb_cfg.seed);
-                    std::poisson_distribution<int> poisson(
-                        nsb_cfg.rate_pe_per_ns_per_pixel * nsb_cfg.window_ns);
-                    for (std::size_t i = 0; i < dense_nsb_pe.size(); ++i) {
-                        const float nsb_pe = static_cast<float>(poisson(rng));
-                        dense_nsb_pe[i] = nsb_pe;
-                        dense_pe[i] += nsb_pe;
-                        dense_signal[i] += nsb_pe;
+                    for (const auto& image : image_rows) {
+                        const std::size_t row =
+                            static_cast<std::size_t>(image.image_index);
+                        generateIntegratedNsbPe(
+                            nsb_cfg,
+                            static_cast<int>(image.event_id),
+                            static_cast<int>(image.telescope_id),
+                            n_pixels,
+                            nsb_cfg.window_ns,
+                            [&](std::size_t col, float nsb_pe) {
+                                const std::size_t i = row * n_pixels + col;
+                                dense_nsb_pe[i] = nsb_pe;
+                                dense_pe[i] += nsb_pe;
+                                dense_signal[i] += nsb_pe;
+                            });
                     }
                 }
             }
@@ -1822,7 +1781,10 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         if (output_cfg.save_only_triggered && trigger_cfg.enabled) {
             std::set<SummaryKey> triggered_image_keys;
             for (const auto& row : telescope_trigger_rows) {
-                if (row.triggered) {
+                const int n_triggered =
+                    triggered_telescopes_by_event[static_cast<int>(row.event_id)];
+                if (row.triggered &&
+                    n_triggered >= trigger_cfg.array_multiplicity) {
                     triggered_image_keys.insert({
                         static_cast<int>(row.event_id),
                         static_cast<int>(row.telescope_id),
@@ -1943,6 +1905,14 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             double core_x_north_m;
             double core_y_west_m;
             double array_rotation_deg;
+            double h_first_int_m;
+            double x_max_g_cm2;
+            double h_max_m;
+            double starting_grammage_g_cm2;
+            double ground_gammas;
+            double ground_electrons;
+            double ground_hadrons;
+            double ground_muons;
         };
         struct CorsikaShowerRow {
             std::int32_t shower_event_id;
@@ -1954,6 +1924,14 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             double core_x_north_m;
             double core_y_west_m;
             double array_rotation_deg;
+            double h_first_int_m;
+            double x_max_g_cm2;
+            double h_max_m;
+            double starting_grammage_g_cm2;
+            double ground_gammas;
+            double ground_electrons;
+            double ground_hadrons;
+            double ground_muons;
         };
         std::vector<EventRow> event_rows;
         std::vector<CorsikaEventRow> corsika_event_rows;
@@ -1993,6 +1971,14 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                     event_meta.core_x_north_m,
                     event_meta.core_y_west_m,
                     event_it->array_rotation_deg,
+                    event_it->h_first_int_m,
+                    event_it->x_max_g_cm2,
+                    event_it->h_max_m,
+                    event_it->starting_grammage_g_cm2,
+                    event_it->ground_gammas,
+                    event_it->ground_electrons,
+                    event_it->ground_hadrons,
+                    event_it->ground_muons,
                 });
             }
         }
@@ -2028,6 +2014,22 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                       HOFFSET(CorsikaEventRow, core_y_west_m), H5T_NATIVE_DOUBLE);
             H5Tinsert(corsika_event_type, "array_rotation_deg",
                       HOFFSET(CorsikaEventRow, array_rotation_deg), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "h_first_int_m",
+                      HOFFSET(CorsikaEventRow, h_first_int_m), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "x_max_g_cm2",
+                      HOFFSET(CorsikaEventRow, x_max_g_cm2), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "h_max_m",
+                      HOFFSET(CorsikaEventRow, h_max_m), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "starting_grammage_g_cm2",
+                      HOFFSET(CorsikaEventRow, starting_grammage_g_cm2), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "ground_gammas",
+                      HOFFSET(CorsikaEventRow, ground_gammas), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "ground_electrons",
+                      HOFFSET(CorsikaEventRow, ground_electrons), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "ground_hadrons",
+                      HOFFSET(CorsikaEventRow, ground_hadrons), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "ground_muons",
+                      HOFFSET(CorsikaEventRow, ground_muons), H5T_NATIVE_DOUBLE);
             writeCompound1D(events_group, "corsika", corsika_event_type,
                             corsika_event_rows);
             H5Tclose(corsika_event_type);
@@ -2046,6 +2048,14 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                     event.core_x_m,
                     event.core_y_m,
                     event.array_rotation_deg,
+                    event.h_first_int_m,
+                    event.x_max_g_cm2,
+                    event.h_max_m,
+                    event.starting_grammage_g_cm2,
+                    event.ground_gammas,
+                    event.ground_electrons,
+                    event.ground_hadrons,
+                    event.ground_muons,
                 });
             }
             hid_t corsika_shower_type =
@@ -2069,6 +2079,22 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                       HOFFSET(CorsikaShowerRow, core_y_west_m), H5T_NATIVE_DOUBLE);
             H5Tinsert(corsika_shower_type, "array_rotation_deg",
                       HOFFSET(CorsikaShowerRow, array_rotation_deg), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_shower_type, "h_first_int_m",
+                      HOFFSET(CorsikaShowerRow, h_first_int_m), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_shower_type, "x_max_g_cm2",
+                      HOFFSET(CorsikaShowerRow, x_max_g_cm2), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_shower_type, "h_max_m",
+                      HOFFSET(CorsikaShowerRow, h_max_m), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_shower_type, "starting_grammage_g_cm2",
+                      HOFFSET(CorsikaShowerRow, starting_grammage_g_cm2), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_shower_type, "ground_gammas",
+                      HOFFSET(CorsikaShowerRow, ground_gammas), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_shower_type, "ground_electrons",
+                      HOFFSET(CorsikaShowerRow, ground_electrons), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_shower_type, "ground_hadrons",
+                      HOFFSET(CorsikaShowerRow, ground_hadrons), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_shower_type, "ground_muons",
+                      HOFFSET(CorsikaShowerRow, ground_muons), H5T_NATIVE_DOUBLE);
             writeCompound1D(events_group, "corsika_showers", corsika_shower_type,
                             corsika_shower_rows);
             H5Tclose(corsika_shower_type);
@@ -2173,7 +2199,7 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         }
         H5Gclose(images_group);
 
-        if (waveform_cfg.enabled && have_camera_axis) {
+        if (waveform_cfg.enabled && output_cfg.hdf5_write_waveforms && have_camera_axis) {
             const std::size_t n_images = image_rows.size();
             const std::size_t n_pixels = camera_rows.size();
             const std::size_t n_bins = waveformBinCount(waveform_cfg);
@@ -2282,23 +2308,21 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                 nsb_cfg.rate_pe_per_ns_per_pixel > 0.0) {
                 for (std::size_t row = 0; row < image_rows.size(); ++row) {
                     const auto& image = image_rows[row];
-                    for (std::size_t bin = 0; bin < n_bins; ++bin) {
-                        for (std::size_t col = 0; col < n_pixels; ++col) {
-                            const float nsb_pe = sampleTimeBinnedNsbPe(
-                                nsb_cfg,
-                                waveform_cfg,
-                                static_cast<int>(image.event_id),
-                                static_cast<int>(image.telescope_id),
-                                pixel_id_axis[col],
-                                static_cast<int>(bin));
+                    generateTimeBinnedNsbPe(
+                        nsb_cfg,
+                        waveform_cfg,
+                        static_cast<int>(image.event_id),
+                        static_cast<int>(image.telescope_id),
+                        n_pixels,
+                        n_bins,
+                        [&](std::size_t col, std::size_t bin, float nsb_pe) {
                             const std::size_t index =
                                 (row * n_bins + bin) * n_pixels + col;
                             waveform_pe[index] += nsb_pe;
                             if (output_cfg.hdf5_write_components) {
                                 waveform_nsb_pe[index] += nsb_pe;
                             }
-                        }
-                    }
+                        });
                 }
             }
 
@@ -2779,6 +2803,10 @@ void printCorsikaOpticalConfiguration(
         printField("hdf5_storage", output_cfg.hdf5_storage);
         printField("hdf5_write_components",
                    output_cfg.hdf5_write_components ? "true" : "false");
+        printField("hdf5_write_waveforms",
+                   output_cfg.hdf5_write_waveforms ? "true" : "false");
+        printField("lact_root_write_components",
+                   output_cfg.lact_root_write_components ? "true" : "false");
         printField("save_only_triggered",
                    output_cfg.save_only_triggered ? "true" : "false");
         printField("write_pixel_time_stats",
@@ -2791,6 +2819,16 @@ void printCorsikaOpticalConfiguration(
     }
     if (outputWantsCsv(output_cfg)) {
         printField("summary_csv", output_cfg.summary_csv);
+    }
+    if (outputWantsLactRoot(output_cfg)) {
+        printField("lact_root_path", output_cfg.lact_root_path);
+        printField("lact_profile", output_cfg.lact_profile);
+        printField("lact_root_auto_flush_mb",
+                   doubleToString(output_cfg.lact_root_auto_flush_mb));
+        printField("lact_root_flush_events",
+                   output_cfg.lact_root_flush_events > 0
+                       ? intToString(output_cfg.lact_root_flush_events)
+                       : "off");
     }
 
     printSection("Camera");
@@ -2988,6 +3026,134 @@ void printProfileStats(const ProfileStats& stats, double trace_time_s)
     print_item("hdf5_write_s", stats.hdf5_write_s);
 }
 
+double poissonUpperTail(int threshold, double lambda)
+{
+    if (threshold <= 0) {
+        return 1.0;
+    }
+    if (lambda <= 0.0) {
+        return 0.0;
+    }
+    double term = std::exp(-lambda);
+    double cdf = term;
+    for (int k = 1; k < threshold; ++k) {
+        term *= lambda / static_cast<double>(k);
+        cdf += term;
+    }
+    return std::clamp(1.0 - cdf, 0.0, 1.0);
+}
+
+double binomialUpperTail(int threshold, std::size_t trials, double p)
+{
+    if (threshold <= 0) {
+        return 1.0;
+    }
+    if (trials == 0 || p <= 0.0 || static_cast<std::size_t>(threshold) > trials) {
+        return 0.0;
+    }
+    if (p >= 1.0) {
+        return 1.0;
+    }
+    long double tail = 0.0L;
+    for (std::size_t k = static_cast<std::size_t>(threshold); k <= trials; ++k) {
+        const long double log_term =
+            std::lgamma(static_cast<long double>(trials) + 1.0L) -
+            std::lgamma(static_cast<long double>(k) + 1.0L) -
+            std::lgamma(static_cast<long double>(trials - k) + 1.0L) +
+            static_cast<long double>(k) * std::log(static_cast<long double>(p)) +
+            static_cast<long double>(trials - k) *
+                std::log1p(-static_cast<long double>(p));
+        tail += std::exp(log_term);
+        if (tail >= 1.0L) {
+            return 1.0;
+        }
+    }
+    return static_cast<double>(std::min<long double>(1.0L, tail));
+}
+
+std::string scientificDoubleToString(double value, int precision = 6)
+{
+    std::ostringstream oss;
+    oss << std::scientific << std::setprecision(precision) << value;
+    return oss.str();
+}
+
+void printPureNsbTriggerEstimate(const NsbConfig& nsb_cfg,
+                                 const WaveformOutputConfig& waveform_cfg,
+                                 const TriggerConfig& trigger_cfg,
+                                 std::size_t n_pixels,
+                                 std::size_t n_telescopes)
+{
+    printSection("Pure NSB trigger estimate");
+    if (!nsb_cfg.enabled || nsb_cfg.rate_pe_per_ns_per_pixel <= 0.0 ||
+        !trigger_cfg.enabled || n_pixels == 0) {
+        printField("enabled", "false");
+        printField("reason", "NSB, trigger, or camera pixels disabled");
+        return;
+    }
+
+    const double configured_window_ns =
+        trigger_cfg.coincidence_window_ns > 0.0
+            ? trigger_cfg.coincidence_window_ns
+            : std::max(0.0,
+                       waveform_cfg.time_window_end_ns -
+                           waveform_cfg.time_window_start_ns);
+    const std::size_t window_bins =
+        waveform_cfg.enabled && waveform_cfg.time_bin_width_ns > 0.0
+            ? std::max<std::size_t>(
+                  1,
+                  static_cast<std::size_t>(
+                      std::ceil(configured_window_ns /
+                                waveform_cfg.time_bin_width_ns)))
+            : 1;
+    const double effective_window_ns =
+        waveform_cfg.enabled && waveform_cfg.time_bin_width_ns > 0.0
+            ? static_cast<double>(window_bins) * waveform_cfg.time_bin_width_ns
+            : configured_window_ns;
+    const double full_window_ns =
+        waveform_cfg.enabled
+            ? std::max(0.0,
+                       waveform_cfg.time_window_end_ns -
+                           waveform_cfg.time_window_start_ns)
+            : effective_window_ns;
+    const std::size_t n_windows =
+        waveform_cfg.enabled && waveform_cfg.time_bin_width_ns > 0.0
+            ? static_cast<std::size_t>(std::ceil(
+                  full_window_ns / waveform_cfg.time_bin_width_ns))
+            : 1;
+    const double lambda =
+        nsb_cfg.rate_pe_per_ns_per_pixel * effective_window_ns;
+    const double pixel_prob =
+        poissonUpperTail(static_cast<int>(std::ceil(trigger_cfg.pixel_threshold_pe)),
+                         lambda);
+    const double camera_single_window_prob =
+        binomialUpperTail(trigger_cfg.camera_multiplicity, n_pixels, pixel_prob);
+    const double camera_sliding_upper =
+        std::min(1.0, static_cast<double>(n_windows) * camera_single_window_prob);
+    const double array_upper =
+        n_telescopes > 0
+            ? binomialUpperTail(trigger_cfg.array_multiplicity,
+                                n_telescopes,
+                                camera_sliding_upper)
+            : 0.0;
+
+    printField("enabled", "true");
+    printField("rate_pe_per_ns_per_pixel",
+               doubleToString(nsb_cfg.rate_pe_per_ns_per_pixel));
+    printField("effective_window_ns", doubleToString(effective_window_ns));
+    printField("pixel_threshold_pe", doubleToString(trigger_cfg.pixel_threshold_pe));
+    printField("camera_multiplicity", intToString(trigger_cfg.camera_multiplicity));
+    printField("array_multiplicity", intToString(trigger_cfg.array_multiplicity));
+    printField("n_pixels", intToString(static_cast<std::uint64_t>(n_pixels)));
+    printField("n_telescopes", intToString(static_cast<std::uint64_t>(n_telescopes)));
+    printField("pixel_prob_ge_threshold", scientificDoubleToString(pixel_prob, 6));
+    printField("camera_single_window_prob",
+               scientificDoubleToString(camera_single_window_prob, 6));
+    printField("camera_sliding_upper_prob",
+               scientificDoubleToString(camera_sliding_upper, 6));
+    printField("array_sliding_upper_prob", scientificDoubleToString(array_upper, 6));
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -3071,11 +3237,19 @@ int main(int argc, char** argv) {
         ProfileStats profile_stats;
         const bool save_csv = outputWantsCsv(output_cfg);
         const bool save_hdf5 = outputWantsHdf5(output_cfg);
+        const bool save_lact_root = outputWantsLactRoot(output_cfg);
         if (save_hdf5) {
 #ifndef LACT_HAS_HDF5
             throw std::runtime_error(
                 "output.format requests HDF5, but this build was configured without HDF5. "
                 "Install HDF5 and re-run CMake, or set output.format=csv.");
+#endif
+        }
+        if (save_lact_root) {
+#ifndef LACT_HAS_ROOT
+            throw std::runtime_error(
+                "output.lact_root_enabled=true, but this build was configured without ROOT. "
+                "Load/install ROOT >= 6.24 and re-run CMake, or disable output.lact_root_enabled.");
 #endif
         }
 
@@ -3142,6 +3316,11 @@ int main(int argc, char** argv) {
                                          eventio_2d_backproject);
 
 	    printEventIOMetadataSummary(metadata);
+        printPureNsbTriggerEstimate(nsb_cfg,
+                                    waveform_cfg,
+                                    trigger_cfg,
+                                    camera.size(),
+                                    metadata.telescopes.size());
 	    printField("status", "streaming EventIO photon bunches and tracing");
         std::cerr << "run_corsika_trace: streaming photon bunches; "
                   << "no full-file photon preload is used\n";
@@ -3167,9 +3346,107 @@ int main(int argc, char** argv) {
         std::vector<CollectorDebugPhotonRow> collector_debug_rows;
         std::vector<WhiteboardHdf5Row> whiteboard_hits;
 
+#ifdef LACT_HAS_ROOT
+        std::unique_ptr<LactEventRootStreamWriter> lact_root_stream_writer;
+        if (save_lact_root) {
+            printSection("lact_event ROOT output");
+            printField("status", "opening streaming lact_event ROOT writer");
+            printField("path", output_cfg.lact_root_path);
+            printField("profile", output_cfg.lact_profile);
+            lact_root_stream_writer = std::make_unique<LactEventRootStreamWriter>(
+                output_cfg,
+                waveform_cfg,
+                argv[1],
+                cfg,
+                source_runtime_cfg,
+                telescope_cfg,
+                metadata,
+                camera,
+                facets,
+                nsb_cfg,
+                trigger_cfg);
+        }
+#endif
+
         std::uint64_t photon_index = 0;
         int active_shower_event = -1;
+        int active_output_event = -1;
         const auto t_trace_start = std::chrono::steady_clock::now();
+
+        auto writeRootEventIfReady = [&](int event_id) {
+            if (event_id < 0) {
+                return;
+            }
+#ifdef LACT_HAS_ROOT
+            if (!lact_root_stream_writer) {
+                return;
+            }
+            std::map<SummaryKey, TraceSummary> event_summaries;
+            for (const auto& kv : summaries) {
+                if (kv.first.first == event_id) {
+                    event_summaries.insert(kv);
+                }
+            }
+            std::map<PixelKey, PixelAccumulator> event_pixels;
+            for (auto it = pixels.lower_bound(PixelKey{event_id, std::numeric_limits<int>::min(),
+                                                       std::numeric_limits<int>::min()});
+                 it != pixels.end() && std::get<0>(it->first) == event_id;
+                 ++it) {
+                event_pixels.insert(*it);
+            }
+            std::map<WaveformKey, WaveformPixelAccumulator> event_waveforms;
+            for (auto it = waveforms.lower_bound(WaveformKey{
+                     event_id, std::numeric_limits<int>::min(),
+                     std::numeric_limits<int>::min(), std::numeric_limits<int>::min()});
+                 it != waveforms.end() && std::get<0>(it->first) == event_id;
+                 ++it) {
+                event_waveforms.insert(*it);
+            }
+            std::vector<RawWaveformHit> event_raw_waveform_hits;
+            for (const auto& hit : raw_waveform_hits) {
+                if (hit.event_id == event_id) {
+                    event_raw_waveform_hits.push_back(hit);
+                }
+            }
+            lact_root_stream_writer->writeEvent(event_summaries,
+                                                event_pixels,
+                                                event_waveforms,
+                                                event_raw_waveform_hits);
+#endif
+        };
+
+        const bool can_release_streamed_event_data =
+            save_lact_root && !save_hdf5 && !save_csv;
+        auto releaseStreamedEventData = [&](int event_id) {
+            if (!can_release_streamed_event_data || event_id < 0) {
+                return;
+            }
+            for (auto it = pixels.begin(); it != pixels.end();) {
+                if (std::get<0>(it->first) == event_id) {
+                    it = pixels.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            for (auto it = waveforms.begin(); it != waveforms.end();) {
+                if (std::get<0>(it->first) == event_id) {
+                    it = waveforms.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            raw_waveform_hits.erase(
+                std::remove_if(raw_waveform_hits.begin(), raw_waveform_hits.end(),
+                               [event_id](const RawWaveformHit& hit) {
+                                   return hit.event_id == event_id;
+                               }),
+                raw_waveform_hits.end());
+        };
+
+        auto flushOutputEvent = [&](int event_id) {
+            writeRootEventIfReady(event_id);
+            releaseStreamedEventData(event_id);
+        };
 
         auto printRunningEventSummary = [&](int shower_event) {
             if (shower_event < 0) {
@@ -3283,6 +3560,12 @@ int main(int argc, char** argv) {
                 active_shower_event = shower_event;
                 printSection("Event shower_event=" + intToString(shower_event));
                 printField("event_status", "started");
+            }
+            if (active_output_event < 0) {
+                active_output_event = bunch.event_id;
+            } else if (bunch.event_id != active_output_event) {
+                flushOutputEvent(active_output_event);
+                active_output_event = bunch.event_id;
             }
             auto& summary = summaries[{bunch.event_id, bunch.telescope_id}];
             summary.event_id = bunch.event_id;
@@ -3453,6 +3736,7 @@ int main(int argc, char** argv) {
         if (profile_cfg.enabled) {
             addElapsed(profile_stats, &ProfileStats::eventio_stream_s, t_stream_start);
         }
+        flushOutputEvent(active_output_event);
         printRunningEventSummary(active_shower_event);
         const auto t_trace_done = std::chrono::steady_clock::now();
 
@@ -3505,6 +3789,13 @@ int main(int argc, char** argv) {
             printField("status", "HDF5 trace file written");
         }
 #endif
+#ifdef LACT_HAS_ROOT
+        if (save_lact_root) {
+            printField("status", "finalizing streaming lact_event ROOT file");
+            lact_root_stream_writer->finish();
+            printField("status", "lact_event ROOT file written");
+        }
+#endif
         if (save_csv) {
             writeSummaryCsv(output_cfg.summary_csv, summaries);
         }
@@ -3543,6 +3834,9 @@ int main(int argc, char** argv) {
         if (save_hdf5) {
             printField("hdf5_path", output_cfg.hdf5_path);
         }
+        if (save_lact_root) {
+            printField("lact_root_path", output_cfg.lact_root_path);
+        }
         if (save_csv) {
             printField("summary_csv", output_cfg.summary_csv);
             if (camera_cfg.enabled) {
@@ -3567,6 +3861,9 @@ int main(int argc, char** argv) {
         std::cout << "camera_enabled=" << (camera_cfg.enabled ? 1 : 0) << "\n";
         if (save_hdf5) {
             std::cout << "hdf5_path=" << output_cfg.hdf5_path << "\n";
+        }
+        if (save_lact_root) {
+            std::cout << "lact_root_path=" << output_cfg.lact_root_path << "\n";
         }
         if (save_csv) {
             std::cout << "summary_csv=" << output_cfg.summary_csv << "\n";
