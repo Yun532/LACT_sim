@@ -10,4 +10,9 @@ struct PhotonBunch {
     int telescope_id = -1;       // reserved for later, useful for EventIO/CORSIKA adapters
     bool eventio_2d = false;     // true when the original EventIO block has no explicit z/cz
     double emission_altitude_km = std::numeric_limits<double>::quiet_NaN();
+    bool has_emitter = false;    // true when CORSIKA IACT STORE-EMITTER data was attached
+    double emitter_mass_gev = std::numeric_limits<double>::quiet_NaN();
+    double emitter_charge = std::numeric_limits<double>::quiet_NaN();
+    double emitter_energy_gev = std::numeric_limits<double>::quiet_NaN();
+    double emitter_time_ns = std::numeric_limits<double>::quiet_NaN();
 };

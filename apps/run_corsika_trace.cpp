@@ -127,6 +127,11 @@ struct WhiteboardHdf5Row {
     float weight;
     float relative_efficiency;
     float signal_weight;
+    std::uint8_t has_emitter;
+    float emitter_mass_gev;
+    float emitter_charge;
+    float emitter_energy_gev;
+    float emitter_time_ns;
 };
 
 TelescopeFrame frameForEventIOTelescope(const TelescopeConfig& base_telescope,
@@ -423,6 +428,10 @@ CorsikaTraceOutputConfig buildCorsikaTraceOutputConfig(
                out.lact_root_flush_events);
     out.save_only_triggered =
         getBool(cfg, "output.save_only_triggered", out.save_only_triggered);
+    out.whiteboard_emitter_info =
+        getBool(cfg, "output.whiteboard_emitter_info",
+                getBool(cfg, "output.include_emitter_info",
+                        out.whiteboard_emitter_info));
     out.write_pixel_time_stats =
         getBool(cfg,
                 "output.write_pixel_time_stats",
@@ -808,7 +817,7 @@ void writeCollectorDebugCsv(const CollectorDebugConfig& cfg,
     }
 }
 
-void writeCorsikaWhiteboardHeader(std::ofstream& ofs)
+void writeCorsikaWhiteboardHeader(std::ofstream& ofs, bool include_emitter_info)
 {
     ofs << std::setprecision(10);
     ofs << "event_id,telescope_id,photon_index,mirror_id,"
@@ -817,13 +826,19 @@ void writeCorsikaWhiteboardHeader(std::ofstream& ofs)
         << "input_x_m,input_y_m,input_z_m,"
         << "u_m,v_m,dir_x,dir_y,dir_z,"
         << "time_ns,wavelength_nm,weight,relative_efficiency,"
-        << "signal_weight\n";
+        << "signal_weight";
+    if (include_emitter_info) {
+        ofs << ",has_emitter,emitter_mass_gev,emitter_charge,"
+            << "emitter_energy_gev,emitter_time_ns";
+    }
+    ofs << "\n";
 }
 
 void writeCorsikaWhiteboardHit(std::ofstream& ofs,
                                const PhotonBunch& bunch,
                                std::uint64_t photon_index,
-                               const OpticalSurfaceHit& hit)
+                               const OpticalSurfaceHit& hit,
+                               bool include_emitter_info)
 {
     const double signal = hit.weight * hit.relative_efficiency;
     ofs << bunch.event_id << ","
@@ -848,7 +863,16 @@ void writeCorsikaWhiteboardHit(std::ofstream& ofs,
         << hit.wavelength_nm << ","
         << hit.weight << ","
         << hit.relative_efficiency << ","
-        << signal << "\n";
+        << signal;
+    if (include_emitter_info) {
+        ofs << ","
+            << (bunch.has_emitter ? 1 : 0) << ","
+            << bunch.emitter_mass_gev << ","
+            << bunch.emitter_charge << ","
+            << bunch.emitter_energy_gev << ","
+            << bunch.emitter_time_ns;
+    }
+    ofs << "\n";
 }
 
 WhiteboardHdf5Row makeWhiteboardHdf5Row(const PhotonBunch& bunch,
@@ -874,6 +898,11 @@ WhiteboardHdf5Row makeWhiteboardHdf5Row(const PhotonBunch& bunch,
         static_cast<float>(hit.weight),
         static_cast<float>(hit.relative_efficiency),
         static_cast<float>(signal),
+        static_cast<std::uint8_t>(bunch.has_emitter ? 1 : 0),
+        static_cast<float>(bunch.emitter_mass_gev),
+        static_cast<float>(bunch.emitter_charge),
+        static_cast<float>(bunch.emitter_energy_gev),
+        static_cast<float>(bunch.emitter_time_ns),
     };
 }
 
@@ -2447,6 +2476,18 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                       HOFFSET(WhiteboardHdf5Row, relative_efficiency), H5T_NATIVE_FLOAT);
             H5Tinsert(hit_type, "signal_weight",
                       HOFFSET(WhiteboardHdf5Row, signal_weight), H5T_NATIVE_FLOAT);
+            if (output_cfg.whiteboard_emitter_info) {
+                H5Tinsert(hit_type, "has_emitter",
+                          HOFFSET(WhiteboardHdf5Row, has_emitter), H5T_NATIVE_UINT8);
+                H5Tinsert(hit_type, "emitter_mass_gev",
+                          HOFFSET(WhiteboardHdf5Row, emitter_mass_gev), H5T_NATIVE_FLOAT);
+                H5Tinsert(hit_type, "emitter_charge",
+                          HOFFSET(WhiteboardHdf5Row, emitter_charge), H5T_NATIVE_FLOAT);
+                H5Tinsert(hit_type, "emitter_energy_gev",
+                          HOFFSET(WhiteboardHdf5Row, emitter_energy_gev), H5T_NATIVE_FLOAT);
+                H5Tinsert(hit_type, "emitter_time_ns",
+                          HOFFSET(WhiteboardHdf5Row, emitter_time_ns), H5T_NATIVE_FLOAT);
+            }
             writeCompound1D(whiteboard_group, "hits", hit_type, whiteboard_hits);
             H5Tclose(hit_type);
             H5Gclose(whiteboard_group);
@@ -2793,6 +2834,7 @@ void printCorsikaOpticalConfiguration(
     }
     printField("default_weight", doubleToString(source_cfg.photon_weight));
     printField("default_multiplicity", doubleToString(source_cfg.multiplicity));
+    printField("read_emitter_info", eventio_cfg.read_emitter_info ? "true" : "false");
 
     printSection("Output plane");
     printField("point", vec3ToString(plane.point));
@@ -2816,6 +2858,10 @@ void printCorsikaOpticalConfiguration(
         printField("pixel_csv", output_cfg.pixel_csv);
     } else if (!camera_cfg.enabled && outputWantsCsv(output_cfg)) {
         printField("hits_csv", output_cfg.hits_csv);
+    }
+    if (!camera_cfg.enabled) {
+        printField("whiteboard_emitter_info",
+                   output_cfg.whiteboard_emitter_info ? "true" : "false");
     }
     if (outputWantsCsv(output_cfg)) {
         printField("summary_csv", output_cfg.summary_csv);
@@ -3336,7 +3382,8 @@ int main(int argc, char** argv) {
                 throw std::runtime_error("failed to write whiteboard CSV: " +
                                          output_cfg.hits_csv);
             }
-            writeCorsikaWhiteboardHeader(whiteboard_out);
+            writeCorsikaWhiteboardHeader(whiteboard_out,
+                                         output_cfg.whiteboard_emitter_info);
         }
 
         std::map<SummaryKey, TraceSummary> summaries;
@@ -3664,7 +3711,8 @@ int main(int argc, char** argv) {
                     whiteboard_hits.push_back(makeWhiteboardHdf5Row(bunch, photon_index, hit));
                 }
                 if (save_csv) {
-                    writeCorsikaWhiteboardHit(whiteboard_out, bunch, photon_index, hit);
+                    writeCorsikaWhiteboardHit(whiteboard_out, bunch, photon_index, hit,
+                                              output_cfg.whiteboard_emitter_info);
                 }
                 summary.weighted_signal += base_signal;
                 summary.weighted_time_sum += base_signal * hit.time_ns;

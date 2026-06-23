@@ -23,6 +23,7 @@ struct CorsikaTraceOutputConfig {
     bool lact_root_enabled = false;
     bool save_only_triggered = false;
     bool write_pixel_time_stats = false;
+    bool whiteboard_emitter_info = false;
     double lact_root_auto_flush_mb = 200.0;
     int lact_root_flush_events = 20;
 };
