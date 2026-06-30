@@ -1,0 +1,35 @@
+# format=LACT_obstruction_primitives_v1
+# source=converted from workbook source-coordinate sections
+# source_units=mm
+# target_units=m
+# coordinate_transform=swap source x/y, source origin maps to LACT z=-8 m
+# lens_reference_center=8.613475345240747,0.5857474675261903,-7577.2917669755
+# local_adjustment=box1 and camera_body lower faces snapped to LACT z=-8 m
+type,name,role,material_id,x0_m,y0_m,z0_m,x1_m,y1_m,z1_m,center_x_m,center_y_m,center_z_m,radius_m,height_m,rotation_rad,sides,half_x_m,half_y_m,half_z_m,bbox_min_x_m,bbox_min_y_m,bbox_min_z_m,bbox_max_x_m,bbox_max_y_m,bbox_max_z_m,hole_radius_m,hole_rotation_rad,hole_sides
+cylinder,support_strut_2,support_strut,default,-1.01037,-1.44548,-9.78871,-0.85252,-0.86224,-8.01612,,,,0.0445,,,,,,,,,,,,,,,
+cylinder,support_strut_3,support_strut,default,1.01037,-1.44548,-9.78871,0.85252,-0.86224,-8.01612,,,,0.0445,,,,,,,,,,,,,,,
+cylinder,support_strut_4,support_strut,default,-1.01037,1.44548,-9.78871,-0.85252,0.86224,-8.01612,,,,0.0445,,,,,,,,,,,,,,,
+cylinder,support_strut_5,support_strut,default,1.01037,1.44548,-9.78871,0.85252,0.86224,-8.01612,,,,0.0445,,,,,,,,,,,,,,,
+cylinder,support_strut_6,support_strut,default,-1.02656,-1.37715,-9.96557,-0.8647100000000001,-0.10624,-8.1972,,,,0.025500000000000002,,,,,,,,,,,,,,,
+cylinder,support_strut_7,support_strut,default,1.02656,-1.37715,-9.96557,0.8647100000000001,-0.10624,-8.1972,,,,0.025500000000000002,,,,,,,,,,,,,,,
+cylinder,support_strut_8,support_strut,default,-1.02656,1.37715,-9.96557,-0.8647100000000001,0.10624,-8.1972,,,,0.025500000000000002,,,,,,,,,,,,,,,
+cylinder,support_strut_9,support_strut,default,1.02656,1.37715,-9.96557,0.8647100000000001,0.10624,-8.1972,,,,0.025500000000000002,,,,,,,,,,,,,,,
+cylinder,support_strut_10,support_strut,default,-0.971135185,-1.5435634729999999,-9.967663859,-0.044496474,-1.010463367,-8.01612,,,,0.025500000000000002,,,,,,,,,,,,,,,
+cylinder,support_strut_11,support_strut,default,0.971135185,-1.5435634729999999,-9.967663859,0.044496474,-1.010463367,-8.01612,,,,0.025500000000000002,,,,,,,,,,,,,,,
+cylinder,support_strut_12,support_strut,default,-0.971135185,1.5435634729999999,-9.967663859,-0.044496474,1.010463367,-8.01612,,,,0.025500000000000002,,,,,,,,,,,,,,,
+cylinder,support_strut_13,support_strut,default,0.971135185,1.5435634729999999,-9.967663859,0.044496474,1.010463367,-8.01612,,,,0.025500000000000002,,,,,,,,,,,,,,,
+cylinder,support_strut_14,support_strut,default,-1.543662372,-3.470445522,-15.515008558000002,-1.01244,-1.4533399999999999,-9.81129,,,,0.0605,,,,,,,,,,,,,,,
+cylinder,support_strut_15,support_strut,default,1.543662372,-3.470445522,-15.515008558000002,1.01244,-1.4533399999999999,-9.81129,,,,0.0605,,,,,,,,,,,,,,,
+cylinder,support_strut_16,support_strut,default,-1.543662372,3.470445522,-15.515008558000002,-1.01244,1.4533399999999999,-9.81129,,,,0.0605,,,,,,,,,,,,,,,
+cylinder,support_strut_17,support_strut,default,1.543662372,3.470445522,-15.515008558000002,1.01244,1.4533399999999999,-9.81129,,,,0.0605,,,,,,,,,,,,,,,
+cylinder,support_strut_18,support_strut,default,-1.03886,-1.33676,-10.1,-1.03886,1.33676,-10.1,,,,0.051000000000000004,,,,,,,,,,,,,,,
+cylinder,support_strut_19,support_strut,default,1.03886,-1.33676,-10.1,1.03886,1.33676,-10.1,,,,0.051000000000000004,,,,,,,,,,,,,,,
+cylinder,support_strut_20,support_strut,default,-0.986423546,-1.553867826,-10.004947427000001,0.986423546,-1.553867826,-10.004947427000001,,,,0.0445,,,,,,,,,,,,,,,
+cylinder,support_strut_21,support_strut,default,-0.986423546,1.553867826,-10.004947427000001,0.986423546,1.553867826,-10.004947427000001,,,,0.0445,,,,,,,,,,,,,,,
+cylinder,support_strut_22,support_strut,default,-3.201,-0.06086,-15.76998,-1.077627718,-1.5498419220000001,-10.148894577,,,,0.0325,,,,,,,,,,,,,,,
+cylinder,support_strut_23,support_strut,default,3.201,-0.06086,-15.76998,1.077627718,-1.5498419220000001,-10.148894577,,,,0.0325,,,,,,,,,,,,,,,
+cylinder,support_strut_24,support_strut,default,-3.201,0.06086,-15.76998,-1.077627718,1.5498419220000001,-10.148894577,,,,0.0325,,,,,,,,,,,,,,,
+cylinder,support_strut_25,support_strut,default,3.201,0.06086,-15.76998,1.077627718,1.5498419220000001,-10.148894577,,,,0.0325,,,,,,,,,,,,,,,
+box,camera_support_gap_box_1,camera_support_gap_box,default,0.0,0.0,-7.989,0.0,0.0,-7.989,0.0,0.0,-7.989,,,,,0.9550000000000001,0.9550000000000001,0.011,-0.9550000000000001,-0.9550000000000001,-8,0.9550000000000001,0.9550000000000001,-7.978,0.9192388155425111,1.1780972450961724,8
+box,camera_support_gap_box_2,camera_support_gap_box,default,0.0,0.0,-7.76912,0.0,0.0,-7.76912,0.0,0.0,-7.76912,,,,,0.9400000000000001,0.9400000000000001,0.20500000000000002,-0.9400000000000001,-0.9400000000000001,-7.97412,0.9400000000000001,0.9400000000000001,-7.56412,0.9192388155425111,1.1780972450961724,8
+polygon_prism,camera_body,camera_body,default,0.0,0.0,-7.642525,0.0,0.0,-7.642525,0.0,0.0,-7.642525,0.8166633335714291,0.7149500000000001,1.1780972450961724,8,,,,,,,,,,,,
