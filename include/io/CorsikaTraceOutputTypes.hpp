@@ -19,6 +19,8 @@ struct CorsikaTraceOutputConfig {
     std::string hdf5_storage = "dense";
     bool hdf5_write_components = false;
     bool hdf5_write_waveforms = true;
+    bool hdf5_write_parent_component_waveforms = false;
+    bool whiteboard_emitter_info = false;
     bool lact_root_write_components = false;
     bool lact_root_enabled = false;
     bool save_only_triggered = false;
@@ -74,6 +76,16 @@ struct RawWaveformHit {
     int event_id = 0;
     int telescope_id = 0;
     int pixel_id = -1;
+    double time_ns = 0.0;
+    std::uint64_t photon_count = 0;
+    double pe = 0.0;
+};
+
+struct RawParentComponentWaveformHit {
+    int event_id = 0;
+    int telescope_id = 0;
+    int pixel_id = -1;
+    int component_id = 5;
     double time_ns = 0.0;
     std::uint64_t photon_count = 0;
     double pe = 0.0;

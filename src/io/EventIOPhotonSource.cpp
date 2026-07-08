@@ -589,6 +589,30 @@ PhotonBunch makeBunch(const struct bunch& b,
     return out;
 }
 
+bool isEmitterRecord(const struct bunch& b) {
+    return b.lambda >= 9000.0;
+}
+
+bool isEmitterRecord(const struct bunch3d& b) {
+    return b.lambda >= 9000.0;
+}
+
+void attachEmitter(PhotonBunch& out, const struct bunch& emitter) {
+    out.has_emitter = true;
+    out.emitter_mass_gev = emitter.cx;
+    out.emitter_charge = emitter.cy;
+    out.emitter_energy_gev = emitter.photons;
+    out.emitter_time_ns = emitter.zem;
+}
+
+void attachEmitter(PhotonBunch& out, const struct bunch3d& emitter) {
+    out.has_emitter = true;
+    out.emitter_mass_gev = emitter.cx;
+    out.emitter_charge = emitter.cy;
+    out.emitter_energy_gev = emitter.photons;
+    out.emitter_time_ns = emitter.dist;
+}
+
 PhotonBunch makeBunch3d(const struct bunch3d& b,
                         int event_id,
                         int telescope_id,
@@ -651,6 +675,26 @@ int readPhotonBlock(IO_BUFFER* iobuf,
         return get_item_end(iobuf, &item_header);
     }
 
+    struct bunch pending{};
+    bool have_pending = false;
+    auto emit_pending = [&]() {
+        if (!have_pending) {
+            return;
+        }
+        on_bunch(makeBunch(pending, event_id, telescope_id, cfg));
+        ++emitted;
+        ++emitted_2d;
+        have_pending = false;
+    };
+    auto emit_with_emitter = [&](const struct bunch& emitter) {
+        PhotonBunch out = makeBunch(pending, event_id, telescope_id, cfg);
+        attachEmitter(out, emitter);
+        on_bunch(out);
+        ++emitted;
+        ++emitted_2d;
+        have_pending = false;
+    };
+
     for (int i = 0; i < nbunches; ++i) {
         struct bunch b;
         if (version_group == 0) {
@@ -676,10 +720,21 @@ int readPhotonBlock(IO_BUFFER* iobuf,
             b.photons = 0.01 * get_short(iobuf);
             b.lambda = get_short(iobuf);
         }
-        on_bunch(makeBunch(b, event_id, telescope_id, cfg));
-        ++emitted;
-        ++emitted_2d;
+        if (isEmitterRecord(b)) {
+            if (have_pending) {
+                if (cfg.read_emitter_info) {
+                    emit_with_emitter(b);
+                } else {
+                    emit_pending();
+                }
+            }
+            continue;
+        }
+        emit_pending();
+        pending = b;
+        have_pending = true;
     }
+    emit_pending();
 
     return get_item_end(iobuf, &item_header);
 }
@@ -712,11 +767,43 @@ int readPhoton3dBlock(IO_BUFFER* iobuf,
     if (!keepRow(event_id, current_event_id, telescope_id, cfg)) {
         return 0;
     }
-    for (int i = 0; i < nbunches; ++i) {
-        on_bunch(makeBunch3d(bunches[static_cast<std::size_t>(i)], event_id, telescope_id, cfg));
+    struct bunch3d pending{};
+    bool have_pending = false;
+    auto emit_pending = [&]() {
+        if (!have_pending) {
+            return;
+        }
+        on_bunch(makeBunch3d(pending, event_id, telescope_id, cfg));
         ++emitted;
         ++emitted_3d;
+        have_pending = false;
+    };
+    auto emit_with_emitter = [&](const struct bunch3d& emitter) {
+        PhotonBunch out = makeBunch3d(pending, event_id, telescope_id, cfg);
+        attachEmitter(out, emitter);
+        on_bunch(out);
+        ++emitted;
+        ++emitted_3d;
+        have_pending = false;
+    };
+
+    for (int i = 0; i < nbunches; ++i) {
+        const auto& b = bunches[static_cast<std::size_t>(i)];
+        if (isEmitterRecord(b)) {
+            if (have_pending) {
+                if (cfg.read_emitter_info) {
+                    emit_with_emitter(b);
+                } else {
+                    emit_pending();
+                }
+            }
+            continue;
+        }
+        emit_pending();
+        pending = b;
+        have_pending = true;
     }
+    emit_pending();
     return 0;
 }
 

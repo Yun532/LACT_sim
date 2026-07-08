@@ -32,6 +32,7 @@ struct EventIOPhotonConfig {
     bool filter_shower_event_id = false;
     int selected_shower_event_id = 0;
     int max_shower_events = 0;
+    bool read_emitter_info = false;
 };
 
 struct EventIOTelescopePosition {

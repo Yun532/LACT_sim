@@ -1507,6 +1507,10 @@ EventIOPhotonConfig buildEventIOPhotonConfig(const std::map<std::string, std::st
     eventio.filter_shower_event_id = runtime_cfg.filter_shower_event_id;
     eventio.selected_shower_event_id = runtime_cfg.selected_shower_event_id;
     eventio.max_shower_events = runtime_cfg.max_shower_events;
+    eventio.read_emitter_info =
+        getBool(cfg, "source.read_emitter_info",
+                getBool(cfg, "source.eventio_read_emitter_info",
+                        eventio.read_emitter_info));
     return eventio;
 }
 
