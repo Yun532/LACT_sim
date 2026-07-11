@@ -19,7 +19,7 @@ apps/                         程序入口和小工具
   compute_nsb_rate.cpp         从夜天光谱估算每像素 NSB rate
 
 configs/examples/             用户直接运行和修改的示例 cfg
-configs/mirror_1229_facets.csv 1229 面镜片布局
+configs/mirror_1229_facets.csv 默认镜片布局文件
 configs/cameras/              new_camera 像素布局
 configs/efficiency/           SiPM PDE 曲线
 configs/atmosphere/           MODTRAN 大气透过率表
@@ -135,7 +135,7 @@ build/run_optical_sim configs/examples/parallel_light.cfg
 run_logs/parallel_light/hits.csv
 ```
 
-这个例子使用理想平行光照射 1229 面镜片布局，然后把反射光打到焦平面白板上。它适合用来检查镜面布局、焦距、光斑位置和基本光追是否正常。
+这个例子使用理想平行光照射默认镜片布局，然后把反射光打到焦平面白板上。它适合用来检查镜面布局、焦距、光斑位置和基本光追是否正常。
 
 画出焦平面光斑：
 
@@ -262,7 +262,7 @@ input_local_dir_x,input_local_dir_y,input_local_dir_z
 
 ```text
 CORSIKA/EventIO 输入
-1229 镜面光追
+默认镜片布局光追
 仰角相关结构形变
 小幅随机光学误差
 mirror reflectivity 曲线
