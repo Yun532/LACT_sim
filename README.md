@@ -198,6 +198,35 @@ MPLBACKEND=Agg python3 python/plot_hdf5_camera.py \
 
 NSB、trigger、结构遮挡、阵列图、波形和 ROOT/pylast 输出见[完整 CORSIKA 流程](docs/user_guide_zh.md#corsika-相机和完整响应)。
 
+## LACT ROOT / pylast
+
+只保存 LACT ROOT：
+
+```bash
+build/run_corsika_trace \
+  configs/examples/lactroot_only.cfg \
+  /path/to/input.zst
+```
+
+默认输出：
+
+```text
+run_logs/lactroot_only/lact_events.root
+```
+
+配置默认写入积分 p.e. 图像、CORSIKA truth、望远镜/相机 metadata 和稀疏
+`timeseries_pe` waveform；第一次检查时只跑一个 shower，并保留未触发事件。
+正式全文件运行将 `source.max_shower_events` 改为 `-1`。快速画图：
+
+```bash
+python3 python/plot_lact_root_output.py \
+  run_logs/lactroot_only/lact_events.root \
+  --outdir run_logs/lactroot_only/root_quicklook
+```
+
+pylast 读取、ROOT tree 说明和 notebook 流程见
+[ROOT 输出与 pylast 检查](docs/server_root_output_check_zh.md)。
+
 ## 常用 cfg
 
 | 用途 | cfg |
@@ -210,7 +239,7 @@ NSB、trigger、结构遮挡、阵列图、波形和 ROOT/pylast 输出见[完�
 | CORSIKA 理想相机 | `configs/official_tests/corsika_new_camera.cfg` |
 | CORSIKA + NSB + trigger | `configs/official_tests/corsika_nsb_trigger_camera.cfg` |
 | CORSIKA 完整响应 | `configs/official_tests/corsika_full_response_camera.cfg` |
-| pylast ROOT-only | `configs/examples/corsika_lact_pylast_root_only_full_response.cfg` |
+| pylast ROOT-only | `configs/examples/lactroot_only.cfg` |
 
 ## 文档
 

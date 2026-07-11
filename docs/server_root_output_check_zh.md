@@ -96,6 +96,24 @@ cmake -S . -B build \
 
 ## 3. 配置 ROOT 输出
 
+推荐先直接运行仓库内的 ROOT-only 用户示例：
+
+```bash
+build/run_corsika_trace \
+  configs/examples/lactroot_only.cfg \
+  /path/to/input.zst
+```
+
+默认输出：
+
+```text
+run_logs/lactroot_only/lact_events.root
+```
+
+该示例使用完整响应链、`timeseries_pe` waveform，第一次检查只跑一个 shower
+并保留未触发事件。正式全文件运行将 `source.max_shower_events` 改为 `-1`。
+下面的内容说明如何自行配置其他 ROOT 输出路径和 profile。
+
 在运行 `run_corsika_trace` 的配置中加入：
 
 ```ini
@@ -245,6 +263,11 @@ print(event.simulation.shower.energy)
 print(event.r1.tels.keys())
 print(event.dl0.tels.keys())
 ```
+
+`LactEventSource` 只把通过相机 trigger 的望远镜放进 `r1.tels`/`dl0.tels`。
+因此，示例默认保留的未触发事件仍可在 ROOT tree 和 quick-look 中检查，但对应
+event 的 `r1.tels`/`dl0.tels` 可能为空；正式 pylast 样本应运行足够多的 shower，
+并用 `source.get_triggered_tels(event)` 检查触发望远镜。
 
 `timeseries_pe` 文件中：
 

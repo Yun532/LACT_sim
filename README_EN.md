@@ -186,6 +186,36 @@ MPLBACKEND=Agg python3 python/plot_hdf5_camera.py \
 
 See the [complete CORSIKA workflow](docs/user_guide_en.md#corsika-camera-and-full-response) for NSB, trigger, obstruction, array plots, waveforms, and ROOT/pylast output.
 
+## LACT ROOT / pylast
+
+Write LACT ROOT only:
+
+```bash
+build/run_corsika_trace \
+  configs/examples/lactroot_only.cfg \
+  /path/to/input.zst
+```
+
+Default output:
+
+```text
+run_logs/lactroot_only/lact_events.root
+```
+
+The cfg stores integrated p.e. images, CORSIKA truth, telescope/camera metadata,
+and sparse `timeseries_pe` waveforms. The first check processes one shower and
+keeps untriggered events. Set `source.max_shower_events=-1` for a full input
+file. Create quick-look plots with:
+
+```bash
+python3 python/plot_lact_root_output.py \
+  run_logs/lactroot_only/lact_events.root \
+  --outdir run_logs/lactroot_only/root_quicklook
+```
+
+See the [ROOT and pylast check guide](docs/server_root_output_check_zh.md) for
+pylast reading, ROOT trees, and the notebook workflow.
+
 ## Common cfg files
 
 | Purpose | cfg |
@@ -198,7 +228,7 @@ See the [complete CORSIKA workflow](docs/user_guide_en.md#corsika-camera-and-ful
 | CORSIKA ideal camera | `configs/official_tests/corsika_new_camera.cfg` |
 | CORSIKA with NSB and trigger | `configs/official_tests/corsika_nsb_trigger_camera.cfg` |
 | CORSIKA full response | `configs/official_tests/corsika_full_response_camera.cfg` |
-| pylast ROOT-only | `configs/examples/corsika_lact_pylast_root_only_full_response.cfg` |
+| pylast ROOT-only | `configs/examples/lactroot_only.cfg` |
 
 ## Documentation
 

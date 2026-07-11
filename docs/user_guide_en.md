@@ -270,11 +270,28 @@ For all telescopes in one event, use `python/select_hdf5_event.py` or the select
 
 ```bash
 build/run_corsika_trace \
-  configs/examples/corsika_lact_pylast_root_only_full_response.cfg \
+  configs/examples/lactroot_only.cfg \
   /path/to/input.zst
 ```
 
-The output path is controlled by `output.lact_root_path`. See the [ROOT server check](server_root_output_check_zh.md), [pylast data levels](pylast_event_data_levels_zh.md), and `notebooks/lact_root_to_pylast_visualize.ipynb`.
+Default output:
+
+```text
+run_logs/lactroot_only/lact_events.root
+```
+
+Quick-look plots:
+
+```bash
+python3 python/plot_lact_root_output.py \
+  run_logs/lactroot_only/lact_events.root \
+  --outdir run_logs/lactroot_only/root_quicklook
+```
+
+The cfg uses `timeseries_pe`, processes the first shower, and keeps untriggered
+events for the first check. Set `source.max_shower_events=-1` for a full input
+file and `output.save_only_triggered=true` for triggered production samples. See the
+[ROOT server check](server_root_output_check_zh.md), [pylast data levels](pylast_event_data_levels_zh.md), and `notebooks/lact_root_to_pylast_visualize.ipynb`.
 
 ## Common cfg fields
 
