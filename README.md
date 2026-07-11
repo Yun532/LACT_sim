@@ -444,11 +444,11 @@ source.missing_wavelength_seed=246813579
 `eventio_2d_input_plane_z_m` 用于 2D EventIO photon bunch，表示记录平面在望远镜本地坐标的 z 位置。默认 `0`。`eventio_2d_plane_mode=auto` 会自动判断向前追迹还是回投到镜面；只有明确知道输入平面约定时才需要改成 `forward` 或 `backproject`。
 
 ```ini
-# source.max_shower_events=1
+source.max_shower_events=10
 # source.filter_shower_event_id=327666
 ```
 
-调试大文件时可以打开这些选项，只跑一个 shower 或筛选指定 shower。
+普通 CORSIKA 示例默认处理前 10 个 shower；需要时仍可筛选指定 shower。
 
 ```ini
 output.format=hdf5
@@ -493,6 +493,9 @@ output.lact_root_write_components=false
 ```
 
 `output.format=root` 表示不写 HDF5/CSV，只写 ROOT。`output.lact_profile=timeseries_pe` 会写适合后续 waveform/readout 检查的 p.e. 时间序列。
+
+该 ROOT 输出示例默认设置 `source.max_shower_events=-1`，处理输入文件中的全部
+shower。
 
 默认只保存通过 trigger 的望远镜事件：
 
