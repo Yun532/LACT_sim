@@ -203,9 +203,9 @@ run_logs/lactroot_only/lact_events.root
 ```
 
 The cfg stores integrated p.e. images, CORSIKA truth, telescope/camera metadata,
-and sparse `timeseries_pe` waveforms. The first check processes one shower and
-keeps untriggered events. Set `source.max_shower_events=-1` for a full input
-file. Create quick-look plots with:
+and sparse `timeseries_pe` waveforms. By default it processes one shower and
+stores only telescope events that pass the trigger. Set
+`source.max_shower_events=-1` for a full input file. Create quick-look plots with:
 
 ```bash
 python3 python/plot_lact_root_output.py \
