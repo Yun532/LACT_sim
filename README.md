@@ -215,8 +215,8 @@ run_logs/lactroot_only/lact_events.root
 ```
 
 配置默认写入积分 p.e. 图像、CORSIKA truth、望远镜/相机 metadata 和稀疏
-`timeseries_pe` waveform；默认只跑一个 shower，并且只保存通过 trigger 的
-望远镜事件。正式全文件运行将 `source.max_shower_events` 改为 `-1`。快速画图：
+`timeseries_pe` waveform；默认处理输入文件中的全部 shower，并且只保存通过
+trigger 的望远镜事件。快速画图：
 
 ```bash
 python3 python/plot_lact_root_output.py \

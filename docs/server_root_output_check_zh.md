@@ -110,9 +110,8 @@ build/run_corsika_trace \
 run_logs/lactroot_only/lact_events.root
 ```
 
-该示例使用完整响应链、`timeseries_pe` waveform，默认只跑一个 shower，并且
-只保存通过 trigger 的望远镜事件。正式全文件运行将
-`source.max_shower_events` 改为 `-1`。
+该示例使用完整响应链、`timeseries_pe` waveform，默认处理输入文件中的全部
+shower，并且只保存通过 trigger 的望远镜事件。
 下面的内容说明如何自行配置其他 ROOT 输出路径和 profile。
 
 在运行 `run_corsika_trace` 的配置中加入：
@@ -169,7 +168,7 @@ lact_root_path=run_logs/my_corsika_run/lact_events.root
   /path/to/input.simtel.zst
 ```
 
-默认只跑 `source.max_shower_events=1`，输出在：
+该 ROOT 输出配置默认处理全部 shower，输出在：
 
 ```text
 run_logs/lact_root_quicklook/lact_events.root

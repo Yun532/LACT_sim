@@ -548,8 +548,8 @@ cfg 逐项解释：
   光谱 NSB。固定有效面积为 `28.304744 m^2`，程序自动用相机像素尺寸和焦距计算
   `pixel_solid_angle`，得到约 `0.09312 p.e./ns/pixel`。
 - `trigger.config=../trigger/example_simple_multiplicity.cfg`: 启用简单 trigger。
-- `source.max_shower_events=1`: 这个 official 项是 CORSIKA waveform smoke test，
-  只跑 1 个 shower，避免 waveform 输出过大。
+- `source.max_shower_events=10`: 这个 official 项默认跑 10 个 CORSIKA shower，
+  在覆盖多个事件的同时限制 waveform 输出体积。
 - `trigger.pixel_threshold_pe=10`: official smoke test 使用 10 p.e. 像素阈值。
 - `output.hdf5_write_components=true`: 写出 `cherenkov_pe`、`nsb_pe` 和最终 `pe`。
 - `output.save_only_triggered=true`: 只保存触发望远镜图像，减少输出体积。

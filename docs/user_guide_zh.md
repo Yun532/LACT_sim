@@ -368,9 +368,8 @@ python3 python/plot_lact_root_output.py \
   --outdir run_logs/lactroot_only/root_quicklook
 ```
 
-该 cfg 默认使用 `timeseries_pe`，只跑第一个 shower，并且只保存通过 trigger
-的望远镜事件。正式全文件运行将 `source.max_shower_events` 改为 `-1`。ROOT
-文件结构、pylast 数据层级和 notebook 流程见：
+该 cfg 默认使用 `timeseries_pe`，处理输入文件中的全部 shower，并且只保存通过
+trigger 的望远镜事件。ROOT 文件结构、pylast 数据层级和 notebook 流程见：
 
 - [ROOT 输出检查](server_root_output_check_zh.md)
 - [pylast 数据层级](pylast_event_data_levels_zh.md)
@@ -386,7 +385,7 @@ telescope.pointing_el_deg=70
 # 输入
 source.mode=EventIO
 source.eventio_path=
-source.max_shower_events=1
+source.max_shower_events=10
 
 # 输出
 output.format=hdf5
