@@ -272,6 +272,18 @@ def set_equal_3d(ax, points, pad=0.08):
         pass
 
 
+def add_collection3d_without_autolim(ax, collection):
+    """Add a 3D collection without changing limits across Matplotlib versions."""
+    try:
+        ax.add_collection3d(collection, autolim=False)
+    except TypeError as exc:
+        if "autolim" not in str(exc):
+            raise
+        # Matplotlib versions before add_collection3d gained the autolim
+        # keyword still autoscale here; set_equal_3d() sets the final limits.
+        ax.add_collection3d(collection)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Plot a publication-style 3D view of mirror facets and the output plane."
@@ -584,33 +596,33 @@ def main():
                     wire_colors.append((0.0, 0.58, 0.68, 1.0))
                     wire_widths.append(1.2)
         if cylinder_segments:
-            ax.add_collection3d(
+            add_collection3d_without_autolim(
+                ax,
                 Line3DCollection(
                     cylinder_segments,
                     colors=(0.03, 0.03, 0.03, 0.72),
                     linewidths=cylinder_widths,
                     label="3D support obstruction",
                 ),
-                autolim=False,
             )
         if solid_polys:
-            ax.add_collection3d(
+            add_collection3d_without_autolim(
+                ax,
                 Poly3DCollection(
                     solid_polys,
                     facecolors=(0.08, 0.08, 0.08, 0.13),
                     edgecolors=(0.03, 0.03, 0.03, 0.30),
                     linewidths=0.35,
                 ),
-                autolim=False,
             )
         if wire_segments:
-            ax.add_collection3d(
+            add_collection3d_without_autolim(
+                ax,
                 Line3DCollection(
                     wire_segments,
                     colors=wire_colors,
                     linewidths=wire_widths,
                 ),
-                autolim=False,
             )
 
     all_points = []
