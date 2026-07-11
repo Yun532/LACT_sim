@@ -9,7 +9,8 @@
 // 把输出平面上的光子结果保存成 CSV
 // 这样 Python 可以直接读，不需要先做 pybind11。
 inline bool writeSurfaceHitsCSV(const std::string& path,
-                                const std::vector<OpticalSurfaceHit>& hits)
+                                const std::vector<OpticalSurfaceHit>& hits,
+                                bool include_input_photon = false)
 {
     const std::filesystem::path out_path(path);
     if (out_path.has_parent_path()) {
@@ -30,7 +31,12 @@ inline bool writeSurfaceHitsCSV(const std::string& path,
         << "collector_enabled,hit_collector,collector_reflections,collector_intensity,"
         << "collector_exit_x_m,collector_exit_y_m,collector_exit_z_m,"
         << "collector_dir_u,collector_dir_v,collector_dir_w,"
-        << "time_ns,wavelength_nm,weight,relative_efficiency\n";
+        << "time_ns,wavelength_nm,weight,relative_efficiency";
+    if (include_input_photon) {
+        ofs << ",input_local_x_m,input_local_y_m,input_local_z_m,"
+            << "input_local_dir_x,input_local_dir_y,input_local_dir_z";
+    }
+    ofs << "\n";
 
     for (const auto& h : hits) {
         ofs << (h.hit_mirror ? 1 : 0) << ","
@@ -59,8 +65,16 @@ inline bool writeSurfaceHitsCSV(const std::string& path,
             << h.time_ns << ","
             << h.wavelength_nm << ","
             << h.weight << ","
-            << h.relative_efficiency
-            << "\n";
+            << h.relative_efficiency;
+        if (include_input_photon) {
+            ofs << "," << h.input_pos_local.x
+                << "," << h.input_pos_local.y
+                << "," << h.input_pos_local.z
+                << "," << h.input_dir_local.x
+                << "," << h.input_dir_local.y
+                << "," << h.input_dir_local.z;
+        }
+        ofs << "\n";
     }
 
     return true;

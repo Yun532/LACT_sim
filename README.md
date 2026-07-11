@@ -1,10 +1,12 @@
 # LACT_sim 用户版 v1.0
 
-这是 LACT 光学模拟程序的简洁用户版本，只保留三个常用入口：
+这是 LACT 光学模拟程序的简洁用户版本，保留人工光源和 CORSIKA/EventIO
+两类常用流程，并提供四个直接运行的示例配置：
 
 1. 平行光白板测试：`configs/examples/parallel_light.cfg`
-2. CORSIKA/EventIO 完整相机响应：`configs/examples/full_response_corsika.cfg`
-3. CORSIKA/EventIO -> LACT ROOT 输出：`configs/examples/lactroot_only.cfg`
+2. Photon CSV 白板测试：`configs/examples/photon_csv_source.cfg`
+3. CORSIKA/EventIO 完整相机响应：`configs/examples/full_response_corsika.cfg`
+4. CORSIKA/EventIO -> LACT ROOT 输出：`configs/examples/lactroot_only.cfg`
 
 用户版不包含开发测试、额外示例和详细开发文档。核心源码仍保留在 `src/`、`include/` 和 `apps/` 中，并保留了常用画图脚本用于检查输出结果。
 
@@ -16,7 +18,7 @@ apps/                         程序入口和小工具
   run_corsika_trace.cpp        CORSIKA/EventIO 输入的完整响应模拟
   compute_nsb_rate.cpp         从夜天光谱估算每像素 NSB rate
 
-configs/examples/             用户直接运行和修改的三个 cfg
+configs/examples/             用户直接运行和修改的示例 cfg
 configs/mirror_1229_facets.csv 1229 面镜片布局
 configs/cameras/              new_camera 像素布局
 configs/efficiency/           SiPM PDE 曲线
@@ -170,6 +172,13 @@ source.random_seed=1229
 
 平行光设置。`n_bunches` 是光子束数量，越大统计越稳定但越慢。`beam_radius_m` 是入射光束半径。`beam_direction=0,0,-1` 表示沿望远镜光轴入射。
 
+```ini
+source.coordinate_frame=telescope_local
+```
+
+表示人工光源的位置和方向使用原有望远镜本地光学坐标。它只控制输入如何进入
+光追，不改变镜面、白板或画图坐标。
+
 如果想把这个例子改成轴上点源，可以参考 cfg 里的中文注释，把 `source.mode` 改成 `PointSource`，并设置：
 
 ```ini
@@ -187,7 +196,67 @@ output.csv=run_logs/parallel_light/hits.csv
 
 白板输出平面和输出 CSV。当前焦距是 8 m，所以白板放在 `z=-8`。如果修改焦距，要同步检查这里。
 
-## 示例 2：CORSIKA 完整相机响应
+## 示例 2：Photon CSV 白板测试
+
+这个示例从 CSV 读取用户给定的光子位置和方向，再使用与平行光示例相同的
+望远镜、镜面和白板进行光追。
+
+运行：
+
+```bash
+build/run_optical_sim configs/examples/photon_csv_source.cfg
+```
+
+输入和输出：
+
+```text
+configs/examples/photon_csv_source.csv
+run_logs/photon_csv_source/hits.csv
+```
+
+画出白板光斑：
+
+```bash
+python3 python/plot_spot_histogram.py \
+  run_logs/photon_csv_source/hits.csv \
+  --output run_logs/photon_csv_source/spot_histogram.png \
+  --title "Photon CSV spot"
+```
+
+CSV 至少需要六列：
+
+```csv
+x_m,y_m,z_m,dir_x,dir_y,dir_z
+```
+
+示例还给出了 `time_ns`、`wavelength_nm`、`weight`、`multiplicity`、
+`event_id` 和 `telescope_id`。用户通常只需要复制 cfg 后修改：
+
+```ini
+source.csv_path=/path/to/my_photons.csv
+source.coordinate_frame=telescope_local
+output.csv=run_logs/my_photons/hits.csv
+```
+
+下面的开关会把完成输入坐标解释后、实际进入光追的望远镜本地光子位置和方向
+直接追加到输出 CSV：
+
+```ini
+output.whiteboard_input_photon=true
+```
+
+对应列为：
+
+```text
+input_local_x_m,input_local_y_m,input_local_z_m,
+input_local_dir_x,input_local_dir_y,input_local_dir_z
+```
+
+如需使用其他输入坐标，可将 `source.coordinate_frame` 设置为
+`corsika_nwu_relative`、`corsika_nwu_global` 或 `lact_generic_global`；一般用户
+自行生成的望远镜局部光子文件推荐保持 `telescope_local`。
+
+## 示例 3：CORSIKA 完整相机响应
 
 这个示例包含：
 
@@ -390,7 +459,7 @@ output.summary_csv=run_logs/full_response_corsika/corsika_trace_summary.csv
 
 输出设置。正式结果建议用 HDF5。调试时可以把 `output.format` 改成 `csv` 或 `both`。
 
-## 示例 3：LACT ROOT-only 输出
+## 示例 4：LACT ROOT-only 输出
 
 这个示例基于完整响应链，但只写 LACT ROOT 文件，适合后续接 pylast 或 ROOT quicklook：
 
@@ -443,7 +512,7 @@ output.save_only_triggered=true
 nsb.enabled=false
 ```
 
-如果没有 ROOT，运行这个 cfg 会提示 `output.lact_root_enabled=true` 但编译时没有启用 ROOT；这时需要安装 ROOT 后重新 `make`，或先运行前两个非 ROOT 示例。
+如果没有 ROOT，运行这个 cfg 会提示 `output.lact_root_enabled=true` 但编译时没有启用 ROOT；这时需要安装 ROOT 后重新 `make`，或先运行前面几个非 ROOT 示例。
 
 ### 画 CORSIKA 相机图像
 

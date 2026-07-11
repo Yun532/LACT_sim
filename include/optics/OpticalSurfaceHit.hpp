@@ -18,6 +18,11 @@ struct OpticalSurfaceHit {
     // 光子打到输出平面时的传播方向
     Vec3 out_dir;
 
+    // 可选：输入坐标解释完成后、进入全局光追前的望远镜本地光子。
+    bool has_input_photon = false;
+    Vec3 input_pos_local;
+    Vec3 input_dir_local;
+
     // 在输出平面局部坐标系中的二维坐标
     double u_m = 0.0;
     double v_m = 0.0;
