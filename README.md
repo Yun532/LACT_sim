@@ -2,7 +2,7 @@
 
 [**中文**](README.md) | [English](README_EN.md)
 
-LACT_sim 是面向 LACT 镜望远镜的 C++ 光学光线追迹程序，可用于：
+LACT_sim 是使用 LACT 望远镜默认镜片布局的 C++ 光学光线追迹程序，可用于：
 
 - 平行光和有限距离点源光追；
 - 自定义 Photon CSV 光子输入；

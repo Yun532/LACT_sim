@@ -2,7 +2,7 @@
 
 [中文](README.md) | [**English**](README_EN.md)
 
-LACT_sim is a C++ optical ray tracer for the LACT 1229 mirror telescope. It supports:
+LACT_sim is a C++ optical ray tracer using the default LACT telescope mirror layout. It supports:
 
 - parallel beams and finite-distance point sources;
 - custom Photon CSV input;

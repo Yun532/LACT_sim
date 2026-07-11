@@ -35,7 +35,7 @@ output、camera、sipm、NSB、trigger 等模块 cfg。每个 official cfg 只�
   `configs/official_tests/telescope_1229_minimal.cfg`。
 - `telescope.pointing_az_deg`: 望远镜指向方位角，单位 degree。
 - `telescope.pointing_el_deg`: 望远镜指向仰角，单位 degree。
-- `mirror.config`: 镜片布局。标准 1229 镜面是
+- `mirror.config`: 镜片布局。默认镜片布局文件是
   `configs/mirrors/mirror_1229_imported.cfg`。
 - `source.config`: 非 CORSIKA 测试用的人工光源。
 - `source.mode=EventIO`: CORSIKA/EventIO 输入模式，只用于 `run_corsika_trace`。
@@ -218,9 +218,9 @@ configs/official_tests/perfect_parallel_whiteboard.cfg
 
 cfg 逐项解释：
 
-- `telescope.config=telescope_1229_minimal.cfg`: 使用 1229 望远镜元信息。默认指向
+- `telescope.config=telescope_1229_minimal.cfg`: 使用默认望远镜元信息。默认指向
   `az=0, el=90`，也就是竖直向上。
-- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 使用完整 54 片标准镜面。
+- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 使用默认镜片布局。
 - `source.config=../sources/parallel_1M_on_axis.cfg`: 平行光源，`n_bunches=1000000`，
   采样半径 `beam_radius_m=4`，方向 `beam_direction=0,0,-1`。
 - `output.config=../outputs/whiteboard_f8.cfg`: 白板在本地 `z=-8 m`，法向量
@@ -260,7 +260,7 @@ configs/official_tests/perfect_point_900m_whiteboard.cfg
 cfg 逐项解释：
 
 - `telescope.config=telescope_1229_minimal.cfg`: 使用默认竖直望远镜。
-- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 完整 54 片标准镜面。
+- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 使用默认镜片布局。
 - `source.config=../sources/point_900m_on_axis.cfg`: 点源在本地 `z=900 m`，
   程序从 `aperture_z=0`、半径 4 m 的入瞳采样发射光线。
 - `output.config=../outputs/whiteboard_point_900m_focus.cfg`: 900 m 物距对应的近似
@@ -295,7 +295,7 @@ configs/official_tests/perfect_parallel_raytrace_structure_whiteboard.cfg
 cfg 逐项解释：
 
 - `telescope.config=telescope_1229_minimal.cfg`: 默认竖直望远镜。
-- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 完整 54 片标准镜面。
+- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 使用默认镜片布局。
 - `source.config=../sources/parallel_1M_on_axis.cfg`: 100 万平行光。
 - `output.config=../outputs/whiteboard_f8.cfg`: 8 m 白板。
 - `obstruction.config=../obstructions/raytrace_final_structure.cfg`: 启用由外部模型转换得到的
@@ -353,7 +353,7 @@ cfg 逐项解释：
 - `output.config=../outputs/whiteboard_f8.cfg`: 仍然使用标准 8 m 白板，不自动移动到点源
   最佳焦面。
 - `obstruction.config=../obstructions/raytrace_final_structure.cfg`: 启用 3D 遮挡。
-- 其它 telescope/mirror 配置与标准 1229 完美镜面一致。
+- 其它 telescope/mirror 配置与默认理想镜片布局一致。
 
 单独运行：
 
@@ -390,7 +390,7 @@ configs/official_tests/deformation_parallel_whiteboard.cfg
 cfg 逐项解释：
 
 - `telescope.config=telescope_1229_minimal.cfg`: 基础望远镜信息。
-- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 理想镜面作为基准。
+- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 默认镜片布局作为基准。
 - `error.config=../errors/structural_deformation_1229.cfg`: 启用结构形变 series。程序会根据
   当前 `telescope.pointing_el_deg` 插值/读取对应仰角下的镜片中心和法向。
 - `source.config=../sources/parallel_1M_on_axis.cfg`: 平行光；扫描脚本会覆盖光子数。
@@ -502,7 +502,7 @@ configs/official_tests/corsika_new_camera.cfg
 cfg 逐项解释：
 
 - `telescope.pointing_az_deg=0`, `telescope.pointing_el_deg=70`: 望远镜指向。
-- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 标准 54 片理想镜面。
+- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 使用默认理想镜片布局。
 - `output.config=../outputs/focal_plane_f8.cfg`: 相机焦平面在 `z=-8 m`，法向指向镜面。
 - `camera.config=../cameras/new_camera.cfg`: 使用真实相机像素表和 Bezier 光收集器。
 - `sipm.config=../sipm/ideal_sipm.cfg`: SiPM 只提供有效面尺寸，PDE 关闭。
