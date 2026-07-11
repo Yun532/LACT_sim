@@ -168,7 +168,7 @@ lact_root_path=run_logs/my_corsika_run/lact_events.root
   /path/to/input.simtel.zst
 ```
 
-该 ROOT 输出配置默认处理全部 shower，输出在：
+该 quick-look 配置默认只跑 `source.max_shower_events=1`，输出在：
 
 ```text
 run_logs/lact_root_quicklook/lact_events.root
