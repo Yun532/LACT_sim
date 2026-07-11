@@ -94,6 +94,51 @@ def transform_line(points, frame):
     return [list(point_to_global(np.array(p, dtype=float), frame).astype(float)) for p in points]
 
 
+def load_input_local_photon_lines(path, frame, stride, length_m):
+    """Convert saved local input photons to world-space direction segments."""
+    required = {
+        "input_local_x_m", "input_local_y_m", "input_local_z_m",
+        "input_local_dir_x", "input_local_dir_y", "input_local_dir_z",
+    }
+    lines = []
+    with Path(path).open(newline="") as handle:
+        rows = csv.DictReader(handle)
+        available = set(rows.fieldnames or [])
+        missing = sorted(required - available)
+        if missing:
+            raise ValueError(
+                "input photon CSV is missing: " + ", ".join(missing) +
+                "; enable output.whiteboard_input_photon=true when tracing"
+            )
+        for index, row in enumerate(rows):
+            if index % stride:
+                continue
+            local_pos = np.array([
+                float(row["input_local_x_m"]),
+                float(row["input_local_y_m"]),
+                float(row["input_local_z_m"]),
+            ])
+            local_dir = np.array([
+                float(row["input_local_dir_x"]),
+                float(row["input_local_dir_y"]),
+                float(row["input_local_dir_z"]),
+            ])
+            norm = np.linalg.norm(local_dir)
+            if not np.isfinite(norm) or norm == 0.0:
+                continue
+            start = point_to_global(local_pos, frame)
+            direction = rotate_local_vector(local_dir / norm, frame)
+            lines.append({
+                "points": [list(start.astype(float)),
+                           list((start + length_m * direction).astype(float))],
+                "color": "#d98cff",
+                "role": "input_photon",
+                "name": "input photon (telescope local)",
+                "width": 2,
+            })
+    return lines
+
+
 def load_primitives(path: Path):
     primitives = []
     with path.open(newline="") as handle:
@@ -135,6 +180,23 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--ray-stride", type=int, default=12)
     parser.add_argument(
+        "--input-photon-csv",
+        default="",
+        help="whiteboard CSV with input_local_* columns to overlay",
+    )
+    parser.add_argument(
+        "--input-photon-stride",
+        type=int,
+        default=1,
+        help="draw one input-photon direction segment every N CSV rows",
+    )
+    parser.add_argument(
+        "--input-photon-length-m",
+        type=float,
+        default=3.0,
+        help="world-space length of each overlaid input-photon direction segment",
+    )
+    parser.add_argument(
         "--show-coordinate-axes",
         action="store_true",
         help="draw camera u/v image axes and the global +Z direction",
@@ -145,6 +207,10 @@ def main():
         help="comma-separated obstruction primitive names to highlight and label",
     )
     args = parser.parse_args()
+    if args.input_photon_stride <= 0:
+        raise SystemExit("--input-photon-stride must be positive")
+    if args.input_photon_length_m <= 0.0:
+        raise SystemExit("--input-photon-length-m must be positive")
     highlighted = {name.strip() for name in args.highlight_primitives.split(",") if name.strip()}
 
     cfg_path = Path(args.config).resolve()
@@ -227,6 +293,7 @@ def main():
                     lines.append({"points": transform_line(edge, frame), "color": "#e02f45", "role": "camera_adapter_hole", "width": 2})
             if is_highlighted:
                 labels.append({"point": list(point_to_global(center, frame).astype(float)), "text": p["name"], "color": color})
+
         elif p["type"] == "polygon_prism":
             center = np.array(p["center"])
             for edge in regular_prism_edges(center, p["radius"], p["height"], p["rotation"], p["sides"]):
@@ -234,15 +301,30 @@ def main():
             if is_highlighted:
                 labels.append({"point": list(point_to_global(center, frame).astype(float)), "text": p["name"], "color": color})
 
+    input_photon_count = 0
+    if args.input_photon_csv:
+        input_lines = load_input_local_photon_lines(
+            args.input_photon_csv,
+            frame,
+            args.input_photon_stride,
+            args.input_photon_length_m,
+        )
+        input_photon_count = len(input_lines)
+        lines.extend(input_lines)
+
     all_points = [pt for poly in polygons for pt in poly["points"]] + [pt for line in lines for pt in line["points"]]
     arr = np.array(all_points, dtype=float)
     bounds = [arr.min(axis=0).tolist(), arr.max(axis=0).tolist()]
     data = {"polygons": polygons, "lines": lines, "labels": labels, "bounds": bounds}
 
+    input_photon_legend = (
+        f" · Purple: {input_photon_count} input-photon directions"
+        if input_photon_count else ""
+    )
     html = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>LACT Optical Layout</title>
 <style>html,body{{margin:0;height:100%;background:#101216;color:#e8edf2;font-family:Segoe UI,Arial,sans-serif}}#bar{{position:fixed;left:12px;top:10px;padding:8px 10px;background:rgba(16,18,22,.78);border:1px solid #2b3038;border-radius:6px;font-size:13px}}canvas{{width:100vw;height:100vh;display:block;cursor:grab}}canvas:active{{cursor:grabbing}}</style>
-</head><body><canvas id="view"></canvas><div id="bar">Drag to rotate · Wheel to zoom · Blue: mirrors · Red: output plane · Orange: support · Green: box · Cyan: camera · Red wire: adapter hole · Bright red: highlighted struts</div>
+</head><body><canvas id="view"></canvas><div id="bar">Drag to rotate · Wheel to zoom · Blue: mirrors · Red: output plane · Orange: support · Green: box · Cyan: camera · Red wire: adapter hole · Bright red: highlighted struts{input_photon_legend}</div>
 <script>
 const data = {json.dumps(data)};
 const canvas=document.getElementById('view'),ctx=canvas.getContext('2d');let rx=-0.7,ry=0.8,zoom=1,drag=false,lx=0,ly=0;

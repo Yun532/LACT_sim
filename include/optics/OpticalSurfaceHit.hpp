@@ -18,6 +18,12 @@ struct OpticalSurfaceHit {
     // 光子打到输出平面时的传播方向
     Vec3 out_dir;
 
+    // 可选：进入光追前的望远镜本地输入光子。该快照在将光子放入
+    // 全局镜面/焦平面几何之前保存，因此不随原始 source.coordinate_frame 改变。
+    bool has_input_photon = false;
+    Vec3 input_pos_local;
+    Vec3 input_dir_local;
+
     // 在输出平面局部坐标系中的二维坐标
     double u_m = 0.0;
     double v_m = 0.0;

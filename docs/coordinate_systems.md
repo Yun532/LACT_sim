@@ -178,10 +178,10 @@ global sky/up direction appear upward in 2D figures.
 
 ![Mirror and camera axes for el=0 deg, az=90 deg](assets/layout_el0_az90_3d_camera_axes.png)
 
-For:
+正常的 CORSIKA 输入应显式选择既有的 CORSIKA 适配器：
 
 ```ini
-source.eventio_coordinate_frame=corsika_iact
+source.coordinate_frame=corsika_nwu_relative
 ```
 
 LACT_sim constructs this CORSIKA-NWU-to-local basis:
@@ -205,9 +205,12 @@ local_dir = ( dot(dir_NWU, x_axis),
 ```
 
 Because EventIO photon positions are already telescope-relative, the standard
-`corsika_iact` mode does not subtract the EventIO telescope position. Telescope
+`corsika_nwu_relative` mode does not subtract the EventIO telescope position. Telescope
 positions are still written to HDF5 for provenance and array-level plotting.
 This CORSIKA transform is used by `run_corsika_trace`.
+
+其余 `source.coordinate_frame` 选项只控制输入行进入既有光追逻辑之前的
+解释方式；不会重新定义镜面、输出平面、相机或画图坐标。
 
 ### 6. Array Layout Plots
 

@@ -134,85 +134,29 @@ struct WhiteboardHdf5Row {
     float emitter_time_ns;
 };
 
-TelescopeFrame frameForEventIOTelescope(const TelescopeConfig& base_telescope,
-                                        const EventIOMetadata& metadata,
-                                        int telescope_id,
-                                        bool use_eventio_position)
-{
-    TelescopeConfig telescope = base_telescope;
-    if (use_eventio_position) {
-        if (auto tel = metadata.telescopeById(telescope_id)) {
-            telescope.position_m = {tel->x_m, tel->y_m, tel->z_m};
-        }
-    }
-    return buildTelescopeFrame(telescope);
-}
-
-TelescopeFrame corsikaIactFrame(const TelescopeConfig& telescope)
-{
-    // CORSIKA/sim_telarray convention used by hessio:
-    //   global z is upward, azimuth is N -> E, and the horizontal y component
-    //   enters sky direction vectors with a minus sign. Photon bunch x/y are
-    //   already relative to a telescope position, but still expressed in this
-    //   horizontal detection frame. We rotate them into the LACT optical frame
-    //   where local +z points to the sky and photons arrive roughly along -z.
-    const double az = telescope.pointing_az_deg * DEG_TO_RAD;
-    const double el = telescope.pointing_el_deg * DEG_TO_RAD;
-    const double sin_el = std::sin(el);
-    const double cos_el = std::cos(el);
-    const double sin_az = std::sin(az);
-    const double cos_az = std::cos(az);
-
-    TelescopeFrame frame;
-    frame.origin = {0.0, 0.0, 0.0};
-    frame.x_axis = Vec3{-sin_el * cos_az, sin_el * sin_az, cos_el}.normalized();
-    frame.y_axis = Vec3{-sin_az, -cos_az, 0.0}.normalized();
-    frame.z_axis = Vec3{cos_el * cos_az, -cos_el * sin_az, sin_el}.normalized();
-    return frame;
-}
-
 PhotonBunch transformEventIOBunchToTraceFrame(
     const PhotonBunch& input,
     const TelescopeConfig& telescope_cfg,
     const EventIOMetadata& metadata,
     const SourceRuntimeConfig& source_runtime_cfg)
 {
-    const std::string frame_name = lowerCopy(trim(source_runtime_cfg.eventio_coordinate_frame));
     auto apply_2d_plane_z = [&](PhotonBunch& bunch) {
         if (bunch.eventio_2d && source_runtime_cfg.eventio_2d_input_plane_z_m != 0.0) {
             bunch.photon.pos.z += source_runtime_cfg.eventio_2d_input_plane_z_m;
         }
     };
-    if (frame_name == "telescope_local" || frame_name == "local") {
-        PhotonBunch out = input;
-        apply_2d_plane_z(out);
-        return out;
+    TelescopeConfig telescope = telescope_cfg;
+    const std::string frame_name = normalizeSourceCoordinateFrame(
+        source_runtime_cfg.coordinate_frame);
+    if ((frame_name == "corsika_nwu_global" ||
+         frame_name == "lact_generic_global") &&
+        source_runtime_cfg.use_eventio_telescope_position) {
+        if (auto tel = metadata.telescopeById(input.telescope_id)) {
+            telescope.position_m = {tel->x_m, tel->y_m, tel->z_m};
+        }
     }
-
-    PhotonBunch out = input;
-    if (frame_name == "corsika_iact" || frame_name == "corsika" ||
-        frame_name == "simtelarray") {
-        const TelescopeFrame frame = corsikaIactFrame(telescope_cfg);
-        out.photon.pos = frame.rotateVectorToLocal(input.photon.pos);
-        out.photon.dir = frame.rotateVectorToLocal(input.photon.dir).normalized();
-        apply_2d_plane_z(out);
-        return out;
-    }
-
-    if (frame_name == "array_global" || frame_name == "global") {
-        const TelescopeFrame frame = frameForEventIOTelescope(
-            telescope_cfg,
-            metadata,
-            input.telescope_id,
-            source_runtime_cfg.use_eventio_telescope_position);
-        out.photon.pos = frame.pointToLocal(input.photon.pos);
-        out.photon.dir = frame.rotateVectorToLocal(input.photon.dir).normalized();
-        apply_2d_plane_z(out);
-        return out;
-    }
-
-    throw std::runtime_error("unsupported source.eventio_coordinate_frame: " +
-                             source_runtime_cfg.eventio_coordinate_frame);
+    PhotonBunch out = transformBunchToTelescopeLocal(input, telescope, frame_name);
+    apply_2d_plane_z(out);
     return out;
 }
 
@@ -1267,8 +1211,10 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                              "CORSIKA magnetic-North-to-East azimuth; 0=+array_x, 90=East/-array_y");
         writeStringAttribute(coordinates_group, "pointing_el_deg",
                              "Elevation above local horizon; zenith angle = 90 - elevation");
+        writeStringAttribute(coordinates_group, "source_coordinate_frame",
+                             source_runtime_cfg.coordinate_frame);
         writeStringAttribute(coordinates_group, "eventio_photon_frame",
-                             source_runtime_cfg.eventio_coordinate_frame);
+                             source_runtime_cfg.coordinate_frame);
         writeStringAttribute(coordinates_group, "eventio_corsika_iact_positions",
                              "Photon bunch x/y/z are telescope-relative CORSIKA IACT coordinates before rotation to telescope-local optics");
         writeStringAttribute(coordinates_group, "eventio_teloff_core_note",
@@ -2789,7 +2735,9 @@ void printCorsikaOpticalConfiguration(
     printField("mode", "EventIO");
     printField("eventio_path", source_runtime_cfg.eventio_path);
     printField("event_id_mode", source_runtime_cfg.event_id_mode);
-    printField("eventio_coordinate_frame", source_runtime_cfg.eventio_coordinate_frame);
+    printField("source_coordinate_frame", source_runtime_cfg.coordinate_frame);
+    printField("coordinate_interpretation",
+               sourceCoordinateFrameDescription(source_runtime_cfg.coordinate_frame));
     printField("eventio_2d_input_plane_z_m",
                doubleToString(source_runtime_cfg.eventio_2d_input_plane_z_m));
     printField("eventio_2d_plane_mode", source_runtime_cfg.eventio_2d_plane_mode);
@@ -2797,17 +2745,16 @@ void printCorsikaOpticalConfiguration(
     printField("eventio_2d_trace_direction",
                eventio_2d_backproject ? "signed_line_to_mirror_then_reflect"
                                       : "forward_to_mirror_then_reflect");
-    printField("coordinate_interpretation",
-               lowerCopy(trim(source_runtime_cfg.eventio_coordinate_frame)) == "corsika_iact"
-                   ? "CORSIKA IACT x/y are telescope-relative horizontal coordinates; cx/cy/cz are rotated to telescope-local optical coordinates; 2D bunches start at local z=source.eventio_2d_input_plane_z_m"
-                   : (lowerCopy(trim(source_runtime_cfg.eventio_coordinate_frame)) == "telescope_local" ||
-                              lowerCopy(trim(source_runtime_cfg.eventio_coordinate_frame)) == "local"
-                          ? "EventIO photon positions/directions are already in telescope-local optical coordinates; 2D bunches start at local z=source.eventio_2d_input_plane_z_m"
-                          : "EventIO photon positions/directions are global array coordinates and will be transformed to telescope-local coordinates; 2D bunches start at local z=source.eventio_2d_input_plane_z_m"));
+    const std::string normalized_frame = normalizeSourceCoordinateFrame(
+        source_runtime_cfg.coordinate_frame);
+    const bool position_is_applied = normalized_frame == "corsika_nwu_global" ||
+                                     normalized_frame == "lact_generic_global";
     printField("eventio_telescope_position",
-               source_runtime_cfg.use_eventio_telescope_position
-                   ? "use EventIO telescope table"
-                   : "use telescope.position_m for every telescope");
+               position_is_applied
+                   ? (source_runtime_cfg.use_eventio_telescope_position
+                          ? "subtract EventIO telescope position from global photon positions"
+                          : "subtract telescope.position_m from global photon positions")
+                   : "metadata only; local/relative photon positions are not shifted");
     printField("filter_telescope_id", "off");
     printField("filter_event_id", "off");
     printField("filter_shower_event_id",
@@ -3228,6 +3175,11 @@ int main(int argc, char** argv) {
 
         SyntheticPhotonConfig source_cfg = buildSourceConfig(cfg);
         SourceRuntimeConfig source_runtime_cfg = buildSourceRuntimeConfig(cfg);
+        if (cfg.find("source.coordinate_frame") == cfg.end() &&
+            cfg.find("source.eventio_coordinate_frame") != cfg.end()) {
+            std::cerr << "warning: source.eventio_coordinate_frame is deprecated; "
+                         "use source.coordinate_frame instead\n";
+        }
         source_runtime_cfg.use_eventio = true;
         source_runtime_cfg.filter_event_id = false;
         source_runtime_cfg.filter_telescope_id = false;
@@ -3625,7 +3577,8 @@ int main(int argc, char** argv) {
             photon.weight *= bunch.multiplicity;
             const double atmosphere_weight_before = photon.weight;
             if (atmosphere.enabled()) {
-                const Vec3 global_dir = telescope_frame.rotateVector(photon.dir).normalized();
+                const Vec3 global_dir = sourceDirectionInWorld(
+                    raw_bunch, telescope_cfg, source_runtime_cfg.coordinate_frame);
                 const double atmosphere_t =
                     atmosphere.transmission(photon.wavelength_nm,
                                             bunch.emission_altitude_km,

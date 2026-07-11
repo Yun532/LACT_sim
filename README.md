@@ -254,7 +254,7 @@ PhotonCsv optical debugging and rejects `source.mode=EventIO`.
 ```ini
 telescope.pointing_az_deg=0
 telescope.pointing_el_deg=70
-source.eventio_coordinate_frame=corsika_iact
+source.coordinate_frame=corsika_nwu_relative
 ```
 
 Use the CORSIKA run direction to set these values. If the CORSIKA file name or
@@ -289,10 +289,10 @@ The azimuth convention is the hessio/sim_telarray-compatible one documented in
 `docs/coordinate_systems.md`: `0 deg` points along array `+X` / North, and
 `90 deg` points toward East, represented as array `-Y` in the CORSIKA frame.
 
-The generic frame used by `run_optical_sim` is different: its
-`buildTelescopeFrame()` helper measures azimuth from global `+x` toward global
-`+y`. That generic frame is kept for local optical tests and should not be used
-as the CORSIKA NWU transform.
+`run_optical_sim` 使用的通用坐标框架不变：其 `buildTelescopeFrame()`
+按全局 `+x` 到 `+y` 测量方位角。新的 `source.coordinate_frame` 只决定
+输入行如何转换到既有的运行时光追坐标；不会改变镜面、相机、输出或画图的
+坐标定义。
 
 For the smallest normal CORSIKA camera run, copy this template and edit only
 pointing plus input/output paths:
@@ -601,7 +601,7 @@ command line; the configs keep `source.eventio_path` empty.
 Recommended CORSIKA coordinate setting:
 
 ```ini
-source.eventio_coordinate_frame=corsika_iact
+source.coordinate_frame=corsika_nwu_relative
 source.missing_wavelength_model=cherenkov
 ```
 

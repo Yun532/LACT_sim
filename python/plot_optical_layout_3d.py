@@ -590,7 +590,8 @@ def main():
                     colors=(0.03, 0.03, 0.03, 0.72),
                     linewidths=cylinder_widths,
                     label="3D support obstruction",
-                )
+                ),
+                autolim=False,
             )
         if solid_polys:
             ax.add_collection3d(
@@ -599,7 +600,8 @@ def main():
                     facecolors=(0.08, 0.08, 0.08, 0.13),
                     edgecolors=(0.03, 0.03, 0.03, 0.30),
                     linewidths=0.35,
-                )
+                ),
+                autolim=False,
             )
         if wire_segments:
             ax.add_collection3d(
@@ -607,7 +609,8 @@ def main():
                     wire_segments,
                     colors=wire_colors,
                     linewidths=wire_widths,
-                )
+                ),
+                autolim=False,
             )
 
     all_points = []

@@ -160,6 +160,12 @@ target_link_libraries(test_off_axis_orientation PRIVATE simlite_core)
 add_test(NAME test_off_axis_orientation
          COMMAND test_off_axis_orientation ${CMAKE_CURRENT_SOURCE_DIR}/configs/mirror_1229_facets.csv)
 
+add_executable(test_coordinate_frames
+    apps/test_coordinate_frames.cpp
+)
+target_link_libraries(test_coordinate_frames PRIVATE simlite_core)
+add_test(NAME test_coordinate_frames COMMAND test_coordinate_frames)
+
 add_executable(test_light_collector_response
     apps/test_light_collector_response.cpp
 )

@@ -187,6 +187,12 @@ private:
 struct SourceRuntimeConfig {
     bool use_photon_csv = false;
     bool use_eventio = false;
+    // Explicit input-frame names; these do not redefine trace/output axes:
+    //   telescope_local      existing local optical input coordinates
+    //   corsika_nwu_relative CORSIKA NWU positions relative to the telescope
+    //   corsika_nwu_global   absolute CORSIKA NWU array positions
+    //   lact_generic_global  legacy +X-to-+Y azimuth global coordinates
+    std::string coordinate_frame = "telescope_local";
     bool csv_local_telescope_frame = true;
     std::string csv_path;
     std::string eventio_path;
@@ -264,6 +270,15 @@ bool isEventIOMode(const std::string& text);
 std::string vec3ToString(const Vec3& v);
 std::string sourceModeName(SyntheticMode mode);
 TelescopeFrame buildTelescopeFrame(const TelescopeConfig& telescope);
+TelescopeFrame buildCorsikaNwuTelescopeFrame(const TelescopeConfig& telescope);
+std::string normalizeSourceCoordinateFrame(const std::string& frame_name);
+std::string sourceCoordinateFrameDescription(const std::string& frame_name);
+PhotonBunch transformBunchToTelescopeLocal(const PhotonBunch& input,
+                                           const TelescopeConfig& telescope,
+                                           const std::string& frame_name);
+Vec3 sourceDirectionInWorld(const PhotonBunch& input,
+                            const TelescopeConfig& telescope,
+                            const std::string& frame_name);
 void applyTelescopeFrame(std::vector<MirrorFacet>& facets,
                          OutputPlane& plane,
                          const TelescopeFrame& frame);

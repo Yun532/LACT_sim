@@ -44,7 +44,7 @@ output、camera、sipm、NSB、trigger 等模块 cfg。每个 official cfg 只�
   命令行传入，避免用户每次改 cfg。
 - `source.event_id_mode=event_array100`: 输出事件编号采用
   `event_id = shower_event * 100 + array_id`。
-- `source.eventio_coordinate_frame=corsika_iact`: 使用当前 EventIO/CORSIKA IACT
+- `source.coordinate_frame=corsika_nwu_relative`: 使用当前 EventIO/CORSIKA IACT
   坐标转换约定。
 - `output.config`: 白板或相机焦平面位置。
 - `output.format=csv`: 输出光子命中 CSV。
@@ -227,6 +227,10 @@ cfg 逐项解释：
   `0,0,-1`，图像坐标由 `plane_u_axis=1,0,0` 和 `plane_v_axis=0,1,0` 定义。
 - `propagation.speed_of_light_m_per_ns=0.299792458`: 局部传播光速。
 - `output.csv=run_logs/official_tests/perfect_parallel/hits.csv`: 输出白板命中光子。
+- `output.whiteboard_input_photon=true`：在白板 CSV 末尾追加
+  `input_local_x/y/z_m` 和 `input_local_dir_x/y/z`。对平行光、点源和 PhotonCsv
+  都适用；它们是输入坐标解释完成后、进入全局光追前直接保存的望远镜本地入射
+  光子位置和方向，不再做额外坐标转换。
 
 单独运行：
 
@@ -465,7 +469,7 @@ cfg 逐项解释：
 - `source.mode=EventIO`: 读取 EventIO 光子。
 - `source.eventio_path=`: 留空，运行命令传入 zst 文件。
 - `source.event_id_mode=event_array100`: 输出事件号为 `shower_event * 100 + array_id`。
-- `source.eventio_coordinate_frame=corsika_iact`: 使用 CORSIKA IACT 坐标约定。
+- `source.coordinate_frame=corsika_nwu_relative`: 使用 CORSIKA IACT 坐标约定。
 - `output.format=csv`: 输出白板光子 CSV。
 - `output.hits_csv`: 白板命中光子。
 - `output.summary_csv`: 每个 event/telescope 的简要统计。
