@@ -494,16 +494,16 @@ output.lact_root_write_components=false
 
 `output.format=root` 表示不写 HDF5/CSV，只写 ROOT。`output.lact_profile=timeseries_pe` 会写适合后续 waveform/readout 检查的 p.e. 时间序列。
 
-第一次检查时默认：
-
-```ini
-output.save_only_triggered=false
-```
-
-这样即使事件没有触发，也不会得到空 ROOT 文件。正式触发样本可以改成：
+默认只保存通过 trigger 的望远镜事件：
 
 ```ini
 output.save_only_triggered=true
+```
+
+如果只是排查光追或 ROOT 写出链路，确实需要保留未触发事件，可以临时改成：
+
+```ini
+output.save_only_triggered=false
 ```
 
 如果只想先检查 ROOT 输出链路、暂时不加 NSB，可以改：
