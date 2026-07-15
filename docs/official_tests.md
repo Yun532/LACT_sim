@@ -136,7 +136,7 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_efficiency_curves.py \
 
 默认输入：
 
-- `configs/efficiency/mirror_reflectivity.csv`: 镜面反射率。
+- `configs/efficiency/mirror_reflectivity_dm0113_13point_mean.csv`: DM0113 镜面 13 点平均反射率。
 - `configs/efficiency/filter_transmission.csv`: 相机滤光片透过率。
 - `configs/efficiency/sipm_pde.csv`: SiPM PDE。
 - `atmosphere_transmission=none`: 不额外加入大气衰减。
@@ -186,7 +186,7 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_nsb_spectral_rate.py \
   单位是 `ph / (s nm sr m^2)`。
 - `configs/nsb/spectral_skycalc_dark_with_obstruction.cfg`: NSB spectral 配置，固定
   有效面积为 `22.606448 m^2`，对应 official 平行光遮挡测试得到的面积。
-- `configs/efficiency/mirror_reflectivity.csv`: 镜面反射率。
+- `configs/efficiency/mirror_reflectivity_dm0113_13point_mean.csv`: DM0113 镜面 13 点平均反射率。
 - `configs/efficiency/filter_transmission.csv`: 滤光片透过率。
 - `configs/efficiency/sipm_pde.csv`: SiPM PDE。
 
