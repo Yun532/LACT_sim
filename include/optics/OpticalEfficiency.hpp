@@ -156,6 +156,14 @@ public:
                               wavelength_nm);
     }
 
+    double preGeometryDetectionProbability(double wavelength_nm) const {
+        return cfg_.constant_scale
+             * mirrorReflectivity(wavelength_nm)
+             * telescopeTransmission(wavelength_nm)
+             * atmosphereTransmission(wavelength_nm)
+             * cathodeEfficiency(wavelength_nm);
+    }
+
     double total(double wavelength_nm, double incidence_angle_rad) const {
         return cfg_.constant_scale
              * mirrorReflectivity(wavelength_nm)

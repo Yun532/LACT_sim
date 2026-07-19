@@ -1,4 +1,5 @@
 #include "app/OpticalSimCommon.hpp"
+#include "app/PhotonResponseSampler.hpp"
 #include "app/TelescopeOpticsCache.hpp"
 #include "io/CorsikaTraceOutputTypes.hpp"
 
@@ -2723,6 +2724,7 @@ void printCorsikaOpticalConfiguration(
     const CollectorDebugConfig& collector_debug_cfg,
     const NsbConfig& nsb_cfg,
     const TriggerConfig& trigger_cfg,
+    const PhotonResponseConfig& response_cfg,
     const OpticalEfficiencyConfig& efficiency_cfg,
     const AtmosphereTransmissionConfig& atmosphere_cfg,
     const ErrorConfig& error_cfg,
@@ -2958,6 +2960,10 @@ void printCorsikaOpticalConfiguration(
     printField("camera_multiplicity", intToString(trigger_cfg.camera_multiplicity));
     printField("array_multiplicity", intToString(trigger_cfg.array_multiplicity));
     printField("coincidence_window_ns", doubleToString(trigger_cfg.coincidence_window_ns));
+
+    printSection("Photon response");
+    printField("mode", response_cfg.modeName());
+    printField("seed", intToString(response_cfg.seed));
 
     printSection("Efficiency");
     printField("constant_scale", doubleToString(efficiency_cfg.constant_scale));
@@ -3263,6 +3269,7 @@ int main(int argc, char** argv) {
         std::vector<AtmosphereHistogramBin> atmosphere_histogram =
             makeAtmosphereHistogramBins(atmosphere_histogram_cfg);
         auto eventio_cfg = buildEventIOPhotonConfig(cfg, source_cfg, source_runtime_cfg);
+        const PhotonResponseConfig response_cfg = buildPhotonResponseConfig(cfg);
         ProfileStats profile_stats;
         const bool save_csv = outputWantsCsv(output_cfg);
         const bool save_hdf5 = outputWantsHdf5(output_cfg);
@@ -3321,6 +3328,7 @@ int main(int argc, char** argv) {
         }
         AtmosphereTransmission atmosphere(atmosphere_cfg);
         atmosphere_cfg = atmosphere.config();
+        PhotonResponseSampler response_sampler(response_cfg, eventio_cfg);
         const std::string missing_wavelength_range_source =
             explicit_wavelength_range ? "cfg"
                                       : (has_cwavlg ? "EventIO input card CWAVLG"
@@ -3343,6 +3351,7 @@ int main(int argc, char** argv) {
                                          collector_debug_cfg,
                                          nsb_cfg,
                                          trigger_cfg,
+                                         response_cfg,
                                          efficiency_cfg,
                                          atmosphere_cfg,
                                          error_cfg,
@@ -3587,7 +3596,6 @@ int main(int argc, char** argv) {
             if (profile_cfg.enabled) {
                 addElapsed(profile_stats, &ProfileStats::transform_s, t_step);
             }
-            ++photon_index;
             const int shower_event =
                 showerEventFromOutputEvent(bunch.event_id, source_runtime_cfg.event_id_mode);
             if (active_shower_event < 0) {
@@ -3614,35 +3622,35 @@ int main(int argc, char** argv) {
             const MirrorLayout& telescope_mirrors =
                 telescope_optics.layoutFor(bunch.telescope_id);
 
-            Photon photon = bunch.photon;
-            photon.normalizeDirection();
-            photon.weight *= bunch.multiplicity;
-            const double atmosphere_weight_before = photon.weight;
-            if (atmosphere.enabled() && !photon.optical_efficiency_preapplied) {
-                const Vec3 global_dir = sourceDirectionInWorld(
-                    raw_bunch, telescope_cfg, source_runtime_cfg.coordinate_frame);
-                const double atmosphere_t =
-                    atmosphere.transmission(photon.wavelength_nm,
-                                            bunch.emission_altitude_km,
-                                            global_dir);
-                photon.weight *= atmosphere_t;
-                accumulateAtmosphereHistogram(atmosphere_histogram,
-                                              atmosphere_histogram_cfg,
-                                              bunch.emission_altitude_km,
-                                              atmosphere_weight_before,
-                                              photon.weight,
-                                              atmosphere_weight_before * atmosphere_t);
-                if (photon.weight <= 0.0) {
+            const Vec3 global_dir = sourceDirectionInWorld(
+                raw_bunch, telescope_cfg, source_runtime_cfg.coordinate_frame);
+            auto tracePhotonCandidate = [&](PhotonCandidate candidate) {
+                ++photon_index;
+                Photon& photon = candidate.photon;
+                photon.normalizeDirection();
+
+                double atmosphere_t = 1.0;
+                if (atmosphere.enabled() &&
+                    !photon.optical_efficiency_preapplied) {
+                    atmosphere_t = atmosphere.transmission(
+                        photon.wavelength_nm,
+                        bunch.emission_altitude_km,
+                        global_dir);
+                }
+                const auto pre_geometry = response_sampler.applyPreGeometry(
+                    candidate,
+                    atmosphere_t,
+                    eff.preGeometryDetectionProbability(photon.wavelength_nm));
+                accumulateAtmosphereHistogram(
+                    atmosphere_histogram,
+                    atmosphere_histogram_cfg,
+                    bunch.emission_altitude_km,
+                    pre_geometry.expected_weight_before_atmosphere,
+                    pre_geometry.expected_weight_after_atmosphere,
+                    pre_geometry.expected_weight_after_atmosphere);
+                if (!pre_geometry.survives) {
                     return;
                 }
-            } else {
-                accumulateAtmosphereHistogram(atmosphere_histogram,
-                                              atmosphere_histogram_cfg,
-                                              bunch.emission_altitude_km,
-                                              atmosphere_weight_before,
-                                              photon.weight,
-                                              atmosphere_weight_before);
-            }
 
             if (profile_cfg.enabled) {
                 t_step = std::chrono::steady_clock::now();
@@ -3698,9 +3706,13 @@ int main(int argc, char** argv) {
             }
 
             summary.hit_output_plane += 1;
-            const double base_signal = hit.weight * hit.relative_efficiency;
 
             if (!camera_cfg.enabled) {
+                if (candidate.stochastic &&
+                    !response_sampler.acceptPostGeometry(candidate, hit)) {
+                    return;
+                }
+                const double base_signal = hit.weight * hit.relative_efficiency;
                 if (profile_cfg.enabled) {
                     t_step = std::chrono::steady_clock::now();
                 }
@@ -3738,6 +3750,10 @@ int main(int argc, char** argv) {
             }
             summary.hit_camera += 1;
             summary.unique_pixels.insert(hit.pixel_id);
+            if (candidate.stochastic &&
+                !response_sampler.acceptPostGeometry(candidate, hit)) {
+                return;
+            }
             if (hit.accepted) {
                 summary.accepted_camera += 1;
             }
@@ -3761,6 +3777,16 @@ int main(int argc, char** argv) {
                                   hit);
             if (profile_cfg.enabled) {
                 addElapsed(profile_stats, &ProfileStats::camera_accumulate_s, t_step);
+            }
+            };
+
+            const std::uint64_t candidate_count =
+                response_sampler.candidateCount(bunch);
+            for (std::uint64_t represented_index = 0;
+                 represented_index < candidate_count;
+                 ++represented_index) {
+                tracePhotonCandidate(
+                    response_sampler.candidate(bunch, represented_index));
             }
         };
 
