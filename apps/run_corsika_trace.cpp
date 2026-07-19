@@ -3247,7 +3247,6 @@ int main(int argc, char** argv) {
         AtmosphereTransmissionConfig atmosphere_cfg = buildAtmosphereTransmissionConfig(cfg);
         PropagationConfig propagation_cfg = buildPropagationConfig(cfg);
         OpticalEfficiency eff(efficiency_cfg);
-        AtmosphereTransmission atmosphere(atmosphere_cfg);
         OpticalTracer tracer(propagation_cfg.speed_of_light_m_per_ns,
                              error_cfg.reflect_direction_sigma_deg * DEG_TO_RAD,
                              error_cfg.random_seed);
@@ -3313,6 +3312,14 @@ int main(int argc, char** argv) {
         const bool has_cwavlg = wavelengthRangeFromInputCard(metadata).has_value();
         applyEventIOWavelengthMetadata(eventio_cfg, metadata, cfg);
         applyEventIOAtmosphereMetadata(eventio_cfg, metadata);
+        if (cfg.find("atmosphere.detector_altitude_km") == cfg.end() &&
+            cfg.find("atmosphere.ground_altitude_km") == cfg.end() &&
+            std::isfinite(metadata.observation_altitude_m)) {
+            atmosphere_cfg.detector_altitude_km =
+                metadata.observation_altitude_m * 1.0e-3;
+        }
+        AtmosphereTransmission atmosphere(atmosphere_cfg);
+        atmosphere_cfg = atmosphere.config();
         const std::string missing_wavelength_range_source =
             explicit_wavelength_range ? "cfg"
                                       : (has_cwavlg ? "EventIO input card CWAVLG"

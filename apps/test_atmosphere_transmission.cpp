@@ -55,6 +55,48 @@ int main(int argc, char** argv)
     ok &= check(nearlyEqual(vertical, std::exp(-0.207110), 1e-8),
                 "440 nm, 100 km vertical transmission");
 
+    AtmosphereTransmissionConfig elevated_cfg = cfg;
+    elevated_cfg.detector_altitude_km = 4.45;
+    AtmosphereTransmission elevated_atm(elevated_cfg);
+    const double elevated = elevated_atm.transmission(
+        440.0, 100.0, {0.0, 0.0, -1.0});
+    ok &= check(nearlyEqual(elevated,
+                            std::exp(-(0.207110 - 0.003406)),
+                            1e-8),
+                "detector altitude removes optical depth below telescope");
+    ok &= check(nearlyEqual(elevated_atm.transmission(
+                                440.0, 4.45, {0.0, 0.0, -1.0}),
+                            1.0, 1e-12),
+                "emission at detector altitude has unit transmission");
+    ok &= check(elevated_atm.transmission(
+                    440.0, 4.425, {0.0, 0.0, -1.0}) == 0.0,
+                "emission below detector cannot reach downward-looking telescope");
+
+    try {
+        AtmosphereTransmissionConfig wrong_h2 = cfg;
+        wrong_h2.table_reference_altitude_km = 4.5;
+        AtmosphereTransmission should_fail(wrong_h2);
+        (void)should_fail;
+        ok &= check(false, "mismatched H2 should fail");
+    } catch (const std::runtime_error&) {
+    }
+    try {
+        AtmosphereTransmissionConfig below_table = cfg;
+        below_table.detector_altitude_km = 4.3;
+        AtmosphereTransmission should_fail(below_table);
+        (void)should_fail;
+        ok &= check(false, "detector below H2 should fail");
+    } catch (const std::runtime_error&) {
+    }
+
+    const auto legacy_cfg = buildAtmosphereTransmissionConfig({
+        {"atmosphere.model", "modtran_tau"},
+        {"atmosphere.tau_table", argv[1]},
+        {"atmosphere.ground_altitude_km", "4.4"},
+    });
+    ok &= check(nearlyEqual(legacy_cfg.detector_altitude_km, 4.4, 1e-12),
+                "legacy ground altitude aliases detector altitude");
+
     AtmosphereTransmissionConfig slant_cfg = cfg;
     slant_cfg.slant_correction = true;
     AtmosphereTransmission slant_atm(slant_cfg);

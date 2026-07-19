@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <limits>
 #include <map>
 #include <string>
 #include <vector>
@@ -11,7 +12,10 @@ struct AtmosphereTransmissionConfig {
     bool enabled = false;
     std::string model = "none";
     std::string tau_table_path;
-    double ground_altitude_km = 4.4;
+    // H2 encoded in the MODTRAN table. NaN accepts the table header.
+    double table_reference_altitude_km = std::numeric_limits<double>::quiet_NaN();
+    // Actual detector altitude. NaN uses the table H2 observation level.
+    double detector_altitude_km = std::numeric_limits<double>::quiet_NaN();
     bool slant_correction = true;
     double min_cos_theta = 0.2;
     std::string large_angle_behavior = "clamp";
@@ -46,6 +50,7 @@ private:
     std::vector<double> altitudes_km_;
     std::vector<double> log_altitudes_cm_;
     std::vector<double> tau_;
+    double table_reference_altitude_km_ = std::numeric_limits<double>::quiet_NaN();
 
     void loadModtranTauTable(const std::string& path);
     LookupIndex locate(const std::vector<double>& grid, double value) const;
