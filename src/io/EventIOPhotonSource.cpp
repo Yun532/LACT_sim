@@ -78,6 +78,11 @@ bool keepRow(int event_id, int shower_event_id, int telescope_id, const EventIOP
     if (cfg.filter_event_id && event_id != cfg.selected_event_id) {
         return false;
     }
+    if (!cfg.selected_event_ids.empty() &&
+        !std::binary_search(cfg.selected_event_ids.begin(),
+                            cfg.selected_event_ids.end(), event_id)) {
+        return false;
+    }
     if (cfg.filter_telescope_id && telescope_id != cfg.selected_telescope_id) {
         return false;
     }
@@ -194,26 +199,32 @@ void buildOutputEventIdentityMap(EventIOMetadata& metadata,
 }
 
 int selectedShowerEventId(const EventIOPhotonConfig& cfg) {
-    if (!cfg.filter_event_id) {
+    if (!cfg.filter_event_id && cfg.selected_event_ids.empty()) {
         if (cfg.filter_shower_event_id) {
             return cfg.selected_shower_event_id;
         }
         return cfg.default_event_id;
     }
+    const int selected_event = cfg.filter_event_id
+                                   ? cfg.selected_event_id
+                                   : cfg.selected_event_ids.front();
     const std::string mode = lowerCopy(cfg.event_id_mode);
     if (mode == "event_array100" || mode == "runid") {
-        return cfg.selected_event_id / 100;
+        return selected_event / 100;
     }
-    return cfg.selected_event_id;
+    return selected_event;
 }
 
 int selectedArrayId(const EventIOPhotonConfig& cfg) {
-    if (!cfg.filter_event_id) {
+    if (!cfg.filter_event_id && cfg.selected_event_ids.empty()) {
         return 0;
     }
+    const int selected_event = cfg.filter_event_id
+                                   ? cfg.selected_event_id
+                                   : cfg.selected_event_ids.front();
     const std::string mode = lowerCopy(cfg.event_id_mode);
     if (mode == "event_array100" || mode == "runid") {
-        return cfg.selected_event_id % 100;
+        return selected_event % 100;
     }
     return 0;
 }

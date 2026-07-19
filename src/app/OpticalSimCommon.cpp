@@ -862,6 +862,30 @@ std::vector<double> parseDoubleList(const std::string& text, const std::string& 
     return values;
 }
 
+std::vector<int> parseIntList(const std::string& text, const std::string& key) {
+    std::stringstream ss(text);
+    std::string cell;
+    std::vector<int> values;
+    while (std::getline(ss, cell, ',')) {
+        cell = trim(cell);
+        if (cell.empty()) {
+            throw std::runtime_error("empty component in list config value for " + key);
+        }
+        std::size_t pos = 0;
+        const int value = std::stoi(cell, &pos);
+        if (pos != cell.size()) {
+            throw std::runtime_error("invalid list component in " + key + ": " + cell);
+        }
+        values.push_back(value);
+    }
+    if (values.empty()) {
+        throw std::runtime_error("list config value for " + key + " is empty");
+    }
+    std::sort(values.begin(), values.end());
+    values.erase(std::unique(values.begin(), values.end()), values.end());
+    return values;
+}
+
 std::string formatAngleToken(double angle_deg) {
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(6) << angle_deg;
@@ -1581,6 +1605,17 @@ SourceRuntimeConfig buildSourceRuntimeConfig(const std::map<std::string, std::st
         runtime.filter_event_id = true;
         runtime.selected_event_id = std::stoi(event_filter_value);
     }
+    const std::string event_filters_value =
+        getString(cfg, "source.filter_event_ids", "");
+    if (!trim(event_filters_value).empty() &&
+        !isDisabledText(event_filters_value)) {
+        runtime.selected_event_ids =
+            parseIntList(event_filters_value, "source.filter_event_ids");
+    }
+    if (runtime.filter_event_id && !runtime.selected_event_ids.empty()) {
+        throw std::runtime_error(
+            "source.filter_event_id and source.filter_event_ids are mutually exclusive");
+    }
     const std::string shower_filter_value = getString(cfg, "source.filter_shower_event_id", "");
     if (!trim(shower_filter_value).empty() && !isDisabledText(shower_filter_value)) {
         runtime.filter_shower_event_id = true;
@@ -1625,6 +1660,7 @@ EventIOPhotonConfig buildEventIOPhotonConfig(const std::map<std::string, std::st
     eventio.selected_telescope_id = runtime_cfg.selected_telescope_id;
     eventio.filter_event_id = runtime_cfg.filter_event_id;
     eventio.selected_event_id = runtime_cfg.selected_event_id;
+    eventio.selected_event_ids = runtime_cfg.selected_event_ids;
     eventio.filter_shower_event_id = runtime_cfg.filter_shower_event_id;
     eventio.selected_shower_event_id = runtime_cfg.selected_shower_event_id;
     eventio.max_shower_events = runtime_cfg.max_shower_events;

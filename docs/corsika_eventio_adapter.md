@@ -155,6 +155,11 @@ source.filter_event_id=100
 source.filter_telescope_id=0
 ```
 
+For matched validation samples, `source.filter_event_ids=100,203,417`
+accepts several output event IDs in one streaming pass. It is mutually
+exclusive with `source.filter_event_id`; duplicates are removed and order does
+not affect the stochastic response.
+
 Many CORSIKA IACT/EventIO photon bunch files store `lambda=0` for Cherenkov
 photon bunches. In that case LACT_sim does not use a fixed 400 nm wavelength by
 default. It samples the missing wavelength from

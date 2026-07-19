@@ -2750,8 +2750,19 @@ void printCorsikaOpticalConfiguration(
                           ? "subtract EventIO telescope position from global photon positions"
                           : "subtract telescope.position_m from global photon positions")
                    : "metadata only; local/relative photon positions are not shifted");
-    printField("filter_telescope_id", "off");
-    printField("filter_event_id", "off");
+    printField("filter_telescope_id",
+               source_runtime_cfg.filter_telescope_id
+                   ? intToString(source_runtime_cfg.selected_telescope_id)
+                   : "off");
+    printField("filter_event_id",
+               source_runtime_cfg.filter_event_id
+                   ? intToString(source_runtime_cfg.selected_event_id)
+                   : "off");
+    printField("filter_event_ids",
+               source_runtime_cfg.selected_event_ids.empty()
+                   ? "off"
+                   : (intToString(source_runtime_cfg.selected_event_ids.size()) +
+                      " selected"));
     printField("filter_shower_event_id",
                source_runtime_cfg.filter_shower_event_id
                    ? intToString(source_runtime_cfg.selected_shower_event_id)

@@ -30,6 +30,7 @@ struct EventIOPhotonConfig {
     int selected_telescope_id = 0;
     bool filter_event_id = false;
     int selected_event_id = 0;
+    std::vector<int> selected_event_ids;
     bool filter_shower_event_id = false;
     int selected_shower_event_id = 0;
     int max_shower_events = 0;
