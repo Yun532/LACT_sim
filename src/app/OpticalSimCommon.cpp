@@ -2147,21 +2147,7 @@ std::unique_ptr<Cone::SquareCone> buildLightCollector(const CameraConfig& cfg,
 
 const CameraPixel* findContainingPixel(const CameraGeometry& camera, double x, double y)
 {
-    const CameraPixel* best = nullptr;
-    double best_r2 = std::numeric_limits<double>::max();
-    for (const auto& pixel : camera.pixels()) {
-        if (!CameraGeometry::contains(pixel, x, y)) {
-            continue;
-        }
-        const double dx = x - pixel.center.x;
-        const double dy = y - pixel.center.y;
-        const double r2 = dx * dx + dy * dy;
-        if (r2 < best_r2) {
-            best_r2 = r2;
-            best = &pixel;
-        }
-    }
-    return best;
+    return camera.findContainingPixelPtr(x, y);
 }
 
 CollectorTraceResult traceLightCollector(const Cone::SquareCone& cone,
