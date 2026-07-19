@@ -108,6 +108,12 @@ if(LACT_HAS_HESSIO)
         target_compile_definitions(run_corsika_trace PRIVATE LACT_HAS_ROOT=1)
         target_link_libraries(run_corsika_trace PRIVATE ROOT::Core ROOT::RIO ROOT::Tree)
     endif()
+
+    add_executable(test_eventio_wavelength
+        apps/test_eventio_wavelength.cpp
+    )
+    target_link_libraries(test_eventio_wavelength PRIVATE simlite_core)
+    add_test(NAME test_eventio_wavelength COMMAND test_eventio_wavelength)
 endif()
 
 add_executable(test_facet_geometry

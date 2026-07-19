@@ -164,7 +164,10 @@ OpticalSurfaceHit OpticalTracer::traceToPlane(const Photon& photon,
     double cosang = std::clamp(std::abs(out_dir.dot(plane.normal.normalized())), 0.0, 1.0);
     double incidence_angle = std::acos(cosang);
     hit.relative_efficiency = best_tile->reflectivity_scale *
-                              eff.total(photon.wavelength_nm, incidence_angle);
+                              (photon.optical_efficiency_preapplied
+                                   ? eff.funnelAcceptance(incidence_angle,
+                                                          photon.wavelength_nm)
+                                   : eff.total(photon.wavelength_nm, incidence_angle));
 
     return hit;
 }
@@ -245,7 +248,10 @@ OpticalSurfaceHit OpticalTracer::traceBackprojectedToPlane(
     double cosang = std::clamp(std::abs(out_dir.dot(plane.normal.normalized())), 0.0, 1.0);
     double incidence_angle = std::acos(cosang);
     hit.relative_efficiency = best_tile->reflectivity_scale *
-                              eff.total(photon.wavelength_nm, incidence_angle);
+                              (photon.optical_efficiency_preapplied
+                                   ? eff.funnelAcceptance(incidence_angle,
+                                                          photon.wavelength_nm)
+                                   : eff.total(photon.wavelength_nm, incidence_angle));
 
     return hit;
 }

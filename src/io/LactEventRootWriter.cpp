@@ -26,6 +26,9 @@ struct OutputEventMetadata {
     double core_x_north_m = 0.0;
     double core_y_west_m = 0.0;
     double azimuth_north_to_east_deg = 0.0;
+    double array_time_offset_ns = 0.0;
+    double area_weight_m2 = 0.0;
+    bool has_explicit_area_weight = false;
     bool found = false;
     bool used_array_offset = false;
 };
@@ -54,8 +57,14 @@ OutputEventMetadata outputEventMetadata(int event_id,
 {
     OutputEventMetadata out;
     out.event_id = event_id;
-    out.shower_event = showerEventFromOutputEvent(event_id, event_id_mode);
-    out.array_id = arrayIdFromOutputEvent(event_id, event_id_mode);
+    const auto identity = metadata.output_event_identity.find(event_id);
+    if (identity != metadata.output_event_identity.end()) {
+        out.shower_event = identity->second.first;
+        out.array_id = identity->second.second;
+    } else {
+        out.shower_event = showerEventFromOutputEvent(event_id, event_id_mode);
+        out.array_id = arrayIdFromOutputEvent(event_id, event_id_mode);
+    }
 
     auto event_it = std::find_if(
         metadata.events.begin(), metadata.events.end(),
@@ -73,12 +82,17 @@ OutputEventMetadata outputEventMetadata(int event_id,
     out.azimuth_north_to_east_deg = event_it->azimuth_north_to_east_deg;
 
     if (auto offsets = metadata.arrayOffsetsForShower(out.shower_event)) {
+        out.array_time_offset_ns = offsets->time_offset_ns;
         const std::size_t offset_index = static_cast<std::size_t>(out.array_id);
         if (out.array_id >= 0 && offset_index < offsets->x_m.size() &&
             offset_index < offsets->y_m.size()) {
             out.core_x_north_m = -offsets->x_m[offset_index];
             out.core_y_west_m = -offsets->y_m[offset_index];
             out.used_array_offset = true;
+        }
+        if (out.array_id >= 0 && offset_index < offsets->weight.size()) {
+            out.area_weight_m2 = offsets->weight[offset_index];
+            out.has_explicit_area_weight = offsets->has_explicit_weights;
         }
     }
     return out;
@@ -711,6 +725,8 @@ struct LactEventRootStreamWriter::Impl {
     double energy_gev = 0.0, theta_deg = 0.0, phi_deg = 0.0;
     double azimuth_north_to_east_deg = 0.0, altitude_deg = 0.0;
     double core_x_north_m = 0.0, core_y_west_m = 0.0, array_rotation_deg = 0.0;
+    double array_time_offset_ns = 0.0, area_weight_m2 = 0.0;
+    bool has_explicit_area_weight = false;
     double h_first_int_m = std::numeric_limits<double>::quiet_NaN();
     double x_max_g_cm2 = std::numeric_limits<double>::quiet_NaN();
     double h_max_m = std::numeric_limits<double>::quiet_NaN();
@@ -904,6 +920,9 @@ struct LactEventRootStreamWriter::Impl {
       corsika_tree->Branch("event_id", &root_event_id);
       corsika_tree->Branch("shower_event_id", &shower_event_id);
       corsika_tree->Branch("array_id", &array_id);
+      corsika_tree->Branch("array_time_offset_ns", &array_time_offset_ns);
+      corsika_tree->Branch("area_weight_m2", &area_weight_m2);
+      corsika_tree->Branch("has_explicit_area_weight", &has_explicit_area_weight);
       corsika_tree->Branch("run_id", &run_id);
       corsika_tree->Branch("primary_type", &primary_type);
       corsika_tree->Branch("energy_gev", &energy_gev);
@@ -1006,6 +1025,9 @@ struct LactEventRootStreamWriter::Impl {
                               source_runtime_cfg.event_id_mode, metadata);
       shower_event_id = event_meta.shower_event;
       array_id = event_meta.array_id;
+      array_time_offset_ns = event_meta.array_time_offset_ns;
+      area_weight_m2 = event_meta.area_weight_m2;
+      has_explicit_area_weight = event_meta.has_explicit_area_weight;
       root_event_id = event_id;
       primary_type = 0;
       energy_gev = event_meta.energy_gev;

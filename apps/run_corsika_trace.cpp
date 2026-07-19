@@ -209,6 +209,9 @@ struct OutputEventMetadata {
     double core_x_north_m = 0.0;
     double core_y_west_m = 0.0;
     double azimuth_north_to_east_deg = 0.0;
+    double array_time_offset_ns = 0.0;
+    double area_weight_m2 = 0.0;
+    bool has_explicit_area_weight = false;
     bool found = false;
     bool used_array_offset = false;
 };
@@ -219,8 +222,14 @@ OutputEventMetadata outputEventMetadata(int event_id,
 {
     OutputEventMetadata out;
     out.event_id = event_id;
-    out.shower_event = showerEventFromOutputEvent(event_id, event_id_mode);
-    out.array_id = arrayIdFromOutputEvent(event_id, event_id_mode);
+    const auto identity = metadata.output_event_identity.find(event_id);
+    if (identity != metadata.output_event_identity.end()) {
+        out.shower_event = identity->second.first;
+        out.array_id = identity->second.second;
+    } else {
+        out.shower_event = showerEventFromOutputEvent(event_id, event_id_mode);
+        out.array_id = arrayIdFromOutputEvent(event_id, event_id_mode);
+    }
 
     auto event_it = std::find_if(
         metadata.events.begin(), metadata.events.end(),
@@ -238,6 +247,7 @@ OutputEventMetadata outputEventMetadata(int event_id,
     out.azimuth_north_to_east_deg = event_it->azimuth_north_to_east_deg;
 
     if (auto offsets = metadata.arrayOffsetsForShower(out.shower_event)) {
+        out.array_time_offset_ns = offsets->time_offset_ns;
         const std::size_t offset_index = static_cast<std::size_t>(out.array_id);
         if (out.array_id >= 0 && offset_index < offsets->x_m.size() &&
             offset_index < offsets->y_m.size()) {
@@ -247,6 +257,10 @@ OutputEventMetadata outputEventMetadata(int event_id,
             out.core_x_north_m = -offsets->x_m[offset_index];
             out.core_y_west_m = -offsets->y_m[offset_index];
             out.used_array_offset = true;
+        }
+        if (out.array_id >= 0 && offset_index < offsets->weight.size()) {
+            out.area_weight_m2 = offsets->weight[offset_index];
+            out.has_explicit_area_weight = offsets->has_explicit_weights;
         }
     }
     return out;
@@ -335,6 +349,15 @@ void applyEventIOWavelengthMetadata(EventIOPhotonConfig& eventio_cfg,
     if (auto range = wavelengthRangeFromInputCard(metadata)) {
         eventio_cfg.missing_wavelength_min_nm = range->min_nm;
         eventio_cfg.missing_wavelength_max_nm = range->max_nm;
+    }
+}
+
+void applyEventIOAtmosphereMetadata(EventIOPhotonConfig& eventio_cfg,
+                                    const EventIOMetadata& metadata)
+{
+    if (std::isfinite(metadata.observation_altitude_m)) {
+        eventio_cfg.observation_altitude_km =
+            metadata.observation_altitude_m * 1.0e-3;
     }
 }
 
@@ -1872,6 +1895,7 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             std::int64_t event_id;
             std::int32_t shower_event_id;
             std::int32_t array_id;
+            std::int32_t has_explicit_area_weight;
             std::int32_t primary_type;
             double energy_gev;
             double theta_deg;
@@ -1880,6 +1904,8 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             double core_x_north_m;
             double core_y_west_m;
             double array_rotation_deg;
+            double array_time_offset_ns;
+            double area_weight_m2;
             double h_first_int_m;
             double x_max_g_cm2;
             double h_max_m;
@@ -1920,24 +1946,21 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                 event_index++,
                 static_cast<std::int64_t>(event_id),
             });
-            const int shower_event =
-                showerEventFromOutputEvent(event_id, source_runtime_cfg.event_id_mode);
-            const int array_id =
-                arrayIdFromOutputEvent(event_id, source_runtime_cfg.event_id_mode);
+            const OutputEventMetadata event_meta = outputEventMetadata(
+                event_id, source_runtime_cfg.event_id_mode, metadata);
+            const int shower_event = event_meta.shower_event;
+            const int array_id = event_meta.array_id;
             auto event_it = std::find_if(
                 metadata.events.begin(), metadata.events.end(),
                 [shower_event](const EventIOEventHeader& event) {
                     return event.shower_event_id == shower_event;
                 });
             if (event_it != metadata.events.end()) {
-                const OutputEventMetadata event_meta =
-                    outputEventMetadata(event_id,
-                                        source_runtime_cfg.event_id_mode,
-                                        metadata);
                 corsika_event_rows.push_back(CorsikaEventRow{
                     static_cast<std::int64_t>(event_id),
                     static_cast<std::int32_t>(shower_event),
                     static_cast<std::int32_t>(array_id),
+                    static_cast<std::int32_t>(event_meta.has_explicit_area_weight),
                     static_cast<std::int32_t>(event_it->primary_type),
                     event_it->energy_gev,
                     event_it->theta_deg,
@@ -1946,6 +1969,8 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                     event_meta.core_x_north_m,
                     event_meta.core_y_west_m,
                     event_it->array_rotation_deg,
+                    event_meta.array_time_offset_ns,
+                    event_meta.area_weight_m2,
                     event_it->h_first_int_m,
                     event_it->x_max_g_cm2,
                     event_it->h_max_m,
@@ -1972,6 +1997,9 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                       HOFFSET(CorsikaEventRow, shower_event_id), H5T_NATIVE_INT32);
             H5Tinsert(corsika_event_type, "array_id",
                       HOFFSET(CorsikaEventRow, array_id), H5T_NATIVE_INT32);
+            H5Tinsert(corsika_event_type, "has_explicit_area_weight",
+                      HOFFSET(CorsikaEventRow, has_explicit_area_weight),
+                      H5T_NATIVE_INT32);
             H5Tinsert(corsika_event_type, "primary_type",
                       HOFFSET(CorsikaEventRow, primary_type), H5T_NATIVE_INT32);
             H5Tinsert(corsika_event_type, "energy_gev",
@@ -1989,6 +2017,10 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                       HOFFSET(CorsikaEventRow, core_y_west_m), H5T_NATIVE_DOUBLE);
             H5Tinsert(corsika_event_type, "array_rotation_deg",
                       HOFFSET(CorsikaEventRow, array_rotation_deg), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "array_time_offset_ns",
+                      HOFFSET(CorsikaEventRow, array_time_offset_ns), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "area_weight_m2",
+                      HOFFSET(CorsikaEventRow, area_weight_m2), H5T_NATIVE_DOUBLE);
             H5Tinsert(corsika_event_type, "h_first_int_m",
                       HOFFSET(CorsikaEventRow, h_first_int_m), H5T_NATIVE_DOUBLE);
             H5Tinsert(corsika_event_type, "x_max_g_cm2",
@@ -2588,12 +2620,11 @@ void printEventSummary(const std::map<SummaryKey, TraceSummary>& summaries,
     std::map<int, EventAggregate> events;
     for (const auto& kv : summaries) {
         const auto& s = kv.second;
-        const int shower_event = showerEventFromOutputEvent(s.event_id, event_id_mode);
-        const int array_id = arrayIdFromOutputEvent(s.event_id, event_id_mode);
+        const auto identity = outputEventMetadata(s.event_id, event_id_mode, metadata);
         auto& e = events[s.event_id];
         e.event_id = s.event_id;
-        e.shower_event = shower_event;
-        e.array_id = array_id;
+        e.shower_event = identity.shower_event;
+        e.array_id = identity.array_id;
         e.output_events.insert(s.event_id);
         e.telescopes.insert(s.telescope_id);
         e.input_bunches += s.input_bunches;
@@ -3281,6 +3312,7 @@ int main(int argc, char** argv) {
         const bool explicit_wavelength_range = hasExplicitMissingWavelengthRange(cfg);
         const bool has_cwavlg = wavelengthRangeFromInputCard(metadata).has_value();
         applyEventIOWavelengthMetadata(eventio_cfg, metadata, cfg);
+        applyEventIOAtmosphereMetadata(eventio_cfg, metadata);
         const std::string missing_wavelength_range_source =
             explicit_wavelength_range ? "cfg"
                                       : (has_cwavlg ? "EventIO input card CWAVLG"
@@ -3576,7 +3608,7 @@ int main(int argc, char** argv) {
             photon.normalizeDirection();
             photon.weight *= bunch.multiplicity;
             const double atmosphere_weight_before = photon.weight;
-            if (atmosphere.enabled()) {
+            if (atmosphere.enabled() && !photon.optical_efficiency_preapplied) {
                 const Vec3 global_dir = sourceDirectionInWorld(
                     raw_bunch, telescope_cfg, source_runtime_cfg.coordinate_frame);
                 const double atmosphere_t =
