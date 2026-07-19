@@ -2062,6 +2062,10 @@ TriggerConfig buildTriggerConfig(const std::map<std::string, std::string>& cfg) 
         getInt(cfg, "trigger.array_multiplicity", trigger.array_multiplicity);
     trigger.coincidence_window_ns =
         getDouble(cfg, "trigger.coincidence_window_ns", trigger.coincidence_window_ns);
+    trigger.camera_coincidence_window_ns = getDouble(
+        cfg, "trigger.camera_coincidence_window_ns", trigger.coincidence_window_ns);
+    trigger.array_coincidence_window_ns = getDouble(
+        cfg, "trigger.array_coincidence_window_ns", trigger.coincidence_window_ns);
 
     if (!std::isfinite(trigger.pixel_threshold_pe) || trigger.pixel_threshold_pe < 0.0) {
         throw std::runtime_error("trigger.pixel_threshold_pe must be finite and >= 0");
@@ -2075,6 +2079,16 @@ TriggerConfig buildTriggerConfig(const std::map<std::string, std::string>& cfg) 
     if (!std::isfinite(trigger.coincidence_window_ns) ||
         trigger.coincidence_window_ns < 0.0) {
         throw std::runtime_error("trigger.coincidence_window_ns must be finite and >= 0");
+    }
+    if (!std::isfinite(trigger.camera_coincidence_window_ns) ||
+        trigger.camera_coincidence_window_ns < 0.0) {
+        throw std::runtime_error(
+            "trigger.camera_coincidence_window_ns must be finite and >= 0");
+    }
+    if (!std::isfinite(trigger.array_coincidence_window_ns) ||
+        trigger.array_coincidence_window_ns < 0.0) {
+        throw std::runtime_error(
+            "trigger.array_coincidence_window_ns must be finite and >= 0");
     }
     return trigger;
 }

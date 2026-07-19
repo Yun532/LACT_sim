@@ -76,6 +76,15 @@ int main()
     ok &= check(!trigger_default.enabled, "trigger should default to disabled");
     ok &= check(std::abs(trigger_default.pixel_threshold_pe - 5.0) < 1e-12,
                 "trigger default threshold");
+    const auto split_windows = buildTriggerConfig({
+        {"trigger.coincidence_window_ns", "50"},
+        {"trigger.camera_coincidence_window_ns", "8"},
+        {"trigger.array_coincidence_window_ns", "24"},
+    });
+    ok &= check(std::abs(split_windows.camera_coincidence_window_ns - 8.0) < 1e-12,
+                "camera coincidence window parsed");
+    ok &= check(std::abs(split_windows.array_coincidence_window_ns - 24.0) < 1e-12,
+                "array coincidence window parsed");
 
     std::map<std::string, std::string> trigger_cfg{
         {"trigger.enabled", "true"},

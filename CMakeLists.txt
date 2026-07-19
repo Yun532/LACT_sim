@@ -67,6 +67,7 @@ add_library(simlite_core
     src/app/OpticalSimCommon.cpp
     src/app/PhotonResponseSampler.cpp
     src/app/TelescopeOpticsCache.cpp
+    src/app/TriggerResponse.cpp
     src/geometry/FacetFactory.cpp
     src/optics/AtmosphereTransmission.cpp
     src/optics/OpticalTracer.cpp
@@ -102,6 +103,7 @@ if(LACT_HAS_HESSIO)
     set_target_properties(run_corsika_trace PROPERTIES NO_SYSTEM_FROM_IMPORTED TRUE)
     target_link_libraries(run_corsika_trace PRIVATE simlite_core)
     if(LACT_HAS_HDF5)
+        target_sources(run_corsika_trace PRIVATE src/io/Hdf5WaveformWriter.cpp)
         target_compile_definitions(run_corsika_trace PRIVATE LACT_HAS_HDF5=1)
         target_link_libraries(run_corsika_trace PRIVATE ${HDF5_LIBRARIES})
     endif()
@@ -197,6 +199,12 @@ add_executable(test_photon_response_sampler
 )
 target_link_libraries(test_photon_response_sampler PRIVATE simlite_core)
 add_test(NAME test_photon_response_sampler COMMAND test_photon_response_sampler)
+
+add_executable(test_trigger_response
+    apps/test_trigger_response.cpp
+)
+target_link_libraries(test_trigger_response PRIVATE simlite_core)
+add_test(NAME test_trigger_response COMMAND test_trigger_response)
 
 add_executable(test_efficiency_curves
     apps/test_efficiency_curves.cpp

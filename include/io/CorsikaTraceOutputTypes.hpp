@@ -17,6 +17,7 @@ struct CorsikaTraceOutputConfig {
     std::string lact_profile = "image_pe";
     std::string format = "hdf5";
     std::string hdf5_storage = "dense";
+    std::string hdf5_waveform_storage = "sparse";
     bool hdf5_write_components = false;
     bool hdf5_write_waveforms = true;
     bool lact_root_write_components = false;

@@ -172,6 +172,8 @@ struct TriggerConfig {
     int camera_multiplicity = 3;
     int array_multiplicity = 2;
     double coincidence_window_ns = 50.0;
+    double camera_coincidence_window_ns = 50.0;
+    double array_coincidence_window_ns = 50.0;
 };
 
 class ElectronicsResponse {

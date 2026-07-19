@@ -1,5 +1,7 @@
 #include "io/LactEventRootWriter.hpp"
 
+#include "app/TriggerResponse.hpp"
+
 #include <TFile.h>
 #include <TTree.h>
 
@@ -268,7 +270,8 @@ LactRootPreparedData prepareLactRootObservations(
         bool has_waveform = false;
     };
     std::vector<PreparedObservation> candidates;
-    std::map<int, int> triggered_telescopes_by_event;
+    std::map<int, std::vector<TelescopeTriggerTime>>
+        telescope_trigger_times_by_event;
     candidates.reserve(image_keys.size());
     prepared.observations.reserve(image_keys.size());
     prepared.waveforms.reserve(write_time_series ? image_keys.size() : 0);
@@ -371,11 +374,11 @@ LactRootPreparedData prepareLactRootObservations(
             }
 
             const std::size_t trigger_window_bins =
-                trigger_cfg.coincidence_window_ns > 0.0
+                trigger_cfg.camera_coincidence_window_ns > 0.0
                     ? std::min(n_bins, std::max<std::size_t>(
                                       1,
                                       static_cast<std::size_t>(std::ceil(
-                                          trigger_cfg.coincidence_window_ns /
+                                          trigger_cfg.camera_coincidence_window_ns /
                                           waveform_cfg.time_bin_width_ns))))
                     : n_bins;
             const auto waveform_pe_at = [&](std::size_t col, std::size_t bin) {
@@ -566,14 +569,16 @@ LactRootPreparedData prepareLactRootObservations(
                 obs.time_peak_ns =
                     reference_time_ns + prepared.time_centers_ns[camera_peak_bin];
             }
-            const auto final_trigger = find_best_trigger_window(0, n_bins - 1);
-            obs.n_pixels_above_threshold = final_trigger.first;
-            if (!std::isfinite(trigger_time_ns) && final_trigger.first > 0) {
-                const std::size_t trigger_bin = std::min(
-                    n_bins - 1,
-                    final_trigger.second + trigger_window_bins / 2);
-                trigger_time_ns = reference_time_ns + prepared.time_centers_ns[trigger_bin];
-            }
+            const auto final_trigger = evaluateBinnedPeTrigger(
+                n_pixels,
+                n_bins,
+                waveform_cfg.time_bin_width_ns,
+                reference_time_ns + prepared.time_centers_ns.front(),
+                trigger_cfg,
+                waveform_pe_at);
+            obs.n_pixels_above_threshold =
+                final_trigger.n_pixels_above_threshold;
+            trigger_time_ns = final_trigger.trigger_time_ns;
         } else {
             const PixelKey begin_key{event_id, telescope_id, std::numeric_limits<int>::min()};
             const PixelKey end_key{event_id, telescope_id, std::numeric_limits<int>::max()};
@@ -643,8 +648,10 @@ LactRootPreparedData prepareLactRootObservations(
         if (obs.triggered) {
             obs.trigger_time_ns =
                 std::isfinite(trigger_time_ns) ? trigger_time_ns :
-                (std::isfinite(obs.time_peak_ns) ? obs.time_peak_ns : obs.time_mean_ns);
-            triggered_telescopes_by_event[event_id] += 1;
+                (std::isfinite(obs.time_peak_ns) ? obs.time_peak_ns :
+                 (std::isfinite(obs.time_mean_ns) ? obs.time_mean_ns : 0.0));
+            telescope_trigger_times_by_event[event_id].push_back(
+                TelescopeTriggerTime{telescope_id, obs.trigger_time_ns});
         }
 
         PreparedObservation candidate;
@@ -677,12 +684,23 @@ LactRootPreparedData prepareLactRootObservations(
         candidates.push_back(std::move(candidate));
     }
 
+    std::map<int, ArrayTriggerDecision> array_trigger_decisions;
+    for (const auto& item : telescope_trigger_times_by_event) {
+        array_trigger_decisions[item.first] =
+            evaluateArrayTrigger(item.second, trigger_cfg);
+    }
+
     for (auto& candidate : candidates) {
         if (output_cfg.save_only_triggered && trigger_cfg.enabled) {
-            const int n_triggered =
-                triggered_telescopes_by_event[candidate.observation.event_id];
-            if (n_triggered < trigger_cfg.array_multiplicity ||
-                !candidate.observation.triggered) {
+            const auto& array_decision =
+                array_trigger_decisions[candidate.observation.event_id];
+            const bool telescope_is_coincident = std::binary_search(
+                array_decision.coincident_telescope_ids.begin(),
+                array_decision.coincident_telescope_ids.end(),
+                candidate.observation.telescope_id);
+            if (!array_decision.triggered ||
+                !candidate.observation.triggered ||
+                !telescope_is_coincident) {
                 continue;
             }
         }
