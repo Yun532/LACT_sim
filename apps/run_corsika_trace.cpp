@@ -1,4 +1,5 @@
 #include "app/OpticalSimCommon.hpp"
+#include "app/TelescopeOpticsCache.hpp"
 #include "io/CorsikaTraceOutputTypes.hpp"
 
 #ifdef LACT_HAS_HDF5
@@ -3226,11 +3227,10 @@ int main(int argc, char** argv) {
             throw std::runtime_error("source.eventio_path or corsika.input is required");
         }
         TelescopeConfig telescope_cfg = buildTelescopeConfig(cfg);
-        std::vector<MirrorFacet> facets = buildFacetsFromConfig(cfg);
+        std::vector<MirrorFacet> nominal_facets = buildFacetsFromConfig(cfg);
         ErrorConfig error_cfg = buildErrorConfig(cfg);
         ObstructionMask obstruction = buildObstructionMask(cfg);
-        applyStructuralDeformation(facets, error_cfg, telescope_cfg);
-        applyFacetErrors(facets, error_cfg);
+        applyStructuralDeformation(nominal_facets, error_cfg, telescope_cfg);
         OutputPlane plane = buildOutputPlane(cfg);
         TelescopeFrame telescope_frame = buildTelescopeFrame(telescope_cfg);
         CameraConfig camera_cfg = buildCameraConfig(cfg);
@@ -3241,7 +3241,8 @@ int main(int argc, char** argv) {
         TriggerConfig trigger_cfg = buildTriggerConfig(cfg);
         CameraGeometry camera = buildCameraGeometry(camera_cfg);
         auto light_collector = buildLightCollector(camera_cfg, camera);
-        MirrorLayout mirrors = makeMirrorLayoutFromFacets(facets);
+        TelescopeOpticsCache telescope_optics(nominal_facets, error_cfg);
+        const MirrorLayout& mirrors = telescope_optics.layoutFor(telescope_cfg.id);
         OpticalEfficiencyConfig efficiency_cfg = buildEfficiencyConfig(cfg);
         resolveNsbSpectralRate(nsb_cfg, efficiency_cfg, camera, telescope_cfg);
         AtmosphereTransmissionConfig atmosphere_cfg = buildAtmosphereTransmissionConfig(cfg);
@@ -3400,7 +3401,7 @@ int main(int argc, char** argv) {
                 telescope_cfg,
                 metadata,
                 camera,
-                facets,
+                nominal_facets,
                 nsb_cfg,
                 trigger_cfg);
         }
@@ -3610,6 +3611,8 @@ int main(int argc, char** argv) {
             summary.telescope_id = bunch.telescope_id;
             summary.input_bunches += 1;
             summary.input_photons += bunch.multiplicity;
+            const MirrorLayout& telescope_mirrors =
+                telescope_optics.layoutFor(bunch.telescope_id);
 
             Photon photon = bunch.photon;
             photon.normalizeDirection();
@@ -3646,8 +3649,10 @@ int main(int argc, char** argv) {
             }
             const bool backproject_this_bunch = bunch.eventio_2d && eventio_2d_backproject;
             OpticalSurfaceHit hit = backproject_this_bunch
-                                        ? tracer.traceBackprojectedToPlane(photon, mirrors, plane, eff)
-                                        : tracer.traceToPlane(photon, mirrors, plane, eff);
+                                        ? tracer.traceBackprojectedToPlane(
+                                              photon, telescope_mirrors, plane, eff)
+                                        : tracer.traceToPlane(
+                                              photon, telescope_mirrors, plane, eff);
             if (profile_cfg.enabled) {
                 addElapsed(profile_stats, &ProfileStats::trace_to_plane_s, t_step);
             }
@@ -3812,7 +3817,7 @@ int main(int argc, char** argv) {
                                  telescope_cfg,
                                  metadata,
                                  camera,
-                                 facets,
+                                 nominal_facets,
                                  sipm_cfg,
                                  electronics_cfg,
                                  efficiency_cfg,

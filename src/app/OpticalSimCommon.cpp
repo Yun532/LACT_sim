@@ -2906,10 +2906,15 @@ void applyStructuralDeformation(std::vector<MirrorFacet>& facets,
 }
 
 void applyFacetErrors(std::vector<MirrorFacet>& facets, const ErrorConfig& error) {
+    const bool has_per_facet_misalignment =
+        std::any_of(facets.begin(), facets.end(), [](const MirrorFacet& facet) {
+            return facet.misalign_sigma_rad > 0.0;
+        });
     if (error.facet_radial_position_sigma_m == 0.0 &&
         error.facet_normal_sigma_deg == 0.0 &&
         error.radius_of_curvature_sigma_m == 0.0 &&
-        error.reflectivity_scale_sigma == 0.0) {
+        error.reflectivity_scale_sigma == 0.0 &&
+        !has_per_facet_misalignment) {
         return;
     }
 
@@ -2926,8 +2931,11 @@ void applyFacetErrors(std::vector<MirrorFacet>& facets, const ErrorConfig& error
             facet.center += ideal_normal * offset;
         }
 
-        if (normal_sigma_rad > 0.0) {
-            facet.normal = perturbVectorOnSphere(ideal_normal, normal_sigma_rad, rng);
+        const double facet_normal_sigma_rad =
+            std::hypot(normal_sigma_rad, facet.misalign_sigma_rad);
+        if (facet_normal_sigma_rad > 0.0) {
+            facet.normal = perturbVectorOnSphere(
+                ideal_normal, facet_normal_sigma_rad, rng);
         }
 
         if (error.radius_of_curvature_sigma_m > 0.0 &&
@@ -2939,7 +2947,7 @@ void applyFacetErrors(std::vector<MirrorFacet>& facets, const ErrorConfig& error
 
         if (error.reflectivity_scale_sigma > 0.0) {
             double scale = 1.0 + error.reflectivity_scale_sigma * unit_normal(rng);
-            facet.reflectivity_scale = std::max(0.0, scale);
+            facet.reflectivity_scale *= std::max(0.0, scale);
         }
     }
 }

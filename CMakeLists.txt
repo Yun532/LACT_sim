@@ -65,6 +65,7 @@ add_library(simlite_core
     src/io/PhotonCsvSource.cpp
     src/io/MirrorFacetCsvReader.cpp
     src/app/OpticalSimCommon.cpp
+    src/app/TelescopeOpticsCache.cpp
     src/geometry/FacetFactory.cpp
     src/optics/AtmosphereTransmission.cpp
     src/optics/OpticalTracer.cpp
@@ -183,6 +184,12 @@ add_executable(test_detector_response_config
 )
 target_link_libraries(test_detector_response_config PRIVATE simlite_core)
 add_test(NAME test_detector_response_config COMMAND test_detector_response_config)
+
+add_executable(test_telescope_optics
+    apps/test_telescope_optics.cpp
+)
+target_link_libraries(test_telescope_optics PRIVATE simlite_core)
+add_test(NAME test_telescope_optics COMMAND test_telescope_optics)
 
 add_executable(test_efficiency_curves
     apps/test_efficiency_curves.cpp
