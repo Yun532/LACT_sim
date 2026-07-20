@@ -1,4 +1,5 @@
 #include "app/OpticalSimCommon.hpp"
+#include "app/NsbResponseSampler.hpp"
 #include "app/PhotonResponseSampler.hpp"
 #include "app/TelescopeOpticsCache.hpp"
 #include "app/TriggerResponse.hpp"
@@ -1309,11 +1310,15 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                                      H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
         writeStringAttribute(nsb_group, "enabled", nsb_cfg.enabled ? "true" : "false");
         writeStringAttribute(nsb_group, "model", nsb_cfg.model);
+        writeStringAttribute(nsb_group, "spatial_model", nsb_cfg.spatial_model);
         writeStringAttribute(nsb_group, "rate_pe_per_ns_per_pixel",
                              doubleToString(nsb_cfg.rate_pe_per_ns_per_pixel));
         writeStringAttribute(nsb_group, "window_ns", doubleToString(nsb_cfg.window_ns));
         writeStringAttribute(nsb_group, "seed", intToString(nsb_cfg.seed));
         writeStringAttribute(nsb_group, "spectrum_csv", nsb_cfg.spectrum_csv);
+        writeStringAttribute(nsb_group, "pixel_scale_csv", nsb_cfg.pixel_scale_csv);
+        writeStringAttribute(nsb_group, "pixel_scale_rows",
+                             intToString(nsb_cfg.pixel_relative_scale.size()));
         writeStringAttribute(nsb_group, "spectrum_unit", nsb_cfg.spectrum_unit);
         writeStringAttribute(nsb_group, "effective_area_m2",
                              doubleToString(nsb_cfg.effective_area_m2));
@@ -1543,7 +1548,11 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         };
         std::vector<SparsePixelRow> sparse_rows;
         std::vector<ImageIndexRow> image_rows;
+        std::vector<double> image_time_mean_exact_ns;
+        std::vector<double> image_time_first_exact_ns;
         image_rows.reserve(image_keys.size());
+        image_time_mean_exact_ns.reserve(image_keys.size());
+        image_time_first_exact_ns.reserve(image_keys.size());
 
         std::int32_t image_index = 0;
         for (const auto& key : image_keys) {
@@ -1582,6 +1591,8 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             float mean = 0.0f;
             float rms = 0.0f;
             float first = 0.0f;
+            double exact_mean = std::numeric_limits<double>::quiet_NaN();
+            double exact_first = std::numeric_limits<double>::quiet_NaN();
             auto summary_it = summaries.find(key);
             if (summary_it != summaries.end()) {
                 const auto& s = summary_it->second;
@@ -1589,11 +1600,13 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                 total_pe = s.weighted_signal;
                 total_photons = static_cast<double>(s.hit_camera);
                 if (std::isfinite(s.first_cherenkov_time_ns)) {
+                    exact_first = s.first_cherenkov_time_ns;
                     first = static_cast<float>(s.first_cherenkov_time_ns);
                 }
                 if (s.weighted_signal > 0.0) {
                     const double m = s.weighted_time_sum / s.weighted_signal;
                     const double v = std::max(0.0, s.weighted_time2_sum / s.weighted_signal - m * m);
+                    exact_mean = m;
                     mean = static_cast<float>(m);
                     rms = static_cast<float>(std::sqrt(v));
                 }
@@ -1613,9 +1626,12 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                 rms,
                 first,
             });
+            image_time_mean_exact_ns.push_back(exact_mean);
+            image_time_first_exact_ns.push_back(exact_first);
         }
 
         std::vector<std::int32_t> pixel_id_axis;
+        std::vector<int> nsb_pixel_ids;
         std::map<std::int32_t, std::size_t> pixel_to_col;
         std::vector<float> dense_signal;
         std::vector<float> dense_pe;
@@ -1628,9 +1644,81 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         const bool have_camera_axis = !camera_rows.empty();
         if (have_camera_axis) {
             pixel_id_axis.reserve(camera_rows.size());
+            nsb_pixel_ids.reserve(camera_rows.size());
             for (std::size_t i = 0; i < camera_rows.size(); ++i) {
                 pixel_id_axis.push_back(camera_rows[i].pixel_id);
+                nsb_pixel_ids.push_back(camera_rows[i].pixel_id);
                 pixel_to_col[camera_rows[i].pixel_id] = i;
+            }
+        }
+
+        // A p.e. waveform defines the camera integration interval.  Keep one
+        // canonical, time-windowed Cherenkov image so HDF5 dense/sparse images,
+        // waveforms, and ROOT all describe the same p.e. population.
+        const bool image_from_pe_waveform =
+            waveform_cfg.enabled && waveform_cfg.source == "pe" &&
+            have_camera_axis;
+        std::vector<float> windowed_cherenkov_pe;
+        std::map<std::size_t, float> sparse_windowed_cherenkov_pe;
+        if (image_from_pe_waveform) {
+            const std::size_t n_images = image_rows.size();
+            const std::size_t n_pixels = camera_rows.size();
+            const std::size_t n_bins = waveformBinCount(waveform_cfg);
+            if (have_dense_images) {
+                windowed_cherenkov_pe.assign(n_images * n_pixels, 0.0f);
+            }
+            std::map<std::pair<int, int>, std::size_t> row_by_key;
+            for (const auto& image : image_rows) {
+                row_by_key[{static_cast<int>(image.event_id),
+                            static_cast<int>(image.telescope_id)}] =
+                    static_cast<std::size_t>(image.image_index);
+            }
+            auto add_windowed_pe = [&](int event_id, int telescope_id,
+                                       int pixel_id, int bin, double pe) {
+                const auto row = row_by_key.find({event_id, telescope_id});
+                const auto col = pixel_to_col.find(pixel_id);
+                if (row == row_by_key.end() || col == pixel_to_col.end() ||
+                    bin < 0 || static_cast<std::size_t>(bin) >= n_bins ||
+                    pe == 0.0) {
+                    return;
+                }
+                const std::size_t flat = row->second * n_pixels + col->second;
+                if (have_dense_images) {
+                    windowed_cherenkov_pe[flat] += static_cast<float>(pe);
+                } else {
+                    sparse_windowed_cherenkov_pe[flat] +=
+                        static_cast<float>(pe);
+                }
+            };
+            if (waveformUsesImageReference(waveform_cfg)) {
+                for (const auto& hit : raw_waveform_hits) {
+                    const auto row = row_by_key.find(
+                        {hit.event_id, hit.telescope_id});
+                    if (row == row_by_key.end()) continue;
+                    const auto& image = image_rows[row->second];
+                    double reference_time_ns = 0.0;
+                    if (waveform_cfg.time_reference == "image_first" &&
+                        std::isfinite(image_time_first_exact_ns[row->second])) {
+                        reference_time_ns =
+                            image_time_first_exact_ns[row->second];
+                    } else if (waveform_cfg.time_reference == "image_mean" &&
+                               std::isfinite(image_time_mean_exact_ns[row->second])) {
+                        reference_time_ns =
+                            image_time_mean_exact_ns[row->second];
+                    }
+                    add_windowed_pe(
+                        hit.event_id, hit.telescope_id, hit.pixel_id,
+                        waveformBinForTime(
+                            waveform_cfg, hit.time_ns - reference_time_ns),
+                        hit.pe);
+                }
+            } else {
+                for (const auto& item : waveforms) {
+                    const auto& value = item.second;
+                    add_windowed_pe(
+                        value.event_id, value.telescope_id, value.pixel_id,
+                        value.time_bin, value.pe);
+                }
             }
         }
 
@@ -1665,6 +1753,11 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                 }
             }
 
+            if (image_from_pe_waveform) {
+                dense_pe = windowed_cherenkov_pe;
+                dense_signal = windowed_cherenkov_pe;
+            }
+
             dense_cherenkov_pe = dense_pe;
             dense_nsb_pe.assign(n_images * n_pixels, 0.0f);
             if (nsb_cfg.enabled && nsb_cfg.rate_pe_per_ns_per_pixel > 0.0 &&
@@ -1674,36 +1767,41 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                     for (const auto& image : image_rows) {
                         const std::size_t row =
                             static_cast<std::size_t>(image.image_index);
-                        generateTimeBinnedNsbPe(
+                        const auto realization = generateNsbRealization(
                             nsb_cfg,
-                            waveform_cfg,
                             static_cast<int>(image.event_id),
                             static_cast<int>(image.telescope_id),
-                            n_pixels,
+                            nsb_pixel_ids,
                             n_bins,
-                            [&](std::size_t col, std::size_t, float nsb_pe) {
-                                const std::size_t index = row * n_pixels + col;
-                                dense_nsb_pe[index] += nsb_pe;
-                                dense_pe[index] += nsb_pe;
-                                dense_signal[index] += nsb_pe;
-                            });
+                            waveform_cfg.time_bin_width_ns);
+                        for (std::size_t col = 0; col < n_pixels; ++col) {
+                            const float nsb_pe =
+                                realization.integrated_pe_by_pixel[col];
+                            const std::size_t index = row * n_pixels + col;
+                            dense_nsb_pe[index] += nsb_pe;
+                            dense_pe[index] += nsb_pe;
+                            dense_signal[index] += nsb_pe;
+                        }
                     }
                 } else {
                     for (const auto& image : image_rows) {
                         const std::size_t row =
                             static_cast<std::size_t>(image.image_index);
-                        generateIntegratedNsbPe(
+                        const auto realization = generateNsbRealization(
                             nsb_cfg,
                             static_cast<int>(image.event_id),
                             static_cast<int>(image.telescope_id),
-                            n_pixels,
-                            nsb_cfg.window_ns,
-                            [&](std::size_t col, float nsb_pe) {
-                                const std::size_t i = row * n_pixels + col;
-                                dense_nsb_pe[i] = nsb_pe;
-                                dense_pe[i] += nsb_pe;
-                                dense_signal[i] += nsb_pe;
-                            });
+                            nsb_pixel_ids,
+                            1,
+                            nsb_cfg.window_ns);
+                        for (std::size_t col = 0; col < n_pixels; ++col) {
+                            const float nsb_pe =
+                                realization.integrated_pe_by_pixel[col];
+                            const std::size_t i = row * n_pixels + col;
+                            dense_nsb_pe[i] = nsb_pe;
+                            dense_pe[i] += nsb_pe;
+                            dense_signal[i] += nsb_pe;
+                        }
                     }
                 }
             }
@@ -1720,6 +1818,92 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                 image.total_pe = total_pe;
                 image.total_signal = total_signal;
             }
+        }
+
+        if (write_sparse && nsb_cfg.enabled &&
+            nsb_cfg.rate_pe_per_ns_per_pixel > 0.0 && have_camera_axis) {
+            std::vector<SparsePixelRow> nsb_sparse_rows;
+            nsb_sparse_rows.reserve(sparse_rows.size());
+            const bool nsb_time_binned =
+                waveform_cfg.enabled && waveform_cfg.source == "pe";
+            const std::size_t nsb_bins =
+                nsb_time_binned ? waveformBinCount(waveform_cfg) : 1;
+            const double nsb_bin_width_ns =
+                nsb_time_binned ? waveform_cfg.time_bin_width_ns : nsb_cfg.window_ns;
+            for (auto& image : image_rows) {
+                std::map<int, SparsePixelRow> by_pixel;
+                const std::int64_t begin = image.start;
+                const std::int64_t end = image.start + image.count;
+                for (std::int64_t i = begin; i < end; ++i) {
+                    const auto& row = sparse_rows[static_cast<std::size_t>(i)];
+                    by_pixel[row.pixel_id] = row;
+                }
+                if (image_from_pe_waveform) {
+                    const std::size_t image_row =
+                        static_cast<std::size_t>(image.image_index);
+                    for (auto& item : by_pixel) {
+                        item.second.pe = 0.0f;
+                        item.second.signal = 0.0f;
+                    }
+                    const std::size_t n_pixels = nsb_pixel_ids.size();
+                    if (have_dense_images) {
+                        for (std::size_t col = 0; col < n_pixels; ++col) {
+                            const float pe = windowed_cherenkov_pe[
+                                image_row * n_pixels + col];
+                            if (pe <= 0.0f) continue;
+                            auto& row = by_pixel[nsb_pixel_ids[col]];
+                            row.pixel_id =
+                                static_cast<std::int32_t>(nsb_pixel_ids[col]);
+                            row.pe = pe;
+                            row.signal = pe;
+                        }
+                    } else {
+                        const auto begin = sparse_windowed_cherenkov_pe.lower_bound(
+                            image_row * n_pixels);
+                        const auto end = sparse_windowed_cherenkov_pe.lower_bound(
+                            (image_row + 1) * n_pixels);
+                        for (auto it = begin; it != end; ++it) {
+                            const std::size_t col = it->first % n_pixels;
+                            auto& row = by_pixel[nsb_pixel_ids[col]];
+                            row.pixel_id =
+                                static_cast<std::int32_t>(nsb_pixel_ids[col]);
+                            row.pe = it->second;
+                            row.signal = it->second;
+                        }
+                    }
+                }
+                const auto realization = generateNsbRealization(
+                    nsb_cfg,
+                    static_cast<int>(image.event_id),
+                    static_cast<int>(image.telescope_id),
+                    nsb_pixel_ids,
+                    nsb_bins,
+                    nsb_bin_width_ns);
+                double added_nsb_pe = 0.0;
+                for (std::size_t col = 0; col < realization.n_pixels; ++col) {
+                    const float nsb_pe = realization.integrated_pe_by_pixel[col];
+                    if (nsb_pe <= 0.0f) continue;
+                    auto& row = by_pixel[nsb_pixel_ids[col]];
+                    row.pixel_id = static_cast<std::int32_t>(nsb_pixel_ids[col]);
+                    row.pe += nsb_pe;
+                    row.signal += nsb_pe;
+                    added_nsb_pe += nsb_pe;
+                }
+                image.start = static_cast<std::int64_t>(nsb_sparse_rows.size());
+                for (const auto& item : by_pixel) {
+                    if (item.second.pe > 0.0f || item.second.signal > 0.0f ||
+                        item.second.photon_count > 0) {
+                        nsb_sparse_rows.push_back(item.second);
+                    }
+                }
+                image.count = static_cast<std::int32_t>(
+                    static_cast<std::int64_t>(nsb_sparse_rows.size()) - image.start);
+                if (!have_dense_images) {
+                    image.total_pe += added_nsb_pe;
+                    image.total_signal += added_nsb_pe;
+                }
+            }
+            sparse_rows.swap(nsb_sparse_rows);
         }
 
         struct TelescopeTriggerRow {
@@ -1757,12 +1941,14 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                 trigger_bins = waveformBinCount(waveform_cfg);
                 trigger_bin_width_ns = waveform_cfg.time_bin_width_ns;
                 double reference_time_ns = 0.0;
+                const std::size_t image_row =
+                    static_cast<std::size_t>(image.image_index);
                 if (waveform_cfg.time_reference == "image_first" &&
-                    std::isfinite(image.time_first_ns)) {
-                    reference_time_ns = image.time_first_ns;
+                    std::isfinite(image_time_first_exact_ns[image_row])) {
+                    reference_time_ns = image_time_first_exact_ns[image_row];
                 } else if (waveform_cfg.time_reference == "image_mean" &&
-                           std::isfinite(image.time_mean_ns)) {
-                    reference_time_ns = image.time_mean_ns;
+                           std::isfinite(image_time_mean_exact_ns[image_row])) {
+                    reference_time_ns = image_time_mean_exact_ns[image_row];
                 }
                 first_trigger_bin_center_ns =
                     reference_time_ns + waveform_cfg.time_window_start_ns +
@@ -1806,22 +1992,21 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                             it->second.pixel_id, it->second.time_bin, it->second.pe);
                     }
                 }
-                pe_at = [&, event_id = static_cast<int>(image.event_id),
-                         telescope_id = static_cast<int>(image.telescope_id)](
-                            std::size_t col, std::size_t bin) {
+                const auto trigger_nsb = generateNsbRealization(
+                    nsb_cfg,
+                    static_cast<int>(image.event_id),
+                    static_cast<int>(image.telescope_id),
+                    nsb_pixel_ids,
+                    trigger_bins,
+                    trigger_bin_width_ns);
+                for (const auto& sample : trigger_nsb.samples) {
+                    trigger_waveform_pe[
+                        sample.pixel_col * trigger_bins + sample.time_bin] += sample.pe;
+                }
+                pe_at = [&](std::size_t col, std::size_t bin) {
                     const auto found = trigger_waveform_pe.find(
                         col * trigger_bins + bin);
-                    const double cherenkov_pe =
-                        found == trigger_waveform_pe.end() ? 0.0 : found->second;
-                    return cherenkov_pe + sampleTimeBinnedNsbPeCell(
-                        nsb_cfg,
-                        waveform_cfg,
-                        event_id,
-                        telescope_id,
-                        trigger_pixels,
-                        trigger_bins,
-                        col,
-                        bin);
+                    return found == trigger_waveform_pe.end() ? 0.0 : found->second;
                 };
             } else if (have_dense_images) {
                 const std::size_t row = static_cast<std::size_t>(image.image_index);
@@ -2335,8 +2520,10 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                     image.image_index,
                     static_cast<int>(image.event_id),
                     static_cast<int>(image.telescope_id),
-                    static_cast<double>(image.time_first_ns),
-                    static_cast<double>(image.time_mean_ns),
+                    image_time_first_exact_ns[
+                        static_cast<std::size_t>(image.image_index)],
+                    image_time_mean_exact_ns[
+                        static_cast<std::size_t>(image.image_index)],
                 });
             }
             writeHdf5Waveforms(file,
@@ -2912,10 +3099,16 @@ void printCorsikaOpticalConfiguration(
     printSection("NSB");
     printField("enabled", nsb_cfg.enabled ? "true" : "false");
     printField("model", nsb_cfg.model);
+    printField("spatial_model", nsb_cfg.spatial_model);
     printField("rate_pe_per_ns_per_pixel",
                doubleToString(nsb_cfg.rate_pe_per_ns_per_pixel));
     printField("window_ns", doubleToString(nsb_cfg.window_ns));
     printField("seed", intToString(nsb_cfg.seed));
+    if (nsb_cfg.spatial_model == "pixel_scale") {
+        printField("pixel_scale_csv", nsb_cfg.pixel_scale_csv);
+        printField("pixel_scale_rows",
+                   intToString(nsb_cfg.pixel_relative_scale.size()));
+    }
     if (nsb_cfg.model == "spectral_flux") {
         printField("spectrum_csv", nsb_cfg.spectrum_csv);
         printField("spectrum_unit", nsb_cfg.spectrum_unit);

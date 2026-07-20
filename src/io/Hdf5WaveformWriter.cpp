@@ -1,5 +1,7 @@
 #include "io/Hdf5WaveformWriter.hpp"
 
+#include "app/NsbResponseSampler.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -158,6 +160,8 @@ void writeHdf5Waveforms(
     const std::size_t n_images = images.size();
     const std::size_t n_pixels = pixel_id_axis.size();
     const std::size_t n_bins = binCount(waveform);
+    const std::vector<int> nsb_pixel_ids(
+        pixel_id_axis.begin(), pixel_id_axis.end());
 
     std::vector<double> time_edges(n_bins + 1, 0.0);
     std::vector<double> time_centers(n_bins, 0.0);
@@ -257,12 +261,13 @@ void writeHdf5Waveforms(
     if (waveform.source == "pe" && nsb.enabled &&
         nsb.rate_pe_per_ns_per_pixel > 0.0) {
         for (std::size_t row = 0; row < images.size(); ++row) {
-            generateTimeBinnedNsbPe(
-                nsb, waveform, images[row].event_id, images[row].telescope_id,
-                n_pixels, n_bins,
-                [&](std::size_t col, std::size_t bin, float pe) {
-                    addSample(row, col, bin, 0, pe, 0.0f, pe);
-                });
+            const auto realization = generateNsbRealization(
+                nsb, images[row].event_id, images[row].telescope_id,
+                nsb_pixel_ids, n_bins, waveform.time_bin_width_ns);
+            for (const auto& sample : realization.samples) {
+                addSample(row, sample.pixel_col, sample.time_bin,
+                          0, sample.pe, 0.0f, sample.pe);
+            }
         }
     }
 

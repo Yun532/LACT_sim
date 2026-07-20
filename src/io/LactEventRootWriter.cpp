@@ -1,5 +1,7 @@
 #include "io/LactEventRootWriter.hpp"
 
+#include "app/NsbResponseSampler.hpp"
+
 #include "app/TriggerResponse.hpp"
 
 #include <TFile.h>
@@ -383,24 +385,13 @@ LactRootPreparedData prepareLactRootObservations(
                 return it == waveform_pe.end() ? 0.0 : it->second;
             };
 
-            // Triggering must see one complete, deterministic NSB realization.
-            // Whether the waveform is serialized is an independent decision.
-            if (nsb_cfg.enabled) {
-                for (std::size_t col = 0; col < n_pixels; ++col) {
-                    for (std::size_t bin = 0; bin < n_bins; ++bin) {
-                        const float nsb_pe = sampleTimeBinnedNsbPeCell(
-                            nsb_cfg,
-                            waveform_cfg,
-                            event_id,
-                            telescope_id,
-                            n_pixels,
-                            n_bins,
-                            col,
-                            bin);
-                        if (nsb_pe > 0.0f) {
-                            add_waveform_pe(col, bin, nsb_pe, 0.0, nsb_pe);
-                        }
-                    }
+            const auto nsb_realization = generateNsbRealization(
+                nsb_cfg, event_id, telescope_id, prepared.pixel_axis,
+                n_bins, waveform_cfg.time_bin_width_ns);
+            for (const auto& sample : nsb_realization.samples) {
+                if (sample.pe > 0.0f) {
+                    add_waveform_pe(sample.pixel_col, sample.time_bin,
+                                    sample.pe, 0.0, sample.pe);
                 }
             }
 
@@ -464,16 +455,14 @@ LactRootPreparedData prepareLactRootObservations(
                 time_sum_by_col[col] = p.time_sum;
                 time2_sum_by_col[col] = p.time2_sum;
             }
-            generateIntegratedNsbPe(
-                nsb_cfg,
-                event_id,
-                telescope_id,
-                n_pixels,
-                nsb_cfg.window_ns,
-                [&](std::size_t col, float nsb_pe) {
-                    image_pe_by_col[col] += nsb_pe;
-                    image_nsb_pe_by_col[col] += nsb_pe;
-                });
+            const auto nsb_realization = generateNsbRealization(
+                nsb_cfg, event_id, telescope_id, prepared.pixel_axis,
+                1, nsb_cfg.window_ns);
+            for (std::size_t col = 0; col < n_pixels; ++col) {
+                const double nsb_pe = nsb_realization.integrated_pe_by_pixel[col];
+                image_pe_by_col[col] += nsb_pe;
+                image_nsb_pe_by_col[col] += nsb_pe;
+            }
         }
 
         for (std::size_t col = 0; col < n_pixels; ++col) {
