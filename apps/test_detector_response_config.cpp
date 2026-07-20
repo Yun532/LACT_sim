@@ -87,7 +87,7 @@ int main()
         {"nsb.model", "spectral_flux"},
         {"nsb.spectrum_csv", "configs/nsb/nsb_spectrum.csv"},
         {"nsb.spectrum_unit", "ph_s_nm_sr_m2"},
-        {"nsb.effective_area_m2", "22.606448"},
+        {"nsb.effective_area_m2", "24.576860"},
         {"nsb.pixel_solid_angle", "auto"},
     };
     auto spectral_nsb = buildNsbConfig(spectral_nsb_cfg);
@@ -95,7 +95,7 @@ int main()
     ok &= check(spectral_nsb.model == "spectral_flux", "spectral NSB model parsed");
     ok &= check(spectral_nsb.spectrum_csv == "configs/nsb/nsb_spectrum.csv",
                 "spectral NSB spectrum path parsed");
-    ok &= check(std::abs(spectral_nsb.effective_area_m2 - 22.606448) < 1e-12,
+    ok &= check(std::abs(spectral_nsb.effective_area_m2 - 24.576860) < 1e-12,
                 "spectral NSB effective area parsed");
 
     auto trigger_default = buildTriggerConfig({});
