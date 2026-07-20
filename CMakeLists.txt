@@ -63,7 +63,11 @@ add_library(lact_sim_core
     src/io/SyntheticPhotonSource.cpp
     src/io/PhotonCsvSource.cpp
     src/io/MirrorFacetCsvReader.cpp
+    src/io/EventIOPhotonSemantics.cpp
     src/app/OpticalSimCommon.cpp
+    src/app/TelescopeOpticsCache.cpp
+    src/app/PhotonResponseSampler.cpp
+    src/app/TriggerResponse.cpp
     src/geometry/FacetFactory.cpp
     src/optics/AtmosphereTransmission.cpp
     src/optics/OpticalTracer.cpp
@@ -87,6 +91,7 @@ if(LACT_HAS_HESSIO)
     set_target_properties(run_corsika_trace PROPERTIES NO_SYSTEM_FROM_IMPORTED TRUE)
     target_link_libraries(run_corsika_trace PRIVATE lact_sim_core)
     if(LACT_HAS_HDF5)
+        target_sources(run_corsika_trace PRIVATE src/io/Hdf5WaveformWriter.cpp)
         target_compile_definitions(run_corsika_trace PRIVATE LACT_HAS_HDF5=1)
         target_link_libraries(run_corsika_trace PRIVATE ${HDF5_LIBRARIES})
     endif()
@@ -95,4 +100,5 @@ if(LACT_HAS_HESSIO)
         target_compile_definitions(run_corsika_trace PRIVATE LACT_HAS_ROOT=1)
         target_link_libraries(run_corsika_trace PRIVATE ROOT::Core ROOT::RIO ROOT::Tree)
     endif()
+
 endif()

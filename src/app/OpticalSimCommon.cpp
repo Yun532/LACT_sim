@@ -850,6 +850,30 @@ std::vector<double> parseDoubleList(const std::string& text, const std::string& 
     return values;
 }
 
+std::vector<int> parseIntList(const std::string& text, const std::string& key) {
+    std::stringstream ss(text);
+    std::string cell;
+    std::vector<int> values;
+    while (std::getline(ss, cell, ',')) {
+        cell = trim(cell);
+        if (cell.empty()) {
+            throw std::runtime_error("empty component in list config value for " + key);
+        }
+        std::size_t pos = 0;
+        const int value = std::stoi(cell, &pos);
+        if (pos != cell.size()) {
+            throw std::runtime_error("invalid list component in " + key + ": " + cell);
+        }
+        values.push_back(value);
+    }
+    if (values.empty()) {
+        throw std::runtime_error("list config value for " + key + " is empty");
+    }
+    std::sort(values.begin(), values.end());
+    values.erase(std::unique(values.begin(), values.end()), values.end());
+    return values;
+}
+
 std::string formatAngleToken(double angle_deg) {
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(6) << angle_deg;
@@ -1573,6 +1597,17 @@ SourceRuntimeConfig buildSourceRuntimeConfig(const std::map<std::string, std::st
         runtime.filter_event_id = true;
         runtime.selected_event_id = std::stoi(event_filter_value);
     }
+    const std::string event_filters_value =
+        getString(cfg, "source.filter_event_ids", "");
+    if (!trim(event_filters_value).empty() &&
+        !isDisabledText(event_filters_value)) {
+        runtime.selected_event_ids =
+            parseIntList(event_filters_value, "source.filter_event_ids");
+    }
+    if (runtime.filter_event_id && !runtime.selected_event_ids.empty()) {
+        throw std::runtime_error(
+            "source.filter_event_id and source.filter_event_ids are mutually exclusive");
+    }
     const std::string shower_filter_value = getString(cfg, "source.filter_shower_event_id", "");
     if (!trim(shower_filter_value).empty() && !isDisabledText(shower_filter_value)) {
         runtime.filter_shower_event_id = true;
@@ -1617,6 +1652,7 @@ EventIOPhotonConfig buildEventIOPhotonConfig(const std::map<std::string, std::st
     eventio.selected_telescope_id = runtime_cfg.selected_telescope_id;
     eventio.filter_event_id = runtime_cfg.filter_event_id;
     eventio.selected_event_id = runtime_cfg.selected_event_id;
+    eventio.selected_event_ids = runtime_cfg.selected_event_ids;
     eventio.filter_shower_event_id = runtime_cfg.filter_shower_event_id;
     eventio.selected_shower_event_id = runtime_cfg.selected_shower_event_id;
     eventio.max_shower_events = runtime_cfg.max_shower_events;
@@ -2050,6 +2086,10 @@ TriggerConfig buildTriggerConfig(const std::map<std::string, std::string>& cfg) 
         getInt(cfg, "trigger.array_multiplicity", trigger.array_multiplicity);
     trigger.coincidence_window_ns =
         getDouble(cfg, "trigger.coincidence_window_ns", trigger.coincidence_window_ns);
+    trigger.camera_coincidence_window_ns = getDouble(
+        cfg, "trigger.camera_coincidence_window_ns", trigger.coincidence_window_ns);
+    trigger.array_coincidence_window_ns = getDouble(
+        cfg, "trigger.array_coincidence_window_ns", trigger.coincidence_window_ns);
 
     if (!std::isfinite(trigger.pixel_threshold_pe) || trigger.pixel_threshold_pe < 0.0) {
         throw std::runtime_error("trigger.pixel_threshold_pe must be finite and >= 0");
@@ -2063,6 +2103,16 @@ TriggerConfig buildTriggerConfig(const std::map<std::string, std::string>& cfg) 
     if (!std::isfinite(trigger.coincidence_window_ns) ||
         trigger.coincidence_window_ns < 0.0) {
         throw std::runtime_error("trigger.coincidence_window_ns must be finite and >= 0");
+    }
+    if (!std::isfinite(trigger.camera_coincidence_window_ns) ||
+        trigger.camera_coincidence_window_ns < 0.0) {
+        throw std::runtime_error(
+            "trigger.camera_coincidence_window_ns must be finite and >= 0");
+    }
+    if (!std::isfinite(trigger.array_coincidence_window_ns) ||
+        trigger.array_coincidence_window_ns < 0.0) {
+        throw std::runtime_error(
+            "trigger.array_coincidence_window_ns must be finite and >= 0");
     }
     return trigger;
 }
@@ -2135,21 +2185,7 @@ std::unique_ptr<Cone::SquareCone> buildLightCollector(const CameraConfig& cfg,
 
 const CameraPixel* findContainingPixel(const CameraGeometry& camera, double x, double y)
 {
-    const CameraPixel* best = nullptr;
-    double best_r2 = std::numeric_limits<double>::max();
-    for (const auto& pixel : camera.pixels()) {
-        if (!CameraGeometry::contains(pixel, x, y)) {
-            continue;
-        }
-        const double dx = x - pixel.center.x;
-        const double dy = y - pixel.center.y;
-        const double r2 = dx * dx + dy * dy;
-        if (r2 < best_r2) {
-            best_r2 = r2;
-            best = &pixel;
-        }
-    }
-    return best;
+    return camera.findContainingPixelPtr(x, y);
 }
 
 CollectorTraceResult traceLightCollector(const Cone::SquareCone& cone,
@@ -2908,10 +2944,15 @@ void applyStructuralDeformation(std::vector<MirrorFacet>& facets,
 }
 
 void applyFacetErrors(std::vector<MirrorFacet>& facets, const ErrorConfig& error) {
+    const bool has_per_facet_misalignment =
+        std::any_of(facets.begin(), facets.end(), [](const MirrorFacet& facet) {
+            return facet.misalign_sigma_rad > 0.0;
+        });
     if (error.facet_radial_position_sigma_m == 0.0 &&
         error.facet_normal_sigma_deg == 0.0 &&
         error.radius_of_curvature_sigma_m == 0.0 &&
-        error.reflectivity_scale_sigma == 0.0) {
+        error.reflectivity_scale_sigma == 0.0 &&
+        !has_per_facet_misalignment) {
         return;
     }
 
@@ -2928,8 +2969,11 @@ void applyFacetErrors(std::vector<MirrorFacet>& facets, const ErrorConfig& error
             facet.center += ideal_normal * offset;
         }
 
-        if (normal_sigma_rad > 0.0) {
-            facet.normal = perturbVectorOnSphere(ideal_normal, normal_sigma_rad, rng);
+        const double facet_normal_sigma_rad =
+            std::hypot(normal_sigma_rad, facet.misalign_sigma_rad);
+        if (facet_normal_sigma_rad > 0.0) {
+            facet.normal = perturbVectorOnSphere(
+                ideal_normal, facet_normal_sigma_rad, rng);
         }
 
         if (error.radius_of_curvature_sigma_m > 0.0 &&
@@ -2941,7 +2985,7 @@ void applyFacetErrors(std::vector<MirrorFacet>& facets, const ErrorConfig& error
 
         if (error.reflectivity_scale_sigma > 0.0) {
             double scale = 1.0 + error.reflectivity_scale_sigma * unit_normal(rng);
-            facet.reflectivity_scale = std::max(0.0, scale);
+            facet.reflectivity_scale *= std::max(0.0, scale);
         }
     }
 }

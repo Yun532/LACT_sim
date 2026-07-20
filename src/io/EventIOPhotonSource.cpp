@@ -78,125 +78,93 @@ bool keepRow(int event_id, int shower_event_id, int telescope_id, const EventIOP
     if (cfg.filter_event_id && event_id != cfg.selected_event_id) {
         return false;
     }
+    if (!cfg.selected_event_ids.empty() &&
+        !std::binary_search(cfg.selected_event_ids.begin(),
+                            cfg.selected_event_ids.end(), event_id)) {
+        return false;
+    }
     if (cfg.filter_telescope_id && telescope_id != cfg.selected_telescope_id) {
         return false;
     }
     return true;
 }
 
-std::uint64_t mixSeed(std::uint64_t seed, std::uint64_t value)
-{
-    seed ^= value + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
-    return seed;
-}
+using EventIdentity = std::pair<int, int>;
 
-std::uint64_t hashDouble(double value)
+void registerOutputEventId(std::map<int, EventIdentity>& identities,
+                           int event_id,
+                           int shower_event_id,
+                           int array_id,
+                           const EventIOPhotonConfig& cfg)
 {
-    if (!std::isfinite(value)) {
-        return 0x9e3779b97f4a7c15ULL;
+    const std::string mode = lowerCopy(cfg.event_id_mode);
+    if (mode != "event_array100" && mode != "runid") {
+        return;
     }
-    return static_cast<std::uint64_t>(std::llround(value * 1000000.0));
-}
-
-double unitRandom01(std::uint64_t seed)
-{
-    // SplitMix64 gives a deterministic pseudo-random value from bunch identity,
-    // independent of streaming order and filtering.
-    seed += 0x9e3779b97f4a7c15ULL;
-    seed = (seed ^ (seed >> 30U)) * 0xbf58476d1ce4e5b9ULL;
-    seed = (seed ^ (seed >> 27U)) * 0x94d049bb133111ebULL;
-    seed = seed ^ (seed >> 31U);
-    constexpr double denom = 1.0 / 9007199254740992.0; // 2^53
-    return static_cast<double>(seed >> 11U) * denom;
-}
-
-double sampleMissingWavelength(double x,
-                               double y,
-                               double cx,
-                               double cy,
-                               double ctime,
-                               double photons,
-                               int event_id,
-                               int telescope_id,
-                               const EventIOPhotonConfig& cfg)
-{
-    const std::string model = lowerCopy(cfg.missing_wavelength_model);
-    if (model.empty() || model == "default" || model == "fixed" ||
-        model == "constant" || model == "none" || model == "off") {
-        return cfg.default_wavelength_nm;
-    }
-
-    const double lo = cfg.missing_wavelength_min_nm;
-    const double hi = cfg.missing_wavelength_max_nm;
-    if (!std::isfinite(lo) || !std::isfinite(hi) || lo <= 0.0 || hi <= lo) {
+    const EventIdentity identity{shower_event_id, array_id};
+    const auto [it, inserted] = identities.emplace(event_id, identity);
+    if (!inserted && it->second != identity) {
         throw std::runtime_error(
-            "source.missing_wavelength_min_nm/max_nm must be finite with 0 < min < max");
+            "source.event_id_mode produced a collision for event_id=" +
+            std::to_string(event_id) + ": (shower_event_id,array_id)=(" +
+            std::to_string(it->second.first) + "," +
+            std::to_string(it->second.second) + ") and (" +
+            std::to_string(shower_event_id) + "," +
+            std::to_string(array_id) + ")");
     }
-
-    std::uint64_t seed = cfg.missing_wavelength_seed;
-    seed = mixSeed(seed, static_cast<std::uint64_t>(event_id + 1000003));
-    seed = mixSeed(seed, static_cast<std::uint64_t>(telescope_id + 10007));
-    seed = mixSeed(seed, hashDouble(x));
-    seed = mixSeed(seed, hashDouble(y));
-    seed = mixSeed(seed, hashDouble(cx));
-    seed = mixSeed(seed, hashDouble(cy));
-    seed = mixSeed(seed, hashDouble(ctime));
-    seed = mixSeed(seed, hashDouble(photons));
-    const double u = std::min(1.0 - 1e-16, std::max(1e-16, unitRandom01(seed)));
-
-    if (model == "uniform") {
-        return lo + u * (hi - lo);
-    }
-    if (model == "cherenkov" || model == "cherenkov_1_over_lambda2" ||
-        model == "1_over_lambda2" || model == "one_over_lambda2") {
-        const double inv_lo = 1.0 / lo;
-        const double inv_hi = 1.0 / hi;
-        return 1.0 / (inv_lo - u * (inv_lo - inv_hi));
-    }
-
-    throw std::runtime_error("unsupported source.missing_wavelength_model: " +
-                             cfg.missing_wavelength_model);
 }
 
-double eventioWavelengthOrSample(double raw_lambda,
-                                 double x,
-                                 double y,
-                                 double cx,
-                                 double cy,
-                                 double ctime,
-                                 double photons,
-                                 int event_id,
-                                 int telescope_id,
+void buildOutputEventIdentityMap(EventIOMetadata& metadata,
                                  const EventIOPhotonConfig& cfg)
 {
-    if (raw_lambda > 0.0) {
-        return raw_lambda;
+    metadata.output_event_identity.clear();
+    const std::string mode = lowerCopy(cfg.event_id_mode);
+    if (mode != "event_array100" && mode != "runid") {
+        return;
     }
-    return sampleMissingWavelength(x, y, cx, cy, ctime, photons,
-                                   event_id, telescope_id, cfg);
+    for (const auto& item : metadata.array_offsets_by_shower) {
+        const int shower_event_id = item.first;
+        const std::size_t n_arrays = std::max(item.second.x_m.size(),
+                                              item.second.y_m.size());
+        for (std::size_t array_index = 0; array_index < n_arrays; ++array_index) {
+            const int array_id = static_cast<int>(array_index);
+            const int event_id = outputEventId(shower_event_id, array_id, cfg);
+            registerOutputEventId(metadata.output_event_identity,
+                                  event_id,
+                                  shower_event_id,
+                                  array_id,
+                                  cfg);
+        }
+    }
 }
 
 int selectedShowerEventId(const EventIOPhotonConfig& cfg) {
-    if (!cfg.filter_event_id) {
+    if (!cfg.filter_event_id && cfg.selected_event_ids.empty()) {
         if (cfg.filter_shower_event_id) {
             return cfg.selected_shower_event_id;
         }
         return cfg.default_event_id;
     }
+    const int selected_event = cfg.filter_event_id
+                                   ? cfg.selected_event_id
+                                   : cfg.selected_event_ids.front();
     const std::string mode = lowerCopy(cfg.event_id_mode);
     if (mode == "event_array100" || mode == "runid") {
-        return cfg.selected_event_id / 100;
+        return selected_event / 100;
     }
-    return cfg.selected_event_id;
+    return selected_event;
 }
 
 int selectedArrayId(const EventIOPhotonConfig& cfg) {
-    if (!cfg.filter_event_id) {
+    if (!cfg.filter_event_id && cfg.selected_event_ids.empty()) {
         return 0;
     }
+    const int selected_event = cfg.filter_event_id
+                                   ? cfg.selected_event_id
+                                   : cfg.selected_event_ids.front();
     const std::string mode = lowerCopy(cfg.event_id_mode);
     if (mode == "event_array100" || mode == "runid") {
-        return cfg.selected_event_id % 100;
+        return selected_event % 100;
     }
     return 0;
 }
@@ -416,6 +384,10 @@ int readAtmosphereMetadata(IO_BUFFER* iobuf, EventIOMetadata& metadata)
         return rc;
     }
 
+    if (std::isfinite(atmosphere.obslev)) {
+        metadata.observation_altitude_m = atmosphere.obslev * 0.01;
+    }
+
     metadata.atmosphere.clear();
     metadata.atmosphere.reserve(atmosphere.n_alt);
     for (unsigned i = 0; i < atmosphere.n_alt; ++i) {
@@ -556,7 +528,11 @@ int readArrayOffsetsMetadata(IO_BUFFER* iobuf,
     for (int i = 0; i < narray; ++i) {
         offsets.x_m.push_back(x[static_cast<std::size_t>(i)] * 0.01);
         offsets.y_m.push_back(y[static_cast<std::size_t>(i)] * 0.01);
-        offsets.weight.push_back(w[static_cast<std::size_t>(i)]);
+        // MC_TELOFF follows CORSIKA's centimetre coordinate convention.  This
+        // is an event/core-sampling area weight, not a per-photon efficiency.
+        offsets.weight.push_back(w[static_cast<std::size_t>(i)] * 1.0e-4);
+        offsets.has_explicit_weights = offsets.has_explicit_weights ||
+                                       w[static_cast<std::size_t>(i)] != 0.0;
     }
     metadata.array_offsets_by_shower[current_event_id] = offsets;
     if (current_event_id == selected_shower_event_id) {
@@ -566,8 +542,11 @@ int readArrayOffsetsMetadata(IO_BUFFER* iobuf,
 }
 
 PhotonBunch makeBunch(const struct bunch& b,
+                      int shower_event_id,
+                      int array_id,
                       int event_id,
                       int telescope_id,
+                      std::uint64_t source_bunch_index,
                       const EventIOPhotonConfig& cfg)
 {
     PhotonBunch out;
@@ -575,13 +554,16 @@ PhotonBunch makeBunch(const struct bunch& b,
     out.photon.dir = {b.cx, b.cy, downwardDirZ(b.cx, b.cy)};
     out.photon.normalizeDirection();
     out.photon.time_ns = b.ctime;
-    out.photon.wavelength_nm =
-        eventioWavelengthOrSample(b.lambda, b.x, b.y, b.cx, b.cy, b.ctime, b.photons,
-                                  event_id, telescope_id, cfg);
     out.photon.weight = cfg.default_weight;
+    out.photon.optical_efficiency_preapplied = b.lambda < 0.0;
     out.multiplicity = b.photons * cfg.default_multiplicity;
     out.event_id = event_id;
+    out.shower_event_id = shower_event_id;
+    out.array_id = array_id;
     out.telescope_id = telescope_id;
+    out.source_bunch_index = source_bunch_index;
+    out.raw_wavelength_nm = b.lambda;
+    out.photon.wavelength_nm = resolveEventIOPhotonWavelength(out, 0, cfg);
     out.eventio_2d = true;
     if (std::isfinite(b.zem) && b.zem > 0.0) {
         out.emission_altitude_km = b.zem * 1.0e-5;
@@ -590,8 +572,11 @@ PhotonBunch makeBunch(const struct bunch& b,
 }
 
 PhotonBunch makeBunch3d(const struct bunch3d& b,
+                        int shower_event_id,
+                        int array_id,
                         int event_id,
                         int telescope_id,
+                        std::uint64_t source_bunch_index,
                         const EventIOPhotonConfig& cfg)
 {
     PhotonBunch out;
@@ -599,14 +584,19 @@ PhotonBunch makeBunch3d(const struct bunch3d& b,
     out.photon.dir = {b.cx, b.cy, b.cz};
     out.photon.normalizeDirection();
     out.photon.time_ns = b.ctime;
-    out.photon.wavelength_nm =
-        eventioWavelengthOrSample(b.lambda, b.x, b.y, b.cx, b.cy, b.ctime, b.photons,
-                                  event_id, telescope_id, cfg);
     out.photon.weight = cfg.default_weight;
+    out.photon.optical_efficiency_preapplied = b.lambda < 0.0;
     out.multiplicity = b.photons * cfg.default_multiplicity;
     out.event_id = event_id;
+    out.shower_event_id = shower_event_id;
+    out.array_id = array_id;
     out.telescope_id = telescope_id;
+    out.source_bunch_index = source_bunch_index;
+    out.raw_wavelength_nm = b.lambda;
+    out.photon.wavelength_nm = resolveEventIOPhotonWavelength(out, 0, cfg);
     out.eventio_2d = false;
+    out.emission_altitude_km = eventIO3DEmissionAltitudeKm(
+        cfg.observation_altitude_km, b.z, b.cz, b.dist);
     return out;
 }
 
@@ -614,6 +604,7 @@ int readPhotonBlock(IO_BUFFER* iobuf,
                     int current_event_id,
                     const EventIOPhotonConfig& cfg,
                     const EventIOPhotonCallback& on_bunch,
+                    std::map<int, EventIdentity>& event_identities,
                     std::size_t& emitted,
                     std::size_t& emitted_2d)
 {
@@ -650,6 +641,7 @@ int readPhotonBlock(IO_BUFFER* iobuf,
     if (!keepRow(event_id, current_event_id, telescope_id, cfg)) {
         return get_item_end(iobuf, &item_header);
     }
+    registerOutputEventId(event_identities, event_id, current_event_id, array_id, cfg);
 
     for (int i = 0; i < nbunches; ++i) {
         struct bunch b;
@@ -676,7 +668,8 @@ int readPhotonBlock(IO_BUFFER* iobuf,
             b.photons = 0.01 * get_short(iobuf);
             b.lambda = get_short(iobuf);
         }
-        on_bunch(makeBunch(b, event_id, telescope_id, cfg));
+        on_bunch(makeBunch(b, current_event_id, array_id, event_id,
+                           telescope_id, static_cast<std::uint64_t>(i), cfg));
         ++emitted;
         ++emitted_2d;
     }
@@ -688,6 +681,7 @@ int readPhoton3dBlock(IO_BUFFER* iobuf,
                       int current_event_id,
                       const EventIOPhotonConfig& cfg,
                       const EventIOPhotonCallback& on_bunch,
+                      std::map<int, EventIdentity>& event_identities,
                       std::size_t& emitted,
                       std::size_t& emitted_3d)
 {
@@ -712,8 +706,11 @@ int readPhoton3dBlock(IO_BUFFER* iobuf,
     if (!keepRow(event_id, current_event_id, telescope_id, cfg)) {
         return 0;
     }
+    registerOutputEventId(event_identities, event_id, current_event_id, array_id, cfg);
     for (int i = 0; i < nbunches; ++i) {
-        on_bunch(makeBunch3d(bunches[static_cast<std::size_t>(i)], event_id, telescope_id, cfg));
+        const auto& b = bunches[static_cast<std::size_t>(i)];
+        on_bunch(makeBunch3d(b, current_event_id, array_id, event_id,
+                             telescope_id, static_cast<std::uint64_t>(i), cfg));
         ++emitted;
         ++emitted_3d;
     }
@@ -724,6 +721,7 @@ int readTelArray(IO_BUFFER* iobuf,
                  int current_event_id,
                  const EventIOPhotonConfig& cfg,
                  const EventIOPhotonCallback& on_bunch,
+                 std::map<int, EventIdentity>& event_identities,
                  EventIOStreamStats& stats)
 {
     IO_ITEM_HEADER array_header;
@@ -736,9 +734,11 @@ int readTelArray(IO_BUFFER* iobuf,
     while ((type = next_subitem_type(iobuf)) > 0) {
         if (type == IO_TYPE_MC_PHOTONS) {
             rc = readPhotonBlock(iobuf, current_event_id, cfg, on_bunch,
+                                 event_identities,
                                  stats.photon_bunches, stats.photon_bunches_2d);
         } else if (type == IO_TYPE_MC_PHOTONS3D) {
             rc = readPhoton3dBlock(iobuf, current_event_id, cfg, on_bunch,
+                                   event_identities,
                                    stats.photon_bunches, stats.photon_bunches_3d);
         } else {
             rc = skip_subitem(iobuf);
@@ -860,6 +860,7 @@ EventIOMetadata readEventIOMetadata(const EventIOPhotonConfig& cfg) {
         }
     }
     iobuf.ptr->input_file = nullptr;
+    buildOutputEventIdentityMap(metadata, cfg);
     return metadata;
 }
 
@@ -895,6 +896,7 @@ EventIOStreamStats streamEventIOPhotonBunches(
     IO_ITEM_HEADER item_header;
     EventIOStreamStats stats;
     std::set<int> streamed_shower_events;
+    std::map<int, EventIdentity> event_identities;
     bool stop_after_current_block = false;
     std::size_t next_report_rows = 1000000;
     const auto load_start = std::chrono::steady_clock::now();
@@ -932,6 +934,7 @@ EventIOStreamStats streamEventIOPhotonBunches(
                     break;
                 }
                 rc = readTelArray(iobuf.ptr, current_event_id, cfg, on_bunch,
+                                  event_identities,
                                   stats);
                 break;
             case IO_TYPE_MC_PHOTONS:
@@ -940,6 +943,7 @@ EventIOStreamStats streamEventIOPhotonBunches(
                     break;
                 }
                 rc = readPhotonBlock(iobuf.ptr, current_event_id, cfg, on_bunch,
+                                     event_identities,
                                      stats.photon_bunches, stats.photon_bunches_2d);
                 break;
             case IO_TYPE_MC_PHOTONS3D:
@@ -948,6 +952,7 @@ EventIOStreamStats streamEventIOPhotonBunches(
                     break;
                 }
                 rc = readPhoton3dBlock(iobuf.ptr, current_event_id, cfg, on_bunch,
+                                       event_identities,
                                        stats.photon_bunches, stats.photon_bunches_3d);
                 break;
             default:

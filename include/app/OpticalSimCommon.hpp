@@ -172,6 +172,8 @@ struct TriggerConfig {
     int camera_multiplicity = 3;
     int array_multiplicity = 2;
     double coincidence_window_ns = 50.0;
+    double camera_coincidence_window_ns = 50.0;
+    double array_coincidence_window_ns = 50.0;
 };
 
 class ElectronicsResponse {
@@ -202,6 +204,7 @@ struct SourceRuntimeConfig {
     int selected_telescope_id = 0;
     bool filter_event_id = false;
     int selected_event_id = 0;
+    std::vector<int> selected_event_ids;
     bool filter_shower_event_id = false;
     int selected_shower_event_id = 0;
     int max_shower_events = 0;
@@ -290,6 +293,7 @@ bool parseDoubleStrict(const std::string& text, double& out);
 bool isDisabledText(const std::string& text);
 std::string factorDescription(const EfficiencyFactorConfig& factor);
 std::vector<double> parseDoubleList(const std::string& text, const std::string& key);
+std::vector<int> parseIntList(const std::string& text, const std::string& key);
 std::vector<std::string> splitCsvCells(const std::string& line);
 CameraGeometry readCameraCsv(const std::string& path);
 std::vector<std::pair<double, double>> readCollectorReflectivityCsv(const std::string& path);

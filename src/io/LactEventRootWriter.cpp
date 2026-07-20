@@ -1,5 +1,7 @@
 #include "io/LactEventRootWriter.hpp"
 
+#include "app/TriggerResponse.hpp"
+
 #include <TFile.h>
 #include <TTree.h>
 
@@ -26,6 +28,9 @@ struct OutputEventMetadata {
     double core_x_north_m = 0.0;
     double core_y_west_m = 0.0;
     double azimuth_north_to_east_deg = 0.0;
+    double array_time_offset_ns = 0.0;
+    double area_weight_m2 = 0.0;
+    bool has_explicit_area_weight = false;
     bool found = false;
     bool used_array_offset = false;
 };
@@ -54,8 +59,14 @@ OutputEventMetadata outputEventMetadata(int event_id,
 {
     OutputEventMetadata out;
     out.event_id = event_id;
-    out.shower_event = showerEventFromOutputEvent(event_id, event_id_mode);
-    out.array_id = arrayIdFromOutputEvent(event_id, event_id_mode);
+    const auto identity = metadata.output_event_identity.find(event_id);
+    if (identity != metadata.output_event_identity.end()) {
+        out.shower_event = identity->second.first;
+        out.array_id = identity->second.second;
+    } else {
+        out.shower_event = showerEventFromOutputEvent(event_id, event_id_mode);
+        out.array_id = arrayIdFromOutputEvent(event_id, event_id_mode);
+    }
 
     auto event_it = std::find_if(
         metadata.events.begin(), metadata.events.end(),
@@ -73,12 +84,17 @@ OutputEventMetadata outputEventMetadata(int event_id,
     out.azimuth_north_to_east_deg = event_it->azimuth_north_to_east_deg;
 
     if (auto offsets = metadata.arrayOffsetsForShower(out.shower_event)) {
+        out.array_time_offset_ns = offsets->time_offset_ns;
         const std::size_t offset_index = static_cast<std::size_t>(out.array_id);
         if (out.array_id >= 0 && offset_index < offsets->x_m.size() &&
             offset_index < offsets->y_m.size()) {
             out.core_x_north_m = -offsets->x_m[offset_index];
             out.core_y_west_m = -offsets->y_m[offset_index];
             out.used_array_offset = true;
+        }
+        if (out.array_id >= 0 && offset_index < offsets->weight.size()) {
+            out.area_weight_m2 = offsets->weight[offset_index];
+            out.has_explicit_area_weight = offsets->has_explicit_weights;
         }
     }
     return out;
@@ -228,13 +244,18 @@ LactRootPreparedData prepareLactRootObservations(
         image_keys.insert({hit.event_id, hit.telescope_id});
     }
 
-    const bool write_time_series =
+    const bool waveform_pe_available =
+        waveform_cfg.enabled && waveform_cfg.source == "pe" &&
+        !prepared.pixel_axis.empty();
+    const bool write_time_series = waveform_pe_available &&
         (output_cfg.lact_profile == "timeseries_pe" ||
-         output_cfg.lact_profile == "debug_full") &&
-        waveform_cfg.enabled && waveform_cfg.source == "pe" && !prepared.pixel_axis.empty();
+         output_cfg.lact_profile == "debug_full");
+    const bool evaluate_time_series = waveform_pe_available &&
+        (write_time_series || trigger_cfg.enabled);
     const std::size_t n_pixels = prepared.pixel_axis.size();
-    const std::size_t n_bins = write_time_series ? waveformBinCount(waveform_cfg) : 0;
-    if (write_time_series) {
+    const std::size_t n_bins =
+        evaluate_time_series ? waveformBinCount(waveform_cfg) : 0;
+    if (evaluate_time_series) {
         prepared.time_edges_ns.resize(n_bins + 1);
         prepared.time_centers_ns.resize(n_bins);
         for (std::size_t i = 0; i <= n_bins; ++i) {
@@ -254,7 +275,8 @@ LactRootPreparedData prepareLactRootObservations(
         bool has_waveform = false;
     };
     std::vector<PreparedObservation> candidates;
-    std::map<int, int> triggered_telescopes_by_event;
+    std::map<int, std::vector<TelescopeTriggerTime>>
+        telescope_trigger_times_by_event;
     candidates.reserve(image_keys.size());
     prepared.observations.reserve(image_keys.size());
     prepared.waveforms.reserve(write_time_series ? image_keys.size() : 0);
@@ -292,7 +314,7 @@ LactRootPreparedData prepareLactRootObservations(
             }
         }
 
-        if (write_time_series) {
+        if (evaluate_time_series) {
             if (waveform_cfg.time_reference == "image_first" &&
                 std::isfinite(obs.time_first_ns)) {
                 reference_time_ns = obs.time_first_ns;
@@ -356,149 +378,14 @@ LactRootPreparedData prepareLactRootObservations(
                 }
             }
 
-            const std::size_t trigger_window_bins =
-                trigger_cfg.coincidence_window_ns > 0.0
-                    ? std::min(n_bins, std::max<std::size_t>(
-                                      1,
-                                      static_cast<std::size_t>(std::ceil(
-                                          trigger_cfg.coincidence_window_ns /
-                                          waveform_cfg.time_bin_width_ns))))
-                    : n_bins;
             const auto waveform_pe_at = [&](std::size_t col, std::size_t bin) {
                 const auto it = waveform_pe.find(col * n_bins + bin);
                 return it == waveform_pe.end() ? 0.0 : it->second;
             };
-            const auto find_best_trigger_window =
-                [&](std::size_t first_window,
-                    std::size_t last_window) -> std::pair<int, std::size_t> {
-                    if (n_bins == 0 || first_window >= n_bins) {
-                        return {0, 0};
-                    }
-                    last_window = std::min(last_window, n_bins - 1);
-                    std::vector<int> pixels_above_threshold_by_window(n_bins, 0);
-                    for (std::size_t col = 0; col < n_pixels; ++col) {
-                        double window_pe = 0.0;
-                        const std::size_t first_end =
-                            std::min(n_bins, first_window + trigger_window_bins);
-                        for (std::size_t bin = first_window; bin < first_end; ++bin) {
-                            window_pe += waveform_pe_at(col, bin);
-                        }
-                        if (window_pe >= trigger_cfg.pixel_threshold_pe) {
-                            ++pixels_above_threshold_by_window[first_window];
-                        }
-                        for (std::size_t window_start = first_window + 1;
-                             window_start <= last_window;
-                             ++window_start) {
-                            window_pe -= waveform_pe_at(col, window_start - 1);
-                            const std::size_t add_bin =
-                                window_start + trigger_window_bins - 1;
-                            if (add_bin < n_bins) {
-                                window_pe += waveform_pe_at(col, add_bin);
-                            }
-                            if (window_pe >= trigger_cfg.pixel_threshold_pe) {
-                                ++pixels_above_threshold_by_window[window_start];
-                            }
-                        }
-                    }
 
-                    int best_pixels_above_threshold = 0;
-                    std::size_t best_trigger_window_start = first_window;
-                    for (std::size_t window_start = first_window;
-                         window_start <= last_window;
-                         ++window_start) {
-                        const int pixels_above_threshold =
-                            pixels_above_threshold_by_window[window_start];
-                        if (pixels_above_threshold > best_pixels_above_threshold) {
-                            best_pixels_above_threshold = pixels_above_threshold;
-                            best_trigger_window_start = window_start;
-                        }
-                    }
-                    return {best_pixels_above_threshold, best_trigger_window_start};
-                };
-
-            double camera_peak = -1.0;
-            std::size_t camera_peak_bin = 0;
-            for (std::size_t bin = 0; bin < n_bins; ++bin) {
-                if (camera_time_series[bin] > camera_peak) {
-                    camera_peak = camera_time_series[bin];
-                    camera_peak_bin = bin;
-                }
-            }
-
-            const auto cherenkov_trigger =
-                find_best_trigger_window(0, n_bins - 1);
-            bool should_add_full_nsb =
-                !output_cfg.save_only_triggered || !trigger_cfg.enabled ||
-                cherenkov_trigger.first >= trigger_cfg.camera_multiplicity;
-            if (!should_add_full_nsb && nsb_cfg.enabled && camera_peak > 0.0) {
-                const std::size_t first_window =
-                    camera_peak_bin >= trigger_window_bins
-                        ? camera_peak_bin - trigger_window_bins + 1
-                        : 0;
-                const std::size_t last_window = std::min(camera_peak_bin, n_bins - 1);
-                const std::size_t first_light_bin = first_window;
-                const std::size_t last_light_bin = std::min(
-                    n_bins - 1,
-                    last_window + trigger_window_bins - 1);
-                const std::size_t light_bin_count =
-                    last_light_bin - first_light_bin + 1;
-                std::vector<float> light_nsb_pe(n_pixels * light_bin_count, 0.0f);
-                for (std::size_t col = 0; col < n_pixels; ++col) {
-                    for (std::size_t offset = 0; offset < light_bin_count; ++offset) {
-                        const std::size_t bin = first_light_bin + offset;
-                        light_nsb_pe[col * light_bin_count + offset] =
-                            sampleTimeBinnedNsbPeCell(
-                                nsb_cfg,
-                                waveform_cfg,
-                                event_id,
-                                telescope_id,
-                                n_pixels,
-                                n_bins,
-                                col,
-                                bin);
-                    }
-                }
-                const auto light_nsb_at = [&](std::size_t col, std::size_t bin) {
-                    if (bin < first_light_bin || bin > last_light_bin) {
-                        return 0.0f;
-                    }
-                    return light_nsb_pe[col * light_bin_count + (bin - first_light_bin)];
-                };
-                int best_pixels_with_light_nsb = 0;
-                std::size_t best_light_window = first_window;
-                for (std::size_t window_start = first_window;
-                     window_start <= last_window;
-                     ++window_start) {
-                    const std::size_t window_end =
-                        std::min(n_bins, window_start + trigger_window_bins);
-                    int pixels_above_threshold = 0;
-                    for (std::size_t col = 0; col < n_pixels; ++col) {
-                        double window_pe = 0.0;
-                        for (std::size_t bin = window_start; bin < window_end; ++bin) {
-                            window_pe += waveform_pe_at(col, bin);
-                            window_pe += light_nsb_at(col, bin);
-                        }
-                        if (window_pe >= trigger_cfg.pixel_threshold_pe) {
-                            ++pixels_above_threshold;
-                        }
-                    }
-                    if (pixels_above_threshold > best_pixels_with_light_nsb) {
-                        best_pixels_with_light_nsb = pixels_above_threshold;
-                        best_light_window = window_start;
-                    }
-                }
-                should_add_full_nsb =
-                    best_pixels_with_light_nsb >= trigger_cfg.camera_multiplicity;
-                if (should_add_full_nsb) {
-                    trigger_time_ns =
-                        reference_time_ns +
-                        prepared.time_centers_ns[std::min(
-                            n_bins - 1,
-                            best_light_window + trigger_window_bins / 2)];
-                }
-            }
-
-            if (should_add_full_nsb) {
+            // Triggering must see one complete, deterministic NSB realization.
+            // Whether the waveform is serialized is an independent decision.
+            if (nsb_cfg.enabled) {
                 for (std::size_t col = 0; col < n_pixels; ++col) {
                     for (std::size_t bin = 0; bin < n_bins; ++bin) {
                         const float nsb_pe = sampleTimeBinnedNsbPeCell(
@@ -540,8 +427,8 @@ LactRootPreparedData prepareLactRootObservations(
                 }
             }
 
-            camera_peak = -1.0;
-            camera_peak_bin = 0;
+            double camera_peak = -1.0;
+            std::size_t camera_peak_bin = 0;
             for (std::size_t bin = 0; bin < n_bins; ++bin) {
                 if (camera_time_series[bin] > camera_peak) {
                     camera_peak = camera_time_series[bin];
@@ -552,14 +439,16 @@ LactRootPreparedData prepareLactRootObservations(
                 obs.time_peak_ns =
                     reference_time_ns + prepared.time_centers_ns[camera_peak_bin];
             }
-            const auto final_trigger = find_best_trigger_window(0, n_bins - 1);
-            obs.n_pixels_above_threshold = final_trigger.first;
-            if (!std::isfinite(trigger_time_ns) && final_trigger.first > 0) {
-                const std::size_t trigger_bin = std::min(
-                    n_bins - 1,
-                    final_trigger.second + trigger_window_bins / 2);
-                trigger_time_ns = reference_time_ns + prepared.time_centers_ns[trigger_bin];
-            }
+            const auto final_trigger = evaluateBinnedPeTrigger(
+                n_pixels,
+                n_bins,
+                waveform_cfg.time_bin_width_ns,
+                reference_time_ns + prepared.time_centers_ns.front(),
+                trigger_cfg,
+                waveform_pe_at);
+            obs.n_pixels_above_threshold =
+                final_trigger.n_pixels_above_threshold;
+            trigger_time_ns = final_trigger.trigger_time_ns;
         } else {
             const PixelKey begin_key{event_id, telescope_id, std::numeric_limits<int>::min()};
             const PixelKey end_key{event_id, telescope_id, std::numeric_limits<int>::max()};
@@ -607,7 +496,7 @@ LactRootPreparedData prepareLactRootObservations(
             }
             obs.image_time_mean_ns.push_back(static_cast<float>(mean));
             obs.image_time_rms_ns.push_back(static_cast<float>(rms));
-            if (write_time_series && col < waveform_peak_by_col.size()) {
+            if (evaluate_time_series && col < waveform_peak_by_col.size()) {
                 const double peak = waveform_peak_by_col[col];
                 const std::size_t peak_bin = waveform_peak_bin_by_col[col];
                 obs.image_time_peak_ns.push_back(static_cast<float>(
@@ -618,7 +507,7 @@ LactRootPreparedData prepareLactRootObservations(
                 obs.image_time_peak_ns.push_back(std::numeric_limits<float>::quiet_NaN());
             }
             obs.total_pe += pe;
-            if (!write_time_series && pe >= trigger_cfg.pixel_threshold_pe) {
+            if (!evaluate_time_series && pe >= trigger_cfg.pixel_threshold_pe) {
                 ++obs.n_pixels_above_threshold;
             }
         }
@@ -629,8 +518,10 @@ LactRootPreparedData prepareLactRootObservations(
         if (obs.triggered) {
             obs.trigger_time_ns =
                 std::isfinite(trigger_time_ns) ? trigger_time_ns :
-                (std::isfinite(obs.time_peak_ns) ? obs.time_peak_ns : obs.time_mean_ns);
-            triggered_telescopes_by_event[event_id] += 1;
+                (std::isfinite(obs.time_peak_ns) ? obs.time_peak_ns :
+                 (std::isfinite(obs.time_mean_ns) ? obs.time_mean_ns : 0.0));
+            telescope_trigger_times_by_event[event_id].push_back(
+                TelescopeTriggerTime{telescope_id, obs.trigger_time_ns});
         }
 
         PreparedObservation candidate;
@@ -663,12 +554,23 @@ LactRootPreparedData prepareLactRootObservations(
         candidates.push_back(std::move(candidate));
     }
 
+    std::map<int, ArrayTriggerDecision> array_trigger_decisions;
+    for (const auto& item : telescope_trigger_times_by_event) {
+        array_trigger_decisions[item.first] =
+            evaluateArrayTrigger(item.second, trigger_cfg);
+    }
+
     for (auto& candidate : candidates) {
         if (output_cfg.save_only_triggered && trigger_cfg.enabled) {
-            const int n_triggered =
-                triggered_telescopes_by_event[candidate.observation.event_id];
-            if (n_triggered < trigger_cfg.array_multiplicity ||
-                !candidate.observation.triggered) {
+            const auto& array_decision =
+                array_trigger_decisions[candidate.observation.event_id];
+            const bool telescope_is_coincident = std::binary_search(
+                array_decision.coincident_telescope_ids.begin(),
+                array_decision.coincident_telescope_ids.end(),
+                candidate.observation.telescope_id);
+            if (!array_decision.triggered ||
+                !candidate.observation.triggered ||
+                !telescope_is_coincident) {
                 continue;
             }
         }
@@ -711,6 +613,8 @@ struct LactEventRootStreamWriter::Impl {
     double energy_gev = 0.0, theta_deg = 0.0, phi_deg = 0.0;
     double azimuth_north_to_east_deg = 0.0, altitude_deg = 0.0;
     double core_x_north_m = 0.0, core_y_west_m = 0.0, array_rotation_deg = 0.0;
+    double array_time_offset_ns = 0.0, area_weight_m2 = 0.0;
+    bool has_explicit_area_weight = false;
     double h_first_int_m = std::numeric_limits<double>::quiet_NaN();
     double x_max_g_cm2 = std::numeric_limits<double>::quiet_NaN();
     double h_max_m = std::numeric_limits<double>::quiet_NaN();
@@ -904,6 +808,9 @@ struct LactEventRootStreamWriter::Impl {
       corsika_tree->Branch("event_id", &root_event_id);
       corsika_tree->Branch("shower_event_id", &shower_event_id);
       corsika_tree->Branch("array_id", &array_id);
+      corsika_tree->Branch("array_time_offset_ns", &array_time_offset_ns);
+      corsika_tree->Branch("area_weight_m2", &area_weight_m2);
+      corsika_tree->Branch("has_explicit_area_weight", &has_explicit_area_weight);
       corsika_tree->Branch("run_id", &run_id);
       corsika_tree->Branch("primary_type", &primary_type);
       corsika_tree->Branch("energy_gev", &energy_gev);
@@ -1006,6 +913,9 @@ struct LactEventRootStreamWriter::Impl {
                               source_runtime_cfg.event_id_mode, metadata);
       shower_event_id = event_meta.shower_event;
       array_id = event_meta.array_id;
+      array_time_offset_ns = event_meta.array_time_offset_ns;
+      area_weight_m2 = event_meta.area_weight_m2;
+      has_explicit_area_weight = event_meta.has_explicit_area_weight;
       root_event_id = event_id;
       primary_type = 0;
       energy_gev = event_meta.energy_gev;

@@ -1,8 +1,12 @@
 #include "app/OpticalSimCommon.hpp"
+#include "app/PhotonResponseSampler.hpp"
+#include "app/TelescopeOpticsCache.hpp"
+#include "app/TriggerResponse.hpp"
 #include "io/CorsikaTraceOutputTypes.hpp"
 
 #ifdef LACT_HAS_HDF5
 #include <hdf5.h>
+#include "io/Hdf5WaveformWriter.hpp"
 #endif
 
 #ifdef LACT_HAS_ROOT
@@ -260,6 +264,9 @@ struct OutputEventMetadata {
     double core_x_north_m = 0.0;
     double core_y_west_m = 0.0;
     double azimuth_north_to_east_deg = 0.0;
+    double array_time_offset_ns = 0.0;
+    double area_weight_m2 = 0.0;
+    bool has_explicit_area_weight = false;
     bool found = false;
     bool used_array_offset = false;
 };
@@ -270,8 +277,14 @@ OutputEventMetadata outputEventMetadata(int event_id,
 {
     OutputEventMetadata out;
     out.event_id = event_id;
-    out.shower_event = showerEventFromOutputEvent(event_id, event_id_mode);
-    out.array_id = arrayIdFromOutputEvent(event_id, event_id_mode);
+    const auto identity = metadata.output_event_identity.find(event_id);
+    if (identity != metadata.output_event_identity.end()) {
+        out.shower_event = identity->second.first;
+        out.array_id = identity->second.second;
+    } else {
+        out.shower_event = showerEventFromOutputEvent(event_id, event_id_mode);
+        out.array_id = arrayIdFromOutputEvent(event_id, event_id_mode);
+    }
 
     auto event_it = std::find_if(
         metadata.events.begin(), metadata.events.end(),
@@ -289,6 +302,7 @@ OutputEventMetadata outputEventMetadata(int event_id,
     out.azimuth_north_to_east_deg = event_it->azimuth_north_to_east_deg;
 
     if (auto offsets = metadata.arrayOffsetsForShower(out.shower_event)) {
+        out.array_time_offset_ns = offsets->time_offset_ns;
         const std::size_t offset_index = static_cast<std::size_t>(out.array_id);
         if (out.array_id >= 0 && offset_index < offsets->x_m.size() &&
             offset_index < offsets->y_m.size()) {
@@ -298,6 +312,10 @@ OutputEventMetadata outputEventMetadata(int event_id,
             out.core_x_north_m = -offsets->x_m[offset_index];
             out.core_y_west_m = -offsets->y_m[offset_index];
             out.used_array_offset = true;
+        }
+        if (out.array_id >= 0 && offset_index < offsets->weight.size()) {
+            out.area_weight_m2 = offsets->weight[offset_index];
+            out.has_explicit_area_weight = offsets->has_explicit_weights;
         }
     }
     return out;
@@ -389,6 +407,15 @@ void applyEventIOWavelengthMetadata(EventIOPhotonConfig& eventio_cfg,
     }
 }
 
+void applyEventIOAtmosphereMetadata(EventIOPhotonConfig& eventio_cfg,
+                                    const EventIOMetadata& metadata)
+{
+    if (std::isfinite(metadata.observation_altitude_m)) {
+        eventio_cfg.observation_altitude_km =
+            metadata.observation_altitude_m * 1.0e-3;
+    }
+}
+
 CorsikaTraceOutputConfig buildCorsikaTraceOutputConfig(
     const std::map<std::string, std::string>& cfg)
 {
@@ -408,6 +435,8 @@ CorsikaTraceOutputConfig buildCorsikaTraceOutputConfig(
     out.format = lowerCopy(trim(getString(cfg, "output.format", out.format)));
     out.hdf5_storage =
         lowerCopy(trim(getString(cfg, "output.hdf5_storage", out.hdf5_storage)));
+    out.hdf5_waveform_storage = lowerCopy(trim(getString(
+        cfg, "output.hdf5_waveform_storage", out.hdf5_waveform_storage)));
     out.hdf5_write_components =
         getBool(cfg, "output.hdf5_write_components", out.hdf5_write_components);
     out.hdf5_write_waveforms =
@@ -460,6 +489,11 @@ CorsikaTraceOutputConfig buildCorsikaTraceOutputConfig(
           out.hdf5_storage == "dense" ||
           out.hdf5_storage == "both")) {
         throw std::runtime_error("output.hdf5_storage must be sparse, dense, or both");
+    }
+    if (!(out.hdf5_waveform_storage == "sparse" ||
+          out.hdf5_waveform_storage == "dense")) {
+        throw std::runtime_error(
+            "output.hdf5_waveform_storage must be sparse or dense");
     }
     return out;
 }
@@ -1182,6 +1216,8 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                              waveform_cfg.enabled ? "true" : "false");
         writeStringAttribute(file, "hdf5_write_waveforms",
                              output_cfg.hdf5_write_waveforms ? "true" : "false");
+        writeStringAttribute(file, "hdf5_waveform_storage",
+                             output_cfg.hdf5_waveform_storage);
         writeStringAttribute(file, "event_id_mode", source_runtime_cfg.event_id_mode);
         writeStringAttribute(file, "source_eventio_path", source_runtime_cfg.eventio_path);
 
@@ -1327,6 +1363,10 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                              intToString(trigger_cfg.array_multiplicity));
         writeStringAttribute(trigger_group_meta, "coincidence_window_ns",
                              doubleToString(trigger_cfg.coincidence_window_ns));
+        writeStringAttribute(trigger_group_meta, "camera_coincidence_window_ns",
+                             doubleToString(trigger_cfg.camera_coincidence_window_ns));
+        writeStringAttribute(trigger_group_meta, "array_coincidence_window_ns",
+                             doubleToString(trigger_cfg.array_coincidence_window_ns));
         H5Gclose(trigger_group_meta);
         H5Gclose(metadata_group);
 
@@ -1610,8 +1650,7 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         std::vector<float> dense_time_rms_ns;
         std::vector<std::int32_t> dense_photon_count;
         const bool have_dense_images = write_dense && !camera_rows.empty();
-        const bool have_camera_axis = !camera_rows.empty() &&
-            (have_dense_images || waveform_cfg.enabled);
+        const bool have_camera_axis = !camera_rows.empty();
         if (have_camera_axis) {
             pixel_id_axis.reserve(camera_rows.size());
             for (std::size_t i = 0; i < camera_rows.size(); ++i) {
@@ -1722,44 +1761,140 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             std::int32_t n_triggered_telescopes;
         };
         std::vector<TelescopeTriggerRow> telescope_trigger_rows;
-        std::map<int, int> triggered_telescopes_by_event;
+        std::map<int, std::vector<TelescopeTriggerTime>>
+            telescope_trigger_times_by_event;
         telescope_trigger_rows.reserve(image_rows.size());
         for (const auto& image : image_rows) {
-            int above_threshold = 0;
             double total_pe = image.total_pe;
-            if (have_dense_images) {
+            std::size_t trigger_pixels = 0;
+            std::size_t trigger_bins = 1;
+            double trigger_bin_width_ns = 1.0;
+            double first_trigger_bin_center_ns =
+                std::isfinite(image.time_mean_ns) ? image.time_mean_ns : 0.0;
+            std::function<double(std::size_t, std::size_t)> pe_at;
+            std::unordered_map<std::size_t, double> trigger_waveform_pe;
+            std::vector<double> sparse_trigger_pe;
+            const bool use_time_trigger =
+                waveform_cfg.enabled && waveform_cfg.source == "pe" &&
+                !camera_rows.empty();
+            if (use_time_trigger) {
+                trigger_pixels = camera_rows.size();
+                trigger_bins = waveformBinCount(waveform_cfg);
+                trigger_bin_width_ns = waveform_cfg.time_bin_width_ns;
+                double reference_time_ns = 0.0;
+                if (waveform_cfg.time_reference == "image_first" &&
+                    std::isfinite(image.time_first_ns)) {
+                    reference_time_ns = image.time_first_ns;
+                } else if (waveform_cfg.time_reference == "image_mean" &&
+                           std::isfinite(image.time_mean_ns)) {
+                    reference_time_ns = image.time_mean_ns;
+                }
+                first_trigger_bin_center_ns =
+                    reference_time_ns + waveform_cfg.time_window_start_ns +
+                    0.5 * waveform_cfg.time_bin_width_ns;
+                auto add_trigger_pe = [&](int pixel_id, int bin, double pe) {
+                    const auto col_it = pixel_to_col.find(pixel_id);
+                    if (col_it == pixel_to_col.end() || bin < 0 ||
+                        static_cast<std::size_t>(bin) >= trigger_bins || pe == 0.0) {
+                        return;
+                    }
+                    trigger_waveform_pe[
+                        col_it->second * trigger_bins + static_cast<std::size_t>(bin)] += pe;
+                };
+                if (waveformUsesImageReference(waveform_cfg)) {
+                    for (const auto& hit : raw_waveform_hits) {
+                        if (hit.event_id != image.event_id ||
+                            hit.telescope_id != image.telescope_id) {
+                            continue;
+                        }
+                        add_trigger_pe(
+                            hit.pixel_id,
+                            waveformBinForTime(
+                                waveform_cfg, hit.time_ns - reference_time_ns),
+                            hit.pe);
+                    }
+                } else {
+                    const WaveformKey begin_key{
+                        static_cast<int>(image.event_id),
+                        static_cast<int>(image.telescope_id),
+                        std::numeric_limits<int>::min(),
+                        std::numeric_limits<int>::min()};
+                    const WaveformKey end_key{
+                        static_cast<int>(image.event_id),
+                        static_cast<int>(image.telescope_id),
+                        std::numeric_limits<int>::max(),
+                        std::numeric_limits<int>::max()};
+                    for (auto it = waveforms.lower_bound(begin_key);
+                         it != waveforms.end() && it->first <= end_key;
+                         ++it) {
+                        add_trigger_pe(
+                            it->second.pixel_id, it->second.time_bin, it->second.pe);
+                    }
+                }
+                pe_at = [&, event_id = static_cast<int>(image.event_id),
+                         telescope_id = static_cast<int>(image.telescope_id)](
+                            std::size_t col, std::size_t bin) {
+                    const auto found = trigger_waveform_pe.find(
+                        col * trigger_bins + bin);
+                    const double cherenkov_pe =
+                        found == trigger_waveform_pe.end() ? 0.0 : found->second;
+                    return cherenkov_pe + sampleTimeBinnedNsbPeCell(
+                        nsb_cfg,
+                        waveform_cfg,
+                        event_id,
+                        telescope_id,
+                        trigger_pixels,
+                        trigger_bins,
+                        col,
+                        bin);
+                };
+            } else if (have_dense_images) {
                 const std::size_t row = static_cast<std::size_t>(image.image_index);
                 const std::size_t n_pixels = camera_rows.size();
                 total_pe = 0.0;
                 for (std::size_t col = 0; col < n_pixels; ++col) {
-                    const double pe = dense_pe[row * n_pixels + col];
-                    total_pe += pe;
-                    if (pe >= trigger_cfg.pixel_threshold_pe) {
-                        ++above_threshold;
-                    }
+                    total_pe += dense_pe[row * n_pixels + col];
                 }
+                trigger_pixels = n_pixels;
+                pe_at = [&, row, n_pixels](std::size_t col, std::size_t) {
+                    return static_cast<double>(dense_pe[row * n_pixels + col]);
+                };
             } else {
                 const std::int64_t begin = image.start;
                 const std::int64_t end = image.start + image.count;
+                trigger_pixels = camera_rows.size();
+                sparse_trigger_pe.assign(trigger_pixels, 0.0);
                 for (std::int64_t i = begin; i < end; ++i) {
-                    if (sparse_rows[static_cast<std::size_t>(i)].pe >=
-                        trigger_cfg.pixel_threshold_pe) {
-                        ++above_threshold;
+                    const auto& pixel = sparse_rows[static_cast<std::size_t>(i)];
+                    const auto col_it = pixel_to_col.find(pixel.pixel_id);
+                    if (col_it != pixel_to_col.end()) {
+                        sparse_trigger_pe[col_it->second] += pixel.pe;
                     }
                 }
+                pe_at = [&](std::size_t col, std::size_t) {
+                    return sparse_trigger_pe[col];
+                };
             }
-            const bool telescope_triggered =
-                trigger_cfg.enabled && above_threshold >= trigger_cfg.camera_multiplicity;
-            if (telescope_triggered) {
-                triggered_telescopes_by_event[static_cast<int>(image.event_id)] += 1;
+            const auto camera_trigger = evaluateBinnedPeTrigger(
+                trigger_pixels,
+                trigger_bins,
+                trigger_bin_width_ns,
+                first_trigger_bin_center_ns,
+                trigger_cfg, pe_at);
+            if (camera_trigger.triggered) {
+                telescope_trigger_times_by_event[static_cast<int>(image.event_id)]
+                    .push_back(TelescopeTriggerTime{
+                        static_cast<int>(image.telescope_id),
+                        camera_trigger.trigger_time_ns});
             }
             telescope_trigger_rows.push_back(TelescopeTriggerRow{
                 image.event_id,
                 image.telescope_id,
-                static_cast<std::int8_t>(telescope_triggered ? 1 : 0),
-                static_cast<std::int32_t>(above_threshold),
+                static_cast<std::int8_t>(camera_trigger.triggered ? 1 : 0),
+                static_cast<std::int32_t>(
+                    camera_trigger.n_pixels_above_threshold),
                 total_pe,
-                image.time_mean_ns,
+                static_cast<float>(camera_trigger.trigger_time_ns),
             });
         }
         std::set<int> trigger_event_ids;
@@ -1767,13 +1902,17 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             trigger_event_ids.insert(key.first);
         }
         std::vector<ArrayTriggerRow> array_trigger_rows;
+        std::map<int, ArrayTriggerDecision> array_trigger_decisions;
         array_trigger_rows.reserve(trigger_event_ids.size());
         for (const int event_id : trigger_event_ids) {
-            const int n_triggered = triggered_telescopes_by_event[event_id];
+            const auto decision = evaluateArrayTrigger(
+                telescope_trigger_times_by_event[event_id], trigger_cfg);
+            array_trigger_decisions[event_id] = decision;
+            const int n_triggered = static_cast<int>(
+                telescope_trigger_times_by_event[event_id].size());
             array_trigger_rows.push_back(ArrayTriggerRow{
                 static_cast<std::int64_t>(event_id),
-                static_cast<std::int8_t>(
-                    trigger_cfg.enabled && n_triggered >= trigger_cfg.array_multiplicity ? 1 : 0),
+                static_cast<std::int8_t>(decision.triggered ? 1 : 0),
                 static_cast<std::int32_t>(n_triggered),
             });
         }
@@ -1781,10 +1920,14 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         if (output_cfg.save_only_triggered && trigger_cfg.enabled) {
             std::set<SummaryKey> triggered_image_keys;
             for (const auto& row : telescope_trigger_rows) {
-                const int n_triggered =
-                    triggered_telescopes_by_event[static_cast<int>(row.event_id)];
-                if (row.triggered &&
-                    n_triggered >= trigger_cfg.array_multiplicity) {
+                const auto& array_decision =
+                    array_trigger_decisions[static_cast<int>(row.event_id)];
+                const bool telescope_is_coincident = std::binary_search(
+                    array_decision.coincident_telescope_ids.begin(),
+                    array_decision.coincident_telescope_ids.end(),
+                    static_cast<int>(row.telescope_id));
+                if (row.triggered && array_decision.triggered &&
+                    telescope_is_coincident) {
                     triggered_image_keys.insert({
                         static_cast<int>(row.event_id),
                         static_cast<int>(row.telescope_id),
@@ -1897,6 +2040,7 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             std::int64_t event_id;
             std::int32_t shower_event_id;
             std::int32_t array_id;
+            std::int32_t has_explicit_area_weight;
             std::int32_t primary_type;
             double energy_gev;
             double theta_deg;
@@ -1905,6 +2049,8 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             double core_x_north_m;
             double core_y_west_m;
             double array_rotation_deg;
+            double array_time_offset_ns;
+            double area_weight_m2;
             double h_first_int_m;
             double x_max_g_cm2;
             double h_max_m;
@@ -1945,24 +2091,21 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                 event_index++,
                 static_cast<std::int64_t>(event_id),
             });
-            const int shower_event =
-                showerEventFromOutputEvent(event_id, source_runtime_cfg.event_id_mode);
-            const int array_id =
-                arrayIdFromOutputEvent(event_id, source_runtime_cfg.event_id_mode);
+            const OutputEventMetadata event_meta = outputEventMetadata(
+                event_id, source_runtime_cfg.event_id_mode, metadata);
+            const int shower_event = event_meta.shower_event;
+            const int array_id = event_meta.array_id;
             auto event_it = std::find_if(
                 metadata.events.begin(), metadata.events.end(),
                 [shower_event](const EventIOEventHeader& event) {
                     return event.shower_event_id == shower_event;
                 });
             if (event_it != metadata.events.end()) {
-                const OutputEventMetadata event_meta =
-                    outputEventMetadata(event_id,
-                                        source_runtime_cfg.event_id_mode,
-                                        metadata);
                 corsika_event_rows.push_back(CorsikaEventRow{
                     static_cast<std::int64_t>(event_id),
                     static_cast<std::int32_t>(shower_event),
                     static_cast<std::int32_t>(array_id),
+                    static_cast<std::int32_t>(event_meta.has_explicit_area_weight),
                     static_cast<std::int32_t>(event_it->primary_type),
                     event_it->energy_gev,
                     event_it->theta_deg,
@@ -1971,6 +2114,8 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                     event_meta.core_x_north_m,
                     event_meta.core_y_west_m,
                     event_it->array_rotation_deg,
+                    event_meta.array_time_offset_ns,
+                    event_meta.area_weight_m2,
                     event_it->h_first_int_m,
                     event_it->x_max_g_cm2,
                     event_it->h_max_m,
@@ -1997,6 +2142,9 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                       HOFFSET(CorsikaEventRow, shower_event_id), H5T_NATIVE_INT32);
             H5Tinsert(corsika_event_type, "array_id",
                       HOFFSET(CorsikaEventRow, array_id), H5T_NATIVE_INT32);
+            H5Tinsert(corsika_event_type, "has_explicit_area_weight",
+                      HOFFSET(CorsikaEventRow, has_explicit_area_weight),
+                      H5T_NATIVE_INT32);
             H5Tinsert(corsika_event_type, "primary_type",
                       HOFFSET(CorsikaEventRow, primary_type), H5T_NATIVE_INT32);
             H5Tinsert(corsika_event_type, "energy_gev",
@@ -2014,6 +2162,10 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                       HOFFSET(CorsikaEventRow, core_y_west_m), H5T_NATIVE_DOUBLE);
             H5Tinsert(corsika_event_type, "array_rotation_deg",
                       HOFFSET(CorsikaEventRow, array_rotation_deg), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "array_time_offset_ns",
+                      HOFFSET(CorsikaEventRow, array_time_offset_ns), H5T_NATIVE_DOUBLE);
+            H5Tinsert(corsika_event_type, "area_weight_m2",
+                      HOFFSET(CorsikaEventRow, area_weight_m2), H5T_NATIVE_DOUBLE);
             H5Tinsert(corsika_event_type, "h_first_int_m",
                       HOFFSET(CorsikaEventRow, h_first_int_m), H5T_NATIVE_DOUBLE);
             H5Tinsert(corsika_event_type, "x_max_g_cm2",
@@ -2199,184 +2351,27 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         }
         H5Gclose(images_group);
 
-        if (waveform_cfg.enabled && output_cfg.hdf5_write_waveforms && have_camera_axis) {
-            const std::size_t n_images = image_rows.size();
-            const std::size_t n_pixels = camera_rows.size();
-            const std::size_t n_bins = waveformBinCount(waveform_cfg);
-            std::vector<double> time_edges(n_bins + 1, 0.0);
-            std::vector<double> time_centers(n_bins, 0.0);
-            for (std::size_t i = 0; i <= n_bins; ++i) {
-                time_edges[i] = waveform_cfg.time_window_start_ns +
-                    static_cast<double>(i) * waveform_cfg.time_bin_width_ns;
+        if (waveform_cfg.enabled && output_cfg.hdf5_write_waveforms &&
+            have_camera_axis) {
+            std::vector<Hdf5WaveformImage> waveform_images;
+            waveform_images.reserve(image_rows.size());
+            for (const auto& image : image_rows) {
+                waveform_images.push_back(Hdf5WaveformImage{
+                    image.image_index,
+                    static_cast<int>(image.event_id),
+                    static_cast<int>(image.telescope_id),
+                    static_cast<double>(image.time_first_ns),
+                    static_cast<double>(image.time_mean_ns),
+                });
             }
-            for (std::size_t i = 0; i < n_bins; ++i) {
-                time_centers[i] = 0.5 * (time_edges[i] + time_edges[i + 1]);
-            }
-
-            std::map<SummaryKey, std::size_t> image_row_by_key;
-            for (std::size_t row = 0; row < image_rows.size(); ++row) {
-                image_row_by_key[{
-                    static_cast<int>(image_rows[row].event_id),
-                    static_cast<int>(image_rows[row].telescope_id),
-                }] = row;
-            }
-            std::vector<double> waveform_reference_time_ns(n_images, 0.0);
-            if (waveformUsesImageReference(waveform_cfg)) {
-                for (std::size_t row = 0; row < image_rows.size(); ++row) {
-                    if (waveform_cfg.time_reference == "image_first") {
-                        waveform_reference_time_ns[row] =
-                            static_cast<double>(image_rows[row].time_first_ns);
-                    } else {
-                        waveform_reference_time_ns[row] =
-                            static_cast<double>(image_rows[row].time_mean_ns);
-                    }
-                }
-            }
-
-            std::vector<std::int32_t> waveform_photon_count;
-            std::vector<float> waveform_pe;
-            std::vector<float> waveform_cherenkov_pe;
-            std::vector<float> waveform_nsb_pe;
-            if (waveform_cfg.source == "photon_count") {
-                waveform_photon_count.assign(n_images * n_bins * n_pixels, 0);
-            } else if (waveform_cfg.source == "pe") {
-                waveform_pe.assign(n_images * n_bins * n_pixels, 0.0f);
-                if (output_cfg.hdf5_write_components) {
-                    waveform_cherenkov_pe.assign(n_images * n_bins * n_pixels, 0.0f);
-                    waveform_nsb_pe.assign(n_images * n_bins * n_pixels, 0.0f);
-                }
-            }
-
-            for (const auto& kv : waveforms) {
-                const auto& w = kv.second;
-                const auto image_it = image_row_by_key.find({w.event_id, w.telescope_id});
-                const auto pixel_it = pixel_to_col.find(w.pixel_id);
-                if (image_it == image_row_by_key.end() ||
-                    pixel_it == pixel_to_col.end() ||
-                    w.time_bin < 0 ||
-                    static_cast<std::size_t>(w.time_bin) >= n_bins) {
-                    continue;
-                }
-                const std::size_t index =
-                    (image_it->second * n_bins + static_cast<std::size_t>(w.time_bin)) *
-                    n_pixels + pixel_it->second;
-                if (waveform_cfg.source == "photon_count") {
-                    waveform_photon_count[index] =
-                        static_cast<std::int32_t>(w.photon_count);
-                } else if (waveform_cfg.source == "pe") {
-                    const float cherenkov_pe = static_cast<float>(w.pe);
-                    waveform_pe[index] += cherenkov_pe;
-                    if (output_cfg.hdf5_write_components) {
-                        waveform_cherenkov_pe[index] += cherenkov_pe;
-                    }
-                }
-            }
-            if (waveformUsesImageReference(waveform_cfg)) {
-                for (const auto& hit : raw_waveform_hits) {
-                    const auto image_it = image_row_by_key.find({
-                        hit.event_id, hit.telescope_id});
-                    const auto pixel_it = pixel_to_col.find(hit.pixel_id);
-                    if (image_it == image_row_by_key.end() ||
-                        pixel_it == pixel_to_col.end()) {
-                        continue;
-                    }
-                    const std::size_t row = image_it->second;
-                    const double relative_time_ns =
-                        hit.time_ns - waveform_reference_time_ns[row];
-                    const int bin = waveformBinForTime(waveform_cfg, relative_time_ns);
-                    if (bin < 0) {
-                        continue;
-                    }
-                    const std::size_t index =
-                        (row * n_bins + static_cast<std::size_t>(bin)) *
-                        n_pixels + pixel_it->second;
-                    if (waveform_cfg.source == "photon_count") {
-                        waveform_photon_count[index] +=
-                            static_cast<std::int32_t>(hit.photon_count);
-                    } else if (waveform_cfg.source == "pe") {
-                        const float cherenkov_pe = static_cast<float>(hit.pe);
-                        waveform_pe[index] += cherenkov_pe;
-                        if (output_cfg.hdf5_write_components) {
-                            waveform_cherenkov_pe[index] += cherenkov_pe;
-                        }
-                    }
-                }
-            }
-
-            if (waveform_cfg.source == "pe" &&
-                nsb_cfg.enabled &&
-                nsb_cfg.rate_pe_per_ns_per_pixel > 0.0) {
-                for (std::size_t row = 0; row < image_rows.size(); ++row) {
-                    const auto& image = image_rows[row];
-                    generateTimeBinnedNsbPe(
-                        nsb_cfg,
-                        waveform_cfg,
-                        static_cast<int>(image.event_id),
-                        static_cast<int>(image.telescope_id),
-                        n_pixels,
-                        n_bins,
-                        [&](std::size_t col, std::size_t bin, float nsb_pe) {
-                            const std::size_t index =
-                                (row * n_bins + bin) * n_pixels + col;
-                            waveform_pe[index] += nsb_pe;
-                            if (output_cfg.hdf5_write_components) {
-                                waveform_nsb_pe[index] += nsb_pe;
-                            }
-                        });
-                }
-            }
-
-            hid_t waveform_group = H5Gcreate2(file, "waveforms",
-                                              H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-            writeStringAttribute(waveform_group, "source", waveform_cfg.source);
-            writeStringAttribute(waveform_group, "time_reference",
-                                 waveform_cfg.time_reference);
-            writeStringAttribute(waveform_group, "shape",
-                                 "image_index,time_bin,pixel_id_axis");
-            writeStringAttribute(waveform_group, "note",
-                                 "proxy waveform accumulated at camera/collector output; "
-                                 "real electronics waveform is not modeled");
-            writePlain1D(waveform_group, "pixel_id_axis", H5T_NATIVE_INT32, pixel_id_axis);
-            writePlain1D(waveform_group, "time_edges_ns", H5T_NATIVE_DOUBLE, time_edges);
-            writePlain1D(waveform_group, "time_centers_ns", H5T_NATIVE_DOUBLE, time_centers);
-            writePlain1D(waveform_group,
-                         "reference_time_ns",
-                         H5T_NATIVE_DOUBLE,
-                         waveform_reference_time_ns);
-            if (waveform_cfg.source == "photon_count") {
-                writePlain3D(waveform_group,
-                             "photon_count",
-                             H5T_NATIVE_INT32,
-                             waveform_photon_count,
-                             static_cast<hsize_t>(n_images),
-                             static_cast<hsize_t>(n_bins),
-                             static_cast<hsize_t>(n_pixels));
-            } else if (waveform_cfg.source == "pe") {
-                if (output_cfg.hdf5_write_components) {
-                    writePlain3D(waveform_group,
-                                 "cherenkov_pe",
-                                 H5T_NATIVE_FLOAT,
-                                 waveform_cherenkov_pe,
-                                 static_cast<hsize_t>(n_images),
-                                 static_cast<hsize_t>(n_bins),
-                                 static_cast<hsize_t>(n_pixels));
-                    writePlain3D(waveform_group,
-                                 "nsb_pe",
-                                 H5T_NATIVE_FLOAT,
-                                 waveform_nsb_pe,
-                                 static_cast<hsize_t>(n_images),
-                                 static_cast<hsize_t>(n_bins),
-                                 static_cast<hsize_t>(n_pixels));
-                }
-                writePlain3D(waveform_group,
-                             "pe",
-                             H5T_NATIVE_FLOAT,
-                             waveform_pe,
-                             static_cast<hsize_t>(n_images),
-                             static_cast<hsize_t>(n_bins),
-                             static_cast<hsize_t>(n_pixels));
-            }
-            H5Gclose(waveform_group);
+            writeHdf5Waveforms(file,
+                               output_cfg,
+                               waveform_cfg,
+                               nsb_cfg,
+                               pixel_id_axis,
+                               waveform_images,
+                               waveforms,
+                               raw_waveform_hits);
         }
 
         hid_t trigger_group = H5Gcreate2(file, "trigger",
@@ -2601,12 +2596,11 @@ void printEventSummary(const std::map<SummaryKey, TraceSummary>& summaries,
     std::map<int, EventAggregate> events;
     for (const auto& kv : summaries) {
         const auto& s = kv.second;
-        const int shower_event = showerEventFromOutputEvent(s.event_id, event_id_mode);
-        const int array_id = arrayIdFromOutputEvent(s.event_id, event_id_mode);
+        const auto identity = outputEventMetadata(s.event_id, event_id_mode, metadata);
         auto& e = events[s.event_id];
         e.event_id = s.event_id;
-        e.shower_event = shower_event;
-        e.array_id = array_id;
+        e.shower_event = identity.shower_event;
+        e.array_id = identity.array_id;
         e.output_events.insert(s.event_id);
         e.telescopes.insert(s.telescope_id);
         e.input_bunches += s.input_bunches;
@@ -2704,6 +2698,7 @@ void printCorsikaOpticalConfiguration(
     const CollectorDebugConfig& collector_debug_cfg,
     const NsbConfig& nsb_cfg,
     const TriggerConfig& trigger_cfg,
+    const PhotonResponseConfig& response_cfg,
     const OpticalEfficiencyConfig& efficiency_cfg,
     const AtmosphereTransmissionConfig& atmosphere_cfg,
     const ErrorConfig& error_cfg,
@@ -2767,8 +2762,19 @@ void printCorsikaOpticalConfiguration(
                source_runtime_cfg.use_eventio_telescope_position
                    ? "use EventIO telescope table"
                    : "use telescope.position_m for every telescope");
-    printField("filter_telescope_id", "off");
-    printField("filter_event_id", "off");
+    printField("filter_telescope_id",
+               source_runtime_cfg.filter_telescope_id
+                   ? intToString(source_runtime_cfg.selected_telescope_id)
+                   : "off");
+    printField("filter_event_id",
+               source_runtime_cfg.filter_event_id
+                   ? intToString(source_runtime_cfg.selected_event_id)
+                   : "off");
+    printField("filter_event_ids",
+               source_runtime_cfg.selected_event_ids.empty()
+                   ? "off"
+                   : (intToString(source_runtime_cfg.selected_event_ids.size()) +
+                      " selected"));
     printField("filter_shower_event_id",
                source_runtime_cfg.filter_shower_event_id
                    ? intToString(source_runtime_cfg.selected_shower_event_id)
@@ -2805,6 +2811,8 @@ void printCorsikaOpticalConfiguration(
                    output_cfg.hdf5_write_components ? "true" : "false");
         printField("hdf5_write_waveforms",
                    output_cfg.hdf5_write_waveforms ? "true" : "false");
+        printField("hdf5_waveform_storage",
+                   output_cfg.hdf5_waveform_storage);
         printField("lact_root_write_components",
                    output_cfg.lact_root_write_components ? "true" : "false");
         printField("save_only_triggered",
@@ -2932,7 +2940,14 @@ void printCorsikaOpticalConfiguration(
     printField("pixel_threshold_pe", doubleToString(trigger_cfg.pixel_threshold_pe));
     printField("camera_multiplicity", intToString(trigger_cfg.camera_multiplicity));
     printField("array_multiplicity", intToString(trigger_cfg.array_multiplicity));
-    printField("coincidence_window_ns", doubleToString(trigger_cfg.coincidence_window_ns));
+    printField("camera_coincidence_window_ns",
+               doubleToString(trigger_cfg.camera_coincidence_window_ns));
+    printField("array_coincidence_window_ns",
+               doubleToString(trigger_cfg.array_coincidence_window_ns));
+
+    printSection("Photon response");
+    printField("mode", response_cfg.modeName());
+    printField("seed", intToString(response_cfg.seed));
 
     printSection("Efficiency");
     printField("constant_scale", doubleToString(efficiency_cfg.constant_scale));
@@ -3197,11 +3212,10 @@ int main(int argc, char** argv) {
             throw std::runtime_error("source.eventio_path or corsika.input is required");
         }
         TelescopeConfig telescope_cfg = buildTelescopeConfig(cfg);
-        std::vector<MirrorFacet> facets = buildFacetsFromConfig(cfg);
+        std::vector<MirrorFacet> nominal_facets = buildFacetsFromConfig(cfg);
         ErrorConfig error_cfg = buildErrorConfig(cfg);
         ObstructionMask obstruction = buildObstructionMask(cfg);
-        applyStructuralDeformation(facets, error_cfg, telescope_cfg);
-        applyFacetErrors(facets, error_cfg);
+        applyStructuralDeformation(nominal_facets, error_cfg, telescope_cfg);
         OutputPlane plane = buildOutputPlane(cfg);
         TelescopeFrame telescope_frame = buildTelescopeFrame(telescope_cfg);
         CameraConfig camera_cfg = buildCameraConfig(cfg);
@@ -3212,13 +3226,13 @@ int main(int argc, char** argv) {
         TriggerConfig trigger_cfg = buildTriggerConfig(cfg);
         CameraGeometry camera = buildCameraGeometry(camera_cfg);
         auto light_collector = buildLightCollector(camera_cfg, camera);
-        MirrorLayout mirrors = makeMirrorLayoutFromFacets(facets);
+        TelescopeOpticsCache telescope_optics(nominal_facets, error_cfg);
+        const MirrorLayout& mirrors = telescope_optics.layoutFor(telescope_cfg.id);
         OpticalEfficiencyConfig efficiency_cfg = buildEfficiencyConfig(cfg);
         resolveNsbSpectralRate(nsb_cfg, efficiency_cfg, camera, telescope_cfg);
         AtmosphereTransmissionConfig atmosphere_cfg = buildAtmosphereTransmissionConfig(cfg);
         PropagationConfig propagation_cfg = buildPropagationConfig(cfg);
         OpticalEfficiency eff(efficiency_cfg);
-        AtmosphereTransmission atmosphere(atmosphere_cfg);
         OpticalTracer tracer(propagation_cfg.speed_of_light_m_per_ns,
                              error_cfg.reflect_direction_sigma_deg * DEG_TO_RAD,
                              error_cfg.random_seed);
@@ -3234,6 +3248,7 @@ int main(int argc, char** argv) {
         std::vector<AtmosphereHistogramBin> atmosphere_histogram =
             makeAtmosphereHistogramBins(atmosphere_histogram_cfg);
         auto eventio_cfg = buildEventIOPhotonConfig(cfg, source_cfg, source_runtime_cfg);
+        const PhotonResponseConfig response_cfg = buildPhotonResponseConfig(cfg);
         ProfileStats profile_stats;
         const bool save_csv = outputWantsCsv(output_cfg);
         const bool save_hdf5 = outputWantsHdf5(output_cfg);
@@ -3283,6 +3298,16 @@ int main(int argc, char** argv) {
         const bool explicit_wavelength_range = hasExplicitMissingWavelengthRange(cfg);
         const bool has_cwavlg = wavelengthRangeFromInputCard(metadata).has_value();
         applyEventIOWavelengthMetadata(eventio_cfg, metadata, cfg);
+        applyEventIOAtmosphereMetadata(eventio_cfg, metadata);
+        if (cfg.find("atmosphere.detector_altitude_km") == cfg.end() &&
+            cfg.find("atmosphere.ground_altitude_km") == cfg.end() &&
+            std::isfinite(metadata.observation_altitude_m)) {
+            atmosphere_cfg.detector_altitude_km =
+                metadata.observation_altitude_m * 1.0e-3;
+        }
+        AtmosphereTransmission atmosphere(atmosphere_cfg);
+        atmosphere_cfg = atmosphere.config();
+        PhotonResponseSampler response_sampler(response_cfg, eventio_cfg);
         const std::string missing_wavelength_range_source =
             explicit_wavelength_range ? "cfg"
                                       : (has_cwavlg ? "EventIO input card CWAVLG"
@@ -3305,6 +3330,7 @@ int main(int argc, char** argv) {
                                          collector_debug_cfg,
                                          nsb_cfg,
                                          trigger_cfg,
+                                         response_cfg,
                                          efficiency_cfg,
                                          atmosphere_cfg,
                                          error_cfg,
@@ -3362,7 +3388,7 @@ int main(int argc, char** argv) {
                 telescope_cfg,
                 metadata,
                 camera,
-                facets,
+                nominal_facets,
                 nsb_cfg,
                 trigger_cfg);
         }
@@ -3548,7 +3574,6 @@ int main(int argc, char** argv) {
             if (profile_cfg.enabled) {
                 addElapsed(profile_stats, &ProfileStats::transform_s, t_step);
             }
-            ++photon_index;
             const int shower_event =
                 showerEventFromOutputEvent(bunch.event_id, source_runtime_cfg.event_id_mode);
             if (active_shower_event < 0) {
@@ -3572,43 +3597,48 @@ int main(int argc, char** argv) {
             summary.telescope_id = bunch.telescope_id;
             summary.input_bunches += 1;
             summary.input_photons += bunch.multiplicity;
+            const MirrorLayout& telescope_mirrors =
+                telescope_optics.layoutFor(bunch.telescope_id);
 
-            Photon photon = bunch.photon;
-            photon.normalizeDirection();
-            photon.weight *= bunch.multiplicity;
-            const double atmosphere_weight_before = photon.weight;
-            if (atmosphere.enabled()) {
-                const Vec3 global_dir = telescope_frame.rotateVector(photon.dir).normalized();
-                const double atmosphere_t =
-                    atmosphere.transmission(photon.wavelength_nm,
-                                            bunch.emission_altitude_km,
-                                            global_dir);
-                photon.weight *= atmosphere_t;
-                accumulateAtmosphereHistogram(atmosphere_histogram,
-                                              atmosphere_histogram_cfg,
-                                              bunch.emission_altitude_km,
-                                              atmosphere_weight_before,
-                                              photon.weight,
-                                              atmosphere_weight_before * atmosphere_t);
-                if (photon.weight <= 0.0) {
+            const Vec3 global_dir = sourceDirectionInWorld(
+                raw_bunch, telescope_cfg, source_runtime_cfg.coordinate_frame);
+            auto tracePhotonCandidate = [&](PhotonCandidate candidate) {
+                ++photon_index;
+                Photon& photon = candidate.photon;
+                photon.normalizeDirection();
+
+                double atmosphere_t = 1.0;
+                if (atmosphere.enabled() &&
+                    !photon.optical_efficiency_preapplied) {
+                    atmosphere_t = atmosphere.transmission(
+                        photon.wavelength_nm,
+                        bunch.emission_altitude_km,
+                        global_dir);
+                }
+                const auto pre_geometry = response_sampler.applyPreGeometry(
+                    candidate,
+                    atmosphere_t,
+                    eff.preGeometryDetectionProbability(photon.wavelength_nm));
+                accumulateAtmosphereHistogram(
+                    atmosphere_histogram,
+                    atmosphere_histogram_cfg,
+                    bunch.emission_altitude_km,
+                    pre_geometry.expected_weight_before_atmosphere,
+                    pre_geometry.expected_weight_after_atmosphere,
+                    pre_geometry.expected_weight_after_atmosphere);
+                if (!pre_geometry.survives) {
                     return;
                 }
-            } else {
-                accumulateAtmosphereHistogram(atmosphere_histogram,
-                                              atmosphere_histogram_cfg,
-                                              bunch.emission_altitude_km,
-                                              atmosphere_weight_before,
-                                              photon.weight,
-                                              atmosphere_weight_before);
-            }
 
             if (profile_cfg.enabled) {
                 t_step = std::chrono::steady_clock::now();
             }
             const bool backproject_this_bunch = bunch.eventio_2d && eventio_2d_backproject;
             OpticalSurfaceHit hit = backproject_this_bunch
-                                        ? tracer.traceBackprojectedToPlane(photon, mirrors, plane, eff)
-                                        : tracer.traceToPlane(photon, mirrors, plane, eff);
+                                        ? tracer.traceBackprojectedToPlane(
+                                              photon, telescope_mirrors, plane, eff)
+                                        : tracer.traceToPlane(
+                                              photon, telescope_mirrors, plane, eff);
             if (profile_cfg.enabled) {
                 addElapsed(profile_stats, &ProfileStats::trace_to_plane_s, t_step);
             }
@@ -3654,9 +3684,13 @@ int main(int argc, char** argv) {
             }
 
             summary.hit_output_plane += 1;
-            const double base_signal = hit.weight * hit.relative_efficiency;
 
             if (!camera_cfg.enabled) {
+                if (candidate.stochastic &&
+                    !response_sampler.acceptPostGeometry(candidate, hit)) {
+                    return;
+                }
+                const double base_signal = hit.weight * hit.relative_efficiency;
                 if (profile_cfg.enabled) {
                     t_step = std::chrono::steady_clock::now();
                 }
@@ -3693,6 +3727,10 @@ int main(int argc, char** argv) {
             }
             summary.hit_camera += 1;
             summary.unique_pixels.insert(hit.pixel_id);
+            if (candidate.stochastic &&
+                !response_sampler.acceptPostGeometry(candidate, hit)) {
+                return;
+            }
             if (hit.accepted) {
                 summary.accepted_camera += 1;
             }
@@ -3716,6 +3754,16 @@ int main(int argc, char** argv) {
                                   hit);
             if (profile_cfg.enabled) {
                 addElapsed(profile_stats, &ProfileStats::camera_accumulate_s, t_step);
+            }
+            };
+
+            const std::uint64_t candidate_count =
+                response_sampler.candidateCount(bunch);
+            for (std::uint64_t represented_index = 0;
+                 represented_index < candidate_count;
+                 ++represented_index) {
+                tracePhotonCandidate(
+                    response_sampler.candidate(bunch, represented_index));
             }
         };
 
@@ -3772,7 +3820,7 @@ int main(int argc, char** argv) {
                                  telescope_cfg,
                                  metadata,
                                  camera,
-                                 facets,
+                                 nominal_facets,
                                  sipm_cfg,
                                  electronics_cfg,
                                  efficiency_cfg,
