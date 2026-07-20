@@ -250,4 +250,5 @@ pylast 读取、ROOT tree 说明和 notebook 流程见
 - [HDF5 输出格式](docs/hdf5_output_format.md)
 - [相机时间和波形](docs/camera_timing_waveform_zh.md)
 - [NSB 光谱模型](docs/nsb_spectral_model_zh.md)
+- [NSB 逐像素空间采样](docs/nsb_spatial_sampling.md)
 - [ROOT/pylast 数据层级](docs/pylast_event_data_levels_zh.md)

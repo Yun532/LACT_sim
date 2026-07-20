@@ -178,15 +178,20 @@ nsb.model=constant_rate
 nsb.rate_pe_per_ns_per_pixel=0.05
 nsb.window_ns=16
 nsb.seed=12345
+nsb.spatial_model=uniform
 ```
 
-It applies only to dense pixel-camera HDF5 output. The final
-`/images/dense/pe` includes the NSB p.e. contribution. Use
+The final ROOT and HDF5 images include the same reproducible NSB realization;
+HDF5 dense and sparse storage also agree. Use
 `output.hdf5_write_components=true` to additionally write `cherenkov_pe` and
-`nsb_pe`. When waveform output is enabled with `waveform.source=pe`, NSB is
-sampled per waveform time bin using `rate_pe_per_ns_per_pixel *
-waveform.time_bin_width_ns`; otherwise it is sampled once per pixel with
-`rate_pe_per_ns_per_pixel * nsb.window_ns`.
+`nsb_pe`. When waveform output is enabled with `waveform.source=pe`, the final
+image is the integral of the configured waveform time window. Otherwise NSB is
+integrated over `nsb.window_ns`.
+
+Set `nsb.spatial_model=pixel_scale` and provide `nsb.pixel_scale_csv` to scale
+the mean rate independently for each pixel and, optionally, each telescope.
+The CSV schema and reproducibility rules are documented in
+[`nsb_spatial_sampling.md`](nsb_spatial_sampling.md).
 
 The spectral model computes the same `rate_pe_per_ns_per_pixel` from a LoNS
 spectrum, a fixed effective area, the camera pixel solid angle, and the
