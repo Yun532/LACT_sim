@@ -64,6 +64,7 @@ add_library(simlite_core
     src/io/SyntheticPhotonSource.cpp
     src/io/PhotonCsvSource.cpp
     src/io/MirrorFacetCsvReader.cpp
+    src/io/EventIOPhotonSemantics.cpp
     src/app/OpticalSimCommon.cpp
     src/app/PhotonResponseSampler.cpp
     src/app/TelescopeOpticsCache.cpp
