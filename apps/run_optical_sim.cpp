@@ -17,6 +17,11 @@ int main(int argc, char** argv) {
 
         SyntheticPhotonConfig source_cfg = buildSourceConfig(cfg);
         SourceRuntimeConfig source_runtime_cfg = buildSourceRuntimeConfig(cfg);
+        if (cfg.find("source.coordinate_frame") == cfg.end() &&
+            cfg.find("source.local_telescope_frame") != cfg.end()) {
+            std::cerr << "warning: source.local_telescope_frame is deprecated; "
+                         "use source.coordinate_frame instead\n";
+        }
         if (source_runtime_cfg.use_eventio) {
             throw std::runtime_error(
                 "run_optical_sim no longer accepts source.mode=EventIO. "
@@ -51,6 +56,8 @@ int main(int argc, char** argv) {
             (output_mode == "pixel" || output_mode == "pixels" ||
              output_mode == "both" || cfg.find("output.pixel_csv") != cfg.end());
         const bool save_hits_csv = !(output_mode == "pixel" || output_mode == "pixels");
+        const bool write_input_local_photon =
+            getBool(cfg, "output.whiteboard_input_photon", false);
         const auto t_setup_done = std::chrono::steady_clock::now();
 
         const std::string mirror_mode = lowerCopy(getString(cfg, "mirror.mode", "generated"));
@@ -106,6 +113,13 @@ int main(int argc, char** argv) {
         printField("focal_length_m", doubleToString(telescope_cfg.focal_length_m));
         printField("coordinate_system", telescope_cfg.coordinate_system);
         printField("coordinate_transform", "local telescope frame -> global frame");
+        const std::string normalized_source_frame = normalizeSourceCoordinateFrame(
+            source_runtime_cfg.coordinate_frame);
+        printField("position_role",
+                   normalized_source_frame == "corsika_nwu_global" ||
+                           normalized_source_frame == "lact_generic_global"
+                       ? "global input is converted through the selected input frame"
+                       : "local input is placed with the original telescope frame");
         printField("frame_x_axis", vec3ToString(telescope_frame.x_axis));
         printField("frame_y_axis", vec3ToString(telescope_frame.y_axis));
         printField("frame_z_axis", vec3ToString(telescope_frame.z_axis));
@@ -144,8 +158,9 @@ int main(int argc, char** argv) {
                 printField("eventio_path", source_runtime_cfg.eventio_path);
                 printField("event_id_mode", source_runtime_cfg.event_id_mode);
             }
-            printField("local_telescope_frame",
-                       source_runtime_cfg.csv_local_telescope_frame ? "true" : "false");
+            printField("coordinate_frame", source_runtime_cfg.coordinate_frame);
+            printField("coordinate_interpretation",
+                       sourceCoordinateFrameDescription(source_runtime_cfg.coordinate_frame));
             printField("filter_telescope_id",
                        source_runtime_cfg.filter_telescope_id
                            ? intToString(source_runtime_cfg.selected_telescope_id)
@@ -200,6 +215,8 @@ int main(int argc, char** argv) {
         printField("mode", output_mode);
         if (save_hits_csv) {
             printField("hits_csv", output_csv);
+            printField("whiteboard_input_photon",
+                       write_input_local_photon ? "telescope_local" : "off");
         }
         if (save_pixel_csv) {
             printField("pixel_csv", output_pixel_csv);
@@ -352,7 +369,7 @@ int main(int argc, char** argv) {
         }
         std::map<PixelKey, PixelAccumulator> pixels;
 
-        PhotonBunch bunch;
+        PhotonBunch raw_bunch;
         int n_total = 0;
         int n_hit_mirror_before_obstruction = 0;
         int n_hit_surface_before_obstruction = 0;
@@ -368,20 +385,22 @@ int main(int argc, char** argv) {
         double sum_r2 = 0.0;
 
         const auto t_trace_start = std::chrono::steady_clock::now();
-        while (source->next(bunch)) {
+        while (source->next(raw_bunch)) {
             ++n_total;
 
+            const PhotonBunch bunch = transformBunchToTelescopeLocal(
+                raw_bunch, telescope_cfg, source_runtime_cfg.coordinate_frame);
             Photon photon = bunch.photon;
             photon.normalizeDirection();
             photon.weight *= bunch.multiplicity;
-            if ((!source_runtime_cfg.use_photon_csv && !source_runtime_cfg.use_eventio) ||
-                source_runtime_cfg.csv_local_telescope_frame) {
-                applyTelescopeFrame(photon, telescope_frame);
-            }
+            applyTelescopeFrame(photon, telescope_frame);
             if (atmosphere.enabled()) {
                 photon.weight *= atmosphere.transmission(photon.wavelength_nm,
                                                          bunch.emission_altitude_km,
-                                                         photon.dir);
+                                                         sourceDirectionInWorld(
+                                                             raw_bunch,
+                                                             telescope_cfg,
+                                                             source_runtime_cfg.coordinate_frame));
                 if (photon.weight <= 0.0) {
                     continue;
                 }
@@ -440,6 +459,11 @@ int main(int argc, char** argv) {
                     ++n_hit_surface;
                 }
                 if (save_hits_csv) {
+                    if (write_input_local_photon) {
+                        hit.has_input_photon = true;
+                        hit.input_pos_local = bunch.photon.pos;
+                        hit.input_dir_local = bunch.photon.dir;
+                    }
                     hits.push_back(hit);
                 }
 
@@ -453,7 +477,8 @@ int main(int argc, char** argv) {
         }
         const auto t_trace_done = std::chrono::steady_clock::now();
 
-        if (save_hits_csv && !writeSurfaceHitsCSV(output_csv, hits)) {
+        if (save_hits_csv &&
+            !writeSurfaceHitsCSV(output_csv, hits, write_input_local_photon)) {
             throw std::runtime_error("failed to write output CSV: " + output_csv);
         }
         if (save_pixel_csv) {

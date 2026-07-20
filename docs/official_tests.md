@@ -35,7 +35,7 @@ output、camera、sipm、NSB、trigger 等模块 cfg。每个 official cfg 只�
   `configs/official_tests/telescope_1229_minimal.cfg`。
 - `telescope.pointing_az_deg`: 望远镜指向方位角，单位 degree。
 - `telescope.pointing_el_deg`: 望远镜指向仰角，单位 degree。
-- `mirror.config`: 镜片布局。标准 1229 镜面是
+- `mirror.config`: 镜片布局。默认镜片布局文件是
   `configs/mirrors/mirror_1229_imported.cfg`。
 - `source.config`: 非 CORSIKA 测试用的人工光源。
 - `source.mode=EventIO`: CORSIKA/EventIO 输入模式，只用于 `run_corsika_trace`。
@@ -44,7 +44,7 @@ output、camera、sipm、NSB、trigger 等模块 cfg。每个 official cfg 只�
   命令行传入，避免用户每次改 cfg。
 - `source.event_id_mode=event_array100`: 输出事件编号采用
   `event_id = shower_event * 100 + array_id`。
-- `source.eventio_coordinate_frame=corsika_iact`: 使用当前 EventIO/CORSIKA IACT
+- `source.coordinate_frame=corsika_nwu_relative`: 使用当前 EventIO/CORSIKA IACT
   坐标转换约定。
 - `output.config`: 白板或相机焦平面位置。
 - `output.format=csv`: 输出光子命中 CSV。
@@ -136,7 +136,7 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_efficiency_curves.py \
 
 默认输入：
 
-- `configs/efficiency/mirror_reflectivity.csv`: 镜面反射率。
+- `configs/efficiency/mirror_reflectivity_dm0113_13point_mean.csv`: DM0113 镜面 13 点平均反射率。
 - `configs/efficiency/filter_transmission.csv`: 相机滤光片透过率。
 - `configs/efficiency/sipm_pde.csv`: SiPM PDE。
 - `atmosphere_transmission=none`: 不额外加入大气衰减。
@@ -186,7 +186,7 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_nsb_spectral_rate.py \
   单位是 `ph / (s nm sr m^2)`。
 - `configs/nsb/spectral_skycalc_dark_with_obstruction.cfg`: NSB spectral 配置，固定
   有效面积为 `22.606448 m^2`，对应 official 平行光遮挡测试得到的面积。
-- `configs/efficiency/mirror_reflectivity.csv`: 镜面反射率。
+- `configs/efficiency/mirror_reflectivity_dm0113_13point_mean.csv`: DM0113 镜面 13 点平均反射率。
 - `configs/efficiency/filter_transmission.csv`: 滤光片透过率。
 - `configs/efficiency/sipm_pde.csv`: SiPM PDE。
 
@@ -218,15 +218,19 @@ configs/official_tests/perfect_parallel_whiteboard.cfg
 
 cfg 逐项解释：
 
-- `telescope.config=telescope_1229_minimal.cfg`: 使用 1229 望远镜元信息。默认指向
+- `telescope.config=telescope_1229_minimal.cfg`: 使用默认望远镜元信息。默认指向
   `az=0, el=90`，也就是竖直向上。
-- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 使用完整 54 片标准镜面。
+- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 使用默认镜片布局。
 - `source.config=../sources/parallel_1M_on_axis.cfg`: 平行光源，`n_bunches=1000000`，
   采样半径 `beam_radius_m=4`，方向 `beam_direction=0,0,-1`。
 - `output.config=../outputs/whiteboard_f8.cfg`: 白板在本地 `z=-8 m`，法向量
   `0,0,-1`，图像坐标由 `plane_u_axis=1,0,0` 和 `plane_v_axis=0,1,0` 定义。
 - `propagation.speed_of_light_m_per_ns=0.299792458`: 局部传播光速。
 - `output.csv=run_logs/official_tests/perfect_parallel/hits.csv`: 输出白板命中光子。
+- `output.whiteboard_input_photon=true`：在白板 CSV 末尾追加
+  `input_local_x/y/z_m` 和 `input_local_dir_x/y/z`。对平行光、点源和 PhotonCsv
+  都适用；它们是输入坐标解释完成后、进入全局光追前直接保存的望远镜本地入射
+  光子位置和方向，不再做额外坐标转换。
 
 单独运行：
 
@@ -256,7 +260,7 @@ configs/official_tests/perfect_point_900m_whiteboard.cfg
 cfg 逐项解释：
 
 - `telescope.config=telescope_1229_minimal.cfg`: 使用默认竖直望远镜。
-- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 完整 54 片标准镜面。
+- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 使用默认镜片布局。
 - `source.config=../sources/point_900m_on_axis.cfg`: 点源在本地 `z=900 m`，
   程序从 `aperture_z=0`、半径 4 m 的入瞳采样发射光线。
 - `output.config=../outputs/whiteboard_point_900m_focus.cfg`: 900 m 物距对应的近似
@@ -291,7 +295,7 @@ configs/official_tests/perfect_parallel_raytrace_structure_whiteboard.cfg
 cfg 逐项解释：
 
 - `telescope.config=telescope_1229_minimal.cfg`: 默认竖直望远镜。
-- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 完整 54 片标准镜面。
+- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 使用默认镜片布局。
 - `source.config=../sources/parallel_1M_on_axis.cfg`: 100 万平行光。
 - `output.config=../outputs/whiteboard_f8.cfg`: 8 m 白板。
 - `obstruction.config=../obstructions/raytrace_final_structure.cfg`: 启用由外部模型转换得到的
@@ -349,7 +353,7 @@ cfg 逐项解释：
 - `output.config=../outputs/whiteboard_f8.cfg`: 仍然使用标准 8 m 白板，不自动移动到点源
   最佳焦面。
 - `obstruction.config=../obstructions/raytrace_final_structure.cfg`: 启用 3D 遮挡。
-- 其它 telescope/mirror 配置与标准 1229 完美镜面一致。
+- 其它 telescope/mirror 配置与默认理想镜片布局一致。
 
 单独运行：
 
@@ -386,7 +390,7 @@ configs/official_tests/deformation_parallel_whiteboard.cfg
 cfg 逐项解释：
 
 - `telescope.config=telescope_1229_minimal.cfg`: 基础望远镜信息。
-- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 理想镜面作为基准。
+- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 默认镜片布局作为基准。
 - `error.config=../errors/structural_deformation_1229.cfg`: 启用结构形变 series。程序会根据
   当前 `telescope.pointing_el_deg` 插值/读取对应仰角下的镜片中心和法向。
 - `source.config=../sources/parallel_1M_on_axis.cfg`: 平行光；扫描脚本会覆盖光子数。
@@ -465,7 +469,7 @@ cfg 逐项解释：
 - `source.mode=EventIO`: 读取 EventIO 光子。
 - `source.eventio_path=`: 留空，运行命令传入 zst 文件。
 - `source.event_id_mode=event_array100`: 输出事件号为 `shower_event * 100 + array_id`。
-- `source.eventio_coordinate_frame=corsika_iact`: 使用 CORSIKA IACT 坐标约定。
+- `source.coordinate_frame=corsika_nwu_relative`: 使用 CORSIKA IACT 坐标约定。
 - `output.format=csv`: 输出白板光子 CSV。
 - `output.hits_csv`: 白板命中光子。
 - `output.summary_csv`: 每个 event/telescope 的简要统计。
@@ -498,7 +502,7 @@ configs/official_tests/corsika_new_camera.cfg
 cfg 逐项解释：
 
 - `telescope.pointing_az_deg=0`, `telescope.pointing_el_deg=70`: 望远镜指向。
-- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 标准 54 片理想镜面。
+- `mirror.config=../mirrors/mirror_1229_imported.cfg`: 使用默认理想镜片布局。
 - `output.config=../outputs/focal_plane_f8.cfg`: 相机焦平面在 `z=-8 m`，法向指向镜面。
 - `camera.config=../cameras/new_camera.cfg`: 使用真实相机像素表和 Bezier 光收集器。
 - `sipm.config=../sipm/ideal_sipm.cfg`: SiPM 只提供有效面尺寸，PDE 关闭。
@@ -544,8 +548,8 @@ cfg 逐项解释：
   光谱 NSB。固定有效面积为 `28.304744 m^2`，程序自动用相机像素尺寸和焦距计算
   `pixel_solid_angle`，得到约 `0.09312 p.e./ns/pixel`。
 - `trigger.config=../trigger/example_simple_multiplicity.cfg`: 启用简单 trigger。
-- `source.max_shower_events=1`: 这个 official 项是 CORSIKA waveform smoke test，
-  只跑 1 个 shower，避免 waveform 输出过大。
+- `source.max_shower_events=10`: 这个 official 项默认跑 10 个 CORSIKA shower，
+  在覆盖多个事件的同时限制 waveform 输出体积。
 - `trigger.pixel_threshold_pe=10`: official smoke test 使用 10 p.e. 像素阈值。
 - `output.hdf5_write_components=true`: 写出 `cherenkov_pe`、`nsb_pe` 和最终 `pe`。
 - `output.save_only_triggered=true`: 只保存触发望远镜图像，减少输出体积。

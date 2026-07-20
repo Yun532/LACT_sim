@@ -38,22 +38,36 @@ explicit default emission altitude.
 
 ## Coordinate Convention
 
-The source config controls the coordinate frame:
+推荐的默认输入坐标是 PhotonCsv 光学调试原来使用的望远镜本地坐标：
 
 ```ini
-local_telescope_frame=true
+source.coordinate_frame=telescope_local
 ```
 
-means the photon rows are interpreted in each telescope's local optical frame
-and then transformed by that telescope's position and pointing.
+这保持原有 PhotonCsv 行为：CSV 行按配置的望远镜本地光学坐标解释，再通过
+`buildTelescopeFrame()` 放入既有光追坐标。镜面、相机、输出和画图轴定义
+均不改变。
+
+还支持以下显式输入坐标：
 
 ```ini
-local_telescope_frame=false
+source.coordinate_frame=corsika_nwu_relative
+source.coordinate_frame=corsika_nwu_global
+source.coordinate_frame=lact_generic_global
 ```
 
-means the photon rows are already expressed in the generic LACT global frame
-used by `buildTelescopeFrame()`: azimuth is measured from global `+x` toward
-global `+y`. This is not the CORSIKA NWU frame.
+- `corsika_nwu_relative`：CORSIKA NWU 向量，位置已经相对选定望远镜；
+  与正常 EventIO photon bunch 相同。
+- `corsika_nwu_global`：CORSIKA NWU 阵列绝对坐标；程序只减一次
+  `telescope.position_m`。
+- `lact_generic_global`：旧 LACT 通用全局坐标；方位角从 `+x` 指向 `+y`。
+
+```ini
+source.local_telescope_frame=true
+```
+
+保留为兼容写法：`true` 等价于 `telescope_local`，`false` 等价于
+`lact_generic_global`。新 cfg 应使用 `source.coordinate_frame`。
 
 Raw CORSIKA/EventIO photon bunches should be read with `run_corsika_trace`.
 Do not feed raw EventIO-derived rows into `run_optical_sim` as generic global
@@ -104,5 +118,5 @@ The output can then be used with:
 ```ini
 mode=PhotonCsv
 csv_path=...
-local_telescope_frame=true
+coordinate_frame=telescope_local
 ```

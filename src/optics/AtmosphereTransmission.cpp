@@ -96,6 +96,24 @@ AtmosphereTransmission::AtmosphereTransmission(const AtmosphereTransmissionConfi
         throw std::runtime_error("atmosphere.min_cos_theta must be in (0, 1]");
     }
     loadModtranTauTable(cfg_.tau_table_path);
+    if (std::isfinite(cfg_.table_reference_altitude_km) &&
+        std::abs(cfg_.table_reference_altitude_km -
+                 table_reference_altitude_km_) > 1.0e-9) {
+        throw std::runtime_error(
+            "atmosphere.table_reference_altitude_km does not match H2 in tau table");
+    }
+    cfg_.table_reference_altitude_km = table_reference_altitude_km_;
+    if (!std::isfinite(cfg_.detector_altitude_km)) {
+        cfg_.detector_altitude_km = table_reference_altitude_km_;
+    }
+    if (cfg_.detector_altitude_km < table_reference_altitude_km_ - 1.0e-9) {
+        throw std::runtime_error(
+            "atmosphere.detector_altitude_km is below the tau-table H2 coverage");
+    }
+    if (cfg_.detector_altitude_km > altitudes_km_.back() + 1.0e-9) {
+        throw std::runtime_error(
+            "atmosphere.detector_altitude_km is above the tau-table range");
+    }
 }
 
 void AtmosphereTransmission::loadModtranTauTable(const std::string& path)
@@ -158,6 +176,7 @@ void AtmosphereTransmission::loadModtranTauTable(const std::string& path)
     if (wavelengths_nm_.empty() || altitudes_km_.empty()) {
         throw std::runtime_error("atmosphere tau table missing wavelength rows or H1 header: " + path);
     }
+    table_reference_altitude_km_ = altitudes_km_.front();
     const std::size_t expected = wavelengths_nm_.size() * altitudes_km_.size();
     if (rows.size() != expected) {
         std::ostringstream oss;
@@ -271,10 +290,16 @@ double AtmosphereTransmission::transmission(double wavelength_nm,
         return 1.0;
     }
     const double altitude = resolveEmissionAltitude(emission_altitude_km);
-    double tau = interpolateTau(wavelength_nm, altitude);
-    if (!std::isfinite(tau)) {
+    if (altitude < cfg_.detector_altitude_km - 1.0e-9) {
         return 0.0;
     }
+    double tau = interpolateTau(wavelength_nm, altitude);
+    const double tau_at_detector =
+        interpolateTau(wavelength_nm, cfg_.detector_altitude_km);
+    if (!std::isfinite(tau) || !std::isfinite(tau_at_detector)) {
+        return 0.0;
+    }
+    tau = std::max(0.0, tau - tau_at_detector);
     if (cfg_.slant_correction) {
         double cos_theta = -global_direction.normalized().z;
         if (cos_theta <= 0.0) {
@@ -307,8 +332,18 @@ AtmosphereTransmissionConfig buildAtmosphereTransmissionConfig(
     }
     out.enabled = true;
     out.tau_table_path = getStringLocal(cfg, "atmosphere.tau_table", "");
-    out.ground_altitude_km =
-        getDoubleLocal(cfg, "atmosphere.ground_altitude_km", out.ground_altitude_km);
+    out.table_reference_altitude_km = getDoubleLocal(
+        cfg, "atmosphere.table_reference_altitude_km",
+        out.table_reference_altitude_km);
+    if (cfg.find("atmosphere.detector_altitude_km") != cfg.end()) {
+        out.detector_altitude_km = getDoubleLocal(
+            cfg, "atmosphere.detector_altitude_km", out.detector_altitude_km);
+    } else {
+        // Backward-compatible alias: the old field described the observing
+        // layer and is therefore the detector altitude when present.
+        out.detector_altitude_km = getDoubleLocal(
+            cfg, "atmosphere.ground_altitude_km", out.detector_altitude_km);
+    }
     const std::string slant =
         lowerCopyLocal(trimCopy(getStringLocal(cfg, "atmosphere.slant_correction", "secant")));
     out.slant_correction = !(disabledText(slant) || slant == "none");
@@ -337,7 +372,19 @@ std::string atmosphereTransmissionDescription(const AtmosphereTransmissionConfig
     }
     std::ostringstream oss;
     oss << cfg.model << ": " << cfg.tau_table_path
-        << ", H2=" << cfg.ground_altitude_km << " km"
+        << ", H2=";
+    if (std::isfinite(cfg.table_reference_altitude_km)) {
+        oss << cfg.table_reference_altitude_km << " km";
+    } else {
+        oss << "table header";
+    }
+    oss << ", detector=";
+    if (std::isfinite(cfg.detector_altitude_km)) {
+        oss << cfg.detector_altitude_km << " km";
+    } else {
+        oss << "H2";
+    }
+    oss
         << ", slant=" << (cfg.slant_correction ? "secant" : "none")
         << ", min_cos=" << cfg.min_cos_theta;
     return oss.str();

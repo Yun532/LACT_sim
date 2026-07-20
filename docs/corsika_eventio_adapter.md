@@ -123,7 +123,7 @@ CORSIKA photons -> multiplicity
 For optical tracing, the recommended `run_corsika_trace` setting is:
 
 ```ini
-source.eventio_coordinate_frame=corsika_iact
+source.coordinate_frame=corsika_nwu_relative
 ```
 
 In this mode x/y/z are treated as telescope-relative positions in the CORSIKA
@@ -148,12 +148,17 @@ A typical CORSIKA/EventIO source section is:
 source.mode=EventIO
 source.eventio_path=
 source.event_id_mode=event_array100
-source.eventio_coordinate_frame=corsika_iact
+source.coordinate_frame=corsika_nwu_relative
 source.missing_wavelength_model=cherenkov
 source.use_eventio_telescope_position=true
 source.filter_event_id=100
 source.filter_telescope_id=0
 ```
+
+For matched validation samples, `source.filter_event_ids=100,203,417`
+accepts several output event IDs in one streaming pass. It is mutually
+exclusive with `source.filter_event_id`; duplicates are removed and order does
+not affect the stochastic response.
 
 Many CORSIKA IACT/EventIO photon bunch files store `lambda=0` for Cherenkov
 photon bunches. In that case LACT_sim does not use a fixed 400 nm wavelength by
@@ -349,7 +354,7 @@ Then run as usual with:
 ```ini
 source.mode=PhotonCsv
 source.csv_path=run_logs/eventio/photons_from_read_iact.csv
-source.eventio_coordinate_frame=corsika_iact
+source.coordinate_frame=corsika_nwu_relative
 ```
 
 This parser supports printed normal, compact, and 3D bunch formats. It is now

@@ -96,6 +96,24 @@ cmake -S . -B build \
 
 ## 3. 配置 ROOT 输出
 
+推荐先直接运行仓库内的 ROOT-only 用户示例：
+
+```bash
+build/run_corsika_trace \
+  configs/examples/lactroot_only.cfg \
+  /path/to/input.zst
+```
+
+默认输出：
+
+```text
+run_logs/lactroot_only/lact_events.root
+```
+
+该示例使用完整响应链、`timeseries_pe` waveform，默认处理输入文件中的全部
+shower，并且只保存通过 trigger 的望远镜事件。
+下面的内容说明如何自行配置其他 ROOT 输出路径和 profile。
+
 在运行 `run_corsika_trace` 的配置中加入：
 
 ```ini
@@ -150,7 +168,7 @@ lact_root_path=run_logs/my_corsika_run/lact_events.root
   /path/to/input.simtel.zst
 ```
 
-默认只跑 `source.max_shower_events=1`，输出在：
+该 quick-look 配置默认只跑 `source.max_shower_events=1`，输出在：
 
 ```text
 run_logs/lact_root_quicklook/lact_events.root
@@ -245,6 +263,10 @@ print(event.simulation.shower.energy)
 print(event.r1.tels.keys())
 print(event.dl0.tels.keys())
 ```
+
+`LactEventSource` 只把通过相机 trigger 的望远镜放进 `r1.tels`/`dl0.tels`；
+`lactroot_only.cfg` 默认也只保存这些望远镜事件。可以用
+`source.get_triggered_tels(event)` 检查触发望远镜。
 
 `timeseries_pe` 文件中：
 

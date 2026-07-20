@@ -64,7 +64,11 @@ add_library(simlite_core
     src/io/SyntheticPhotonSource.cpp
     src/io/PhotonCsvSource.cpp
     src/io/MirrorFacetCsvReader.cpp
+    src/io/EventIOPhotonSemantics.cpp
     src/app/OpticalSimCommon.cpp
+    src/app/PhotonResponseSampler.cpp
+    src/app/TelescopeOpticsCache.cpp
+    src/app/TriggerResponse.cpp
     src/geometry/FacetFactory.cpp
     src/optics/AtmosphereTransmission.cpp
     src/optics/OpticalTracer.cpp
@@ -100,6 +104,7 @@ if(LACT_HAS_HESSIO)
     set_target_properties(run_corsika_trace PROPERTIES NO_SYSTEM_FROM_IMPORTED TRUE)
     target_link_libraries(run_corsika_trace PRIVATE simlite_core)
     if(LACT_HAS_HDF5)
+        target_sources(run_corsika_trace PRIVATE src/io/Hdf5WaveformWriter.cpp)
         target_compile_definitions(run_corsika_trace PRIVATE LACT_HAS_HDF5=1)
         target_link_libraries(run_corsika_trace PRIVATE ${HDF5_LIBRARIES})
     endif()
@@ -108,6 +113,12 @@ if(LACT_HAS_HESSIO)
         target_compile_definitions(run_corsika_trace PRIVATE LACT_HAS_ROOT=1)
         target_link_libraries(run_corsika_trace PRIVATE ROOT::Core ROOT::RIO ROOT::Tree)
     endif()
+
+    add_executable(test_eventio_wavelength
+        apps/test_eventio_wavelength.cpp
+    )
+    target_link_libraries(test_eventio_wavelength PRIVATE simlite_core)
+    add_test(NAME test_eventio_wavelength COMMAND test_eventio_wavelength)
 endif()
 
 add_executable(test_facet_geometry
@@ -160,6 +171,12 @@ target_link_libraries(test_off_axis_orientation PRIVATE simlite_core)
 add_test(NAME test_off_axis_orientation
          COMMAND test_off_axis_orientation ${CMAKE_CURRENT_SOURCE_DIR}/configs/mirror_1229_facets.csv)
 
+add_executable(test_coordinate_frames
+    apps/test_coordinate_frames.cpp
+)
+target_link_libraries(test_coordinate_frames PRIVATE simlite_core)
+add_test(NAME test_coordinate_frames COMMAND test_coordinate_frames)
+
 add_executable(test_light_collector_response
     apps/test_light_collector_response.cpp
 )
@@ -171,6 +188,24 @@ add_executable(test_detector_response_config
 )
 target_link_libraries(test_detector_response_config PRIVATE simlite_core)
 add_test(NAME test_detector_response_config COMMAND test_detector_response_config)
+
+add_executable(test_telescope_optics
+    apps/test_telescope_optics.cpp
+)
+target_link_libraries(test_telescope_optics PRIVATE simlite_core)
+add_test(NAME test_telescope_optics COMMAND test_telescope_optics)
+
+add_executable(test_photon_response_sampler
+    apps/test_photon_response_sampler.cpp
+)
+target_link_libraries(test_photon_response_sampler PRIVATE simlite_core)
+add_test(NAME test_photon_response_sampler COMMAND test_photon_response_sampler)
+
+add_executable(test_trigger_response
+    apps/test_trigger_response.cpp
+)
+target_link_libraries(test_trigger_response PRIVATE simlite_core)
+add_test(NAME test_trigger_response COMMAND test_trigger_response)
 
 add_executable(test_efficiency_curves
     apps/test_efficiency_curves.cpp

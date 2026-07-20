@@ -140,7 +140,10 @@ OpticalSurfaceHit OpticalTracer::traceToPlane(const Photon& photon,
     scatter_seed = mixSeed(scatter_seed, hashDouble(photon.dir.x));
     scatter_seed = mixSeed(scatter_seed, hashDouble(photon.dir.y));
     scatter_seed = mixSeed(scatter_seed, hashDouble(photon.dir.z));
-    out_dir = perturbDirection(out_dir, reflect_direction_sigma_rad_, scatter_seed);
+    scatter_seed = mixSeed(scatter_seed, photon.random_stream_id);
+    const double scatter_sigma_rad = std::hypot(reflect_direction_sigma_rad_,
+                                                best_tile->roughness_sigma_rad);
+    out_dir = perturbDirection(out_dir, scatter_sigma_rad, scatter_seed);
 
     auto surf_sol = intersectOutputPlane(best_sol.point, out_dir, plane);
     if (!surf_sol.has_value()) {
@@ -164,7 +167,10 @@ OpticalSurfaceHit OpticalTracer::traceToPlane(const Photon& photon,
     double cosang = std::clamp(std::abs(out_dir.dot(plane.normal.normalized())), 0.0, 1.0);
     double incidence_angle = std::acos(cosang);
     hit.relative_efficiency = best_tile->reflectivity_scale *
-                              eff.total(photon.wavelength_nm, incidence_angle);
+                              (photon.optical_efficiency_preapplied
+                                   ? eff.funnelAcceptance(incidence_angle,
+                                                          photon.wavelength_nm)
+                                   : eff.total(photon.wavelength_nm, incidence_angle));
 
     return hit;
 }
@@ -222,7 +228,10 @@ OpticalSurfaceHit OpticalTracer::traceBackprojectedToPlane(
     scatter_seed = mixSeed(scatter_seed, hashDouble(photon.dir.x));
     scatter_seed = mixSeed(scatter_seed, hashDouble(photon.dir.y));
     scatter_seed = mixSeed(scatter_seed, hashDouble(photon.dir.z));
-    out_dir = perturbDirection(out_dir, reflect_direction_sigma_rad_, scatter_seed);
+    scatter_seed = mixSeed(scatter_seed, photon.random_stream_id);
+    const double scatter_sigma_rad = std::hypot(reflect_direction_sigma_rad_,
+                                                best_tile->roughness_sigma_rad);
+    out_dir = perturbDirection(out_dir, scatter_sigma_rad, scatter_seed);
 
     auto surf_sol = intersectOutputPlane(best_sol.point, out_dir, plane);
     if (!surf_sol.has_value()) {
@@ -245,7 +254,10 @@ OpticalSurfaceHit OpticalTracer::traceBackprojectedToPlane(
     double cosang = std::clamp(std::abs(out_dir.dot(plane.normal.normalized())), 0.0, 1.0);
     double incidence_angle = std::acos(cosang);
     hit.relative_efficiency = best_tile->reflectivity_scale *
-                              eff.total(photon.wavelength_nm, incidence_angle);
+                              (photon.optical_efficiency_preapplied
+                                   ? eff.funnelAcceptance(incidence_angle,
+                                                          photon.wavelength_nm)
+                                   : eff.total(photon.wavelength_nm, incidence_angle));
 
     return hit;
 }

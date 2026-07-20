@@ -20,6 +20,7 @@ struct EventIOPhotonConfig {
     double missing_wavelength_min_nm = 260.0;
     double missing_wavelength_max_nm = 1000.0;
     std::uint64_t missing_wavelength_seed = 246813579ULL;
+    double observation_altitude_km = std::numeric_limits<double>::quiet_NaN();
     double default_time_ns = 0.0;
     double default_weight = 1.0;
     double default_multiplicity = 1.0;
@@ -29,6 +30,7 @@ struct EventIOPhotonConfig {
     int selected_telescope_id = 0;
     bool filter_event_id = false;
     int selected_event_id = 0;
+    std::vector<int> selected_event_ids;
     bool filter_shower_event_id = false;
     int selected_shower_event_id = 0;
     int max_shower_events = 0;
@@ -48,6 +50,7 @@ struct EventIOArrayOffsets {
     std::vector<double> x_m;
     std::vector<double> y_m;
     std::vector<double> weight;
+    bool has_explicit_weights = false;
 };
 
 struct EventIOEventHeader {
@@ -85,11 +88,22 @@ struct EventIOMetadata {
     std::optional<EventIOEventHeader> selected_event;
     std::optional<EventIOArrayOffsets> selected_event_offsets;
     std::map<int, EventIOArrayOffsets> array_offsets_by_shower;
+    std::map<int, std::pair<int, int>> output_event_identity;
     int selected_array_id = 0;
+    double observation_altitude_m = std::numeric_limits<double>::quiet_NaN();
 
     std::optional<EventIOTelescopePosition> telescopeById(int telescope_id) const;
     std::optional<EventIOArrayOffsets> arrayOffsetsForShower(int shower_event_id) const;
 };
+
+double resolveEventIOPhotonWavelength(const PhotonBunch& bunch,
+                                      std::uint64_t photon_index,
+                                      const EventIOPhotonConfig& cfg);
+
+double eventIO3DEmissionAltitudeKm(double observation_altitude_km,
+                                   double bunch_z_cm,
+                                   double direction_cosine_z,
+                                   double emission_distance_cm);
 
 EventIOMetadata readEventIOMetadata(const EventIOPhotonConfig& cfg);
 

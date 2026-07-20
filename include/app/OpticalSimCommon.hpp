@@ -172,6 +172,8 @@ struct TriggerConfig {
     int camera_multiplicity = 3;
     int array_multiplicity = 2;
     double coincidence_window_ns = 50.0;
+    double camera_coincidence_window_ns = 50.0;
+    double array_coincidence_window_ns = 50.0;
 };
 
 class ElectronicsResponse {
@@ -187,6 +189,12 @@ private:
 struct SourceRuntimeConfig {
     bool use_photon_csv = false;
     bool use_eventio = false;
+    // Explicit input-frame names; these do not redefine trace/output axes:
+    //   telescope_local      existing local optical input coordinates
+    //   corsika_nwu_relative CORSIKA NWU positions relative to the telescope
+    //   corsika_nwu_global   absolute CORSIKA NWU array positions
+    //   lact_generic_global  legacy +X-to-+Y azimuth global coordinates
+    std::string coordinate_frame = "telescope_local";
     bool csv_local_telescope_frame = true;
     std::string csv_path;
     std::string eventio_path;
@@ -199,6 +207,7 @@ struct SourceRuntimeConfig {
     int selected_telescope_id = 0;
     bool filter_event_id = false;
     int selected_event_id = 0;
+    std::vector<int> selected_event_ids;
     bool filter_shower_event_id = false;
     int selected_shower_event_id = 0;
     int max_shower_events = 0;
@@ -264,6 +273,15 @@ bool isEventIOMode(const std::string& text);
 std::string vec3ToString(const Vec3& v);
 std::string sourceModeName(SyntheticMode mode);
 TelescopeFrame buildTelescopeFrame(const TelescopeConfig& telescope);
+TelescopeFrame buildCorsikaNwuTelescopeFrame(const TelescopeConfig& telescope);
+std::string normalizeSourceCoordinateFrame(const std::string& frame_name);
+std::string sourceCoordinateFrameDescription(const std::string& frame_name);
+PhotonBunch transformBunchToTelescopeLocal(const PhotonBunch& input,
+                                           const TelescopeConfig& telescope,
+                                           const std::string& frame_name);
+Vec3 sourceDirectionInWorld(const PhotonBunch& input,
+                            const TelescopeConfig& telescope,
+                            const std::string& frame_name);
 void applyTelescopeFrame(std::vector<MirrorFacet>& facets,
                          OutputPlane& plane,
                          const TelescopeFrame& frame);
@@ -278,6 +296,7 @@ bool parseDoubleStrict(const std::string& text, double& out);
 bool isDisabledText(const std::string& text);
 std::string factorDescription(const EfficiencyFactorConfig& factor);
 std::vector<double> parseDoubleList(const std::string& text, const std::string& key);
+std::vector<int> parseIntList(const std::string& text, const std::string& key);
 std::vector<std::string> splitCsvCells(const std::string& line);
 CameraGeometry readCameraCsv(const std::string& path);
 std::vector<std::pair<double, double>> readCollectorReflectivityCsv(const std::string& path);

@@ -52,10 +52,16 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_efficiency_curves.py \
 默认读取：
 
 ```text
-configs/efficiency/mirror_reflectivity.csv
+configs/efficiency/mirror_reflectivity_dm0113_13point_mean.csv
 configs/efficiency/filter_transmission.csv
 configs/efficiency/sipm_pde.csv
 ```
+
+DM0113 反射率曲线取自镜面 13 个测点的逐波长算术平均。实测覆盖
+252--750 nm；表内缺失的整数波长采用相邻实测点线性插值，250--251 nm
+按 252--253 nm 的局部斜率线性外推，从而保持模拟默认的 250--750 nm
+有效范围。该曲线只描述平均反射率；镜面间随机缩放误差仍由 error cfg
+中的 `reflectivity_scale_sigma` 独立控制。
 
 输出：
 

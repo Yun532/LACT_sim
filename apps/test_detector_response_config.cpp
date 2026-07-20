@@ -56,6 +56,32 @@ int main()
     ok &= check(std::abs(nsb.window_ns - 20.0) < 1e-12, "NSB window parsed");
     ok &= check(nsb.seed == 7, "NSB seed parsed");
 
+    const auto event_ids =
+        parseIntList("603, 201,603,402", "source.filter_event_ids");
+    ok &= check(event_ids == std::vector<int>({201, 402, 603}),
+                "event ID list is parsed, sorted, and deduplicated");
+    try {
+        (void)parseIntList("201,bad", "source.filter_event_ids");
+        std::cerr << "expected invalid event ID list\n";
+        ok = false;
+    } catch (...) {
+    }
+    const auto selected_events = buildSourceRuntimeConfig({
+        {"source.filter_event_ids", "603,201,603,402"},
+    });
+    ok &= check(selected_events.selected_event_ids ==
+                    std::vector<int>({201, 402, 603}),
+                "multiple source event filters are retained");
+    try {
+        (void)buildSourceRuntimeConfig({
+            {"source.filter_event_id", "201"},
+            {"source.filter_event_ids", "201,402"},
+        });
+        std::cerr << "expected mutually exclusive event filters\n";
+        ok = false;
+    } catch (...) {
+    }
+
     std::map<std::string, std::string> spectral_nsb_cfg{
         {"nsb.enabled", "true"},
         {"nsb.model", "spectral_flux"},
@@ -76,6 +102,15 @@ int main()
     ok &= check(!trigger_default.enabled, "trigger should default to disabled");
     ok &= check(std::abs(trigger_default.pixel_threshold_pe - 5.0) < 1e-12,
                 "trigger default threshold");
+    const auto split_windows = buildTriggerConfig({
+        {"trigger.coincidence_window_ns", "50"},
+        {"trigger.camera_coincidence_window_ns", "8"},
+        {"trigger.array_coincidence_window_ns", "24"},
+    });
+    ok &= check(std::abs(split_windows.camera_coincidence_window_ns - 8.0) < 1e-12,
+                "camera coincidence window parsed");
+    ok &= check(std::abs(split_windows.array_coincidence_window_ns - 24.0) < 1e-12,
+                "array coincidence window parsed");
 
     std::map<std::string, std::string> trigger_cfg{
         {"trigger.enabled", "true"},

@@ -592,6 +592,116 @@ TelescopeFrame buildTelescopeFrame(const TelescopeConfig& telescope)
     return frame;
 }
 
+TelescopeFrame buildCorsikaNwuTelescopeFrame(const TelescopeConfig& telescope)
+{
+    // Existing CORSIKA/sim_telarray input-adapter basis in magnetic
+    // North-West-Up coordinates. This converts input rows only; it does not
+    // redefine the generic trace/output or plotting frames.
+    //   local +z: boresight toward the sky
+    //   local +x: increasing elevation (toward zenith)
+    //   local +y: increasing azimuth (North -> East)
+    // This is right-handed: x cross y = z.
+    const double az = telescope.pointing_az_deg * DEG_TO_RAD;
+    const double el = telescope.pointing_el_deg * DEG_TO_RAD;
+    const double sin_el = std::sin(el);
+    const double cos_el = std::cos(el);
+    const double sin_az = std::sin(az);
+    const double cos_az = std::cos(az);
+
+    TelescopeFrame frame;
+    frame.origin = telescope.position_m;
+    frame.x_axis = Vec3{-sin_el * cos_az, sin_el * sin_az, cos_el}.normalized();
+    frame.y_axis = Vec3{-sin_az, -cos_az, 0.0}.normalized();
+    frame.z_axis = Vec3{cos_el * cos_az, -cos_el * sin_az, sin_el}.normalized();
+    return frame;
+}
+
+std::string normalizeSourceCoordinateFrame(const std::string& frame_name)
+{
+    const std::string frame = lowerCopy(trim(frame_name));
+    if (frame.empty() || frame == "telescope_local" || frame == "local" ||
+        frame == "optical_local") {
+        return "telescope_local";
+    }
+    if (frame == "corsika_nwu_relative" || frame == "corsika_iact" ||
+        frame == "corsika" || frame == "simtelarray") {
+        return "corsika_nwu_relative";
+    }
+    if (frame == "corsika_nwu_global" || frame == "corsika_global") {
+        return "corsika_nwu_global";
+    }
+    if (frame == "lact_generic_global" || frame == "generic_global" ||
+        frame == "array_global" || frame == "global") {
+        return "lact_generic_global";
+    }
+    throw std::runtime_error(
+        "unsupported source.coordinate_frame: " + frame_name +
+        "; expected telescope_local, corsika_nwu_relative, "
+        "corsika_nwu_global, or lact_generic_global");
+}
+
+std::string sourceCoordinateFrameDescription(const std::string& frame_name)
+{
+    const std::string frame = normalizeSourceCoordinateFrame(frame_name);
+    if (frame == "telescope_local") {
+        return "existing telescope-local optical coordinates; axis definitions are unchanged";
+    }
+    if (frame == "corsika_nwu_relative") {
+        return "CORSIKA NWU; positions are relative to the selected telescope";
+    }
+    if (frame == "corsika_nwu_global") {
+        return "CORSIKA NWU absolute array positions; telescope.position_m is subtracted";
+    }
+    return "legacy LACT generic global XY; azimuth runs from +x toward +y";
+}
+
+PhotonBunch transformBunchToTelescopeLocal(const PhotonBunch& input,
+                                           const TelescopeConfig& telescope,
+                                           const std::string& frame_name)
+{
+    PhotonBunch out = input;
+    const std::string frame_name_normalized = normalizeSourceCoordinateFrame(frame_name);
+    if (frame_name_normalized == "telescope_local") {
+        out.photon.normalizeDirection();
+        return out;
+    }
+
+    if (frame_name_normalized == "corsika_nwu_relative") {
+        const TelescopeFrame frame = buildCorsikaNwuTelescopeFrame(telescope);
+        out.photon.pos = frame.rotateVectorToLocal(input.photon.pos);
+        out.photon.dir = frame.rotateVectorToLocal(input.photon.dir).normalized();
+        return out;
+    }
+
+    if (frame_name_normalized == "corsika_nwu_global") {
+        const TelescopeFrame frame = buildCorsikaNwuTelescopeFrame(telescope);
+        out.photon.pos = frame.pointToLocal(input.photon.pos);
+        out.photon.dir = frame.rotateVectorToLocal(input.photon.dir).normalized();
+        return out;
+    }
+
+    const TelescopeFrame frame = buildTelescopeFrame(telescope);
+    out.photon.pos = frame.pointToLocal(input.photon.pos);
+    out.photon.dir = frame.rotateVectorToLocal(input.photon.dir).normalized();
+    return out;
+}
+
+Vec3 sourceDirectionInWorld(const PhotonBunch& input,
+                            const TelescopeConfig& telescope,
+                            const std::string& frame_name)
+{
+    const std::string frame = normalizeSourceCoordinateFrame(frame_name);
+    if (frame == "telescope_local") {
+        return buildTelescopeFrame(telescope)
+            .rotateVector(input.photon.dir)
+            .normalized();
+    }
+    // Both CORSIKA frames already have physical NWU directions.  The legacy
+    // generic global frame has a different horizontal convention, but its z
+    // axis is still Up, which is the component used by the atmosphere model.
+    return input.photon.dir.normalized();
+}
+
 void applyTelescopeFrame(std::vector<MirrorFacet>& facets,
                          OutputPlane& plane,
                          const TelescopeFrame& frame)
@@ -749,6 +859,30 @@ std::vector<double> parseDoubleList(const std::string& text, const std::string& 
     if (values.empty()) {
         throw std::runtime_error("list config value for " + key + " is empty");
     }
+    return values;
+}
+
+std::vector<int> parseIntList(const std::string& text, const std::string& key) {
+    std::stringstream ss(text);
+    std::string cell;
+    std::vector<int> values;
+    while (std::getline(ss, cell, ',')) {
+        cell = trim(cell);
+        if (cell.empty()) {
+            throw std::runtime_error("empty component in list config value for " + key);
+        }
+        std::size_t pos = 0;
+        const int value = std::stoi(cell, &pos);
+        if (pos != cell.size()) {
+            throw std::runtime_error("invalid list component in " + key + ": " + cell);
+        }
+        values.push_back(value);
+    }
+    if (values.empty()) {
+        throw std::runtime_error("list config value for " + key + " is empty");
+    }
+    std::sort(values.begin(), values.end());
+    values.erase(std::unique(values.begin(), values.end()), values.end());
     return values;
 }
 
@@ -1433,9 +1567,21 @@ SourceRuntimeConfig buildSourceRuntimeConfig(const std::map<std::string, std::st
     runtime.csv_path = getString(cfg, "source.csv_path", "");
     runtime.eventio_path = getString(cfg, "source.eventio_path", "");
     runtime.event_id_mode = getString(cfg, "source.event_id_mode", "event");
-    runtime.eventio_coordinate_frame =
-        getString(cfg, "source.eventio_coordinate_frame",
-                  runtime.use_eventio ? "corsika_iact" : "telescope_local");
+    const auto coordinate_frame_it = cfg.find("source.coordinate_frame");
+    if (coordinate_frame_it != cfg.end()) {
+        runtime.coordinate_frame = normalizeSourceCoordinateFrame(coordinate_frame_it->second);
+    } else if (runtime.use_eventio) {
+        runtime.coordinate_frame = normalizeSourceCoordinateFrame(
+            getString(cfg, "source.eventio_coordinate_frame", "corsika_iact"));
+    } else if (runtime.use_photon_csv &&
+               cfg.find("source.local_telescope_frame") != cfg.end()) {
+        runtime.coordinate_frame = getBool(cfg, "source.local_telescope_frame", true)
+            ? "telescope_local"
+            : "lact_generic_global";
+    } else {
+        runtime.coordinate_frame = "telescope_local";
+    }
+    runtime.eventio_coordinate_frame = runtime.coordinate_frame;
     runtime.eventio_2d_input_plane_z_m =
         getDouble(cfg, "source.eventio_2d_input_plane_z_m", 0.0);
     runtime.eventio_2d_plane_mode =
@@ -1448,8 +1594,7 @@ SourceRuntimeConfig buildSourceRuntimeConfig(const std::map<std::string, std::st
     }
     runtime.use_eventio_telescope_position =
         getBool(cfg, "source.use_eventio_telescope_position", true);
-    runtime.csv_local_telescope_frame =
-        getBool(cfg, "source.local_telescope_frame", true);
+    runtime.csv_local_telescope_frame = runtime.coordinate_frame == "telescope_local";
     const std::string filter_value = getString(cfg, "source.filter_telescope_id", "");
     if (!trim(filter_value).empty() && !isDisabledText(filter_value)) {
         runtime.filter_telescope_id = true;
@@ -1459,6 +1604,17 @@ SourceRuntimeConfig buildSourceRuntimeConfig(const std::map<std::string, std::st
     if (!trim(event_filter_value).empty() && !isDisabledText(event_filter_value)) {
         runtime.filter_event_id = true;
         runtime.selected_event_id = std::stoi(event_filter_value);
+    }
+    const std::string event_filters_value =
+        getString(cfg, "source.filter_event_ids", "");
+    if (!trim(event_filters_value).empty() &&
+        !isDisabledText(event_filters_value)) {
+        runtime.selected_event_ids =
+            parseIntList(event_filters_value, "source.filter_event_ids");
+    }
+    if (runtime.filter_event_id && !runtime.selected_event_ids.empty()) {
+        throw std::runtime_error(
+            "source.filter_event_id and source.filter_event_ids are mutually exclusive");
     }
     const std::string shower_filter_value = getString(cfg, "source.filter_shower_event_id", "");
     if (!trim(shower_filter_value).empty() && !isDisabledText(shower_filter_value)) {
@@ -1504,6 +1660,7 @@ EventIOPhotonConfig buildEventIOPhotonConfig(const std::map<std::string, std::st
     eventio.selected_telescope_id = runtime_cfg.selected_telescope_id;
     eventio.filter_event_id = runtime_cfg.filter_event_id;
     eventio.selected_event_id = runtime_cfg.selected_event_id;
+    eventio.selected_event_ids = runtime_cfg.selected_event_ids;
     eventio.filter_shower_event_id = runtime_cfg.filter_shower_event_id;
     eventio.selected_shower_event_id = runtime_cfg.selected_shower_event_id;
     eventio.max_shower_events = runtime_cfg.max_shower_events;
@@ -1941,6 +2098,10 @@ TriggerConfig buildTriggerConfig(const std::map<std::string, std::string>& cfg) 
         getInt(cfg, "trigger.array_multiplicity", trigger.array_multiplicity);
     trigger.coincidence_window_ns =
         getDouble(cfg, "trigger.coincidence_window_ns", trigger.coincidence_window_ns);
+    trigger.camera_coincidence_window_ns = getDouble(
+        cfg, "trigger.camera_coincidence_window_ns", trigger.coincidence_window_ns);
+    trigger.array_coincidence_window_ns = getDouble(
+        cfg, "trigger.array_coincidence_window_ns", trigger.coincidence_window_ns);
 
     if (!std::isfinite(trigger.pixel_threshold_pe) || trigger.pixel_threshold_pe < 0.0) {
         throw std::runtime_error("trigger.pixel_threshold_pe must be finite and >= 0");
@@ -1954,6 +2115,16 @@ TriggerConfig buildTriggerConfig(const std::map<std::string, std::string>& cfg) 
     if (!std::isfinite(trigger.coincidence_window_ns) ||
         trigger.coincidence_window_ns < 0.0) {
         throw std::runtime_error("trigger.coincidence_window_ns must be finite and >= 0");
+    }
+    if (!std::isfinite(trigger.camera_coincidence_window_ns) ||
+        trigger.camera_coincidence_window_ns < 0.0) {
+        throw std::runtime_error(
+            "trigger.camera_coincidence_window_ns must be finite and >= 0");
+    }
+    if (!std::isfinite(trigger.array_coincidence_window_ns) ||
+        trigger.array_coincidence_window_ns < 0.0) {
+        throw std::runtime_error(
+            "trigger.array_coincidence_window_ns must be finite and >= 0");
     }
     return trigger;
 }
@@ -2026,21 +2197,7 @@ std::unique_ptr<Cone::SquareCone> buildLightCollector(const CameraConfig& cfg,
 
 const CameraPixel* findContainingPixel(const CameraGeometry& camera, double x, double y)
 {
-    const CameraPixel* best = nullptr;
-    double best_r2 = std::numeric_limits<double>::max();
-    for (const auto& pixel : camera.pixels()) {
-        if (!CameraGeometry::contains(pixel, x, y)) {
-            continue;
-        }
-        const double dx = x - pixel.center.x;
-        const double dy = y - pixel.center.y;
-        const double r2 = dx * dx + dy * dy;
-        if (r2 < best_r2) {
-            best_r2 = r2;
-            best = &pixel;
-        }
-    }
-    return best;
+    return camera.findContainingPixelPtr(x, y);
 }
 
 CollectorTraceResult traceLightCollector(const Cone::SquareCone& cone,
@@ -2177,6 +2334,11 @@ TelescopeConfig buildTelescopeConfig(const std::map<std::string, std::string>& c
     telescope.coordinate_system =
         getString(cfg, "telescope.coordinate_system", telescope.coordinate_system);
 
+    if (!std::isfinite(telescope.position_m.x) ||
+        !std::isfinite(telescope.position_m.y) ||
+        !std::isfinite(telescope.position_m.z)) {
+        throw std::runtime_error("telescope.position_m must contain finite coordinates");
+    }
     if (!std::isfinite(telescope.pointing_az_deg) ||
         !std::isfinite(telescope.pointing_el_deg)) {
         throw std::runtime_error("telescope pointing angles must be finite");
@@ -2794,10 +2956,15 @@ void applyStructuralDeformation(std::vector<MirrorFacet>& facets,
 }
 
 void applyFacetErrors(std::vector<MirrorFacet>& facets, const ErrorConfig& error) {
+    const bool has_per_facet_misalignment =
+        std::any_of(facets.begin(), facets.end(), [](const MirrorFacet& facet) {
+            return facet.misalign_sigma_rad > 0.0;
+        });
     if (error.facet_radial_position_sigma_m == 0.0 &&
         error.facet_normal_sigma_deg == 0.0 &&
         error.radius_of_curvature_sigma_m == 0.0 &&
-        error.reflectivity_scale_sigma == 0.0) {
+        error.reflectivity_scale_sigma == 0.0 &&
+        !has_per_facet_misalignment) {
         return;
     }
 
@@ -2814,8 +2981,11 @@ void applyFacetErrors(std::vector<MirrorFacet>& facets, const ErrorConfig& error
             facet.center += ideal_normal * offset;
         }
 
-        if (normal_sigma_rad > 0.0) {
-            facet.normal = perturbVectorOnSphere(ideal_normal, normal_sigma_rad, rng);
+        const double facet_normal_sigma_rad =
+            std::hypot(normal_sigma_rad, facet.misalign_sigma_rad);
+        if (facet_normal_sigma_rad > 0.0) {
+            facet.normal = perturbVectorOnSphere(
+                ideal_normal, facet_normal_sigma_rad, rng);
         }
 
         if (error.radius_of_curvature_sigma_m > 0.0 &&
@@ -2827,7 +2997,7 @@ void applyFacetErrors(std::vector<MirrorFacet>& facets, const ErrorConfig& error
 
         if (error.reflectivity_scale_sigma > 0.0) {
             double scale = 1.0 + error.reflectivity_scale_sigma * unit_normal(rng);
-            facet.reflectivity_scale = std::max(0.0, scale);
+            facet.reflectivity_scale *= std::max(0.0, scale);
         }
     }
 }
