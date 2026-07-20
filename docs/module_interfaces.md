@@ -202,7 +202,7 @@ nsb.enabled=true
 nsb.model=spectral_flux
 nsb.spectrum_csv=configs/nsb/nsb_spectrum.csv
 nsb.spectrum_unit=ph_s_nm_sr_m2
-nsb.effective_area_m2=22.606448
+nsb.effective_area_m2=24.576860
 nsb.pixel_solid_angle=auto
 ```
 
