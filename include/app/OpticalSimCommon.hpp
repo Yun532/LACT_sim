@@ -154,10 +154,13 @@ struct ElectronicsConfig {
 struct NsbConfig {
     bool enabled = false;
     std::string model = "constant_rate";
+    std::string spatial_model = "uniform";
     double rate_pe_per_ns_per_pixel = 0.0;
     double window_ns = 16.0;
     std::uint64_t seed = 12345ULL;
     std::string spectrum_csv;
+    std::string pixel_scale_csv;
+    std::map<std::pair<int, int>, double> pixel_relative_scale;
     std::string spectrum_unit = "ph_s_nm_sr_m2";
     double effective_area_m2 = 0.0;
     std::string pixel_solid_angle = "auto";
@@ -324,27 +327,6 @@ void resolveNsbSpectralRate(NsbConfig& nsb,
                             const OpticalEfficiencyConfig& efficiency_cfg,
                             const CameraGeometry& camera,
                             const TelescopeConfig& telescope);
-void generateIntegratedNsbPe(const NsbConfig& nsb,
-                             int event_id,
-                             int telescope_id,
-                             std::size_t n_pixels,
-                             double window_ns,
-                             const std::function<void(std::size_t, float)>& add_sample);
-void generateTimeBinnedNsbPe(const NsbConfig& nsb,
-                             const WaveformOutputConfig& waveform_cfg,
-                             int event_id,
-                             int telescope_id,
-                             std::size_t n_pixels,
-                             std::size_t n_bins,
-                             const std::function<void(std::size_t, std::size_t, float)>& add_sample);
-float sampleTimeBinnedNsbPeCell(const NsbConfig& nsb,
-                                const WaveformOutputConfig& waveform_cfg,
-                                int event_id,
-                                int telescope_id,
-                                std::size_t n_pixels,
-                                std::size_t n_bins,
-                                std::size_t col,
-                                std::size_t bin);
 TriggerConfig buildTriggerConfig(const std::map<std::string, std::string>& cfg);
 CameraGeometry buildCameraGeometry(const CameraConfig& cfg);
 double cameraPixelSizeForCollector(const CameraConfig& cfg, const CameraGeometry& camera);

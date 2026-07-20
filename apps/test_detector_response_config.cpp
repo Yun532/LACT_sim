@@ -1,6 +1,8 @@
 #include "app/OpticalSimCommon.hpp"
 
 #include <cmath>
+#include <cstdio>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <string>
@@ -40,6 +42,7 @@ int main()
     auto default_nsb = buildNsbConfig({});
     ok &= check(!default_nsb.enabled, "NSB should default to disabled");
     ok &= check(default_nsb.model == "constant_rate", "NSB default model");
+    ok &= check(default_nsb.spatial_model == "uniform", "NSB default spatial model");
     ok &= check(std::abs(default_nsb.window_ns - 16.0) < 1e-12, "NSB default window");
 
     std::map<std::string, std::string> nsb_cfg{
@@ -55,6 +58,39 @@ int main()
                 "NSB rate parsed");
     ok &= check(std::abs(nsb.window_ns - 20.0) < 1e-12, "NSB window parsed");
     ok &= check(nsb.seed == 7, "NSB seed parsed");
+
+    const std::string pixel_scale_path = "test_nsb_pixel_scale.csv";
+    {
+        std::ofstream out(pixel_scale_path);
+        out << "telescope_id,pixel_id,relative_scale\n"
+            << "-1,0,1.0\n"
+            << "3,0,0.75\n";
+    }
+    auto scaled_nsb_cfg = nsb_cfg;
+    scaled_nsb_cfg["nsb.spatial_model"] = "pixel_scale";
+    scaled_nsb_cfg["nsb.pixel_scale_csv"] = pixel_scale_path;
+    const auto scaled_nsb = buildNsbConfig(scaled_nsb_cfg);
+    ok &= check(scaled_nsb.spatial_model == "pixel_scale",
+                "NSB spatial model parsed");
+    ok &= check(scaled_nsb.pixel_relative_scale.size() == 2,
+                "NSB pixel scale rows parsed");
+    ok &= check(std::abs(scaled_nsb.pixel_relative_scale.at({3, 0}) - 0.75) < 1e-12,
+                "NSB telescope pixel override parsed");
+    std::remove(pixel_scale_path.c_str());
+
+    {
+        std::ofstream out(pixel_scale_path);
+        out << "telescope_id,pixel_id,relative_scale\n"
+            << "-1,0,1.0\n"
+            << "-1,0,0.5\n";
+    }
+    try {
+        (void)buildNsbConfig(scaled_nsb_cfg);
+        std::cerr << "duplicate NSB pixel scale row should fail\n";
+        ok = false;
+    } catch (...) {
+    }
+    std::remove(pixel_scale_path.c_str());
 
     const auto event_ids =
         parseIntList("603, 201,603,402", "source.filter_event_ids");
@@ -129,6 +165,9 @@ int main()
                 "coincidence window parsed");
 
     ok &= expectInvalid({{"nsb.rate_pe_per_ns_per_pixel", "-1"}}, "negative NSB rate");
+    ok &= expectInvalid({{"nsb.spatial_model", "invalid"}}, "invalid NSB spatial model");
+    ok &= expectInvalid({{"nsb.spatial_model", "pixel_scale"}},
+                        "pixel scale model missing CSV");
     ok &= expectInvalid({{"nsb.enabled", "true"}, {"nsb.model", "spectral_flux"}},
                         "spectral NSB missing spectrum");
     ok &= expectInvalid({{"trigger.camera_multiplicity", "0"}}, "zero camera multiplicity");

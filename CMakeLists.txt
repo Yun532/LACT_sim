@@ -66,6 +66,7 @@ add_library(simlite_core
     src/io/MirrorFacetCsvReader.cpp
     src/io/EventIOPhotonSemantics.cpp
     src/app/OpticalSimCommon.cpp
+    src/app/NsbResponseSampler.cpp
     src/app/PhotonResponseSampler.cpp
     src/app/TelescopeOpticsCache.cpp
     src/app/TriggerResponse.cpp
@@ -86,6 +87,12 @@ add_executable(test_synthetic_source
 )
 target_link_libraries(test_synthetic_source PRIVATE simlite_core)
 add_test(NAME test_synthetic_source COMMAND test_synthetic_source)
+
+add_executable(test_nsb_response_sampler
+    apps/test_nsb_response_sampler.cpp
+)
+target_link_libraries(test_nsb_response_sampler PRIVATE simlite_core)
+add_test(NAME test_nsb_response_sampler COMMAND test_nsb_response_sampler)
 
 add_executable(run_optical_sim
     apps/run_optical_sim.cpp

@@ -24,40 +24,6 @@ namespace lact {
 
 extern const double DEG_TO_RAD = 3.14159265358979323846 / 180.0;
 
-namespace {
-
-std::uint64_t mixNsbSeed(std::uint64_t seed, std::uint64_t value)
-{
-    seed ^= value + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
-    return seed;
-}
-
-std::mt19937_64 makeNsbEventTelescopeRng(const NsbConfig& nsb,
-                                         int event_id,
-                                         int telescope_id)
-{
-    std::uint64_t seed = nsb.seed;
-    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(
-                                static_cast<std::int64_t>(event_id) + 0x80000000LL));
-    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(telescope_id + 1));
-    return std::mt19937_64(seed);
-}
-
-std::mt19937_64 makeNsbEventTelescopeCellRng(const NsbConfig& nsb,
-                                             int event_id,
-                                             int telescope_id,
-                                             std::size_t cell)
-{
-    std::uint64_t seed = nsb.seed;
-    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(
-                                static_cast<std::int64_t>(event_id) + 0x80000000LL));
-    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(telescope_id + 1));
-    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(cell + 1));
-    return std::mt19937_64(seed);
-}
-
-} // namespace
-
 std::string trim(const std::string& s) {
     auto first = std::find_if_not(s.begin(), s.end(), [](unsigned char c) {
         return std::isspace(c);
@@ -297,7 +263,7 @@ void mergeComponentConfig(std::map<std::string, std::string>& dst,
         if (scoped == "atmosphere.tau_table") {
             value = resolveRelativePath(path, value);
         }
-        if (scoped == "nsb.spectrum_csv") {
+        if (scoped == "nsb.spectrum_csv" || scoped == "nsb.pixel_scale_csv") {
             value = resolveRelativePath(path, value);
         }
         dst[scoped] = value;
@@ -1867,15 +1833,107 @@ ElectronicsConfig buildElectronicsConfig(const std::map<std::string, std::string
     return electronics;
 }
 
+std::map<std::pair<int, int>, double> readNsbPixelScaleCsv(const std::string& path)
+{
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error("failed to open NSB pixel scale CSV: " + path);
+    }
+
+    std::string line;
+    std::map<std::string, int> header;
+    int line_no = 0;
+    while (std::getline(in, line)) {
+        ++line_no;
+        const std::string clean = trim(line);
+        if (clean.empty() || clean.front() == '#') {
+            continue;
+        }
+        const auto cells = splitCsvCells(clean);
+        if (cells.size() != 3) {
+            throw std::runtime_error(
+                "NSB pixel scale CSV header must contain exactly "
+                "telescope_id,pixel_id,relative_scale: " + path);
+        }
+        for (int i = 0; i < static_cast<int>(cells.size()); ++i) {
+            const std::string name =
+                lowerCopy(trim(cells[static_cast<std::size_t>(i)]));
+            if (name.empty() || !header.emplace(name, i).second) {
+                throw std::runtime_error(
+                    "duplicate or empty NSB pixel scale CSV header: " + path);
+            }
+        }
+        break;
+    }
+    if (headerIndex(header, "telescope_id") < 0 ||
+        headerIndex(header, "pixel_id") < 0 ||
+        headerIndex(header, "relative_scale") < 0) {
+        throw std::runtime_error(
+            "NSB pixel scale CSV requires telescope_id,pixel_id,relative_scale: " + path);
+    }
+
+    std::map<std::pair<int, int>, double> scales;
+    while (std::getline(in, line)) {
+        ++line_no;
+        const std::string clean = trim(line);
+        if (clean.empty() || clean.front() == '#') {
+            continue;
+        }
+        const auto cells = splitCsvCells(clean);
+        try {
+            if (cells.size() != header.size()) {
+                throw std::runtime_error("wrong number of CSV columns");
+            }
+            std::size_t pos = 0;
+            const std::string telescope_text =
+                getRequiredCell(cells, header, "telescope_id");
+            const int telescope_id = std::stoi(telescope_text, &pos);
+            if (pos != telescope_text.size() || telescope_id < -1) {
+                throw std::runtime_error("invalid telescope_id");
+            }
+            const std::string pixel_text = getRequiredCell(cells, header, "pixel_id");
+            pos = 0;
+            const int pixel_id = std::stoi(pixel_text, &pos);
+            if (pos != pixel_text.size() || pixel_id < 0) {
+                throw std::runtime_error("invalid pixel_id");
+            }
+            const std::string scale_text =
+                getRequiredCell(cells, header, "relative_scale");
+            pos = 0;
+            const double scale = std::stod(scale_text, &pos);
+            if (pos != scale_text.size() || !std::isfinite(scale) || scale < 0.0) {
+                throw std::runtime_error("invalid relative_scale");
+            }
+            const auto inserted = scales.emplace(
+                std::make_pair(telescope_id, pixel_id), scale);
+            if (!inserted.second) {
+                throw std::runtime_error("duplicate telescope_id,pixel_id");
+            }
+        } catch (const std::exception& error) {
+            throw std::runtime_error(
+                "invalid NSB pixel scale CSV line " + std::to_string(line_no) +
+                " in " + path + ": " + error.what());
+        }
+    }
+    if (scales.empty()) {
+        throw std::runtime_error("NSB pixel scale CSV has no data rows: " + path);
+    }
+    return scales;
+}
+
 NsbConfig buildNsbConfig(const std::map<std::string, std::string>& cfg) {
     NsbConfig nsb;
     nsb.enabled = getBool(cfg, "nsb.enabled", nsb.enabled);
     nsb.model = lowerCopy(trim(getString(cfg, "nsb.model", nsb.model)));
+    nsb.spatial_model =
+        lowerCopy(trim(getString(cfg, "nsb.spatial_model", nsb.spatial_model)));
     nsb.rate_pe_per_ns_per_pixel =
         getDouble(cfg, "nsb.rate_pe_per_ns_per_pixel", nsb.rate_pe_per_ns_per_pixel);
     nsb.window_ns = getDouble(cfg, "nsb.window_ns", nsb.window_ns);
     nsb.seed = getUInt64(cfg, "nsb.seed", nsb.seed);
     nsb.spectrum_csv = getString(cfg, "nsb.spectrum_csv", nsb.spectrum_csv);
+    nsb.pixel_scale_csv =
+        getString(cfg, "nsb.pixel_scale_csv", nsb.pixel_scale_csv);
     nsb.spectrum_unit =
         lowerCopy(trim(getString(cfg, "nsb.spectrum_unit", nsb.spectrum_unit)));
     nsb.effective_area_m2 =
@@ -1888,6 +1946,9 @@ NsbConfig buildNsbConfig(const std::map<std::string, std::string>& cfg) {
     if (!(nsb.model == "constant_rate" || nsb.model == "spectral_flux" ||
           nsb.model == "none" || nsb.model == "off")) {
         throw std::runtime_error("nsb.model must be constant_rate, spectral_flux, or none");
+    }
+    if (!(nsb.spatial_model == "uniform" || nsb.spatial_model == "pixel_scale")) {
+        throw std::runtime_error("nsb.spatial_model must be uniform or pixel_scale");
     }
     if (!std::isfinite(nsb.rate_pe_per_ns_per_pixel) ||
         nsb.rate_pe_per_ns_per_pixel < 0.0) {
@@ -1919,6 +1980,13 @@ NsbConfig buildNsbConfig(const std::map<std::string, std::string>& cfg) {
             throw std::runtime_error(
                 "nsb.effective_area_m2 must be > 0 for nsb.model=spectral_flux");
         }
+    }
+    if (nsb.spatial_model == "pixel_scale") {
+        if (trim(nsb.pixel_scale_csv).empty()) {
+            throw std::runtime_error(
+                "nsb.pixel_scale_csv is required for nsb.spatial_model=pixel_scale");
+        }
+        nsb.pixel_relative_scale = readNsbPixelScaleCsv(nsb.pixel_scale_csv);
     }
     if (isDisabledText(nsb.model)) {
         nsb.enabled = false;
@@ -2006,85 +2074,6 @@ void resolveNsbSpectralRate(NsbConfig& nsb,
     nsb.rate_pe_per_ns_per_pixel =
         1.0e-9 * integral * nsb.effective_area_m2 * nsb.pixel_solid_angle_sr;
     nsb.computed_from_spectrum = true;
-}
-
-void generateIntegratedNsbPe(const NsbConfig& nsb,
-                             int event_id,
-                             int telescope_id,
-                             std::size_t n_pixels,
-                             double window_ns,
-                             const std::function<void(std::size_t, float)>& add_sample)
-{
-    if (!nsb.enabled || nsb.rate_pe_per_ns_per_pixel <= 0.0 ||
-        window_ns <= 0.0 || n_pixels == 0) {
-        return;
-    }
-
-    auto rng = makeNsbEventTelescopeRng(nsb, event_id, telescope_id);
-    std::poisson_distribution<int> poisson(nsb.rate_pe_per_ns_per_pixel * window_ns);
-    for (std::size_t col = 0; col < n_pixels; ++col) {
-        const auto pe = static_cast<float>(poisson(rng));
-        if (pe > 0.0f) {
-            add_sample(col, pe);
-        }
-    }
-}
-
-void generateTimeBinnedNsbPe(const NsbConfig& nsb,
-                             const WaveformOutputConfig& waveform_cfg,
-                             int event_id,
-                             int telescope_id,
-                             std::size_t n_pixels,
-                             std::size_t n_bins,
-                             const std::function<void(std::size_t, std::size_t, float)>& add_sample)
-{
-    if (!nsb.enabled || nsb.rate_pe_per_ns_per_pixel <= 0.0 ||
-        waveform_cfg.time_bin_width_ns <= 0.0 || n_pixels == 0 || n_bins == 0) {
-        return;
-    }
-
-    auto rng = makeNsbEventTelescopeRng(nsb, event_id, telescope_id);
-    const double total_mean =
-        nsb.rate_pe_per_ns_per_pixel *
-        waveform_cfg.time_bin_width_ns *
-        static_cast<double>(n_pixels) *
-        static_cast<double>(n_bins);
-    std::poisson_distribution<unsigned long long> total_poisson(total_mean);
-    const auto total_pe = static_cast<std::uint64_t>(total_poisson(rng));
-    if (total_pe == 0) {
-        return;
-    }
-
-    std::uniform_int_distribution<unsigned long long> pixel_dist(
-        0ULL, static_cast<unsigned long long>(n_pixels - 1));
-    std::uniform_int_distribution<unsigned long long> bin_dist(
-        0ULL, static_cast<unsigned long long>(n_bins - 1));
-    for (std::uint64_t i = 0; i < total_pe; ++i) {
-        add_sample(static_cast<std::size_t>(pixel_dist(rng)),
-                   static_cast<std::size_t>(bin_dist(rng)),
-                   1.0f);
-    }
-}
-
-float sampleTimeBinnedNsbPeCell(const NsbConfig& nsb,
-                                const WaveformOutputConfig& waveform_cfg,
-                                int event_id,
-                                int telescope_id,
-                                std::size_t n_pixels,
-                                std::size_t n_bins,
-                                std::size_t col,
-                                std::size_t bin)
-{
-    if (!nsb.enabled || nsb.rate_pe_per_ns_per_pixel <= 0.0 ||
-        waveform_cfg.time_bin_width_ns <= 0.0 ||
-        col >= n_pixels || bin >= n_bins || n_pixels == 0 || n_bins == 0) {
-        return 0.0f;
-    }
-    const std::size_t cell = col * n_bins + bin;
-    auto rng = makeNsbEventTelescopeCellRng(nsb, event_id, telescope_id, cell);
-    std::poisson_distribution<int> poisson(
-        nsb.rate_pe_per_ns_per_pixel * waveform_cfg.time_bin_width_ns);
-    return static_cast<float>(poisson(rng));
 }
 
 TriggerConfig buildTriggerConfig(const std::map<std::string, std::string>& cfg) {
