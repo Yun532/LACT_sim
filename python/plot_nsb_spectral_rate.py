@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mirror", default="configs/efficiency/mirror_reflectivity.csv")
     parser.add_argument("--filter", default="configs/efficiency/filter_transmission.csv")
     parser.add_argument("--sipm", default="configs/efficiency/sipm_pde.csv")
-    parser.add_argument("--effective-area-m2", type=float, default=22.606448)
+    parser.add_argument("--effective-area-m2", type=float, default=24.576860)
     parser.add_argument("--pixel-size-m", type=float, default=0.0244)
     parser.add_argument("--focal-length-m", type=float, default=8.0)
     parser.add_argument("--window-ns", type=float, default=25.0)

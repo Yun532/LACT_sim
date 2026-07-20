@@ -169,7 +169,7 @@ build/compute_nsb_rate configs/nsb/spectral_rate_check_with_obstruction.cfg \
   2>&1 | tee run_logs/official_tests/nsb_spectral/run.log
 
 MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_nsb_spectral_rate.py \
-  --effective-area-m2 22.606448 \
+  --effective-area-m2 24.576860 \
   --output run_logs/official_tests/nsb_spectral/nsb_spectral_response.png \
   --diagnostic-csv run_logs/official_tests/nsb_spectral/diagnostic.csv \
   --summary run_logs/official_tests/nsb_spectral/summary.txt \
@@ -185,7 +185,7 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_nsb_spectral_rate.py \
 - `configs/nsb/nsb_spectrum.csv`: notebook/SkyCalc 生成的 dark/no-moon LoNS 光谱，
   单位是 `ph / (s nm sr m^2)`。
 - `configs/nsb/spectral_skycalc_dark_with_obstruction.cfg`: NSB spectral 配置，固定
-  有效面积为 `22.606448 m^2`，对应 official 平行光遮挡测试得到的面积。
+  有效面积为 `24.576860 m^2`，对应 official 平行光遮挡测试得到的面积。
 - `configs/efficiency/mirror_reflectivity_dm0113_13point_mean.csv`: DM0113 镜面 13 点平均反射率。
 - `configs/efficiency/filter_transmission.csv`: 滤光片透过率。
 - `configs/efficiency/sipm_pde.csv`: SiPM PDE。
@@ -201,8 +201,8 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_nsb_spectral_rate.py \
 当前 dark/no-moon、考虑遮挡的默认结果约为：
 
 ```text
-rate_pe_per_ns_per_pixel = 0.074375315
-mean_pe_per_pixel_25ns   = 1.859382882
+rate_pe_per_ns_per_pixel = 0.076374999
+mean_pe_per_pixel_25ns   = 1.909374978
 ```
 
 ## 1. 完美平行光白板测试
@@ -545,8 +545,8 @@ cfg 逐项解释：
   `efficiency.config=../efficiency/curves_all.cfg`: 使用真实 SiPM PDE、镜面反射率
   和滤光片曲线。
 - `nsb.config=../nsb/spectral_skycalc_dark_no_obstruction.cfg`: 启用无月 SkyCalc LoNS
-  光谱 NSB。固定有效面积为 `28.304744 m^2`，程序自动用相机像素尺寸和焦距计算
-  `pixel_solid_angle`，得到约 `0.09312 p.e./ns/pixel`。
+  光谱 NSB。固定有效面积为 `29.623570 m^2`，程序自动用相机像素尺寸和焦距计算
+  `pixel_solid_angle`，得到约 `0.09206 p.e./ns/pixel`。
 - `trigger.config=../trigger/example_simple_multiplicity.cfg`: 启用简单 trigger。
 - `source.max_shower_events=10`: 这个 official 项默认跑 10 个 CORSIKA shower，
   在覆盖多个事件的同时限制 waveform 输出体积。
@@ -598,8 +598,8 @@ cfg 逐项解释：
   `efficiency.config=../efficiency/curves_all.cfg`: 使用真实 SiPM PDE、镜面反射率
   和滤光片曲线。
 - `nsb.config=../nsb/spectral_skycalc_dark_with_obstruction.cfg`: 加无月 SkyCalc LoNS
-  光谱 NSB。固定有效面积为 `22.606448 m^2`，对应遮挡后的 official 平行光面积，
-  程序算得约 `0.07438 p.e./ns/pixel`。
+  光谱 NSB。固定有效面积为 `24.576860 m^2`，对应遮挡后的 official 平行光面积，
+  程序算得约 `0.07637 p.e./ns/pixel`。
 - `trigger.config=../trigger/example_simple_multiplicity.cfg`: 启用 trigger。
 - `trigger.pixel_threshold_pe=10`: 像素阈值 10 p.e.。
 - `output.hdf5_path=run_logs/official_tests/corsika/camera_obstruction_nsb_trigger_dense.h5`:

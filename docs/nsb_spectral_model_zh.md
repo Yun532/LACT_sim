@@ -46,10 +46,10 @@ notebook 的 SkyCalc 生成逻辑或导出的有效 LoNS 光谱表为准。
 
 ```text
 不考虑遮挡:
-  A_eff_no_obstruction = 28.304744 m^2
+  A_eff_no_obstruction = 29.623570 m^2
 
 考虑遮挡:
-  A_eff_with_obstruction = 22.606448 m^2
+  A_eff_with_obstruction = 24.576860 m^2
 ```
 
 来源：
@@ -58,6 +58,8 @@ notebook 的 SkyCalc 生成逻辑或导出的有效 LoNS 光谱表为准。
 run_logs/official_tests/perfect_parallel/run.log
 run_logs/official_tests/raytrace_structure_parallel/run.log
 ```
+
+标定运行沿用上述 official 配置，仅把平行光光子数提高到 `10,000,000` 以降低蒙特卡洛统计误差。
 
 计算方式：
 
@@ -69,31 +71,31 @@ official 平行光测试中：
 
 ```text
 source_sampling_area_m2 = 50.265482 m^2
-total_photons           = 1,000,000
+total_photons           = 10,000,000
 ```
 
 统计结果：
 
 ```text
 无遮挡:
-  hit_output_plane = 563105
-  A_eff = 28.304744 m^2
+  hit_output_plane = 5893422
+  A_eff = 29.623570 m^2
 
 考虑遮挡:
-  hit_output_plane = 449741
-  A_eff = 22.606448 m^2
+  hit_output_plane = 4889411
+  A_eff = 24.576860 m^2
 ```
 
 遮挡透过比例：
 
 ```text
-22.606448 / 28.304744 = 0.798681
+24.576860 / 29.623570 = 0.829639
 ```
 
 遮挡损失比例：
 
 ```text
-20.1319 %
+17.0361 %
 ```
 
 这两个面积暂时只代表纯光学白板有效面积，不再额外包含镜面反射率、滤光片、
@@ -177,24 +179,24 @@ Detected p.e. in 30 ns        = 9.1239285550
 
 ```text
 无月，无遮挡:
-  rate = 0.093123 pe/ns/pixel
-  mean = 2.328 pe / 25 ns / pixel
-  mean = 2.794 pe / 30 ns / pixel
+  rate = 0.097462 pe/ns/pixel
+  mean = 2.437 pe / 25 ns / pixel
+  mean = 2.924 pe / 30 ns / pixel
 
 无月，考虑遮挡:
-  rate = 0.074375 pe/ns/pixel
-  mean = 1.859 pe / 25 ns / pixel
-  mean = 2.231 pe / 30 ns / pixel
+  rate = 0.080858 pe/ns/pixel
+  mean = 2.021 pe / 25 ns / pixel
+  mean = 2.426 pe / 30 ns / pixel
 
 有月示例，无遮挡:
-  rate = 0.324549 pe/ns/pixel
-  mean = 8.114 pe / 25 ns / pixel
-  mean = 9.736 pe / 30 ns / pixel
+  rate = 0.339671 pe/ns/pixel
+  mean = 8.492 pe / 25 ns / pixel
+  mean = 10.190 pe / 30 ns / pixel
 
 有月示例，考虑遮挡:
-  rate = 0.259211 pe/ns/pixel
-  mean = 6.480 pe / 25 ns / pixel
-  mean = 7.776 pe / 30 ns / pixel
+  rate = 0.281804 pe/ns/pixel
+  mean = 7.045 pe / 25 ns / pixel
+  mean = 8.454 pe / 30 ns / pixel
 ```
 
 这些数值比当前 smoke test 的：
@@ -216,8 +218,8 @@ nsb.spectrum_csv=configs/nsb/lons_skycalc_dark.csv
 nsb.spectrum_unit=ph_s_nm_sr_m2
 
 # 二选一：无遮挡或考虑遮挡。
-nsb.effective_area_m2=28.304744
-# nsb.effective_area_m2=22.606448
+nsb.effective_area_m2=29.623570
+# nsb.effective_area_m2=24.576860
 
 nsb.pixel_solid_angle=auto
 nsb.seed=12345
@@ -260,7 +262,7 @@ configs/official_tests/corsika_obstruction_nsb_trigger_camera.cfg
 build/compute_nsb_rate configs/nsb/spectral_rate_check_with_obstruction.cfg
 
 MPLBACKEND=Agg python3 python/plot_nsb_spectral_rate.py \
-  --effective-area-m2 22.606448 \
+  --effective-area-m2 24.576860 \
   --output run_logs/manual_checks/nsb_spectrum_from_notebook/nsb_spectral_response_with_poisson.png \
   --diagnostic-csv run_logs/manual_checks/nsb_spectrum_from_notebook/diagnostic_from_script.csv \
   --summary run_logs/manual_checks/nsb_spectrum_from_notebook/summary_from_script.txt

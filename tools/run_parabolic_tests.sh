@@ -190,7 +190,7 @@ python3 python/run_elevation_parallel_scan.py \
   2>&1 | tee run_logs/parabolic_tests/nsb_spectral/run.log
 MPLBACKEND=Agg MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp}" \
 python3 python/plot_nsb_spectral_rate.py \
-  --effective-area-m2 22.606448 \
+  --effective-area-m2 24.576860 \
   --output run_logs/parabolic_tests/nsb_spectral/nsb_spectral_response.png \
   --diagnostic-csv run_logs/parabolic_tests/nsb_spectral/diagnostic.csv \
   --summary run_logs/parabolic_tests/nsb_spectral/summary.txt \
