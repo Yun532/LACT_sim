@@ -34,6 +34,7 @@ int main(int argc, char** argv) {
         ErrorConfig error_cfg = buildErrorConfig(cfg);
         ObstructionMask obstruction = buildObstructionMask(cfg);
         applyStructuralDeformation(facets, error_cfg, telescope_cfg);
+        applyFacetEfficiencyScales(facets, cfg);
         OutputPlane plane = buildOutputPlane(cfg);
         CameraConfig camera_cfg = buildCameraConfig(cfg);
         SipmConfig sipm_cfg = buildSipmConfig(cfg);
@@ -279,6 +280,13 @@ int main(int argc, char** argv) {
         printField("constant_scale", doubleToString(efficiency_cfg.constant_scale));
         printField("mirror_reflectivity",
                    factorDescription(efficiency_cfg.mirror_reflectivity));
+        const std::string facet_scale_csv =
+            getString(cfg, "efficiency.mirror_reflectivity_scale_csv", "");
+        printField("mirror_scale",
+                   isDisabledText(facet_scale_csv)
+                       ? "uniform fallback: " + getString(
+                             cfg, "efficiency.mirror_reflectivity_scale", "1")
+                       : "per-facet CSV: " + facet_scale_csv);
         printField("filter_transmission",
                    factorDescription(efficiency_cfg.filter_transmission));
         printField("atmosphere",
@@ -332,13 +340,13 @@ int main(int argc, char** argv) {
         }
 
         printSection("Model");
-        printField("optics", "ideal reflection only");
+        printField("optics", "facet reflection with configured optical errors");
         printField("speed_of_light_m/ns",
                    doubleToString(propagation_cfg.speed_of_light_m_per_ns, 9));
         printField("not included",
                    light_collector
-                       ? "mirror roughness, misalignment, camera electronics"
-                       : "mirror roughness, misalignment, collector, camera electronics");
+                       ? "camera electronics"
+                       : "collector, camera electronics");
 
         printSection("Run");
         printField("setup_time_s", doubleToString(elapsedSeconds(t_start, t_setup_done)));
@@ -360,7 +368,7 @@ int main(int argc, char** argv) {
             source = std::make_unique<SyntheticPhotonSource>(source_cfg);
         }
         OpticalTracer tracer(propagation_cfg.speed_of_light_m_per_ns,
-                             error_cfg.reflect_direction_sigma_deg * DEG_TO_RAD,
+                             effectiveReflectDirectionSigmaRad(facets, error_cfg),
                              error_cfg.random_seed);
 
         std::vector<OpticalSurfaceHit> hits;

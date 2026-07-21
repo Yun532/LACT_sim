@@ -386,6 +386,10 @@ void applyStructuralDeformation(std::vector<MirrorFacet>& facets,
                                 const ErrorConfig& error,
                                 const TelescopeConfig& telescope);
 void applyFacetErrors(std::vector<MirrorFacet>& facets, const ErrorConfig& error);
+void applyFacetEfficiencyScales(std::vector<MirrorFacet>& facets,
+                                const std::map<std::string, std::string>& cfg);
+double effectiveReflectDirectionSigmaRad(const std::vector<MirrorFacet>& facets,
+                                         const ErrorConfig& error);
 OpticalEfficiencyConfig buildEfficiencyConfig(const std::map<std::string, std::string>& cfg);
 PropagationConfig buildPropagationConfig(const std::map<std::string, std::string>& cfg);
 

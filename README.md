@@ -117,6 +117,8 @@ build/run_optical_sim configs/official_tests/perfect_point_900m_whiteboard.cfg
 `configs/efficiency/mirror_reflectivity_dm0113_13point_mean.csv` 提供。完整字段和避免重复
 施加误差的约定见
 [`configs/calibrated/lact2_measured_20260622/README.md`](configs/calibrated/lact2_measured_20260622/README.md)。
+逐镜 CSV、统一误差和效率乘数的完整优先级见
+[`docs/facet_parameter_precedence_zh.md`](docs/facet_parameter_precedence_zh.md)。
 
 ## Photon CSV
 

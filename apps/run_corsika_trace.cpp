@@ -2946,6 +2946,13 @@ void printCorsikaOpticalConfiguration(
     printField("constant_scale", doubleToString(efficiency_cfg.constant_scale));
     printField("mirror_reflectivity",
                factorDescription(efficiency_cfg.mirror_reflectivity));
+    const std::string facet_scale_csv =
+        getString(cfg, "efficiency.mirror_reflectivity_scale_csv", "");
+    printField("mirror_scale",
+               isDisabledText(facet_scale_csv)
+                   ? "uniform fallback: " + getString(
+                         cfg, "efficiency.mirror_reflectivity_scale", "1")
+                   : "per-facet CSV: " + facet_scale_csv);
     printField("filter_transmission",
                factorDescription(efficiency_cfg.filter_transmission));
     printField("atmosphere", factorDescription(efficiency_cfg.atmosphere_transmission));
@@ -2995,7 +3002,7 @@ void printCorsikaOpticalConfiguration(
     }
 
     printSection("Model");
-    printField("optics", "ideal reflection only");
+    printField("optics", "facet reflection with configured optical errors");
     printField("speed_of_light_m/ns",
                doubleToString(propagation_cfg.speed_of_light_m_per_ns, 9));
     std::string missing = "real electronics waveform, SiPM saturation, crosstalk, "
@@ -3214,6 +3221,7 @@ int main(int argc, char** argv) {
         ErrorConfig error_cfg = buildErrorConfig(cfg);
         ObstructionMask obstruction = buildObstructionMask(cfg);
         applyStructuralDeformation(nominal_facets, error_cfg, telescope_cfg);
+        applyFacetEfficiencyScales(nominal_facets, cfg);
         OutputPlane plane = buildOutputPlane(cfg);
         TelescopeFrame telescope_frame = buildTelescopeFrame(telescope_cfg);
         CameraConfig camera_cfg = buildCameraConfig(cfg);
@@ -3232,7 +3240,7 @@ int main(int argc, char** argv) {
         PropagationConfig propagation_cfg = buildPropagationConfig(cfg);
         OpticalEfficiency eff(efficiency_cfg);
         OpticalTracer tracer(propagation_cfg.speed_of_light_m_per_ns,
-                             error_cfg.reflect_direction_sigma_deg * DEG_TO_RAD,
+                             effectiveReflectDirectionSigmaRad(nominal_facets, error_cfg),
                              error_cfg.random_seed);
         const double eventio_mirror_front_z_m = mirrorFrontReferenceZ(mirrors);
         const bool eventio_2d_backproject =

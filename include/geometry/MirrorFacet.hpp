@@ -34,10 +34,13 @@ struct MirrorFacet {
     Vec3 aperture_u_axis{0.0, 0.0, 0.0};
     Vec3 aperture_v_axis{0.0, 0.0, 0.0};
 
-    // 预留给后续真实误差模型
+    // 逐镜光学参数。has_* 只记录 CSV 是否显式提供该值，便于统一配置回退。
     double reflectivity_scale = 1.0;
+    bool has_reflectivity_scale = false;
     double roughness_sigma_rad = 0.0;
+    bool has_roughness_sigma_rad = false;
     double misalign_sigma_rad = 0.0;
+    bool has_misalign_sigma_rad = false;
 
     // 调试辅助：返回近轴焦距
     double focalLength() const {

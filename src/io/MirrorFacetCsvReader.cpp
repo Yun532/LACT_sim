@@ -1,6 +1,7 @@
 #include "io/MirrorFacetCsvReader.hpp"
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <fstream>
 #include <map>
 #include <sstream>
@@ -130,7 +131,8 @@ int parseInt(const std::string& text, const std::string& field) {
 
 bool readMirrorFacetsCSV(const std::string& path,
                          std::vector<MirrorFacet>& facets,
-                         std::string* error)
+                         std::string* error,
+                         const MirrorFacetCsvDefaults* defaults)
 {
     facets.clear();
 
@@ -158,9 +160,7 @@ bool readMirrorFacetsCSV(const std::string& path,
 
     const std::vector<std::string> required = {
         "id", "center_x", "center_y", "center_z",
-        "normal_x", "normal_y", "normal_z",
-        "surface_type", "radius_of_curvature",
-        "aperture_shape", "size1"
+        "normal_x", "normal_y", "normal_z"
     };
 
     for (const auto& name : required) {
@@ -171,6 +171,10 @@ bool readMirrorFacetsCSV(const std::string& path,
             return false;
         }
     }
+
+    const MirrorFacetCsvDefaults fallback = defaults
+        ? *defaults
+        : MirrorFacetCsvDefaults{};
 
     int line_no = 1;
     try {
@@ -191,28 +195,66 @@ bool readMirrorFacetsCSV(const std::string& path,
             facet.normal.z = parseDouble(getCell(cells, header, "normal_z"), "normal_z");
             facet.normal = facet.normal.normalized();
 
-            if (!parseSurfaceType(getCell(cells, header, "surface_type"), facet.surface_type)) {
+            facet.surface_type = fallback.surface_type;
+            const std::string surface_type = getCell(cells, header, "surface_type");
+            if (!surface_type.empty() && !parseSurfaceType(surface_type, facet.surface_type)) {
                 throw std::runtime_error("invalid surface_type: " +
-                                         getCell(cells, header, "surface_type"));
+                                         surface_type);
             }
-            facet.radius_of_curvature = parseDouble(getCell(cells, header, "radius_of_curvature"),
-                                                    "radius_of_curvature");
+            facet.radius_of_curvature = fallback.radius_of_curvature;
+            const std::string radius = getCell(cells, header, "radius_of_curvature");
+            if (!radius.empty()) {
+                const double value = parseDouble(radius, "radius_of_curvature");
+                if (!std::isfinite(value) || value < 0.0) {
+                    throw std::runtime_error(
+                        "radius_of_curvature must be finite and >= 0");
+                }
+                if (value > 0.0) {
+                    facet.radius_of_curvature = value;
+                }
+            }
 
-            if (!parseApertureShape(getCell(cells, header, "aperture_shape"), facet.aperture_shape)) {
+            facet.aperture_shape = fallback.aperture_shape;
+            const std::string aperture_shape = getCell(cells, header, "aperture_shape");
+            if (!aperture_shape.empty() &&
+                !parseApertureShape(aperture_shape, facet.aperture_shape)) {
                 throw std::runtime_error("invalid aperture_shape: " +
-                                         getCell(cells, header, "aperture_shape"));
+                                         aperture_shape);
             }
 
-            facet.size1 = parseDouble(getCell(cells, header, "size1"), "size1");
-            facet.size2 = parseDouble(getCell(cells, header, "size2", "0"), "size2");
-            facet.aperture_rotation_rad = parseDouble(getCell(cells, header, "aperture_rotation_rad", "0"),
-                                                      "aperture_rotation_rad");
-            facet.reflectivity_scale = parseDouble(getCell(cells, header, "reflectivity_scale", "1"),
-                                                   "reflectivity_scale");
-            facet.roughness_sigma_rad = parseDouble(getCell(cells, header, "roughness_sigma_rad", "0"),
-                                                    "roughness_sigma_rad");
-            facet.misalign_sigma_rad = parseDouble(getCell(cells, header, "misalign_sigma_rad", "0"),
-                                                   "misalign_sigma_rad");
+            facet.size1 = fallback.size1;
+            const std::string size1 = getCell(cells, header, "size1");
+            if (!size1.empty()) {
+                facet.size1 = parseDouble(size1, "size1");
+            }
+            facet.size2 = fallback.size2;
+            const std::string size2 = getCell(cells, header, "size2");
+            if (!size2.empty()) {
+                facet.size2 = parseDouble(size2, "size2");
+            }
+            facet.aperture_rotation_rad = fallback.aperture_rotation_rad;
+            const std::string aperture_rotation =
+                getCell(cells, header, "aperture_rotation_rad");
+            if (!aperture_rotation.empty()) {
+                facet.aperture_rotation_rad = parseDouble(
+                    aperture_rotation, "aperture_rotation_rad");
+            }
+
+            const std::string reflectivity = getCell(cells, header, "reflectivity_scale");
+            if (!reflectivity.empty()) {
+                facet.reflectivity_scale = parseDouble(reflectivity, "reflectivity_scale");
+                facet.has_reflectivity_scale = true;
+            }
+            const std::string roughness = getCell(cells, header, "roughness_sigma_rad");
+            if (!roughness.empty()) {
+                facet.roughness_sigma_rad = parseDouble(roughness, "roughness_sigma_rad");
+                facet.has_roughness_sigma_rad = true;
+            }
+            const std::string misalignment = getCell(cells, header, "misalign_sigma_rad");
+            if (!misalignment.empty()) {
+                facet.misalign_sigma_rad = parseDouble(misalignment, "misalign_sigma_rad");
+                facet.has_misalign_sigma_rad = true;
+            }
 
             facets.push_back(facet);
         }

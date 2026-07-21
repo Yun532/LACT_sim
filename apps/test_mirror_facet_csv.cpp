@@ -1,9 +1,11 @@
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <string>
 #include <vector>
 
+#include "app/OpticalSimCommon.hpp"
 #include "geometry/FacetLayoutUtils.hpp"
 #include "io/MirrorFacetCsvReader.hpp"
 
@@ -45,6 +47,7 @@ int main() {
         "write valid CSV fixture");
 
     std::vector<MirrorFacet> facets;
+    std::vector<MirrorFacet> bad_facets;
     std::string error;
     ok &= check(readMirrorFacetsCSV(valid_path, facets, &error), "read valid CSV: " + error);
     ok &= check(facets.size() == 2, "valid CSV facet count");
@@ -57,13 +60,85 @@ int main() {
         ok &= check(nearlyEqual(facets[0].radius_of_curvature, 10.0), "import curvature radius");
         ok &= check(nearlyEqual(facets[0].size1, 0.22), "import size1");
         ok &= check(nearlyEqual(facets[0].reflectivity_scale, 0.98), "import reflectivity scale");
+        ok &= check(facets[0].has_reflectivity_scale, "record explicit reflectivity scale");
         ok &= check(nearlyEqual(facets[0].roughness_sigma_rad, 0.001), "import roughness");
+        ok &= check(facets[0].has_roughness_sigma_rad, "record explicit roughness");
         ok &= check(nearlyEqual(facets[0].misalign_sigma_rad, 0.002), "import misalignment");
+        ok &= check(facets[0].has_misalign_sigma_rad, "record explicit misalignment");
 
         MirrorLayout layout = makeMirrorLayoutFromFacets(facets);
         ok &= check(layout.size() == facets.size(), "imported facets convert to MirrorLayout");
         ok &= check(layout.tiles()[0].id == facets[0].id, "converted tile preserves id");
         ok &= check(nearlyEqual(layout.tiles()[0].normal.norm(), 1.0), "converted tile normal");
+    }
+
+    const std::string optional_path = "mirror_facets_optional.csv";
+    ok &= check(writeTextFile(optional_path,
+        "id,center_x,center_y,center_z,normal_x,normal_y,normal_z,"
+        "radius_of_curvature\n"
+        "0,0,0,0,0,0,1,0\n"),
+        "write optional-column CSV fixture");
+    MirrorFacetCsvDefaults defaults;
+    defaults.radius_of_curvature = 16.4;
+    defaults.aperture_shape = ApertureShape::Hexagon;
+    defaults.size1 = 0.8;
+    facets.clear();
+    error.clear();
+    ok &= check(readMirrorFacetsCSV(optional_path, facets, &error, &defaults),
+                "read CSV with optional optical fields: " + error);
+    if (facets.size() == 1) {
+        ok &= check(nearlyEqual(facets[0].radius_of_curvature, 16.4),
+                    "zero curvature placeholder uses mirror default");
+        ok &= check(facets[0].aperture_shape == ApertureShape::Hexagon,
+                    "missing aperture shape uses mirror default");
+        ok &= check(nearlyEqual(facets[0].size1, 0.8),
+                    "missing aperture size uses mirror default");
+        ok &= check(!facets[0].has_reflectivity_scale,
+                    "missing reflectivity scale remains unresolved");
+    }
+
+    const std::string negative_radius_path = "mirror_facets_negative_radius.csv";
+    ok &= check(writeTextFile(negative_radius_path,
+        "id,center_x,center_y,center_z,normal_x,normal_y,normal_z,"
+        "radius_of_curvature\n"
+        "0,0,0,0,0,0,1,-1\n"),
+        "write negative-radius CSV fixture");
+    error.clear();
+    ok &= check(!readMirrorFacetsCSV(
+                    negative_radius_path, bad_facets, &error, &defaults),
+                "negative curvature is rejected");
+    ok &= check(error.find("radius_of_curvature must be finite and >= 0") !=
+                    std::string::npos,
+                "negative curvature error message");
+
+    const std::string series_path = "mirror_facets_series_optional.csv";
+    ok &= check(writeTextFile(series_path,
+        "elevation_deg,id,center_x,center_y,center_z,normal_x,normal_y,normal_z,"
+        "radius_of_curvature,reflectivity_scale,roughness_sigma_rad,misalign_sigma_rad\n"
+        "40,0,0,0,0,0,0,1,16,0.9,0.001,0\n"
+        "40,1,1,0,0,0,0,1,0,1,0,0\n"
+        "60,0,0,0,0,0,0,1,16,0.8,0.003,0\n"
+        "60,1,1,0,0,0,0,1,0,1,0,0\n"),
+        "write elevation-series optional-column fixture");
+    std::map<std::string, std::string> series_cfg{
+        {"mirror.mode", "elevation_series"},
+        {"mirror.series_format", "facet_csv"},
+        {"mirror.series_csv_path", series_path},
+        {"mirror.series_elevation_deg", "50"},
+        {"mirror.radius_of_curvature", "17"},
+        {"mirror.aperture_shape", "Hexagon"},
+        {"mirror.size1", "0.8"}};
+    const auto series_facets = lact::buildFacetsFromConfig(series_cfg);
+    ok &= check(series_facets.size() == 2, "elevation-series facet count");
+    if (series_facets.size() == 2) {
+        ok &= check(nearlyEqual(series_facets[0].radius_of_curvature, 16.0),
+                    "series explicit curvature is interpolated");
+        ok &= check(nearlyEqual(series_facets[1].radius_of_curvature, 17.0),
+                    "series zero curvature uses mirror default");
+        ok &= check(nearlyEqual(series_facets[0].reflectivity_scale, 0.85),
+                    "series reflectivity scale is interpolated");
+        ok &= check(nearlyEqual(series_facets[0].roughness_sigma_rad, 0.002),
+                    "series roughness is interpolated");
     }
 
     const std::string duplicate_path = "mirror_facets_duplicate.csv";
@@ -74,7 +149,6 @@ int main() {
         "0,1,0,0,0,0,1,Spherical,10,Circular,0.22\n"),
         "write duplicate CSV fixture");
 
-    std::vector<MirrorFacet> bad_facets;
     error.clear();
     ok &= check(!readMirrorFacetsCSV(duplicate_path, bad_facets, &error),
                 "duplicate ids are rejected");

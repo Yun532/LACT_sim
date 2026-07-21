@@ -284,7 +284,8 @@ void mergeComponentConfig(std::map<std::string, std::string>& dst,
     for (const auto& kv : component_cfg) {
         const std::string scoped = scopedComponentKey(kv.first, prefix);
         std::string value = kv.second;
-        if (scoped == "mirror.series_csv_path" || scoped == "mirror.series_csv_pattern") {
+        if (scoped == "mirror.series_csv_path" || scoped == "mirror.series_csv_pattern" ||
+            scoped == "efficiency.mirror_reflectivity_scale_csv") {
             value = resolveRelativePath(path, value);
         }
         if (scoped == "error.structural_deformation_config") {
@@ -938,6 +939,12 @@ struct SeriesFacetState {
     double size2 = 0.0;
     bool has_aperture_rotation = false;
     double aperture_rotation_rad = 0.0;
+    bool has_reflectivity_scale = false;
+    double reflectivity_scale = 1.0;
+    bool has_roughness_sigma_rad = false;
+    double roughness_sigma_rad = 0.0;
+    bool has_misalign_sigma_rad = false;
+    double misalign_sigma_rad = 0.0;
 };
 
 std::vector<Raw1229FacetState> readRaw1229FacetStates(const std::string& path, bool swap_xy) {
@@ -1243,8 +1250,15 @@ readElevationSeriesCsv(const std::string& path)
         }
         const std::string radius = getOptionalCell(cells, header, "radius_of_curvature");
         if (!radius.empty()) {
-            state.has_radius_of_curvature = true;
-            state.radius_of_curvature = std::stod(radius);
+            double value = 0.0;
+            if (!parseDoubleStrict(radius, value) || !std::isfinite(value) || value < 0.0) {
+                throw std::runtime_error(
+                    "radius_of_curvature must be finite and >= 0");
+            }
+            if (value > 0.0) {
+                state.has_radius_of_curvature = true;
+                state.radius_of_curvature = value;
+            }
         }
         const std::string aperture_shape = getOptionalCell(cells, header, "aperture_shape");
         if (!aperture_shape.empty()) {
@@ -1266,6 +1280,28 @@ readElevationSeriesCsv(const std::string& path)
             state.has_aperture_rotation = true;
             state.aperture_rotation_rad = std::stod(rotation);
         }
+
+        auto read_non_negative = [&](const std::string& key,
+                                     bool& has_value,
+                                     double& value) {
+            const std::string text = getOptionalCell(cells, header, key);
+            if (text.empty()) {
+                return;
+            }
+            if (!parseDoubleStrict(text, value) || !std::isfinite(value) || value < 0.0) {
+                throw std::runtime_error(key + " must be finite and >= 0");
+            }
+            has_value = true;
+        };
+        read_non_negative("reflectivity_scale",
+                          state.has_reflectivity_scale,
+                          state.reflectivity_scale);
+        read_non_negative("roughness_sigma_rad",
+                          state.has_roughness_sigma_rad,
+                          state.roughness_sigma_rad);
+        read_non_negative("misalign_sigma_rad",
+                          state.has_misalign_sigma_rad,
+                          state.misalign_sigma_rad);
 
         by_angle[elevation_deg].push_back(state);
     }
@@ -1431,13 +1467,41 @@ std::vector<MirrorFacet> buildElevationSeriesFacets(const std::map<std::string, 
         facet.center = lo.center * (1.0 - t) + hi.center * t;
         facet.normal = slerpUnitVectors(lo.normal, hi.normal, t);
         facet.surface_type = lo.has_surface_type ? lo.surface_type : surface_type;
-        facet.radius_of_curvature = lo.has_radius_of_curvature ? lo.radius_of_curvature : radius_of_curvature;
+        if (lo.has_radius_of_curvature != hi.has_radius_of_curvature) {
+            throw std::runtime_error(
+                "mirror series CSV has inconsistent radius_of_curvature for facet " +
+                std::to_string(lo.id));
+        }
+        facet.radius_of_curvature = lo.has_radius_of_curvature
+            ? lo.radius_of_curvature * (1.0 - t) + hi.radius_of_curvature * t
+            : radius_of_curvature;
         facet.aperture_shape = lo.has_aperture_shape ? lo.aperture_shape : aperture_shape;
         facet.size1 = lo.has_size1 ? lo.size1 : size1;
         facet.size2 = lo.has_size2 ? lo.size2 : size2;
         facet.aperture_rotation_rad =
             lo.has_aperture_rotation ? lo.aperture_rotation_rad : aperture_rotation_rad;
-        facet.reflectivity_scale = 1.0;
+        if (lo.has_reflectivity_scale != hi.has_reflectivity_scale ||
+            lo.has_roughness_sigma_rad != hi.has_roughness_sigma_rad ||
+            lo.has_misalign_sigma_rad != hi.has_misalign_sigma_rad) {
+            throw std::runtime_error(
+                "mirror series CSV has inconsistent optional per-facet fields for facet " +
+                std::to_string(lo.id));
+        }
+        if (lo.has_reflectivity_scale) {
+            facet.reflectivity_scale =
+                lo.reflectivity_scale * (1.0 - t) + hi.reflectivity_scale * t;
+            facet.has_reflectivity_scale = true;
+        }
+        if (lo.has_roughness_sigma_rad) {
+            facet.roughness_sigma_rad =
+                lo.roughness_sigma_rad * (1.0 - t) + hi.roughness_sigma_rad * t;
+            facet.has_roughness_sigma_rad = true;
+        }
+        if (lo.has_misalign_sigma_rad) {
+            facet.misalign_sigma_rad =
+                lo.misalign_sigma_rad * (1.0 - t) + hi.misalign_sigma_rad * t;
+            facet.has_misalign_sigma_rad = true;
+        }
         facets.push_back(facet);
     }
     return facets;
@@ -1499,8 +1563,19 @@ std::vector<MirrorFacet> buildFacetsFromConfig(const std::map<std::string, std::
         if (path.empty()) {
             throw std::runtime_error("mirror.csv_path is required when mirror.mode=csv");
         }
+        MirrorFacetCsvDefaults defaults;
+        defaults.surface_type =
+            parseSurfaceType(getString(cfg, "mirror.surface_type", "Spherical"));
+        defaults.radius_of_curvature =
+            getDouble(cfg, "mirror.radius_of_curvature", 16.0);
+        defaults.aperture_shape =
+            parseApertureShape(getString(cfg, "mirror.aperture_shape", "Circular"));
+        defaults.size1 = getDouble(cfg, "mirror.size1", 0.25);
+        defaults.size2 = getDouble(cfg, "mirror.size2", 0.0);
+        defaults.aperture_rotation_rad =
+            getDouble(cfg, "mirror.aperture_rotation_rad", 0.0);
         std::string error;
-        if (!readMirrorFacetsCSV(path, facets, &error)) {
+        if (!readMirrorFacetsCSV(path, facets, &error, &defaults)) {
             throw std::runtime_error("failed to read mirror CSV: " + error);
         }
     } else if (mode == "elevation_series" || mode == "series") {
@@ -2971,7 +3046,12 @@ void applyFacetErrors(std::vector<MirrorFacet>& facets, const ErrorConfig& error
     std::mt19937_64 rng(error.random_seed);
     std::normal_distribution<double> unit_normal(0.0, 1.0);
 
-    const double normal_sigma_rad = error.facet_normal_sigma_deg * DEG_TO_RAD;
+    // A positive per-facet column activates the whole column. In that mode zero
+    // is an explicit zero for that facet and the uniform sigma is not added.
+    // If the column is absent or all zeros, fall back to errors.cfg.
+    const double normal_sigma_rad = has_per_facet_misalignment
+        ? 0.0
+        : error.facet_normal_sigma_deg * DEG_TO_RAD;
 
     for (auto& facet : facets) {
         Vec3 ideal_normal = facet.normal.normalized();
@@ -2981,8 +3061,9 @@ void applyFacetErrors(std::vector<MirrorFacet>& facets, const ErrorConfig& error
             facet.center += ideal_normal * offset;
         }
 
-        const double facet_normal_sigma_rad =
-            std::hypot(normal_sigma_rad, facet.misalign_sigma_rad);
+        const double facet_normal_sigma_rad = has_per_facet_misalignment
+            ? facet.misalign_sigma_rad
+            : normal_sigma_rad;
         if (facet_normal_sigma_rad > 0.0) {
             facet.normal = perturbVectorOnSphere(
                 ideal_normal, facet_normal_sigma_rad, rng);
@@ -3000,6 +3081,106 @@ void applyFacetErrors(std::vector<MirrorFacet>& facets, const ErrorConfig& error
             facet.reflectivity_scale *= std::max(0.0, scale);
         }
     }
+}
+
+void applyFacetEfficiencyScales(std::vector<MirrorFacet>& facets,
+                                const std::map<std::string, std::string>& cfg)
+{
+    const double uniform_scale =
+        getDouble(cfg, "efficiency.mirror_reflectivity_scale", 1.0);
+    if (!std::isfinite(uniform_scale) || uniform_scale < 0.0) {
+        throw std::runtime_error(
+            "efficiency.mirror_reflectivity_scale must be finite and >= 0");
+    }
+
+    const std::string csv_path =
+        getString(cfg, "efficiency.mirror_reflectivity_scale_csv", "");
+    if (!isDisabledText(csv_path)) {
+        std::ifstream ifs(csv_path);
+        if (!ifs) {
+            throw std::runtime_error(
+                "failed to open per-facet reflectivity scale CSV: " + csv_path);
+        }
+
+        std::string line;
+        if (!std::getline(ifs, line)) {
+            throw std::runtime_error(
+                "per-facet reflectivity scale CSV is empty: " + csv_path);
+        }
+        const auto header_cells = splitCsvCells(line);
+        std::map<std::string, int> header;
+        for (int i = 0; i < static_cast<int>(header_cells.size()); ++i) {
+            header[lowerCopy(header_cells[i])] = i;
+        }
+        if (headerIndex(header, "id") < 0 ||
+            headerIndex(header, "reflectivity_scale") < 0) {
+            throw std::runtime_error(
+                "per-facet reflectivity scale CSV requires id,reflectivity_scale");
+        }
+
+        std::map<int, double> scales;
+        int line_no = 1;
+        while (std::getline(ifs, line)) {
+            ++line_no;
+            if (trim(line).empty()) {
+                continue;
+            }
+            const auto cells = splitCsvCells(line);
+            const int id = std::stoi(getRequiredCell(cells, header, "id"));
+            double scale = 0.0;
+            const std::string text =
+                getRequiredCell(cells, header, "reflectivity_scale");
+            if (!parseDoubleStrict(text, scale) || !std::isfinite(scale) || scale < 0.0) {
+                throw std::runtime_error(
+                    "per-facet reflectivity scale CSV line " +
+                    std::to_string(line_no) +
+                    " has invalid reflectivity_scale");
+            }
+            if (!scales.emplace(id, scale).second) {
+                throw std::runtime_error(
+                    "per-facet reflectivity scale CSV has duplicate id " +
+                    std::to_string(id));
+            }
+        }
+
+        for (auto& facet : facets) {
+            const auto it = scales.find(facet.id);
+            if (it == scales.end()) {
+                throw std::runtime_error(
+                    "per-facet reflectivity scale CSV is missing facet id " +
+                    std::to_string(facet.id));
+            }
+            facet.reflectivity_scale = it->second;
+            facet.has_reflectivity_scale = true;
+            scales.erase(it);
+        }
+        if (!scales.empty()) {
+            throw std::runtime_error(
+                "per-facet reflectivity scale CSV contains unknown facet id " +
+                std::to_string(scales.begin()->first));
+        }
+        return;
+    }
+
+    // Legacy mirror CSV values remain valid. Missing/blank values use the
+    // uniform efficiency value, whose program default is one.
+    for (auto& facet : facets) {
+        if (!facet.has_reflectivity_scale) {
+            facet.reflectivity_scale = uniform_scale;
+        }
+    }
+}
+
+double effectiveReflectDirectionSigmaRad(const std::vector<MirrorFacet>& facets,
+                                         const ErrorConfig& error)
+{
+    const bool has_positive_per_facet_roughness =
+        std::any_of(facets.begin(), facets.end(), [](const MirrorFacet& facet) {
+            return facet.roughness_sigma_rad > 0.0;
+        });
+    return has_positive_per_facet_roughness
+        ? 0.0
+        : error.reflect_direction_sigma_deg * DEG_TO_RAD;
 }
 
 OpticalEfficiencyConfig buildEfficiencyConfig(const std::map<std::string, std::string>& cfg) {
