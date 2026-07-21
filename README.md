@@ -100,6 +100,24 @@ build/run_optical_sim configs/official_tests/perfect_point_900m_whiteboard.cfg
 
 结构遮挡、仰角形变和三维结构图见[人工光源官方测试](docs/user_guide_zh.md#人工光源官方测试)。
 
+### 理想、支架形变与实测标定光学
+
+原有基准均保留且互不覆盖：
+
+- `configs/official_tests/perfect_parallel_whiteboard.cfg`：理想镜片、无误差；
+- `configs/official_tests/deformation_parallel_whiteboard.cfg`：理想镜片，只加入原始随仰角支架形变；
+- `configs/examples/lact2_measured_parallel.cfg`：20260622 实测标定光学白板入口；
+- `configs/examples/lactroot_only.cfg`：实测标定光学生产默认入口，仅输出 pyLAST 所需 ROOT。
+
+实测入口直接读取
+`configs/calibrated/lact2_measured_20260622/mirror_elevation_series_20260622.csv`。该表在每个仰角、
+每片镜子的同一行中保存支架形变、固定指向偏差和实测曲率半径。
+全镜面统一粗糙度由配套的 `errors.cfg` 施加。
+全局随波长实测反射率由
+`configs/efficiency/mirror_reflectivity_dm0113_13point_mean.csv` 提供。完整字段和避免重复
+施加误差的约定见
+[`configs/calibrated/lact2_measured_20260622/README.md`](configs/calibrated/lact2_measured_20260622/README.md)。
+
 ## Photon CSV
 
 运行仓库示例：
@@ -234,12 +252,14 @@ pylast 读取、ROOT tree 说明和 notebook 流程见
 | 理想平行光 | `configs/official_tests/perfect_parallel_whiteboard.cfg` |
 | 900 m 点源 | `configs/official_tests/perfect_point_900m_whiteboard.cfg` |
 | 平行光加结构遮挡 | `configs/official_tests/perfect_parallel_raytrace_structure_whiteboard.cfg` |
+| 平行光仅支架形变 | `configs/official_tests/deformation_parallel_whiteboard.cfg` |
+| LACT2 实测光学平行光 | `configs/examples/lact2_measured_parallel.cfg` |
 | Photon CSV | `configs/examples/photon_csv_local_whiteboard.cfg` |
 | CORSIKA 白板 | `configs/official_tests/corsika_whiteboard.cfg` |
 | CORSIKA 理想相机 | `configs/official_tests/corsika_new_camera.cfg` |
 | CORSIKA + NSB + trigger | `configs/official_tests/corsika_nsb_trigger_camera.cfg` |
 | CORSIKA 完整响应 | `configs/official_tests/corsika_full_response_camera.cfg` |
-| pylast ROOT-only | `configs/examples/lactroot_only.cfg` |
+| LACT2 实测光学 ROOT-only | `configs/examples/lactroot_only.cfg` |
 
 ## 文档
 
