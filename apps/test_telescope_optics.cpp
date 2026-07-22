@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <stdexcept>
 #include <string>
 
 using namespace lact;
@@ -162,6 +163,79 @@ int main()
     zero_roughness[0].roughness_sigma_rad = 0.002;
     if (effectiveReflectDirectionSigmaRad(zero_roughness, scatter_error) != 0.0) {
         std::cerr << "global reflection sigma was added to active per-facet roughness\n";
+        return 1;
+    }
+
+    auto active_roughness = makeFacet();
+    active_roughness.has_roughness_sigma_rad = true;
+    auto explicit_zero_roughness = makeFacet();
+    explicit_zero_roughness.id = 2;
+    explicit_zero_roughness.roughness_sigma_rad = 0.0;
+    explicit_zero_roughness.has_roughness_sigma_rad = true;
+    std::vector<MirrorFacet> mixed_roughness{
+        active_roughness, explicit_zero_roughness};
+    if (effectiveReflectDirectionSigmaRad(mixed_roughness, scatter_error) != 0.0) {
+        std::cerr << "explicit zero roughness did not remain in per-facet mode\n";
+        return 1;
+    }
+
+    auto absent_sigma_a = makeFacet();
+    absent_sigma_a.roughness_sigma_rad = 0.0;
+    absent_sigma_a.misalign_sigma_rad = 0.0;
+    auto absent_sigma_b = absent_sigma_a;
+    absent_sigma_b.id = 2;
+    std::vector<MirrorFacet> absent_sigma{absent_sigma_a, absent_sigma_b};
+    if (effectiveReflectDirectionSigmaRad(absent_sigma, scatter_error) <= 0.0) {
+        std::cerr << "missing roughness column did not use global fallback\n";
+        return 1;
+    }
+    const Vec3 absent_before = absent_sigma[1].normal;
+    ErrorConfig absent_normal_error;
+    absent_normal_error.random_seed = 46;
+    absent_normal_error.facet_normal_sigma_deg = 0.1;
+    applyFacetErrors(absent_sigma, absent_normal_error);
+    if (absent_sigma[1].normal.x == absent_before.x &&
+        absent_sigma[1].normal.y == absent_before.y &&
+        absent_sigma[1].normal.z == absent_before.z) {
+        std::cerr << "missing misalignment column did not use global fallback\n";
+        return 1;
+    }
+
+    auto partial_active = makeFacet();
+    partial_active.has_roughness_sigma_rad = true;
+    partial_active.has_misalign_sigma_rad = true;
+    auto partial_missing = makeFacet();
+    partial_missing.id = 2;
+    partial_missing.roughness_sigma_rad = 0.0;
+    partial_missing.misalign_sigma_rad = 0.0;
+    partial_missing.has_roughness_sigma_rad = false;
+    partial_missing.has_misalign_sigma_rad = false;
+    std::vector<MirrorFacet> partial_sigma{partial_active, partial_missing};
+
+    bool rejected_partial_roughness = false;
+    try {
+        (void)effectiveReflectDirectionSigmaRad(partial_sigma, scatter_error);
+    } catch (const std::runtime_error& ex) {
+        rejected_partial_roughness =
+            std::string(ex.what()).find("missing facet 2") != std::string::npos;
+    }
+    if (!rejected_partial_roughness) {
+        std::cerr << "partial roughness column was not rejected\n";
+        return 1;
+    }
+
+    bool rejected_partial_misalignment = false;
+    try {
+        ErrorConfig partial_error;
+        partial_error.random_seed = 47;
+        partial_error.facet_normal_sigma_deg = 0.1;
+        applyFacetErrors(partial_sigma, partial_error);
+    } catch (const std::runtime_error& ex) {
+        rejected_partial_misalignment =
+            std::string(ex.what()).find("missing facet 2") != std::string::npos;
+    }
+    if (!rejected_partial_misalignment) {
+        std::cerr << "partial misalignment column was not rejected\n";
         return 1;
     }
 

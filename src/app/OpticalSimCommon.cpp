@@ -3030,11 +3030,53 @@ void applyStructuralDeformation(std::vector<MirrorFacet>& facets,
     }
 }
 
+namespace {
+
+bool perFacetSigmaColumnEnabled(
+    const std::vector<MirrorFacet>& facets,
+    double MirrorFacet::* value_member,
+    bool MirrorFacet::* presence_member,
+    const std::string& column_name)
+{
+    bool any_positive = false;
+    for (const auto& facet : facets) {
+        const double value = facet.*value_member;
+        if (!std::isfinite(value) || value < 0.0) {
+            throw std::runtime_error(
+                column_name + " must be finite and >= 0 for facet " +
+                std::to_string(facet.id));
+        }
+        any_positive = any_positive || value > 0.0;
+    }
+    if (!any_positive) {
+        return false;
+    }
+
+    for (const auto& facet : facets) {
+        const double value = facet.*value_member;
+        const bool explicitly_present = facet.*presence_member;
+        // Positive programmatically constructed values predate the presence
+        // flags and remain explicit for backward compatibility. A zero must
+        // carry the flag so that it can be distinguished from a missing cell.
+        if (!explicitly_present && value == 0.0) {
+            throw std::runtime_error(
+                "per-facet " + column_name +
+                " is active but missing facet " + std::to_string(facet.id) +
+                "; provide an explicit 0 or a non-zero value for every facet");
+        }
+    }
+    return true;
+}
+
+} // namespace
+
 void applyFacetErrors(std::vector<MirrorFacet>& facets, const ErrorConfig& error) {
     const bool has_per_facet_misalignment =
-        std::any_of(facets.begin(), facets.end(), [](const MirrorFacet& facet) {
-            return facet.misalign_sigma_rad > 0.0;
-        });
+        perFacetSigmaColumnEnabled(
+            facets,
+            &MirrorFacet::misalign_sigma_rad,
+            &MirrorFacet::has_misalign_sigma_rad,
+            "misalign_sigma_rad");
     if (error.facet_radial_position_sigma_m == 0.0 &&
         error.facet_normal_sigma_deg == 0.0 &&
         error.radius_of_curvature_sigma_m == 0.0 &&
@@ -3175,9 +3217,11 @@ double effectiveReflectDirectionSigmaRad(const std::vector<MirrorFacet>& facets,
                                          const ErrorConfig& error)
 {
     const bool has_positive_per_facet_roughness =
-        std::any_of(facets.begin(), facets.end(), [](const MirrorFacet& facet) {
-            return facet.roughness_sigma_rad > 0.0;
-        });
+        perFacetSigmaColumnEnabled(
+            facets,
+            &MirrorFacet::roughness_sigma_rad,
+            &MirrorFacet::has_roughness_sigma_rad,
+            "roughness_sigma_rad");
     return has_positive_per_facet_roughness
         ? 0.0
         : error.reflect_direction_sigma_deg * DEG_TO_RAD;
