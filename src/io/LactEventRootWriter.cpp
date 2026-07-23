@@ -1,6 +1,7 @@
 #include "io/LactEventRootWriter.hpp"
 
 #include "app/TriggerResponse.hpp"
+#include "io/EventIOArrayTiming.hpp"
 
 #include <TFile.h>
 #include <TTree.h>
@@ -192,6 +193,8 @@ struct LactRootObservation {
     double impact_parameter_m = std::numeric_limits<double>::quiet_NaN();
     int n_pixels_above_threshold = 0;
     double trigger_time_ns = std::numeric_limits<double>::quiet_NaN();
+    double geometric_delay_ns = std::numeric_limits<double>::quiet_NaN();
+    double coincidence_time_ns = std::numeric_limits<double>::quiet_NaN();
 };
 
 struct LactRootWaveform {
@@ -217,6 +220,9 @@ LactRootPreparedData prepareLactRootObservations(
     const WaveformOutputConfig& waveform_cfg,
     const NsbConfig& nsb_cfg,
     const TriggerConfig& trigger_cfg,
+    const SourceRuntimeConfig& source_runtime_cfg,
+    const TelescopeConfig& telescope_cfg,
+    const EventIOMetadata& metadata,
     const CameraGeometry& camera,
     const std::map<SummaryKey, TraceSummary>& summaries,
     const std::map<PixelKey, PixelAccumulator>& pixels,
@@ -555,12 +561,31 @@ LactRootPreparedData prepareLactRootObservations(
     }
 
     std::map<int, ArrayTriggerDecision> array_trigger_decisions;
-    for (const auto& item : telescope_trigger_times_by_event) {
+    std::map<SummaryKey, TelescopeTriggerTime> array_trigger_times;
+    for (auto& item : telescope_trigger_times_by_event) {
+        applyEventIOArrayTimingCorrection(
+            item.second, item.first, source_runtime_cfg.event_id_mode, trigger_cfg,
+            telescope_cfg, metadata);
+        for (const auto& trigger_time : item.second) {
+            array_trigger_times[{item.first, trigger_time.telescope_id}] =
+                trigger_time;
+        }
         array_trigger_decisions[item.first] =
             evaluateArrayTrigger(item.second, trigger_cfg);
     }
 
     for (auto& candidate : candidates) {
+        const auto corrected_time = array_trigger_times.find({
+            static_cast<int>(candidate.observation.event_id),
+            candidate.observation.telescope_id});
+        if (corrected_time != array_trigger_times.end()) {
+            candidate.observation.geometric_delay_ns =
+                corrected_time->second.geometric_delay_ns;
+            candidate.observation.coincidence_time_ns =
+                std::isfinite(corrected_time->second.coincidence_time_ns)
+                    ? corrected_time->second.coincidence_time_ns
+                    : corrected_time->second.trigger_time_ns;
+        }
         if (output_cfg.save_only_triggered && trigger_cfg.enabled) {
             const auto& array_decision =
                 array_trigger_decisions[candidate.observation.event_id];
@@ -639,6 +664,7 @@ struct LactEventRootStreamWriter::Impl {
     double time_rms_ns = 0.0, time_peak_ns = 0.0, impact_parameter_m = 0.0;
     int n_pixels_above_threshold = 0;
     double trigger_time_ns = 0.0;
+    double geometric_delay_ns = 0.0, coincidence_time_ns = 0.0;
 
     bool waveform_enabled = true;
     std::string waveform_source;
@@ -860,6 +886,8 @@ struct LactEventRootStreamWriter::Impl {
       observation_tree->Branch("n_pixels_above_threshold",
                                &n_pixels_above_threshold);
       observation_tree->Branch("trigger_time_ns", &trigger_time_ns);
+      observation_tree->Branch("geometric_delay_ns", &geometric_delay_ns);
+      observation_tree->Branch("coincidence_time_ns", &coincidence_time_ns);
       configureRootTreeAutoFlush(observation_tree.get(),
                                  output_cfg.lact_root_auto_flush_mb);
 
@@ -984,6 +1012,8 @@ struct LactEventRootStreamWriter::Impl {
         impact_parameter_m = obs.impact_parameter_m;
         n_pixels_above_threshold = obs.n_pixels_above_threshold;
         trigger_time_ns = obs.trigger_time_ns;
+        geometric_delay_ns = obs.geometric_delay_ns;
+        coincidence_time_ns = obs.coincidence_time_ns;
         observation_tree->Fill();
     }
 
@@ -1078,7 +1108,8 @@ struct LactEventRootStreamWriter::Impl {
                     const std::vector<RawWaveformHit>& raw_waveform_hits)
     {
         LactRootPreparedData prepared = prepareLactRootObservations(
-            output_cfg, waveform_cfg, nsb_cfg, trigger_cfg, camera,
+            output_cfg, waveform_cfg, nsb_cfg, trigger_cfg,
+            source_runtime_cfg, telescope_cfg, metadata, camera,
             summaries, pixels, waveforms, raw_waveform_hits);
         writeWaveformConfig(prepared);
         for (const auto& obs : prepared.observations) {

@@ -58,8 +58,9 @@ waveforms / raw_waveform_hits
 1. 根据 `waveform.time_reference` 将 Cherenkov p.e. 放入时间 bin。
 2. 对配置的全部像素和全部时间 bin 生成同一份确定性 NSB realization。
 3. 将 Cherenkov 与 NSB 合并为最终 p.e. 时间序列和积分图像。
-4. 使用 `trigger.camera_coincidence_window_ns` 做滑动相机触发。
-5. 使用望远镜触发时间和 `trigger.array_coincidence_window_ns` 做阵列符合。
+4. 使用 `trigger.camera_coincidence_window_ns` 做滑动相机触发，当前默认窗口为 20 ns。
+5. 阵列默认设置 `trigger.array_coincidence_window_ns=0`，只检查局部触发望远镜数；
+   在尚未实现几何传播延迟校正前，不应使用正数窗口筛选生产数据。正数窗口仅用于原始时间诊断。
 6. 最后应用 `output.save_only_triggered`。
 7. 仅在 profile 要求时把稀疏 waveform 写入 ROOT。
 

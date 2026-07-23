@@ -65,7 +65,9 @@ add_library(simlite_core
     src/io/PhotonCsvSource.cpp
     src/io/MirrorFacetCsvReader.cpp
     src/io/EventIOPhotonSemantics.cpp
+    src/io/EventIOArrayTiming.cpp
     src/app/OpticalSimCommon.cpp
+    src/app/ArrayTimingCorrection.cpp
     src/app/PhotonResponseSampler.cpp
     src/app/TelescopeOpticsCache.cpp
     src/app/TriggerResponse.cpp
@@ -206,6 +208,12 @@ add_executable(test_trigger_response
 )
 target_link_libraries(test_trigger_response PRIVATE simlite_core)
 add_test(NAME test_trigger_response COMMAND test_trigger_response)
+
+add_executable(test_array_timing_correction
+    apps/test_array_timing_correction.cpp
+)
+target_link_libraries(test_array_timing_correction PRIVATE simlite_core)
+add_test(NAME test_array_timing_correction COMMAND test_array_timing_correction)
 
 add_executable(test_efficiency_curves
     apps/test_efficiency_curves.cpp

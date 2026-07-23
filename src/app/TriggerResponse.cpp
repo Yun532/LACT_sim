@@ -5,6 +5,16 @@
 #include <stdexcept>
 
 namespace lact {
+namespace {
+
+double coincidenceTime(const TelescopeTriggerTime& item)
+{
+    return std::isfinite(item.coincidence_time_ns)
+        ? item.coincidence_time_ns
+        : item.trigger_time_ns;
+}
+
+} // namespace
 
 BinnedPeTriggerDecision evaluateBinnedPeTrigger(
     std::size_t n_pixels,
@@ -79,7 +89,7 @@ ArrayTriggerDecision evaluateArrayTrigger(
     telescope_triggers.erase(
         std::remove_if(telescope_triggers.begin(), telescope_triggers.end(),
                        [](const TelescopeTriggerTime& item) {
-                           return !std::isfinite(item.trigger_time_ns);
+                           return !std::isfinite(coincidenceTime(item));
                        }),
         telescope_triggers.end());
     if (telescope_triggers.empty()) {
@@ -88,8 +98,10 @@ ArrayTriggerDecision evaluateArrayTrigger(
 
     std::sort(telescope_triggers.begin(), telescope_triggers.end(),
               [](const TelescopeTriggerTime& a, const TelescopeTriggerTime& b) {
-                  if (a.trigger_time_ns != b.trigger_time_ns) {
-                      return a.trigger_time_ns < b.trigger_time_ns;
+                  const double a_time = coincidenceTime(a);
+                  const double b_time = coincidenceTime(b);
+                  if (a_time != b_time) {
+                      return a_time < b_time;
                   }
                   return a.telescope_id < b.telescope_id;
               });
@@ -102,8 +114,8 @@ ArrayTriggerDecision evaluateArrayTrigger(
         std::size_t begin = 0;
         for (std::size_t end = 0; end < telescope_triggers.size(); ++end) {
             while (begin < end &&
-                   telescope_triggers[end].trigger_time_ns -
-                           telescope_triggers[begin].trigger_time_ns >
+                   coincidenceTime(telescope_triggers[end]) -
+                           coincidenceTime(telescope_triggers[begin]) >
                        trigger.array_coincidence_window_ns) {
                 ++begin;
             }
@@ -119,6 +131,10 @@ ArrayTriggerDecision evaluateArrayTrigger(
     if (!out.triggered) {
         return out;
     }
+    out.coincidence_start_time_ns =
+        coincidenceTime(telescope_triggers[best_begin]);
+    out.coincidence_end_time_ns =
+        coincidenceTime(telescope_triggers[best_end]);
     out.coincident_telescope_ids.reserve(count);
     for (std::size_t i = best_begin; i <= best_end; ++i) {
         out.coincident_telescope_ids.push_back(telescope_triggers[i].telescope_id);

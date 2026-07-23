@@ -52,6 +52,17 @@ int main()
     ok &= check(array.coincident_telescope_ids == std::vector<int>({1, 2}),
                 "array coincidence selected the wrong telescopes");
 
+    const auto corrected_array = evaluateArrayTrigger(
+        {{1, 100.0, 100.0}, {2, 250.0, 104.0}, {3, 130.0, 130.0}},
+        trigger);
+    ok &= check(corrected_array.triggered &&
+                    corrected_array.coincident_telescope_ids ==
+                        std::vector<int>({1, 2}),
+                "array trigger did not use corrected coincidence times");
+    ok &= check(std::abs(corrected_array.coincidence_start_time_ns - 100.0) < 1e-12 &&
+                    std::abs(corrected_array.coincidence_end_time_ns - 104.0) < 1e-12,
+                "array trigger did not report the corrected coincidence interval");
+
     trigger.array_multiplicity = 3;
     const auto separated = evaluateArrayTrigger(
         {{1, 100.0}, {2, 107.0}, {3, 130.0}}, trigger);

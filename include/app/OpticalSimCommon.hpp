@@ -171,9 +171,16 @@ struct TriggerConfig {
     double pixel_threshold_pe = 5.0;
     int camera_multiplicity = 3;
     int array_multiplicity = 2;
-    double coincidence_window_ns = 50.0;
-    double camera_coincidence_window_ns = 50.0;
-    double array_coincidence_window_ns = 50.0;
+    double coincidence_window_ns = 20.0;
+    double camera_coincidence_window_ns = 20.0;
+    double array_coincidence_window_ns = 0.0;
+    // none: compare raw local camera-trigger times.
+    // plane_wave: add the CORSIKA-NWU planar wavefront delay before the
+    // array coincidence test.
+    std::string array_time_correction = "none";
+    // Zero selects the sim_telarray-compatible air speed derived from the
+    // EventIO observation altitude. A positive value is an explicit override.
+    double array_wavefront_speed_m_per_ns = 0.0;
 };
 
 class ElectronicsResponse {

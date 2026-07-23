@@ -214,12 +214,19 @@ trigger.enabled=false
 trigger.pixel_threshold_pe=5
 trigger.camera_multiplicity=3
 trigger.array_multiplicity=2
-trigger.coincidence_window_ns=50
+trigger.camera_coincidence_window_ns=20
+trigger.array_coincidence_window_ns=0
+trigger.array_time_correction=none
+trigger.array_wavefront_speed_m_per_ns=0
 ```
 
-Camera trigger counts pixels above threshold in one telescope image. Array
-trigger counts triggered telescopes for the same `event_id`. Neighbor topology,
-waveform thresholding, and hardware-specific trigger logic are reserved for the
+Camera trigger counts pixels above threshold in a sliding p.e. time window.
+Array trigger counts triggered telescopes for the same `event_id`. For EventIO
+inputs, set `trigger.array_time_correction=plane_wave` together with a positive
+array window to remove the expected planar wavefront delay from the local
+camera-trigger times. The correction uses CORSIKA North-West-Up telescope
+positions and the per-shower altitude/azimuth. Missing geometry is rejected.
+Neighbor topology and hardware-specific trigger logic are reserved for the
 future electronics implementation.
 
 If HDF5 output sets:

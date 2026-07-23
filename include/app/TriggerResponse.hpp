@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <limits>
 #include <vector>
 
 #include "app/OpticalSimCommon.hpp"
@@ -17,12 +18,22 @@ struct BinnedPeTriggerDecision {
 
 struct TelescopeTriggerTime {
     int telescope_id = -1;
+    // Raw local camera-trigger time. Kept for output/debug compatibility.
     double trigger_time_ns = 0.0;
+    // Time used by the array coincidence test. NaN falls back to the raw
+    // trigger time, preserving the previous interface for callers that do
+    // not request geometric correction.
+    double coincidence_time_ns = std::numeric_limits<double>::quiet_NaN();
+    double geometric_delay_ns = 0.0;
 };
 
 struct ArrayTriggerDecision {
     bool triggered = false;
     std::vector<int> coincident_telescope_ids;
+    double coincidence_start_time_ns =
+        std::numeric_limits<double>::quiet_NaN();
+    double coincidence_end_time_ns =
+        std::numeric_limits<double>::quiet_NaN();
 };
 
 BinnedPeTriggerDecision evaluateBinnedPeTrigger(

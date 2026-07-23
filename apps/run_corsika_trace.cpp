@@ -1,5 +1,6 @@
 #include "app/OpticalSimCommon.hpp"
 #include "app/PhotonResponseSampler.hpp"
+#include "io/EventIOArrayTiming.hpp"
 #include "app/TelescopeOpticsCache.hpp"
 #include "app/TriggerResponse.hpp"
 #include "io/CorsikaTraceOutputTypes.hpp"
@@ -1342,6 +1343,15 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                              doubleToString(trigger_cfg.camera_coincidence_window_ns));
         writeStringAttribute(trigger_group_meta, "array_coincidence_window_ns",
                              doubleToString(trigger_cfg.array_coincidence_window_ns));
+        writeStringAttribute(trigger_group_meta, "array_time_correction",
+                             trigger_cfg.array_time_correction);
+        writeStringAttribute(trigger_group_meta, "array_wavefront_speed_m_per_ns",
+                             doubleToString(
+                                 trigger_cfg.array_time_correction == "plane_wave"
+                                     ? resolveEventIOArrayWavefrontSpeedMPerNs(
+                                           trigger_cfg, metadata)
+                                     : trigger_cfg.array_wavefront_speed_m_per_ns,
+                                 15));
         H5Gclose(trigger_group_meta);
         H5Gclose(metadata_group);
 
@@ -1729,6 +1739,8 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             std::int32_t n_pixels_above_threshold;
             double total_pe;
             float trigger_time_ns;
+            float geometric_delay_ns = std::numeric_limits<float>::quiet_NaN();
+            float coincidence_time_ns = std::numeric_limits<float>::quiet_NaN();
         };
         struct ArrayTriggerRow {
             std::int64_t event_id;
@@ -1736,6 +1748,7 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             std::int32_t n_triggered_telescopes;
         };
         std::vector<TelescopeTriggerRow> telescope_trigger_rows;
+        std::map<SummaryKey, std::size_t> telescope_trigger_row_index;
         std::map<int, std::vector<TelescopeTriggerTime>>
             telescope_trigger_times_by_event;
         telescope_trigger_rows.reserve(image_rows.size());
@@ -1862,6 +1875,10 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                         static_cast<int>(image.telescope_id),
                         camera_trigger.trigger_time_ns});
             }
+            telescope_trigger_row_index[{
+                static_cast<int>(image.event_id),
+                static_cast<int>(image.telescope_id)}] =
+                telescope_trigger_rows.size();
             telescope_trigger_rows.push_back(TelescopeTriggerRow{
                 image.event_id,
                 image.telescope_id,
@@ -1880,6 +1897,26 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         std::map<int, ArrayTriggerDecision> array_trigger_decisions;
         array_trigger_rows.reserve(trigger_event_ids.size());
         for (const int event_id : trigger_event_ids) {
+            applyEventIOArrayTimingCorrection(
+                telescope_trigger_times_by_event[event_id], event_id,
+                source_runtime_cfg.event_id_mode, trigger_cfg,
+                telescope_cfg, metadata);
+            for (const auto& trigger_time :
+                 telescope_trigger_times_by_event[event_id]) {
+                const auto row_index = telescope_trigger_row_index.find({
+                    event_id, trigger_time.telescope_id});
+                if (row_index == telescope_trigger_row_index.end()) {
+                    throw std::runtime_error(
+                        "array timing result has no HDF5 telescope trigger row");
+                }
+                auto& row = telescope_trigger_rows[row_index->second];
+                row.geometric_delay_ns = static_cast<float>(
+                    trigger_time.geometric_delay_ns);
+                row.coincidence_time_ns = static_cast<float>(
+                    std::isfinite(trigger_time.coincidence_time_ns)
+                        ? trigger_time.coincidence_time_ns
+                        : trigger_time.trigger_time_ns);
+            }
             const auto decision = evaluateArrayTrigger(
                 telescope_trigger_times_by_event[event_id], trigger_cfg);
             array_trigger_decisions[event_id] = decision;
@@ -2366,6 +2403,12 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                   HOFFSET(TelescopeTriggerRow, total_pe), H5T_NATIVE_DOUBLE);
         H5Tinsert(telescope_trigger_type, "trigger_time_ns",
                   HOFFSET(TelescopeTriggerRow, trigger_time_ns), H5T_NATIVE_FLOAT);
+        H5Tinsert(telescope_trigger_type, "geometric_delay_ns",
+                  HOFFSET(TelescopeTriggerRow, geometric_delay_ns),
+                  H5T_NATIVE_FLOAT);
+        H5Tinsert(telescope_trigger_type, "coincidence_time_ns",
+                  HOFFSET(TelescopeTriggerRow, coincidence_time_ns),
+                  H5T_NATIVE_FLOAT);
         writeCompound1D(trigger_group, "telescope", telescope_trigger_type,
                         telescope_trigger_rows);
         H5Tclose(telescope_trigger_type);
@@ -2937,6 +2980,12 @@ void printCorsikaOpticalConfiguration(
                doubleToString(trigger_cfg.camera_coincidence_window_ns));
     printField("array_coincidence_window_ns",
                doubleToString(trigger_cfg.array_coincidence_window_ns));
+    printField("array_time_correction", trigger_cfg.array_time_correction);
+    printField("array_wavefront_speed_m/ns",
+               trigger_cfg.array_wavefront_speed_m_per_ns > 0.0
+                   ? doubleToString(
+                         trigger_cfg.array_wavefront_speed_m_per_ns, 9)
+                   : "auto (EventIO observation altitude)");
 
     printSection("Photon response");
     printField("mode", response_cfg.modeName());
@@ -3108,8 +3157,8 @@ void printPureNsbTriggerEstimate(const NsbConfig& nsb_cfg,
     }
 
     const double configured_window_ns =
-        trigger_cfg.coincidence_window_ns > 0.0
-            ? trigger_cfg.coincidence_window_ns
+        trigger_cfg.camera_coincidence_window_ns > 0.0
+            ? trigger_cfg.camera_coincidence_window_ns
             : std::max(0.0,
                        waveform_cfg.time_window_end_ns -
                            waveform_cfg.time_window_start_ns);
