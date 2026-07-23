@@ -114,6 +114,34 @@ Required columns:
 x_m,y_m,z_m,dir_x,dir_y,dir_z
 ```
 
+The bundled event-1909, telescope-19 example uses only these six columns:
+
+```bash
+# Pure optics: whiteboard hits plus per-pixel photon counts; two diagnostic plots
+build/run_optical_sim configs/examples/photon_csv_minimal_optics.cfg
+python3 python/plot_minimal_photon_csv_outputs.py \
+  --mode optics \
+  --hits run_logs/examples/photon_csv_minimal/whiteboard_hits.csv \
+  --photon-pixels run_logs/examples/photon_csv_minimal/camera_photon_counts.csv \
+  --camera configs/cameras/new_camera_pixels.csv \
+  --output-dir run_logs/examples/photon_csv_minimal/plots
+
+# Full camera efficiency without waveforms: one expected-p.e. camera plot
+build/run_optical_sim configs/examples/photon_csv_minimal_pe_camera.cfg
+python3 python/plot_minimal_photon_csv_outputs.py \
+  --mode camera \
+  --pe-pixels run_logs/examples/photon_csv_minimal/camera_expected_pe.csv \
+  --camera configs/cameras/new_camera_pixels.csv \
+  --output-dir run_logs/examples/photon_csv_minimal/plots
+```
+
+The two optical diagnostics retain the LACT_sim focal-plane orientation. Only
+the full camera plot uses the pyLAST sky view (`pix_x=-x_m`,
+`pix_y=-y_m`). Wavelength and time may be omitted: the pure-optics example
+disables wavelength-dependent efficiency, while the full-camera cfg supplies a
+single `400 nm` wavelength and does not generate waveforms. See the
+[minimal Photon CSV example](docs/minimal_photon_csv.md) for details.
+
 To save the photon position and direction actually passed into ray tracing:
 
 ```ini

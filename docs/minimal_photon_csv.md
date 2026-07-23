@@ -65,7 +65,21 @@ Run them from the `LACT_sim` directory:
 ```bash
 ./build/run_optical_sim configs/examples/photon_csv_minimal_optics.cfg
 ./build/run_optical_sim configs/examples/photon_csv_minimal_pe_camera.cfg
-python python/plot_minimal_photon_csv_outputs.py
+
+# Pure optics: whiteboard plus raw photon-count camera, no display reversal.
+python python/plot_minimal_photon_csv_outputs.py \
+  --mode optics \
+  --hits run_logs/examples/photon_csv_minimal/whiteboard_hits.csv \
+  --photon-pixels run_logs/examples/photon_csv_minimal/camera_photon_counts.csv \
+  --camera configs/cameras/new_camera_pixels.csv \
+  --output-dir run_logs/examples/photon_csv_minimal/plots
+
+# Full camera: one expected-PE image in the pyLAST sky-view convention.
+python python/plot_minimal_photon_csv_outputs.py \
+  --mode camera \
+  --pe-pixels run_logs/examples/photon_csv_minimal/camera_expected_pe.csv \
+  --camera configs/cameras/new_camera_pixels.csv \
+  --output-dir run_logs/examples/photon_csv_minimal/plots
 ```
 
 ## Making a minimal CSV from CORSIKA photons

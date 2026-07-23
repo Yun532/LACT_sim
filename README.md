@@ -144,6 +144,32 @@ CSV 最少包含：
 x_m,y_m,z_m,dir_x,dir_y,dir_z
 ```
 
+仓库中的 event 1909、19 号望远镜示例也只使用这六列：
+
+```bash
+# 纯光学：输出白板命中和逐像素光子数，可画两张焦平面诊断图
+build/run_optical_sim configs/examples/photon_csv_minimal_optics.cfg
+python3 python/plot_minimal_photon_csv_outputs.py \
+  --mode optics \
+  --hits run_logs/examples/photon_csv_minimal/whiteboard_hits.csv \
+  --photon-pixels run_logs/examples/photon_csv_minimal/camera_photon_counts.csv \
+  --camera configs/cameras/new_camera_pixels.csv \
+  --output-dir run_logs/examples/photon_csv_minimal/plots
+
+# 完整相机效率但不生成波形：只画一张期望 p.e. 相机图
+build/run_optical_sim configs/examples/photon_csv_minimal_pe_camera.cfg
+python3 python/plot_minimal_photon_csv_outputs.py \
+  --mode camera \
+  --pe-pixels run_logs/examples/photon_csv_minimal/camera_expected_pe.csv \
+  --camera configs/cameras/new_camera_pixels.csv \
+  --output-dir run_logs/examples/photon_csv_minimal/plots
+```
+
+纯光学的两张图保持 LACT_sim 焦平面方向；只有完整相机图采用 pyLAST
+天空视角（`pix_x=-x_m`、`pix_y=-y_m`）。波长和时间都可从 CSV 省略：
+纯光学关闭波长效率，完整示例则在 cfg 中统一设置 `400 nm`，且不生成波形。
+更完整的说明见[最简 Photon CSV 示例](docs/minimal_photon_csv.md)。
+
 如需在输出中保存实际进入光追的位置和方向：
 
 ```ini

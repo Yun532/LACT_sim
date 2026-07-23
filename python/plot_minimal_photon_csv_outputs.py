@@ -18,9 +18,6 @@ import numpy as np
 from matplotlib.collections import PatchCollection
 from matplotlib.patches import Rectangle
 
-from pylast.visualize.visualize import plot_camera_image
-
-
 def read_rows(path: Path) -> list[dict[str, str]]:
     with path.open(newline="", encoding="utf-8") as stream:
         return list(csv.DictReader(stream))
@@ -100,6 +97,8 @@ def plot_pylast_camera(
     focal_length_m: float,
 ) -> None:
     """Render the full camera response using pylast's native display logic."""
+    from pylast.visualize.visualize import plot_camera_image
+
     camera = read_rows(camera_path)
     by_id = {
         int(row["pixel_id"]): float(row["pe"]) for row in read_rows(pixels_path)
@@ -148,9 +147,15 @@ def plot_pylast_camera(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--hits", type=Path, required=True)
-    parser.add_argument("--photon-pixels", type=Path, required=True)
-    parser.add_argument("--pe-pixels", type=Path, required=True)
+    parser.add_argument(
+        "--mode",
+        choices=("optics", "camera", "all"),
+        default="all",
+        help="optics writes two focal-plane diagnostics; camera writes one pyLAST PE image",
+    )
+    parser.add_argument("--hits", type=Path)
+    parser.add_argument("--photon-pixels", type=Path)
+    parser.add_argument("--pe-pixels", type=Path)
     parser.add_argument("--camera", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument(
@@ -162,23 +167,29 @@ def main() -> None:
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    plot_whiteboard(
-        args.hits, args.output_dir / "minimal_photons_whiteboard.png"
-    )
-    plot_camera(
-        args.camera,
-        args.photon_pixels,
-        "photon_count",
-        "Photons",
-        "Ideal camera photon count",
-        args.output_dir / "minimal_photons_camera_counts.png",
-    )
-    plot_pylast_camera(
-        args.camera,
-        args.pe_pixels,
-        args.output_dir / "minimal_photons_camera_pe.png",
-        args.focal_length_m,
-    )
+    if args.mode in ("optics", "all"):
+        if args.hits is None or args.photon_pixels is None:
+            parser.error("--mode optics/all requires --hits and --photon-pixels")
+        plot_whiteboard(
+            args.hits, args.output_dir / "minimal_photons_whiteboard.png"
+        )
+        plot_camera(
+            args.camera,
+            args.photon_pixels,
+            "photon_count",
+            "Photons",
+            "Ideal camera photon count",
+            args.output_dir / "minimal_photons_camera_counts.png",
+        )
+    if args.mode in ("camera", "all"):
+        if args.pe_pixels is None:
+            parser.error("--mode camera/all requires --pe-pixels")
+        plot_pylast_camera(
+            args.camera,
+            args.pe_pixels,
+            args.output_dir / "minimal_photons_camera_pe.png",
+            args.focal_length_m,
+        )
 
 
 if __name__ == "__main__":
