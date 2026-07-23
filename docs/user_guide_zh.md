@@ -227,7 +227,9 @@ python3 python/plot_optical_layout_html.py \
   --output run_logs/examples/photon_csv_local_whiteboard/layout_with_photons.html
 ```
 
-可选列、坐标选项和外部文件归一化见 [Photon CSV 格式](photon_csv_format.md)。
+可选列和外部文件归一化见 [Photon CSV 格式](photon_csv_format.md)；CORSIKA
+NWU、东起始 ENU、望远镜本地坐标及画图方向见
+[中文坐标系说明](coordinate_systems_zh.md)。
 
 ## CORSIKA 白板测试
 
@@ -408,7 +410,8 @@ EventIO 文件通常作为命令行第二个参数传入，因此 `source.eventi
 - [所有官方测试及检查标准](official_tests.md)
 - [程序整体流程](program_overview_zh.md)
 - [Photon CSV 格式](photon_csv_format.md)
-- [坐标系](coordinate_systems.md)
+- [坐标系中文说明](coordinate_systems_zh.md)
+- [坐标系英文参考](coordinate_systems.md)
 - [CORSIKA/EventIO 适配](corsika_eventio_adapter.md)
 - [HDF5 输出格式](hdf5_output_format.md)
 - [相机时间和波形](camera_timing_waveform_zh.md)

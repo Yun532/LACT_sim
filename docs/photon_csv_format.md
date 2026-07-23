@@ -62,7 +62,14 @@ source.coordinate_frame=lact_generic_global
   与正常 EventIO photon bunch 相同。
 - `corsika_nwu_global`：CORSIKA NWU 阵列绝对坐标；程序只减一次
   `telescope.position_m`。
+- `enu_east_relative`：ENU 坐标，`+x=East,+y=North,+z=Up`，位置已经
+  相对选定望远镜；方位角从 East 开始向 North 增加。
+- `enu_east_global`：相同的 ENU 轴定义，但位置是阵列绝对坐标；程序只减
+  一次 `telescope.position_m`。
 - `lact_generic_global`：旧 LACT 通用全局坐标；方位角从 `+x` 指向 `+y`。
+
+这些输入坐标、CORSIKA 默认流程和画图层方向的区别见
+[中文坐标系说明](coordinate_systems_zh.md)。
 
 ```ini
 source.local_telescope_frame=true

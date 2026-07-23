@@ -124,7 +124,8 @@ configs/templates/minimal_corsika_camera.cfg
 
 ## 4. 坐标系总览
 
-坐标系详细说明见 `docs/coordinate_systems.md`。这里保留最容易出错的结论。
+坐标系详细说明见 [中文坐标系说明](coordinate_systems_zh.md)；英文参考版见
+[coordinate_systems.md](coordinate_systems.md)。这里保留最容易出错的结论。
 
 ### CORSIKA/EventIO 阵列坐标
 
@@ -501,7 +502,7 @@ python/plot_efficiency_curves.py
 
 ```text
 1. docs/program_overview_zh.md
-2. docs/coordinate_systems.md
+2. docs/coordinate_systems_zh.md
 3. docs/hdf5_output_format.md
 4. docs/module_interfaces.md
 5. docs/official_tests.md

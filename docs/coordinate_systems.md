@@ -3,6 +3,10 @@
 This document is the reference convention for CORSIKA/EventIO input, telescope
 pointing, optical ray tracing, camera images, and array-layout plots.
 
+For a Chinese explanation that explicitly separates input, ray-tracing, map,
+and pyLAST display coordinates, see
+[coordinate_systems_zh.md](coordinate_systems_zh.md).
+
 ## Short Answer
 
 For CORSIKA/EventIO runs, LACT_sim keeps the CORSIKA horizontal coordinate
