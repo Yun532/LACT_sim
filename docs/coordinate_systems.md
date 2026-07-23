@@ -152,6 +152,58 @@ For raw CORSIKA/EventIO input, use `run_corsika_trace`, which applies the
 CORSIKA-specific NWU basis below. `run_optical_sim` intentionally rejects
 `source.mode=EventIO`.
 
+### 4.1 Explicit ENU East-Start Input Frame
+
+PhotonCsv input may instead use an explicit East-North-Up frame:
+
+```ini
+source.coordinate_frame=enu_east_relative
+# or
+source.coordinate_frame=enu_east_global
+```
+
+Its axes and pointing convention are:
+
+```text
++x : East
++y : North
++z : Up
+
+pointing_az_deg = 0    points East
+pointing_az_deg = 90   points North
+pointing_az_deg = 180  points West
+pointing_az_deg = 270  points South
+```
+
+The boresight is:
+
+```text
+z_axis = ( cos(el) cos(az),
+           cos(el) sin(az),
+           sin(el) )
+```
+
+The `_relative` variant interprets photon positions as already relative to the
+selected telescope. The `_global` variant interprets positions as absolute ENU
+array coordinates and subtracts `telescope.position_m` once.
+
+To convert a CORSIKA NWU row and pointing into the same physical ENU row:
+
+```text
+x_ENU = -y_NWU
+y_ENU =  x_NWU
+z_ENU =  z_NWU
+
+dir_x_ENU = -dir_y_NWU
+dir_y_ENU =  dir_x_NWU
+dir_z_ENU =  dir_z_NWU
+
+az_ENU_east_start = 90 deg - az_NWU_north_to_east
+```
+
+Angles may be wrapped to `[0, 360)`. This is an axis/convention conversion
+only; it does not apply magnetic declination.
+
 ### 5. Telescope-Local Optical Frame
 
 The optical ray tracer works in a telescope-local frame:

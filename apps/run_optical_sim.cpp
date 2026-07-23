@@ -118,6 +118,7 @@ int main(int argc, char** argv) {
             source_runtime_cfg.coordinate_frame);
         printField("position_role",
                    normalized_source_frame == "corsika_nwu_global" ||
+                           normalized_source_frame == "enu_east_global" ||
                            normalized_source_frame == "lact_generic_global"
                        ? "global input is converted through the selected input frame"
                        : "local input is placed with the original telescope frame");

@@ -5,6 +5,7 @@
 #include <map>
 #include <sstream>
 #include <stdexcept>
+#include <cstdint>
 
 namespace {
 
@@ -77,6 +78,26 @@ int optionalInt(const std::vector<std::string>& cells,
     return value.empty() ? fallback : std::stoi(value);
 }
 
+std::uint64_t optionalUInt64(const std::vector<std::string>& cells,
+                             const std::map<std::string, int>& header,
+                             const std::string& key,
+                             std::uint64_t fallback) {
+    std::string value = optionalCell(cells, header, key);
+    return value.empty() ? fallback : std::stoull(value);
+}
+
+bool optionalBool(const std::vector<std::string>& cells,
+                  const std::map<std::string, int>& header,
+                  const std::string& key,
+                  bool fallback) {
+    std::string value = lowerCopy(optionalCell(cells, header, key));
+    if (value.empty()) return fallback;
+    if (value == "1" || value == "true" || value == "yes" || value == "on") return true;
+    if (value == "0" || value == "false" || value == "no" || value == "off") return false;
+    throw std::runtime_error("PhotonCsvSource invalid boolean in column " + key +
+                             ": " + value);
+}
+
 } // namespace
 
 PhotonCsvSource::PhotonCsvSource(const PhotonCsvConfig& cfg)
@@ -137,14 +158,27 @@ void PhotonCsvSource::load() {
             optionalDouble(cells, header, "time_ns", cfg_.default_time_ns);
         bunch.photon.wavelength_nm =
             optionalDouble(cells, header, "wavelength_nm", cfg_.default_wavelength_nm);
+        bunch.raw_wavelength_nm =
+            optionalDouble(cells, header, "raw_wavelength_nm",
+                           bunch.photon.wavelength_nm);
         bunch.photon.weight =
             optionalDouble(cells, header, "weight", cfg_.default_weight);
+        bunch.photon.optical_efficiency_preapplied =
+            optionalBool(cells, header, "optical_efficiency_preapplied", false);
         bunch.multiplicity =
             optionalDouble(cells, header, "multiplicity", cfg_.default_multiplicity);
         bunch.event_id =
             optionalInt(cells, header, "event_id", cfg_.default_event_id);
         bunch.telescope_id =
             optionalInt(cells, header, "telescope_id", cfg_.default_telescope_id);
+        bunch.shower_event_id =
+            optionalInt(cells, header, "shower_event_id", bunch.event_id);
+        bunch.array_id =
+            optionalInt(cells, header, "array_id", 0);
+        bunch.source_bunch_index =
+            optionalUInt64(cells, header, "source_bunch_index", 0);
+        bunch.eventio_2d =
+            optionalBool(cells, header, "eventio_2d", false);
         bunch.emission_altitude_km =
             optionalDouble(cells, header, "emission_altitude_km",
                            bunch.emission_altitude_km);

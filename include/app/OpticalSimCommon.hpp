@@ -200,6 +200,8 @@ struct SourceRuntimeConfig {
     //   telescope_local      existing local optical input coordinates
     //   corsika_nwu_relative CORSIKA NWU positions relative to the telescope
     //   corsika_nwu_global   absolute CORSIKA NWU array positions
+    //   enu_east_relative    ENU positions relative to the telescope; az=0 East
+    //   enu_east_global      absolute ENU array positions; az=0 East
     //   lact_generic_global  legacy +X-to-+Y azimuth global coordinates
     std::string coordinate_frame = "telescope_local";
     bool csv_local_telescope_frame = true;
@@ -281,6 +283,7 @@ std::string vec3ToString(const Vec3& v);
 std::string sourceModeName(SyntheticMode mode);
 TelescopeFrame buildTelescopeFrame(const TelescopeConfig& telescope);
 TelescopeFrame buildCorsikaNwuTelescopeFrame(const TelescopeConfig& telescope);
+TelescopeFrame buildEnuEastTelescopeFrame(const TelescopeConfig& telescope);
 std::string normalizeSourceCoordinateFrame(const std::string& frame_name);
 std::string sourceCoordinateFrameDescription(const std::string& frame_name);
 PhotonBunch transformBunchToTelescopeLocal(const PhotonBunch& input,

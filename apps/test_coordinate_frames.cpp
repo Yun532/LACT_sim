@@ -70,6 +70,58 @@ int main()
     ok &= check(nearVec(global_local.photon.pos, local.photon.pos),
                 "global NWU positions must subtract telescope.position_m exactly once");
 
+    // ENU east-start is the same physical frame after:
+    //   East = -West, North = North, az_ENU = 90 deg - az_NWU.
+    TelescopeConfig enu_telescope = telescope;
+    enu_telescope.position_m = {-telescope.position_m.y,
+                                 telescope.position_m.x,
+                                 telescope.position_m.z};
+    enu_telescope.pointing_az_deg = 90.0 - telescope.pointing_az_deg;
+    const TelescopeFrame enu_frame = buildEnuEastTelescopeFrame(enu_telescope);
+    const Vec3 enu_relative_pos{-nwu_relative_pos.y,
+                                nwu_relative_pos.x,
+                                nwu_relative_pos.z};
+    const Vec3 enu_direction{-nwu_direction.y,
+                             nwu_direction.x,
+                             nwu_direction.z};
+    ok &= check(nearVec(enu_frame.x_axis,
+                        {-frame.x_axis.y, frame.x_axis.x, frame.x_axis.z}),
+                "ENU and NWU elevation axes must describe the same physical direction");
+    ok &= check(nearVec(enu_frame.y_axis,
+                        {-frame.y_axis.y, frame.y_axis.x, frame.y_axis.z}),
+                "ENU and NWU camera-y axes must describe the same physical direction");
+    ok &= check(nearVec(enu_frame.z_axis,
+                        {-frame.z_axis.y, frame.z_axis.x, frame.z_axis.z}),
+                "ENU and NWU boresights must describe the same physical direction");
+
+    PhotonBunch enu_relative = local;
+    enu_relative.photon.pos = enu_relative_pos;
+    enu_relative.photon.dir = enu_direction;
+    const PhotonBunch enu_relative_local = transformBunchToTelescopeLocal(
+        enu_relative, enu_telescope, "enu_east_relative");
+    ok &= check(nearVec(enu_relative_local.photon.pos, local.photon.pos),
+                "relative ENU positions must rotate without subtracting telescope position");
+    ok &= check(nearVec(enu_relative_local.photon.dir, local.photon.dir),
+                "relative ENU direction round trip failed");
+
+    PhotonBunch enu_global = enu_relative;
+    enu_global.photon.pos = enu_telescope.position_m + enu_relative_pos;
+    const PhotonBunch enu_global_local = transformBunchToTelescopeLocal(
+        enu_global, enu_telescope, "enu_east_global");
+    ok &= check(nearVec(enu_global_local.photon.pos, local.photon.pos),
+                "global ENU positions must subtract telescope.position_m exactly once");
+
+    TelescopeConfig east_pointing;
+    east_pointing.pointing_az_deg = 0.0;
+    east_pointing.pointing_el_deg = 0.0;
+    const TelescopeFrame east_frame = buildEnuEastTelescopeFrame(east_pointing);
+    ok &= check(nearVec(east_frame.z_axis, {1.0, 0.0, 0.0}),
+                "ENU east-start az=0 must point East");
+    east_pointing.pointing_az_deg = 90.0;
+    const TelescopeFrame north_frame = buildEnuEastTelescopeFrame(east_pointing);
+    ok &= check(nearVec(north_frame.z_axis, {0.0, 1.0, 0.0}),
+                "ENU east-start az=90 must point North");
+
     const TelescopeFrame existing_trace_frame = buildTelescopeFrame(telescope);
     const Vec3 reconstructed_world = sourceDirectionInWorld(
         local, telescope, "telescope_local");
@@ -111,6 +163,12 @@ int main()
                 "legacy corsika_iact alias must remain supported");
     ok &= check(normalizeSourceCoordinateFrame("local") == "telescope_local",
                 "legacy local alias must remain supported");
+    ok &= check(normalizeSourceCoordinateFrame("enu_relative") ==
+                    "enu_east_relative",
+                "ENU relative alias must normalize to the explicit east-start name");
+    ok &= check(normalizeSourceCoordinateFrame("enu_global") ==
+                    "enu_east_global",
+                "ENU global alias must normalize to the explicit east-start name");
 
     return ok ? 0 : 1;
 }

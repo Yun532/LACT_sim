@@ -154,10 +154,17 @@ PhotonBunch transformEventIOBunchToTraceFrame(
     const std::string frame_name = normalizeSourceCoordinateFrame(
         source_runtime_cfg.coordinate_frame);
     if ((frame_name == "corsika_nwu_global" ||
+         frame_name == "enu_east_global" ||
          frame_name == "lact_generic_global") &&
         source_runtime_cfg.use_eventio_telescope_position) {
         if (auto tel = metadata.telescopeById(input.telescope_id)) {
-            telescope.position_m = {tel->x_m, tel->y_m, tel->z_m};
+            if (frame_name == "enu_east_global") {
+                // EventIO telescope metadata is CORSIKA NWU. Convert it to
+                // the ENU frame expected by this PhotonCsv input.
+                telescope.position_m = {-tel->y_m, tel->x_m, tel->z_m};
+            } else {
+                telescope.position_m = {tel->x_m, tel->y_m, tel->z_m};
+            }
         }
     }
     PhotonBunch out = transformBunchToTelescopeLocal(input, telescope, frame_name);
@@ -3240,8 +3247,12 @@ int main(int argc, char** argv) {
         auto cfg = expandConfig(main_cfg, argv[1], component_paths);
 
         cfg["source.mode"] = getString(cfg, "source.mode", "EventIO");
-        if (!isEventIOMode(getString(cfg, "source.mode", "EventIO"))) {
-            throw std::runtime_error("run_corsika_trace requires source.mode=EventIO/CORSIKA");
+        const bool photon_csv_mode =
+            isPhotonCsvMode(getString(cfg, "source.mode", "EventIO"));
+        if (!isEventIOMode(getString(cfg, "source.mode", "EventIO")) &&
+            !photon_csv_mode) {
+            throw std::runtime_error(
+                "run_corsika_trace requires source.mode=EventIO/CORSIKA or PhotonCsv");
         }
 
         SyntheticPhotonConfig source_cfg = buildSourceConfig(cfg);
@@ -3251,20 +3262,26 @@ int main(int argc, char** argv) {
             std::cerr << "warning: source.eventio_coordinate_frame is deprecated; "
                          "use source.coordinate_frame instead\n";
         }
-        source_runtime_cfg.use_eventio = true;
-        source_runtime_cfg.filter_event_id = false;
-        source_runtime_cfg.filter_telescope_id = false;
-        if (argc == 3) {
+        if (argc == 3 && !photon_csv_mode) {
             source_runtime_cfg.eventio_path = argv[2];
             cfg["source.eventio_path"] = argv[2];
         }
+        if (photon_csv_mode && source_runtime_cfg.csv_path.empty()) {
+            throw std::runtime_error(
+                "source.csv_path is required when source.mode=PhotonCsv");
+        }
         if (source_runtime_cfg.eventio_path.empty()) {
             source_runtime_cfg.eventio_path =
-                getString(cfg, "corsika.input", getString(cfg, "eventio.input", ""));
+                getString(cfg, "source.metadata_eventio_path",
+                          getString(cfg, "corsika.input",
+                                    getString(cfg, "eventio.input", "")));
         }
         if (source_runtime_cfg.eventio_path.empty()) {
-            throw std::runtime_error("source.eventio_path or corsika.input is required");
+            throw std::runtime_error(
+                "source.eventio_path (metadata source for PhotonCsv) or corsika.input "
+                "is required");
         }
+        cfg["source.eventio_path"] = source_runtime_cfg.eventio_path;
         TelescopeConfig telescope_cfg = buildTelescopeConfig(cfg);
         std::vector<MirrorFacet> nominal_facets = buildFacetsFromConfig(cfg);
         ErrorConfig error_cfg = buildErrorConfig(cfg);
@@ -3402,9 +3419,13 @@ int main(int argc, char** argv) {
                                     trigger_cfg,
                                     camera.size(),
                                     metadata.telescopes.size());
-	    printField("status", "streaming EventIO photon bunches and tracing");
-        std::cerr << "run_corsika_trace: streaming photon bunches; "
-                  << "no full-file photon preload is used\n";
+	    printField("status", photon_csv_mode
+                                  ? "loading PhotonCsv bunches and tracing"
+                                  : "streaming EventIO photon bunches and tracing");
+        std::cerr << "run_corsika_trace: "
+                  << (photon_csv_mode
+                          ? "loading PhotonCsv bunches\n"
+                          : "streaming photon bunches; no full-file photon preload is used\n");
 
         std::ofstream whiteboard_out;
         if (!camera_cfg.enabled && save_csv) {
@@ -3825,19 +3846,40 @@ int main(int argc, char** argv) {
         };
 
         const auto t_stream_start = std::chrono::steady_clock::now();
-        EventIOStreamStats stream_stats = streamEventIOPhotonBunches(
-            eventio_cfg,
-            processBunch,
-            [](const EventIOStreamProgress& progress) {
-                std::ostringstream value;
-                value << "photon_bunches=" << progress.photon_bunches
-                      << " photon_bunches_2d=" << progress.photon_bunches_2d
-                      << " photon_bunches_3d=" << progress.photon_bunches_3d
-                      << " current_shower_event=" << progress.current_shower_event
-                      << " elapsed_s=" << doubleToString(progress.elapsed_s, 3);
-                printField(progress.final ? "stream_done" : "stream_progress",
-                           value.str());
-            });
+        EventIOStreamStats stream_stats;
+        if (photon_csv_mode) {
+            PhotonCsvSource csv_source(
+                buildPhotonCsvConfig(cfg, source_cfg, source_runtime_cfg));
+            PhotonBunch csv_bunch;
+            while (csv_source.next(csv_bunch)) {
+                processBunch(csv_bunch);
+                ++stream_stats.photon_bunches;
+                if (csv_bunch.eventio_2d) {
+                    ++stream_stats.photon_bunches_2d;
+                } else {
+                    ++stream_stats.photon_bunches_3d;
+                }
+            }
+            std::ostringstream value;
+            value << "photon_bunches=" << stream_stats.photon_bunches
+                  << " photon_bunches_2d=" << stream_stats.photon_bunches_2d
+                  << " photon_bunches_3d=" << stream_stats.photon_bunches_3d;
+            printField("csv_load_done", value.str());
+        } else {
+            stream_stats = streamEventIOPhotonBunches(
+                eventio_cfg,
+                processBunch,
+                [](const EventIOStreamProgress& progress) {
+                    std::ostringstream value;
+                    value << "photon_bunches=" << progress.photon_bunches
+                          << " photon_bunches_2d=" << progress.photon_bunches_2d
+                          << " photon_bunches_3d=" << progress.photon_bunches_3d
+                          << " current_shower_event=" << progress.current_shower_event
+                          << " elapsed_s=" << doubleToString(progress.elapsed_s, 3);
+                    printField(progress.final ? "stream_done" : "stream_progress",
+                               value.str());
+                });
+        }
         if (profile_cfg.enabled) {
             addElapsed(profile_stats, &ProfileStats::eventio_stream_s, t_stream_start);
         }

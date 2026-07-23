@@ -12,8 +12,10 @@
 #include "fileopen.h"
 
 #include <errno.h>
+#include <inttypes.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -27,6 +29,10 @@ typedef struct ConverterOptions {
     int has_filter_event_id;
     int has_filter_array_id;
     int has_filter_telescope_id;
+    int resolve_missing_wavelength;
+    double missing_wavelength_min_nm;
+    double missing_wavelength_max_nm;
+    uint64_t missing_wavelength_seed;
 } ConverterOptions;
 
 typedef struct ConverterStats {
@@ -34,6 +40,8 @@ typedef struct ConverterStats {
     long photon_blocks_seen;
     long photon3d_blocks_seen;
     long rows_written;
+    long emitter_rows_skipped;
+    long missing_wavelengths_resolved;
     double multiplicity_sum;
 } ConverterStats;
 
@@ -46,6 +54,11 @@ static void usage(const char *prog) {
         "  --filter-event-id N                    Keep only one output event id\n"
         "  --filter-array-id N                    Keep only one CORSIKA array block\n"
         "  --filter-telescope-id N                Keep only one telescope id\n"
+        "  --resolve-missing-wavelength cherenkov Resolve lambda=0 exactly like\n"
+        "                                           EventIO expectation mode\n"
+        "  --missing-wavelength-min-nm X           Default: 260\n"
+        "  --missing-wavelength-max-nm X           Default: 1000\n"
+        "  --missing-wavelength-seed N             Default: 246813579\n"
         "\n"
         "Notes:\n"
         "  - hessioxxx returns photon positions in cm; PhotonCsv writes meters.\n"
@@ -67,6 +80,9 @@ static int parse_int_arg(const char *text, int *out) {
 static int parse_args(int argc, char **argv, ConverterOptions *opt) {
     memset(opt, 0, sizeof(*opt));
     opt->event_id_mode = "event";
+    opt->missing_wavelength_min_nm = 260.0;
+    opt->missing_wavelength_max_nm = 1000.0;
+    opt->missing_wavelength_seed = UINT64_C(246813579);
 
     if (argc < 3) {
         usage(argv[0]);
@@ -101,6 +117,29 @@ static int parse_args(int argc, char **argv, ConverterOptions *opt) {
                 return -1;
             }
             opt->has_filter_telescope_id = 1;
+        } else if (strcmp(argv[i], "--resolve-missing-wavelength") == 0 &&
+                   i + 1 < argc) {
+            const char *model = argv[++i];
+            if (strcmp(model, "cherenkov") != 0) {
+                fprintf(stderr, "unsupported missing-wavelength model: %s\n", model);
+                return -1;
+            }
+            opt->resolve_missing_wavelength = 1;
+        } else if (strcmp(argv[i], "--missing-wavelength-min-nm") == 0 &&
+                   i + 1 < argc) {
+            opt->missing_wavelength_min_nm = strtod(argv[++i], NULL);
+        } else if (strcmp(argv[i], "--missing-wavelength-max-nm") == 0 &&
+                   i + 1 < argc) {
+            opt->missing_wavelength_max_nm = strtod(argv[++i], NULL);
+        } else if (strcmp(argv[i], "--missing-wavelength-seed") == 0 &&
+                   i + 1 < argc) {
+            char *end = NULL;
+            unsigned long long value = strtoull(argv[++i], &end, 10);
+            if (end == argv[i] || *end != '\0') {
+                fprintf(stderr, "invalid --missing-wavelength-seed\n");
+                return -1;
+            }
+            opt->missing_wavelength_seed = (uint64_t)value;
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             usage(argv[0]);
             return -1;
@@ -109,6 +148,11 @@ static int parse_args(int argc, char **argv, ConverterOptions *opt) {
             usage(argv[0]);
             return -1;
         }
+    }
+    if (!(opt->missing_wavelength_min_nm > 0.0) ||
+        !(opt->missing_wavelength_max_nm > opt->missing_wavelength_min_nm)) {
+        fprintf(stderr, "missing wavelength range must satisfy 0 < min < max\n");
+        return -1;
     }
     return 0;
 }
@@ -139,6 +183,44 @@ static double downward_dir_z(double cx, double cy) {
         z2 = 0.0;
     }
     return -sqrt(z2);
+}
+
+static uint64_t mix_seed(uint64_t seed, uint64_t value) {
+    seed ^= value + UINT64_C(0x9e3779b97f4a7c15) + (seed << 6U) + (seed >> 2U);
+    return seed;
+}
+
+static double unit_random_01(uint64_t seed) {
+    seed += UINT64_C(0x9e3779b97f4a7c15);
+    seed = (seed ^ (seed >> 30U)) * UINT64_C(0xbf58476d1ce4e5b9);
+    seed = (seed ^ (seed >> 27U)) * UINT64_C(0x94d049bb133111eb);
+    seed ^= seed >> 31U;
+    return (double)(seed >> 11U) * (1.0 / 9007199254740992.0);
+}
+
+static double resolved_wavelength(double raw_wavelength_nm,
+                                  int shower_event_id,
+                                  int array_id,
+                                  int telescope_id,
+                                  uint64_t source_bunch_index,
+                                  const ConverterOptions *opt,
+                                  ConverterStats *stats) {
+    if (raw_wavelength_nm != 0.0 || !opt->resolve_missing_wavelength) {
+        return raw_wavelength_nm;
+    }
+    uint64_t seed = opt->missing_wavelength_seed;
+    seed = mix_seed(seed, (uint64_t)(shower_event_id + 1000003));
+    seed = mix_seed(seed, (uint64_t)(array_id + 100003));
+    seed = mix_seed(seed, (uint64_t)(telescope_id + 10007));
+    seed = mix_seed(seed, source_bunch_index + UINT64_C(1));
+    seed = mix_seed(seed, UINT64_C(1));
+    double u = unit_random_01(seed);
+    if (u < 1e-16) u = 1e-16;
+    if (u > 1.0 - 1e-16) u = 1.0 - 1e-16;
+    const double inv_lo = 1.0 / opt->missing_wavelength_min_nm;
+    const double inv_hi = 1.0 / opt->missing_wavelength_max_nm;
+    stats->missing_wavelengths_resolved++;
+    return 1.0 / (inv_lo - u * (inv_lo - inv_hi));
 }
 
 static int read_current_event_id(IO_BUFFER *iobuf, int item_type, int *current_event_id) {
@@ -190,10 +272,23 @@ static int write_tel_photon_block(IO_BUFFER *iobuf, FILE *out, const ConverterOp
     event_id = output_event_id(current_event_id, array_id, opt);
     for (int i = 0; i < nbunches; ++i) {
         const struct bunch *b = &bunches[i];
-        fprintf(out, "%.9g,%.9g,0,%.9g,%.9g,%.12g,%.9g,%.9g,1,%.9g,%d,%d\n",
+        if (b->lambda >= 9000.0) {
+            stats->emitter_rows_skipped++;
+            continue;
+        }
+        const double wavelength_nm = resolved_wavelength(
+            b->lambda, current_event_id, array_id, telescope_id, (uint64_t)i,
+            opt, stats);
+        const double emission_altitude_km =
+            (isfinite(b->zem) && b->zem > 0.0) ? b->zem * 1.0e-5 : NAN;
+        fprintf(out,
+                "%.17g,%.17g,0,%.17g,%.17g,%.17g,%.17g,%.17g,1,%.17g,"
+                "%d,%d,%d,%d,%d,%" PRIu64 ",1,%.17g,%.17g,0\n",
                 b->x * 0.01, b->y * 0.01,
                 b->cx, b->cy, downward_dir_z(b->cx, b->cy),
-                b->ctime, b->lambda, b->photons, event_id, telescope_id);
+                b->ctime, wavelength_nm, b->photons, event_id, telescope_id,
+                current_event_id, array_id, telescope_id, (uint64_t)i,
+                emission_altitude_km, b->lambda);
         stats->rows_written++;
         stats->multiplicity_sum += b->photons;
     }
@@ -239,10 +334,20 @@ static int write_tel_photon3d_block(IO_BUFFER *iobuf, FILE *out, const Converter
     event_id = output_event_id(current_event_id, array_id, opt);
     for (int i = 0; i < nbunches; ++i) {
         const struct bunch3d *b = &bunches[i];
-        fprintf(out, "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,1,%.9g,%d,%d\n",
+        if (b->lambda >= 9000.0) {
+            stats->emitter_rows_skipped++;
+            continue;
+        }
+        const double wavelength_nm = resolved_wavelength(
+            b->lambda, current_event_id, array_id, telescope_id, (uint64_t)i,
+            opt, stats);
+        fprintf(out,
+                "%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g,1,%.17g,"
+                "%d,%d,%d,%d,%d,%" PRIu64 ",0,nan,%.17g,0\n",
                 b->x * 0.01, b->y * 0.01, b->z * 0.01,
-                b->cx, b->cy, b->cz, b->ctime, b->lambda,
-                b->photons, event_id, telescope_id);
+                b->cx, b->cy, b->cz, b->ctime, wavelength_nm,
+                b->photons, event_id, telescope_id, current_event_id, array_id,
+                telescope_id, (uint64_t)i, b->lambda);
         stats->rows_written++;
         stats->multiplicity_sum += b->photons;
     }
@@ -312,7 +417,12 @@ int main(int argc, char **argv) {
         free_io_buffer(iobuf);
         return 1;
     }
-    fprintf(out, "x_m,y_m,z_m,dir_x,dir_y,dir_z,time_ns,wavelength_nm,weight,multiplicity,event_id,telescope_id\n");
+    fprintf(out,
+            "x_m,y_m,z_m,dir_x,dir_y,dir_z,time_ns,wavelength_nm,weight,"
+            "multiplicity,event_id,telescope_id,shower_event_id,array_id,"
+            "source_telescope_id,source_bunch_index,eventio_2d,"
+            "emission_altitude_km,raw_wavelength_nm,"
+            "optical_efficiency_preapplied\n");
 
     while (find_io_block(iobuf, &item_header) == 0) {
         if (read_io_block(iobuf, &item_header) != 0) {
@@ -361,10 +471,13 @@ int main(int argc, char **argv) {
             "  photon_blocks      : %ld\n"
             "  photon3d_blocks    : %ld\n"
             "  rows_written       : %ld\n"
+            "  emitter_rows_skip  : %ld\n"
+            "  wavelengths_resolved: %ld\n"
             "  multiplicity_sum   : %.12g\n",
             opt.input_path, opt.output_path, stats.blocks_seen,
             stats.photon_blocks_seen, stats.photon3d_blocks_seen,
-            stats.rows_written, stats.multiplicity_sum);
+            stats.rows_written, stats.emitter_rows_skipped,
+            stats.missing_wavelengths_resolved, stats.multiplicity_sum);
 
     return 0;
 }

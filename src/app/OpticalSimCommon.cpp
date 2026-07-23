@@ -617,6 +617,29 @@ TelescopeFrame buildCorsikaNwuTelescopeFrame(const TelescopeConfig& telescope)
     return frame;
 }
 
+TelescopeFrame buildEnuEastTelescopeFrame(const TelescopeConfig& telescope)
+{
+    // Explicit East-North-Up input frame:
+    //   global +x: East, +y: North, +z: Up
+    //   pointing az=0: East, az=90: North
+    //
+    // Keep the same right-handed telescope-local optical axes as the CORSIKA
+    // adapter: local +x increases elevation, local +y follows conventional
+    // North-to-East sky azimuth (therefore decreasing ENU east-start azimuth),
+    // and local +z is the boresight.
+    TelescopeConfig nwu_telescope = telescope;
+    nwu_telescope.position_m = {
+        telescope.position_m.y, -telescope.position_m.x, telescope.position_m.z};
+    nwu_telescope.pointing_az_deg = 90.0 - telescope.pointing_az_deg;
+    const TelescopeFrame nwu = buildCorsikaNwuTelescopeFrame(nwu_telescope);
+    TelescopeFrame frame;
+    frame.origin = telescope.position_m;
+    frame.x_axis = {-nwu.x_axis.y, nwu.x_axis.x, nwu.x_axis.z};
+    frame.y_axis = {-nwu.y_axis.y, nwu.y_axis.x, nwu.y_axis.z};
+    frame.z_axis = {-nwu.z_axis.y, nwu.z_axis.x, nwu.z_axis.z};
+    return frame;
+}
+
 std::string normalizeSourceCoordinateFrame(const std::string& frame_name)
 {
     const std::string frame = lowerCopy(trim(frame_name));
@@ -631,6 +654,14 @@ std::string normalizeSourceCoordinateFrame(const std::string& frame_name)
     if (frame == "corsika_nwu_global" || frame == "corsika_global") {
         return "corsika_nwu_global";
     }
+    if (frame == "enu_east_relative" || frame == "enu_relative" ||
+        frame == "east_north_up_relative" || frame == "east_start_relative") {
+        return "enu_east_relative";
+    }
+    if (frame == "enu_east_global" || frame == "enu_global" ||
+        frame == "east_north_up_global" || frame == "east_start_global") {
+        return "enu_east_global";
+    }
     if (frame == "lact_generic_global" || frame == "generic_global" ||
         frame == "array_global" || frame == "global") {
         return "lact_generic_global";
@@ -638,7 +669,8 @@ std::string normalizeSourceCoordinateFrame(const std::string& frame_name)
     throw std::runtime_error(
         "unsupported source.coordinate_frame: " + frame_name +
         "; expected telescope_local, corsika_nwu_relative, "
-        "corsika_nwu_global, or lact_generic_global");
+        "corsika_nwu_global, enu_east_relative, enu_east_global, "
+        "or lact_generic_global");
 }
 
 std::string sourceCoordinateFrameDescription(const std::string& frame_name)
@@ -652,6 +684,15 @@ std::string sourceCoordinateFrameDescription(const std::string& frame_name)
     }
     if (frame == "corsika_nwu_global") {
         return "CORSIKA NWU absolute array positions; telescope.position_m is subtracted";
+    }
+    if (frame == "enu_east_relative") {
+        return "ENU (+x East, +y North, +z Up), relative to the telescope; "
+               "pointing azimuth starts at East and increases toward North";
+    }
+    if (frame == "enu_east_global") {
+        return "ENU (+x East, +y North, +z Up) absolute array positions; "
+               "telescope.position_m is subtracted; pointing azimuth starts at "
+               "East and increases toward North";
     }
     return "legacy LACT generic global XY; azimuth runs from +x toward +y";
 }
@@ -678,6 +719,36 @@ PhotonBunch transformBunchToTelescopeLocal(const PhotonBunch& input,
         const TelescopeFrame frame = buildCorsikaNwuTelescopeFrame(telescope);
         out.photon.pos = frame.pointToLocal(input.photon.pos);
         out.photon.dir = frame.rotateVectorToLocal(input.photon.dir).normalized();
+        return out;
+    }
+
+    if (frame_name_normalized == "enu_east_relative") {
+        TelescopeConfig nwu_telescope = telescope;
+        nwu_telescope.position_m = {
+            telescope.position_m.y, -telescope.position_m.x, telescope.position_m.z};
+        nwu_telescope.pointing_az_deg = 90.0 - telescope.pointing_az_deg;
+        const TelescopeFrame frame = buildCorsikaNwuTelescopeFrame(nwu_telescope);
+        const Vec3 nwu_pos{input.photon.pos.y, -input.photon.pos.x,
+                           input.photon.pos.z};
+        const Vec3 nwu_dir{input.photon.dir.y, -input.photon.dir.x,
+                           input.photon.dir.z};
+        out.photon.pos = frame.rotateVectorToLocal(nwu_pos);
+        out.photon.dir = frame.rotateVectorToLocal(nwu_dir).normalized();
+        return out;
+    }
+
+    if (frame_name_normalized == "enu_east_global") {
+        TelescopeConfig nwu_telescope = telescope;
+        nwu_telescope.position_m = {
+            telescope.position_m.y, -telescope.position_m.x, telescope.position_m.z};
+        nwu_telescope.pointing_az_deg = 90.0 - telescope.pointing_az_deg;
+        const TelescopeFrame frame = buildCorsikaNwuTelescopeFrame(nwu_telescope);
+        const Vec3 nwu_pos{input.photon.pos.y, -input.photon.pos.x,
+                           input.photon.pos.z};
+        const Vec3 nwu_dir{input.photon.dir.y, -input.photon.dir.x,
+                           input.photon.dir.z};
+        out.photon.pos = frame.pointToLocal(nwu_pos);
+        out.photon.dir = frame.rotateVectorToLocal(nwu_dir).normalized();
         return out;
     }
 

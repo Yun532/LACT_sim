@@ -53,6 +53,8 @@ source.coordinate_frame=telescope_local
 ```ini
 source.coordinate_frame=corsika_nwu_relative
 source.coordinate_frame=corsika_nwu_global
+source.coordinate_frame=enu_east_relative
+source.coordinate_frame=enu_east_global
 source.coordinate_frame=lact_generic_global
 ```
 
@@ -120,3 +122,18 @@ mode=PhotonCsv
 csv_path=...
 coordinate_frame=telescope_local
 ```
+
+## ENU East-Start Input
+
+PhotonCsv also accepts:
+
+```ini
+source.coordinate_frame=enu_east_relative
+source.coordinate_frame=enu_east_global
+```
+
+Both use `+x` East, `+y` North, and `+z` Up. Telescope pointing azimuth starts
+at East and increases toward North, so `pointing_az_deg=0` points East and
+`pointing_az_deg=90` points North. The relative mode expects positions already
+relative to the telescope. The global mode expects absolute ENU array
+positions and subtracts `telescope.position_m` exactly once.
