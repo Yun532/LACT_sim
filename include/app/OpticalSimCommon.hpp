@@ -171,9 +171,9 @@ struct TriggerConfig {
     double pixel_threshold_pe = 5.0;
     int camera_multiplicity = 3;
     int array_multiplicity = 2;
-    double coincidence_window_ns = 50.0;
-    double camera_coincidence_window_ns = 50.0;
-    double array_coincidence_window_ns = 50.0;
+    double coincidence_window_ns = 20.0;
+    double camera_coincidence_window_ns = 20.0;
+    double array_coincidence_window_ns = 0.0;
 };
 
 class ElectronicsResponse {

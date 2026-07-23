@@ -3101,8 +3101,8 @@ void printPureNsbTriggerEstimate(const NsbConfig& nsb_cfg,
     }
 
     const double configured_window_ns =
-        trigger_cfg.coincidence_window_ns > 0.0
-            ? trigger_cfg.coincidence_window_ns
+        trigger_cfg.camera_coincidence_window_ns > 0.0
+            ? trigger_cfg.camera_coincidence_window_ns
             : std::max(0.0,
                        waveform_cfg.time_window_end_ns -
                            waveform_cfg.time_window_start_ns);

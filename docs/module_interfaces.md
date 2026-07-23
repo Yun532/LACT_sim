@@ -214,13 +214,16 @@ trigger.enabled=false
 trigger.pixel_threshold_pe=5
 trigger.camera_multiplicity=3
 trigger.array_multiplicity=2
-trigger.coincidence_window_ns=50
+trigger.camera_coincidence_window_ns=20
+trigger.array_coincidence_window_ns=0
 ```
 
-Camera trigger counts pixels above threshold in one telescope image. Array
-trigger counts triggered telescopes for the same `event_id`. Neighbor topology,
-waveform thresholding, and hardware-specific trigger logic are reserved for the
-future electronics implementation.
+Camera trigger counts pixels above threshold in a sliding p.e. time window.
+Array trigger counts triggered telescopes for the same `event_id`. A positive
+array window applies raw inter-telescope timing and is not recommended until
+geometric delay compensation is implemented. Neighbor topology and
+hardware-specific trigger logic are reserved for the future electronics
+implementation.
 
 If HDF5 output sets:
 

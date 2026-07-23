@@ -102,6 +102,10 @@ int main()
     ok &= check(!trigger_default.enabled, "trigger should default to disabled");
     ok &= check(std::abs(trigger_default.pixel_threshold_pe - 5.0) < 1e-12,
                 "trigger default threshold");
+    ok &= check(std::abs(trigger_default.camera_coincidence_window_ns - 20.0) < 1e-12,
+                "camera trigger should default to a 20 ns window");
+    ok &= check(std::abs(trigger_default.array_coincidence_window_ns) < 1e-12,
+                "raw array timing should default to disabled");
     const auto split_windows = buildTriggerConfig({
         {"trigger.coincidence_window_ns", "50"},
         {"trigger.camera_coincidence_window_ns", "8"},
@@ -127,6 +131,10 @@ int main()
     ok &= check(trigger.array_multiplicity == 2, "array multiplicity parsed");
     ok &= check(std::abs(trigger.coincidence_window_ns - 30.0) < 1e-12,
                 "coincidence window parsed");
+    ok &= check(std::abs(trigger.camera_coincidence_window_ns - 30.0) < 1e-12,
+                "legacy coincidence window should configure the camera window");
+    ok &= check(std::abs(trigger.array_coincidence_window_ns - 30.0) < 1e-12,
+                "legacy coincidence window should configure the array window");
 
     ok &= expectInvalid({{"nsb.rate_pe_per_ns_per_pixel", "-1"}}, "negative NSB rate");
     ok &= expectInvalid({{"nsb.enabled", "true"}, {"nsb.model", "spectral_flux"}},

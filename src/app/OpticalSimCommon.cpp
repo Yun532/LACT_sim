@@ -2096,12 +2096,22 @@ TriggerConfig buildTriggerConfig(const std::map<std::string, std::string>& cfg) 
         getInt(cfg, "trigger.camera_multiplicity", trigger.camera_multiplicity);
     trigger.array_multiplicity =
         getInt(cfg, "trigger.array_multiplicity", trigger.array_multiplicity);
-    trigger.coincidence_window_ns =
-        getDouble(cfg, "trigger.coincidence_window_ns", trigger.coincidence_window_ns);
+    const bool has_legacy_coincidence_window =
+        cfg.find("trigger.coincidence_window_ns") != cfg.end();
+    trigger.coincidence_window_ns = getDouble(
+        cfg, "trigger.coincidence_window_ns", trigger.coincidence_window_ns);
     trigger.camera_coincidence_window_ns = getDouble(
-        cfg, "trigger.camera_coincidence_window_ns", trigger.coincidence_window_ns);
+        cfg,
+        "trigger.camera_coincidence_window_ns",
+        has_legacy_coincidence_window
+            ? trigger.coincidence_window_ns
+            : trigger.camera_coincidence_window_ns);
     trigger.array_coincidence_window_ns = getDouble(
-        cfg, "trigger.array_coincidence_window_ns", trigger.coincidence_window_ns);
+        cfg,
+        "trigger.array_coincidence_window_ns",
+        has_legacy_coincidence_window
+            ? trigger.coincidence_window_ns
+            : trigger.array_coincidence_window_ns);
 
     if (!std::isfinite(trigger.pixel_threshold_pe) || trigger.pixel_threshold_pe < 0.0) {
         throw std::runtime_error("trigger.pixel_threshold_pe must be finite and >= 0");

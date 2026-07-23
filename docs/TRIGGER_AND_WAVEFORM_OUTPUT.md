@@ -1,12 +1,16 @@
 # Trigger and waveform output
 
 Camera triggers use a sliding p.e. coincidence window. Configure it with
-`trigger.camera_coincidence_window_ns`. Array triggers then require
-`trigger.array_multiplicity` camera triggers inside
-`trigger.array_coincidence_window_ns`.
+`trigger.camera_coincidence_window_ns` (20 ns by default). Array triggers
+require `trigger.array_multiplicity` camera triggers. Raw inter-telescope
+timing is disabled by default with `trigger.array_coincidence_window_ns=0`
+because geometric propagation-delay compensation is not yet implemented.
+Positive array windows are available for controlled timing studies, but use
+the uncorrected trigger times and should not be enabled for production data.
 
 `trigger.coincidence_window_ns` remains a compatibility alias: when either
-new setting is omitted, that setting inherits the legacy value.
+new setting is omitted, an explicitly configured legacy value is inherited by
+that setting. Prefer the two explicit settings in new configurations.
 
 ROOT and HDF5 call the same camera and array trigger functions. When
 `waveform.enabled=true` and `waveform.source=pe`, both formats evaluate the
