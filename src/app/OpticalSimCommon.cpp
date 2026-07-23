@@ -2112,6 +2112,12 @@ TriggerConfig buildTriggerConfig(const std::map<std::string, std::string>& cfg) 
         has_legacy_coincidence_window
             ? trigger.coincidence_window_ns
             : trigger.array_coincidence_window_ns);
+    trigger.array_time_correction = lowerCopy(trim(getString(
+        cfg, "trigger.array_time_correction",
+        trigger.array_time_correction)));
+    trigger.array_wavefront_speed_m_per_ns = getDouble(
+        cfg, "trigger.array_wavefront_speed_m_per_ns",
+        trigger.array_wavefront_speed_m_per_ns);
 
     if (!std::isfinite(trigger.pixel_threshold_pe) || trigger.pixel_threshold_pe < 0.0) {
         throw std::runtime_error("trigger.pixel_threshold_pe must be finite and >= 0");
@@ -2135,6 +2141,16 @@ TriggerConfig buildTriggerConfig(const std::map<std::string, std::string>& cfg) 
         trigger.array_coincidence_window_ns < 0.0) {
         throw std::runtime_error(
             "trigger.array_coincidence_window_ns must be finite and >= 0");
+    }
+    if (trigger.array_time_correction != "none" &&
+        trigger.array_time_correction != "plane_wave") {
+        throw std::runtime_error(
+            "trigger.array_time_correction must be none or plane_wave");
+    }
+    if (!std::isfinite(trigger.array_wavefront_speed_m_per_ns) ||
+        trigger.array_wavefront_speed_m_per_ns < 0.0) {
+        throw std::runtime_error(
+            "trigger.array_wavefront_speed_m_per_ns must be finite and >= 0");
     }
     return trigger;
 }

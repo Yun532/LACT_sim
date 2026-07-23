@@ -188,6 +188,8 @@ shower before selecting an array-offset stream.
   n_pixels_above_threshold
   total_pe
   trigger_time_ns
+  geometric_delay_ns
+  coincidence_time_ns
 
 /trigger/array
   event_id

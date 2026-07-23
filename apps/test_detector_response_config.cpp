@@ -106,15 +106,25 @@ int main()
                 "camera trigger should default to a 20 ns window");
     ok &= check(std::abs(trigger_default.array_coincidence_window_ns) < 1e-12,
                 "raw array timing should default to disabled");
+    ok &= check(trigger_default.array_time_correction == "none",
+                "array timing correction should default to none");
+    ok &= check(std::abs(trigger_default.array_wavefront_speed_m_per_ns) < 1e-12,
+                "array wavefront speed should default to observation-altitude auto mode");
     const auto split_windows = buildTriggerConfig({
         {"trigger.coincidence_window_ns", "50"},
         {"trigger.camera_coincidence_window_ns", "8"},
         {"trigger.array_coincidence_window_ns", "24"},
+        {"trigger.array_time_correction", "plane_wave"},
+        {"trigger.array_wavefront_speed_m_per_ns", "0.2997"},
     });
     ok &= check(std::abs(split_windows.camera_coincidence_window_ns - 8.0) < 1e-12,
                 "camera coincidence window parsed");
     ok &= check(std::abs(split_windows.array_coincidence_window_ns - 24.0) < 1e-12,
                 "array coincidence window parsed");
+    ok &= check(split_windows.array_time_correction == "plane_wave",
+                "plane-wave array timing correction parsed");
+    ok &= check(std::abs(split_windows.array_wavefront_speed_m_per_ns - 0.2997) < 1e-12,
+                "array wavefront speed parsed");
 
     std::map<std::string, std::string> trigger_cfg{
         {"trigger.enabled", "true"},
@@ -140,6 +150,8 @@ int main()
     ok &= expectInvalid({{"nsb.enabled", "true"}, {"nsb.model", "spectral_flux"}},
                         "spectral NSB missing spectrum");
     ok &= expectInvalid({{"trigger.camera_multiplicity", "0"}}, "zero camera multiplicity");
+    ok &= expectInvalid({{"trigger.array_time_correction", "unknown"}},
+                        "unknown array timing correction");
 
     std::cout << "detector response config checks passed\n";
     return ok ? 0 : 1;

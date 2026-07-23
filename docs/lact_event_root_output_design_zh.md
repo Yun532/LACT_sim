@@ -521,6 +521,8 @@ event_id                 int64
 tel_id                   int32
 triggered                bool
 trigger_time_ns          float64
+geometric_delay_ns       float64
+coincidence_time_ns      float64
 n_trigger_pixels         int32
 trigger_pixel_ids        RVec<int32>
 ```
