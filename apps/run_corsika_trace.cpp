@@ -2777,8 +2777,12 @@ void printCorsikaOpticalConfiguration(
     printField("facets", intToString(mirrors.size()));
 
     printSection("Source");
-    printField("mode", "EventIO");
-    printField("eventio_path", source_runtime_cfg.eventio_path);
+    printField("mode", source_runtime_cfg.use_photon_csv ? "PhotonCsv" : "EventIO");
+    if (source_runtime_cfg.use_photon_csv) {
+        printField("csv_path", source_runtime_cfg.csv_path);
+    } else {
+        printField("eventio_path", source_runtime_cfg.eventio_path);
+    }
     printField("event_id_mode", source_runtime_cfg.event_id_mode);
     printField("source_coordinate_frame", source_runtime_cfg.coordinate_frame);
     printField("coordinate_interpretation",
