@@ -3280,12 +3280,13 @@ int main(int argc, char** argv) {
                           getString(cfg, "corsika.input",
                                     getString(cfg, "eventio.input", "")));
         }
-        if (source_runtime_cfg.eventio_path.empty()) {
+        if (!photon_csv_mode && source_runtime_cfg.eventio_path.empty()) {
             throw std::runtime_error(
-                "source.eventio_path (metadata source for PhotonCsv) or corsika.input "
-                "is required");
+                "source.eventio_path or corsika.input is required");
         }
-        cfg["source.eventio_path"] = source_runtime_cfg.eventio_path;
+        if (!source_runtime_cfg.eventio_path.empty()) {
+            cfg["source.eventio_path"] = source_runtime_cfg.eventio_path;
+        }
         TelescopeConfig telescope_cfg = buildTelescopeConfig(cfg);
         std::vector<MirrorFacet> nominal_facets = buildFacetsFromConfig(cfg);
         ErrorConfig error_cfg = buildErrorConfig(cfg);
@@ -3364,13 +3365,24 @@ int main(int argc, char** argv) {
         if (!component_paths.obstruction.empty()) {
             printField("obstruction", component_paths.obstruction);
         }
-        if (component_paths.source.empty()) printField("source", "inline EventIO settings");
+        if (component_paths.source.empty()) {
+            printField("source", photon_csv_mode
+                                     ? "inline PhotonCsv settings"
+                                     : "inline EventIO settings");
+        }
 
         printSection("Run");
-        printField("status", "reading EventIO metadata");
-        std::cerr << "run_corsika_trace: reading EventIO metadata from "
-                  << eventio_cfg.path << "\n";
-        EventIOMetadata metadata = readEventIOMetadata(eventio_cfg);
+        EventIOMetadata metadata;
+        if (!eventio_cfg.path.empty()) {
+            printField("status", "reading EventIO metadata");
+            std::cerr << "run_corsika_trace: reading EventIO metadata from "
+                      << eventio_cfg.path << "\n";
+            metadata = readEventIOMetadata(eventio_cfg);
+        } else {
+            printField("status", "using PhotonCsv and configuration metadata");
+            std::cerr << "run_corsika_trace: PhotonCsv has no EventIO metadata; "
+                         "using telescope/source configuration defaults\n";
+        }
         const bool explicit_wavelength_range = hasExplicitMissingWavelengthRange(cfg);
         const bool has_cwavlg = wavelengthRangeFromInputCard(metadata).has_value();
         applyEventIOWavelengthMetadata(eventio_cfg, metadata, cfg);
@@ -3417,12 +3429,16 @@ int main(int argc, char** argv) {
                                          eventio_mirror_front_z_m,
                                          eventio_2d_backproject);
 
-	    printEventIOMetadataSummary(metadata);
+        if (!eventio_cfg.path.empty()) {
+            printEventIOMetadataSummary(metadata);
+        }
         printPureNsbTriggerEstimate(nsb_cfg,
                                     waveform_cfg,
                                     trigger_cfg,
                                     camera.size(),
-                                    metadata.telescopes.size());
+                                    metadata.telescopes.empty()
+                                        ? 1
+                                        : metadata.telescopes.size());
 	    printField("status", photon_csv_mode
                                   ? "loading PhotonCsv bunches and tracing"
                                   : "streaming EventIO photon bunches and tracing");
@@ -3954,7 +3970,15 @@ int main(int argc, char** argv) {
 
         printSection("Input");
         printField("config", argv[1]);
-        printField("eventio_path", source_runtime_cfg.eventio_path);
+        if (photon_csv_mode) {
+            printField("csv_path", source_runtime_cfg.csv_path);
+            if (!source_runtime_cfg.eventio_path.empty()) {
+                printField("metadata_eventio_path",
+                           source_runtime_cfg.eventio_path);
+            }
+        } else {
+            printField("eventio_path", source_runtime_cfg.eventio_path);
+        }
         printField("event_id_mode", source_runtime_cfg.event_id_mode);
         printField("output_format", output_cfg.format);
         printField("input_bunches", intToString(stream_stats.photon_bunches));
@@ -3964,8 +3988,11 @@ int main(int argc, char** argv) {
                    stream_stats.photon_bunches_2d > 0 && stream_stats.photon_bunches_3d > 0
                        ? "mixed_2d_3d"
                        : (stream_stats.photon_bunches_3d > 0 ? "3d" : "2d"));
-        printField("telescopes_in_eventio", intToString(metadata.telescopes.size()));
-        printField("shower_events", intToString(metadata.events.size()));
+        if (!source_runtime_cfg.eventio_path.empty()) {
+            printField("telescopes_in_eventio",
+                       intToString(metadata.telescopes.size()));
+            printField("shower_events", intToString(metadata.events.size()));
+        }
         printField("streams", intToString(summaries.size()));
         for (const auto& tel : metadata.telescopes) {
             std::ostringstream label;

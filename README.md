@@ -142,9 +142,14 @@ CSV 最少包含：
 
 ```csv
 x_m,y_m,z_m,dir_x,dir_y,dir_z
+3.9014025878906251,0.16619310379028321,0,-0.33789920806884766,-0.014721360988914967,-0.94106716376520094
 ```
 
-仓库中的 event 1909、19 号望远镜示例也只使用这六列：
+可直接参考
+[`configs/sources/photon_csv_six_column_example.csv`](configs/sources/photon_csv_six_column_example.csv)。
+用于作图的 event 1909、19 号望远镜输入是
+[`configs/sources/event1909_tel19_minimal_photons.csv`](configs/sources/event1909_tel19_minimal_photons.csv)，
+同样只有六列。
 
 ```bash
 # 纯光学：输出白板命中和逐像素光子数，可画两张焦平面诊断图
@@ -156,18 +161,20 @@ python3 python/plot_minimal_photon_csv_outputs.py \
   --camera configs/cameras/new_camera_pixels.csv \
   --output-dir run_logs/examples/photon_csv_minimal/plots
 
-# 完整相机效率但不生成波形：只画一张期望 p.e. 相机图
-build/run_optical_sim configs/examples/photon_csv_minimal_pe_camera.cfg
-python3 python/plot_minimal_photon_csv_outputs.py \
-  --mode camera \
-  --pe-pixels run_logs/examples/photon_csv_minimal/camera_expected_pe.csv \
-  --camera configs/cameras/new_camera_pixels.csv \
-  --output-dir run_logs/examples/photon_csv_minimal/plots
+# 完整相机链：输出 ROOT，再由 pyLAST 画一张 p.e. 相机图
+build/run_corsika_trace configs/examples/photon_csv_full_camera_root.cfg
+python3 python/plot_photon_csv_root_pylast.py \
+  run_logs/examples/photon_csv_full_camera/lact_events.root \
+  --event-id 1909 --telescope-id 19 \
+  --output run_logs/examples/photon_csv_full_camera/camera_pe.png
 ```
 
-纯光学的两张图保持 LACT_sim 焦平面方向；只有完整相机图采用 pyLAST
-天空视角（`pix_x=-x_m`、`pix_y=-y_m`）。波长和时间都可从 CSV 省略：
-纯光学关闭波长效率，完整示例则在 cfg 中统一设置 `400 nm`，且不生成波形。
+完整示例与 EventIO 输入共用 `run_corsika_trace` 的相机处理和 ROOT 输出。
+CSV 未提供 `multiplicity` 时使用 cfg 的 `source.multiplicity`，本例设为 1，
+即每行一个光子；示例还在 cfg 中统一设置 `400 nm`，并关闭 NSB、trigger
+和 waveform。纯光学的两张图保持 LACT_sim
+焦平面方向；只有 ROOT/pyLAST 相机图采用天空视角
+（`pix_x=-x_m`、`pix_y=-y_m`）。
 更完整的说明见[最简 Photon CSV 示例](docs/minimal_photon_csv.md)。
 
 如需在输出中保存实际进入光追的位置和方向：

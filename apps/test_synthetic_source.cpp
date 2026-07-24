@@ -1,8 +1,11 @@
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 
+#include "io/PhotonCsvSource.hpp"
 #include "io/SyntheticPhotonSource.hpp"
 
 namespace {
@@ -151,6 +154,33 @@ bool checkInvalidConfigs() {
     return ok;
 }
 
+bool checkPhotonCsvRowIndex() {
+    const auto path =
+        std::filesystem::temp_directory_path() / "lact_photon_csv_row_index.csv";
+    {
+        std::ofstream output(path);
+        output << "x_m,y_m,z_m,dir_x,dir_y,dir_z\n"
+               << "0,0,1,0,0,-1\n"
+               << "1,0,1,0,0,-1\n";
+    }
+
+    PhotonCsvConfig cfg;
+    cfg.csv_path = path.string();
+    PhotonCsvSource source(cfg);
+    PhotonBunch first;
+    PhotonBunch second;
+    const bool have_first = source.next(first);
+    const bool have_second = source.next(second);
+    std::filesystem::remove(path);
+
+    bool ok = check(have_first && have_second, "PhotonCsv produces two rows");
+    ok &= check(first.source_bunch_index == 0,
+                "PhotonCsv first implicit random-stream index");
+    ok &= check(second.source_bunch_index == 1,
+                "PhotonCsv second implicit random-stream index");
+    return ok;
+}
+
 } // namespace
 
 int main() {
@@ -158,6 +188,7 @@ int main() {
     ok &= checkParallelBeam();
     ok &= checkPointSource();
     ok &= checkInvalidConfigs();
+    ok &= checkPhotonCsvRowIndex();
 
     if (ok) {
         std::cout << "Synthetic photon source checks passed\n";

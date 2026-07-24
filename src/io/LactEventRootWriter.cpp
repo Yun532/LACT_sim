@@ -721,8 +721,11 @@ struct LactEventRootStreamWriter::Impl {
       std::string profile = output_cfg.lact_profile;
       std::string producer = "LACT_sim";
       std::string producer_version = "unknown";
-      std::string source_kind = "EventIO";
-      std::string source_path = source_runtime_cfg.eventio_path;
+      std::string source_kind =
+          source_runtime_cfg.use_photon_csv ? "PhotonCsv" : "EventIO";
+      std::string source_path = source_runtime_cfg.use_photon_csv
+                                    ? source_runtime_cfg.csv_path
+                                    : source_runtime_cfg.eventio_path;
       std::string source_sha256;
       run_id = 0;
       std::string coordinate_convention =

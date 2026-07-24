@@ -1,115 +1,84 @@
-# Minimal photon CSV
+# Minimal Photon CSV
 
-The simple `PhotonCsv` input is intended for optical tests and camera-image
-generation without requiring CORSIKA event metadata.
-
-## Required columns
+The minimal user input is a CSV with six columns:
 
 ```csv
 x_m,y_m,z_m,dir_x,dir_y,dir_z
+3.9014025878906251,0.16619310379028321,0,-0.33789920806884766,-0.014721360988914967,-0.94106716376520094
 ```
 
-Each row represents one photon ray:
+A small file is included at
+[`configs/sources/photon_csv_six_column_example.csv`](../configs/sources/photon_csv_six_column_example.csv).
+When `multiplicity` is absent, `source.multiplicity` supplies the value; the
+included examples set it to 1, so each row represents one photon.
 
-- `x_m,y_m,z_m`: photon position in metres.
-- `dir_x,dir_y,dir_z`: unit propagation direction.
-- The coordinate frame is selected by `source.coordinate_frame`.
-- `telescope_local` is the simplest choice for hand-written optical tests.
-- A CSV stripped from CORSIKA should remain in `corsika_nwu_relative`; the
-  simulator then uses its existing CORSIKA coordinate adapter instead of a
-  second conversion implemented in a helper script.
+- `x_m,y_m,z_m` are the photon position in metres.
+- `dir_x,dir_y,dir_z` are its propagation direction.
+- `source.coordinate_frame` defines the axes. Use `telescope_local` for
+  hand-written optical tests and `corsika_nwu_relative` for the supplied
+  CORSIKA-derived example.
 
-No bunch column is required. In this mode one CSV row contributes one photon.
+Wavelength and time are optional. A pure optical test can use ideal efficiency
+files, while a monochromatic camera test can set, for example,
+`source.wavelength_nm=400`. Time is unnecessary when waveform processing is
+disabled.
 
-## Optional quantities
+## Included event-1909 example
 
-Wavelength and time do not have to be present in the CSV:
+The plotting input is
+[`configs/sources/event1909_tel19_minimal_photons.csv`](../configs/sources/event1909_tel19_minimal_photons.csv).
+It contains only the six required columns.
 
-- For a pure optical test, use ideal/disabled efficiency curves. Wavelength is
-  then irrelevant.
-- For a monochromatic camera test, set one value such as
-  `source.wavelength_nm=400` in the configuration.
-- If waveform simulation is not requested, photon arrival time is irrelevant
-  and may be omitted.
-
-The loader still accepts optional columns for advanced replay, but they are not
-part of the minimal user interface.
-
-## Included examples
-
-Pure optics, whiteboard hits, and photon-count camera:
-
-```text
-configs/examples/photon_csv_minimal_optics.cfg
-```
-
-Expected-photoelectron camera image with wavelength-dependent detector
-efficiency, but without waveform generation:
-
-```text
-configs/examples/photon_csv_minimal_pe_camera.cfg
-```
-
-The full expected-p.e. figure is rendered through
-`pylast.visualize.plot_camera_image`, using the same angular axes and camera
-orientation as the normal CORSIKA/ROOT pyLAST display. The whiteboard remains a
-focal-plane optical diagnostic rather than a pyLAST camera plot.
-
-At the LACT ROOT/pyLAST boundary, pyLAST converts focal-plane hit coordinates
-to source-offset camera coordinates with
-`pix_x=-x_m` and `pix_y=-y_m`. The minimal-CSV plotting helper applies the same
-conversion before calling `plot_camera_image`; pixel-id order is unchanged.
-
-Run them from the `LACT_sim` directory:
+Pure optics produces a whiteboard image and a raw photon-count camera image:
 
 ```bash
-./build/run_optical_sim configs/examples/photon_csv_minimal_optics.cfg
-./build/run_optical_sim configs/examples/photon_csv_minimal_pe_camera.cfg
-
-# Pure optics: whiteboard plus raw photon-count camera, no display reversal.
-python python/plot_minimal_photon_csv_outputs.py \
+build/run_optical_sim configs/examples/photon_csv_minimal_optics.cfg
+python3 python/plot_minimal_photon_csv_outputs.py \
   --mode optics \
   --hits run_logs/examples/photon_csv_minimal/whiteboard_hits.csv \
   --photon-pixels run_logs/examples/photon_csv_minimal/camera_photon_counts.csv \
   --camera configs/cameras/new_camera_pixels.csv \
   --output-dir run_logs/examples/photon_csv_minimal/plots
-
-# Full camera: one expected-PE image in the pyLAST sky-view convention.
-python python/plot_minimal_photon_csv_outputs.py \
-  --mode camera \
-  --pe-pixels run_logs/examples/photon_csv_minimal/camera_expected_pe.csv \
-  --camera configs/cameras/new_camera_pixels.csv \
-  --output-dir run_logs/examples/photon_csv_minimal/plots
 ```
 
-## Making a minimal CSV from CORSIKA photons
-
-The helper
-
-```text
-python/corsika_photon_csv_to_minimal.py
-```
-
-selects one telescope and removes all columns except position and direction.
-It deliberately keeps the original CORSIKA North-West-Up coordinates. This
-avoids duplicating the coordinate conversion already implemented and tested in
-the simulator.
-
-Example:
+The full camera example uses the normal `run_corsika_trace` event/camera path,
+writes LACT ROOT, and is read back through `pylast.io.LactEventSource`:
 
 ```bash
-python python/corsika_photon_csv_to_minimal.py \
+build/run_corsika_trace configs/examples/photon_csv_full_camera_root.cfg
+python3 python/plot_photon_csv_root_pylast.py \
+  run_logs/examples/photon_csv_full_camera/lact_events.root \
+  --event-id 1909 --telescope-id 19 \
+  --output run_logs/examples/photon_csv_full_camera/camera_pe.png
+```
+
+This cfg assigns every row a fixed wavelength of 400 nm, uses discrete p.e.
+sampling, and disables NSB, trigger, and waveform processing. Those detector
+features can still be enabled with the same keys used by an EventIO run.
+EventIO metadata is optional for PhotonCsv; unavailable shower-truth fields in
+the ROOT file remain at their documented default or non-finite values.
+
+The optical plots retain the native focal-plane orientation. At the ROOT/pyLAST
+boundary, `LactEventSource` applies the normal source-offset display convention:
+
+```text
+pyLAST pix_x = -LACT_sim camera_x
+pyLAST pix_y = -LACT_sim camera_y
+```
+
+## Creating the six-column input
+
+`python/corsika_photon_csv_to_minimal.py` selects one telescope and removes
+optional columns:
+
+```bash
+python3 python/corsika_photon_csv_to_minimal.py \
   event1909_photons.csv \
   configs/sources/event1909_tel19_minimal_photons.csv \
   --telescope-id 19
 ```
 
-For this CORSIKA 2-D example, `z_m=0` is already a valid upstream reference
-plane and does not need to be reconstructed. If another producer supplies
-points downstream of the mirror, that producer should move each point along
-its own ray to an upstream plane before writing the minimal CSV.
-
-The supplied event-1909 example deliberately treats every CORSIKA bunch record
-as one representative photon row. It is therefore suitable for checking image
-shape and coordinate transformations, but its total photon count is not the
-original multiplicity-weighted CORSIKA photon count.
+The helper retains CORSIKA North-West-Up coordinates, so use
+`source.coordinate_frame=corsika_nwu_relative`. The supplied file treats every
+CORSIKA bunch record as one photon row; it is intended for image-shape and
+coordinate checks, not for preserving the original bunch-weighted intensity.

@@ -176,7 +176,8 @@ void PhotonCsvSource::load() {
         bunch.array_id =
             optionalInt(cells, header, "array_id", 0);
         bunch.source_bunch_index =
-            optionalUInt64(cells, header, "source_bunch_index", 0);
+            optionalUInt64(cells, header, "source_bunch_index",
+                           static_cast<std::uint64_t>(line_no - 2));
         bunch.eventio_2d =
             optionalBool(cells, header, "eventio_2d", false);
         bunch.emission_altitude_km =

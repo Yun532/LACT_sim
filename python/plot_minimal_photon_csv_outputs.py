@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""Plot the minimal-CSV outputs.
-
-The whiteboard and ideal photon-count figures are optical diagnostics.  The
-full expected-p.e. image is rendered by pylast's camera plotting function, so
-its axes, camera orientation, inactive-pixel treatment, and angular units are
-the same as the normal CORSIKA/ROOT analysis path.
-"""
+"""Plot the two pure-optics outputs from a minimal PhotonCsv."""
 
 from __future__ import annotations
 
@@ -90,106 +84,32 @@ def plot_camera(
     plt.close(figure)
 
 
-def plot_pylast_camera(
-    camera_path: Path,
-    pixels_path: Path,
-    output: Path,
-    focal_length_m: float,
-) -> None:
-    """Render the full camera response using pylast's native display logic."""
-    from pylast.visualize.visualize import plot_camera_image
-
-    camera = read_rows(camera_path)
-    by_id = {
-        int(row["pixel_id"]): float(row["pe"]) for row in read_rows(pixels_path)
-    }
-    pix_x_m = np.asarray([float(row["x_m"]) for row in camera], dtype=float)
-    pix_y_m = np.asarray([float(row["y_m"]) for row in camera], dtype=float)
-    image_pe = np.asarray(
-        [by_id.get(int(row["id"]), 0.0) for row in camera], dtype=float
-    )
-    pixel_size_m = float(camera[0]["size_m"])
-
-    # Match LactEventSource::load_telescopes: LACT_sim stores focal-plane hit
-    # coordinates, while pyLAST displays source-offset camera coordinates.
-    pix_x_deg = np.degrees(np.arctan2(-pix_x_m, focal_length_m))
-    pix_y_deg = np.degrees(np.arctan2(-pix_y_m, focal_length_m))
-    pixel_size_deg = float(
-        np.degrees(np.arctan2(pixel_size_m, focal_length_m))
-    )
-    mask = image_pe > 0.0
-
-    axis = plot_camera_image(
-        pix_x_deg,
-        pix_y_deg,
-        pixel_size_deg,
-        image_pe,
-        mask=mask,
-        vmin=0.0,
-        vmax=float(np.max(image_pe)) if np.any(mask) else 1.0,
-        title="Full camera response (pylast convention, no waveform)",
-        pixel_shape="square",
-    )
-    axis.text(
-        0.02,
-        0.02,
-        f"Total expected p.e. = {image_pe.sum():.2f}",
-        transform=axis.transAxes,
-        ha="left",
-        va="bottom",
-        fontsize=9,
-        bbox={"facecolor": "white", "alpha": 0.8, "edgecolor": "none"},
-    )
-    figure = axis.figure
-    figure.savefig(output, dpi=220, bbox_inches="tight")
-    plt.close(figure)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--mode",
-        choices=("optics", "camera", "all"),
-        default="all",
-        help="optics writes two focal-plane diagnostics; camera writes one pyLAST PE image",
+        choices=("optics",),
+        default="optics",
+        help="write the whiteboard and raw photon-count camera diagnostics",
     )
-    parser.add_argument("--hits", type=Path)
-    parser.add_argument("--photon-pixels", type=Path)
-    parser.add_argument("--pe-pixels", type=Path)
+    parser.add_argument("--hits", type=Path, required=True)
+    parser.add_argument("--photon-pixels", type=Path, required=True)
     parser.add_argument("--camera", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument(
-        "--focal-length-m",
-        type=float,
-        default=8.0,
-        help="effective focal length used by pylast's angular camera view",
-    )
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.mode in ("optics", "all"):
-        if args.hits is None or args.photon_pixels is None:
-            parser.error("--mode optics/all requires --hits and --photon-pixels")
-        plot_whiteboard(
-            args.hits, args.output_dir / "minimal_photons_whiteboard.png"
-        )
-        plot_camera(
-            args.camera,
-            args.photon_pixels,
-            "photon_count",
-            "Photons",
-            "Ideal camera photon count",
-            args.output_dir / "minimal_photons_camera_counts.png",
-        )
-    if args.mode in ("camera", "all"):
-        if args.pe_pixels is None:
-            parser.error("--mode camera/all requires --pe-pixels")
-        plot_pylast_camera(
-            args.camera,
-            args.pe_pixels,
-            args.output_dir / "minimal_photons_camera_pe.png",
-            args.focal_length_m,
-        )
+    plot_whiteboard(
+        args.hits, args.output_dir / "minimal_photons_whiteboard.png"
+    )
+    plot_camera(
+        args.camera,
+        args.photon_pixels,
+        "photon_count",
+        "Photons",
+        "Ideal camera photon count",
+        args.output_dir / "minimal_photons_camera_counts.png",
+    )
 
 
 if __name__ == "__main__":
