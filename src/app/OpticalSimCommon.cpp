@@ -1729,7 +1729,7 @@ SourceRuntimeConfig buildSourceRuntimeConfig(const std::map<std::string, std::st
     }
     runtime.eventio_coordinate_frame = runtime.coordinate_frame;
     runtime.eventio_2d_input_plane_z_m =
-        getDouble(cfg, "source.eventio_2d_input_plane_z_m", 0.0);
+        getDouble(cfg, "source.eventio_2d_input_plane_z_m", -16.0);
     runtime.eventio_2d_plane_mode =
         lowerCopy(getString(cfg, "source.eventio_2d_plane_mode", "auto"));
     if (runtime.eventio_2d_plane_mode != "auto" &&
@@ -2386,7 +2386,7 @@ CollectorTraceResult traceLightCollector(const Cone::SquareCone& cone,
     Cone::DirectionVecter dir{
         hit.out_dir.dot(plane.u_axis),
         hit.out_dir.dot(plane.v_axis),
-        -std::abs(hit.out_dir.dot(plane.normal))
+        hit.out_dir.dot(plane.normal.normalized())
     };
     double intensity = 1.0;
     auto [out_intensity, exits_collector, exit_pos, exit_dir, reflections] =
@@ -2413,6 +2413,14 @@ void applyCameraResponse(const CameraGeometry& camera,
                          OpticalSurfaceHit& hit)
 {
     hit.camera_enabled = true;
+    const double front_face_cosine =
+        hit.out_dir.dot(plane.normal.normalized());
+    if (!std::isfinite(front_face_cosine) || front_face_cosine >= -1.0e-12) {
+        hit.hit_camera = false;
+        hit.accepted = false;
+        hit.pixel_id = -1;
+        return;
+    }
     hit.camera_x_m = hit.u_m;
     hit.camera_y_m = hit.v_m;
     const CameraPixel* pixel = findContainingPixel(camera, hit.camera_x_m, hit.camera_y_m);
@@ -2771,18 +2779,20 @@ bool segmentIntersectsBoxWithHole(const Vec3& a,
     return !(entry_inside && exit_inside);
 }
 
-bool primitiveAppliesToDirection(const ObstructionMask::Primitive& primitive,
-                                 const Vec3& direction)
+enum class ObstructionLeg {
+    Incoming,
+    Reflected,
+};
+
+bool primitiveAppliesToLeg(const ObstructionMask::Primitive& primitive,
+                           ObstructionLeg leg)
 {
     const std::string role = lowerCopy(primitive.role);
     const std::string material = lowerCopy(primitive.material_id);
     if (material == "void") {
         return false;
     }
-    if (direction.z > 0.0 && role != "support_strut") {
-        return false;
-    }
-    return true;
+    return leg == ObstructionLeg::Incoming || role == "support_strut";
 }
 
 std::map<std::string, std::string> csvRowMap(const std::vector<std::string>& header,
@@ -2831,15 +2841,15 @@ int csvGetInt(const std::map<std::string, std::string>& row,
 
 bool segmentBlockedLocal(const Vec3& a,
                          const Vec3& b,
-                         const ObstructionMask& obstruction)
+                         const ObstructionMask& obstruction,
+                         ObstructionLeg leg)
 {
     if (!obstruction.enabled) {
         return false;
     }
     if (lowerCopy(obstruction.mode) == "primitives") {
-        const Vec3 direction = b - a;
         for (const auto& primitive : obstruction.primitives) {
-            if (!primitiveAppliesToDirection(primitive, direction)) {
+            if (!primitiveAppliesToLeg(primitive, leg)) {
                 continue;
             }
             const std::string type = lowerCopy(primitive.type);
@@ -3058,7 +3068,8 @@ bool photonBlockedByObstruction(const Photon& photon,
         p = trace_to_local_frame->pointToLocal(photon.pos);
         d = trace_to_local_frame->rotateVectorToLocal(photon.dir).normalized();
     }
-    return segmentBlockedLocal(p, p + d * 1.0e4, obstruction);
+    return segmentBlockedLocal(p, p + d * 1.0e4, obstruction,
+                               ObstructionLeg::Incoming);
 }
 
 bool incomingSegmentBlockedByObstruction(const Vec3& a,
@@ -3075,7 +3086,66 @@ bool incomingSegmentBlockedByObstruction(const Vec3& a,
         p0 = trace_to_local_frame->pointToLocal(a);
         p1 = trace_to_local_frame->pointToLocal(b);
     }
-    return segmentBlockedLocal(p0, p1, obstruction);
+    return segmentBlockedLocal(p0, p1, obstruction, ObstructionLeg::Incoming);
+}
+
+bool incomingRayBlockedByObstruction(const Vec3& mirror_point,
+                                     const Vec3& incoming_direction,
+                                     const ObstructionMask& obstruction,
+                                     const TelescopeFrame* trace_to_local_frame)
+{
+    if (!obstruction.enabled || !obstruction.check_incoming) {
+        return false;
+    }
+
+    Vec3 p = mirror_point;
+    Vec3 d = incoming_direction;
+    if (trace_to_local_frame) {
+        p = trace_to_local_frame->pointToLocal(mirror_point);
+        d = trace_to_local_frame->rotateVectorToLocal(incoming_direction);
+    }
+    if (d.norm2() <= 0.0) {
+        return false;
+    }
+    d = d.normalized();
+
+    double upstream_length = 0.0;
+    if (lowerCopy(obstruction.mode) == "primitives") {
+        double obstruction_radius = 0.0;
+        for (const auto& primitive : obstruction.primitives) {
+            const std::string type = lowerCopy(primitive.type);
+            if (type == "cylinder") {
+                obstruction_radius = std::max(
+                    obstruction_radius,
+                    std::max(primitive.p0.norm(), primitive.p1.norm()) +
+                        std::max(0.0, primitive.radius_m));
+            } else if (type == "box" || type == "aabb") {
+                obstruction_radius = std::max(
+                    obstruction_radius,
+                    primitive.center.norm() + primitive.half_size.norm());
+            } else if (type == "polygon_prism") {
+                const double half_height = 0.5 * std::max(0.0, primitive.height_m);
+                const double local_radius =
+                    std::hypot(std::max(0.0, primitive.radius_m), half_height);
+                obstruction_radius = std::max(
+                    obstruction_radius,
+                    primitive.center.norm() + local_radius);
+            }
+        }
+        upstream_length = p.norm() + obstruction_radius + 1.0;
+    } else {
+        if (std::abs(d.z) < 1e-12) {
+            return false;
+        }
+        const double distance_to_plane = (p.z - obstruction.plane_z_m) / d.z;
+        if (distance_to_plane <= 0.0) {
+            return false;
+        }
+        upstream_length = distance_to_plane + 1.0;
+    }
+
+    return segmentBlockedLocal(p - d * upstream_length, p, obstruction,
+                               ObstructionLeg::Incoming);
 }
 
 bool segmentBlockedByObstruction(const Vec3& a,
@@ -3092,7 +3162,7 @@ bool segmentBlockedByObstruction(const Vec3& a,
         p0 = trace_to_local_frame->pointToLocal(a);
         p1 = trace_to_local_frame->pointToLocal(b);
     }
-    return segmentBlockedLocal(p0, p1, obstruction);
+    return segmentBlockedLocal(p0, p1, obstruction, ObstructionLeg::Reflected);
 }
 
 void applyStructuralDeformation(std::vector<MirrorFacet>& facets,

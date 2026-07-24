@@ -97,6 +97,38 @@ cz = -sqrt(1 - cx^2 - cy^2)
 The negative sign means the photon is travelling downward in the CORSIKA
 vertical coordinate.
 
+The EventIO bunch stores telescope-relative `x` and `y`, but no per-bunch `z`.
+After rotating that anchor into telescope-local coordinates, the existing
+scalar setting translates it to the optical model's local origin:
+
+```ini
+source.eventio_2d_input_plane_z_m=-16
+```
+
+The default is `-16 m`. This is the coordinate mapping for the current imported
+LACT model: the mirror vertex is near `z=-16 m` and the camera near `z=-8 m`,
+whereas sim_telarray's corresponding optical coordinates place the mirror
+vertex near `z=0` and the camera near `z=+8 m`. It is not a statement that the
+photons were created 16 m below the mirror, and it does not change CORSIKA's
+global observation level.
+
+`0` remains supported for coordinate diagnostics, but it is not an equivalent
+origin for this imported geometry. Changing only this value keeps EventIO
+`x`, `y`, direction, and time fixed and therefore defines a different parallel
+line in the local optical model; different camera results are expected.
+
+The default `source.eventio_2d_plane_mode=auto` treats every 2D EventIO bunch
+as a complete incoming line. Mirror intersection may therefore have either
+sign of `t`; the photon direction is still used to require front-face
+incidence. Use `forward` only when the input position is known to be a real
+upstream ray origin rather than a record-plane anchor.
+
+CORSIKA telescope positions, including different telescope heights, remain
+array/global metadata used for the shower wavefront and timing. Since bunch
+`x,y` are already relative to each telescope, telescopes using the same optical
+model all use the same local `-16 m` shift. Do not add a telescope's installation
+height to this local value.
+
 ### 3. Telescope Pointing In The CORSIKA Frame
 
 For CORSIKA/EventIO mode, LACT_sim uses an azimuth convention compatible with

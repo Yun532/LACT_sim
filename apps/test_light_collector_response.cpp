@@ -72,6 +72,13 @@ int main()
     ok &= check(std::abs(direct.relative_efficiency - 1.0) < 1e-12,
                 "direct center hit should keep ideal electronics weight");
 
+    auto backside = makeHit(0.0, 0.0, {0.0, 0.0, -1.0});
+    applyCameraResponse(camera, nullptr, plane, sipm, electronics, backside);
+    ok &= check(!backside.hit_camera,
+                "ray crossing the camera plane from behind must be rejected");
+    ok &= check(!backside.accepted && backside.pixel_id < 0,
+                "camera backside rejection must happen before pixel response");
+
     auto outside = makeHit(0.02, 0.0, {0.0, 0.0, 1.0});
     applyCameraResponse(camera, nullptr, plane, sipm, electronics, outside);
     ok &= check(!outside.hit_camera, "point outside square pixel should not hit camera");

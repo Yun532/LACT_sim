@@ -208,7 +208,10 @@ struct SourceRuntimeConfig {
     std::string csv_path;
     std::string eventio_path;
     std::string eventio_coordinate_frame = "corsika_iact";
-    double eventio_2d_input_plane_z_m = 0.0;
+    // Telescope-local optical-origin shift applied to 2D EventIO bunch
+    // anchors after rotation. It maps the CORSIKA telescope reference to the
+    // imported LACT coordinates, whose mirror vertex is near z=-16 m.
+    double eventio_2d_input_plane_z_m = -16.0;
     std::string eventio_2d_plane_mode = "auto";
     std::string event_id_mode = "event";
     bool use_eventio_telescope_position = true;
@@ -388,6 +391,10 @@ bool incomingSegmentBlockedByObstruction(const Vec3& a,
                                          const Vec3& b,
                                          const ObstructionMask& obstruction,
                                          const TelescopeFrame* trace_to_local_frame = nullptr);
+bool incomingRayBlockedByObstruction(const Vec3& mirror_point,
+                                     const Vec3& incoming_direction,
+                                     const ObstructionMask& obstruction,
+                                     const TelescopeFrame* trace_to_local_frame = nullptr);
 bool segmentBlockedByObstruction(const Vec3& a,
                                  const Vec3& b,
                                  const ObstructionMask& obstruction,

@@ -115,10 +115,10 @@ Supported primitive types:
 Coordinates are LACT telescope-local meters. The code can test both the
 incoming segment before mirror intersection and the reflected segment from
 mirror to output plane, so the shadow depends on source direction and telescope
-pointing. For primitive mode, a segment with local `dir.z < 0` checks all solid
-objects; a segment with local `dir.z > 0` checks only `role=support_strut`, so
-camera-side bodies above the receiving plane do not incorrectly block reflected
-photons on their way to the whiteboard/camera.
+pointing. The caller explicitly identifies the incoming or reflected leg; the
+leg is not inferred from local `dir.z`. Incoming checks include all solid
+objects, while reflected checks include `role=support_strut`, so camera-side
+bodies do not incorrectly self-block photons ending at the camera plane.
 
 The legacy `obstruction.mode=mask` path still exists for diagnostic 2D masks,
 but it should not be used as the formal off-axis obstruction model because a

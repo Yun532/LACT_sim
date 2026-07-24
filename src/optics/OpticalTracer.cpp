@@ -94,85 +94,8 @@ OpticalSurfaceHit OpticalTracer::traceToPlane(const Photon& photon,
                                               const OutputPlane& plane_in,
                                               const OpticalEfficiency& eff) const
 {
-    OpticalSurfaceHit hit;
-
-    if (mirrors.empty()) return hit;
-
-    OutputPlane plane = plane_in;
-    if (plane.u_axis.norm2() <= 0.0 || plane.v_axis.norm2() <= 0.0) {
-        plane.buildLocalFrame();
-    } else {
-        plane.normal = plane.normal.normalized();
-        plane.u_axis = plane.u_axis.normalized();
-        plane.v_axis = plane.v_axis.normalized();
-    }
-
-    double best_t = std::numeric_limits<double>::max();
-    const MirrorTile* best_tile = nullptr;
-    MirrorIntersection best_sol;
-
-    for (const auto& tile : mirrors.tiles()) {
-        auto sol = intersectMirror(photon.pos, photon.dir, tile);
-        if (!sol.has_value()) continue;
-
-        if (sol->t < best_t) {
-            best_t = sol->t;
-            best_tile = &tile;
-            best_sol = *sol;
-        }
-    }
-
-    if (!best_tile) {
-        return hit;
-    }
-
-    hit.hit_mirror = true;
-    hit.mirror_id = best_tile->id;
-    hit.mirror_point = best_sol.point;
-
-    Vec3 n = best_sol.normal.normalized();
-    Vec3 out_dir = reflectDirection(photon.dir, n);
-    std::uint64_t scatter_seed = random_seed_;
-    scatter_seed = mixSeed(scatter_seed, static_cast<std::uint64_t>(best_tile->id + 1));
-    scatter_seed = mixSeed(scatter_seed, hashDouble(photon.pos.x));
-    scatter_seed = mixSeed(scatter_seed, hashDouble(photon.pos.y));
-    scatter_seed = mixSeed(scatter_seed, hashDouble(photon.pos.z));
-    scatter_seed = mixSeed(scatter_seed, hashDouble(photon.dir.x));
-    scatter_seed = mixSeed(scatter_seed, hashDouble(photon.dir.y));
-    scatter_seed = mixSeed(scatter_seed, hashDouble(photon.dir.z));
-    scatter_seed = mixSeed(scatter_seed, photon.random_stream_id);
-    const double scatter_sigma_rad = std::hypot(reflect_direction_sigma_rad_,
-                                                best_tile->roughness_sigma_rad);
-    out_dir = perturbDirection(out_dir, scatter_sigma_rad, scatter_seed);
-
-    auto surf_sol = intersectOutputPlane(best_sol.point, out_dir, plane);
-    if (!surf_sol.has_value()) {
-        return hit;
-    }
-
-    const auto& [ts, surf_p] = *surf_sol;
-    hit.hit_surface = true;
-    hit.surface_point = surf_p;
-    hit.out_dir = out_dir;
-
-    Vec3 rel = surf_p - plane.point;
-    hit.u_m = rel.dot(plane.u_axis);
-    hit.v_m = rel.dot(plane.v_axis);
-
-    double total_path_m = best_sol.t + ts;
-    hit.time_ns = photon.time_ns + total_path_m / speed_of_light_m_per_ns_;
-    hit.wavelength_nm = photon.wavelength_nm;
-    hit.weight = photon.weight;
-
-    double cosang = std::clamp(std::abs(out_dir.dot(plane.normal.normalized())), 0.0, 1.0);
-    double incidence_angle = std::acos(cosang);
-    hit.relative_efficiency = best_tile->reflectivity_scale *
-                              (photon.optical_efficiency_preapplied
-                                   ? eff.funnelAcceptance(incidence_angle,
-                                                          photon.wavelength_nm)
-                                   : eff.total(photon.wavelength_nm, incidence_angle));
-
-    return hit;
+    return traceToPlaneImpl(photon, mirrors, plane_in, eff,
+                            IncomingPath::ForwardRay);
 }
 
 OpticalSurfaceHit OpticalTracer::traceBackprojectedToPlane(
@@ -180,6 +103,17 @@ OpticalSurfaceHit OpticalTracer::traceBackprojectedToPlane(
     const MirrorLayout& mirrors,
     const OutputPlane& plane_in,
     const OpticalEfficiency& eff) const
+{
+    return traceToPlaneImpl(photon, mirrors, plane_in, eff,
+                            IncomingPath::FullLine);
+}
+
+OpticalSurfaceHit OpticalTracer::traceToPlaneImpl(
+    const Photon& photon,
+    const MirrorLayout& mirrors,
+    const OutputPlane& plane_in,
+    const OpticalEfficiency& eff,
+    IncomingPath incoming_path) const
 {
     OpticalSurfaceHit hit;
 
@@ -194,17 +128,28 @@ OpticalSurfaceHit OpticalTracer::traceBackprojectedToPlane(
         plane.v_axis = plane.v_axis.normalized();
     }
 
-    double best_abs_t = std::numeric_limits<double>::max();
+    const bool full_line = incoming_path == IncomingPath::FullLine;
+    double best_t = std::numeric_limits<double>::max();
     const MirrorTile* best_tile = nullptr;
     MirrorIntersection best_sol;
 
     for (const auto& tile : mirrors.tiles()) {
-        auto sol = intersectMirror(photon.pos, photon.dir, tile, true);
+        auto sol = intersectMirror(photon.pos, photon.dir, tile, full_line);
         if (!sol.has_value()) continue;
 
-        const double abs_t = std::abs(sol->t);
-        if (abs_t < best_abs_t) {
-            best_abs_t = abs_t;
+        Vec3 front_normal = sol->normal.normalized();
+        if (front_normal.dot(tile.normal) < 0.0) {
+            front_normal *= -1.0;
+        }
+        if (photon.dir.dot(front_normal) >= -EPS) continue;
+
+        // For a full incoming line, choose the first mirror encountered in
+        // the photon propagation direction, not the intersection closest to
+        // the arbitrary EventIO record-plane anchor. Translating the anchor
+        // along the same line then adds one constant to every t and cannot
+        // change which facet is selected.
+        if (sol->t < best_t) {
+            best_t = sol->t;
             best_tile = &tile;
             best_sol = *sol;
         }
@@ -378,7 +323,7 @@ OpticalTracer::intersectSphericalFacet(const Vec3& p0, const Vec3& d, const Mirr
     if (!sol1 && sol2) return sol2;
 
     if (allow_negative_t) {
-        return (std::abs(sol1->t) < std::abs(sol2->t)) ? sol1 : sol2;
+        return (sol1->t < sol2->t) ? sol1 : sol2;
     }
 
     double a1 = std::abs((sol1->point - tile.center).dot(n0));
@@ -449,9 +394,7 @@ OpticalTracer::intersectParaboloid(const Vec3& p0, const Vec3& d, const MirrorTi
         if (!ok1 && !ok2) {
             return std::nullopt;
         } else if (ok1 && ok2) {
-            t = allow_negative_t
-                    ? (std::abs(t1) < std::abs(t2) ? t1 : t2)
-                    : std::min(t1, t2);
+            t = std::min(t1, t2);
         } else {
             t = ok1 ? t1 : t2;
         }

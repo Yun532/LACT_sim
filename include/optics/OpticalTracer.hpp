@@ -30,11 +30,22 @@ public:
                                                 const OpticalEfficiency& eff) const;
 
 private:
+    enum class IncomingPath {
+        ForwardRay,
+        FullLine,
+    };
+
     struct MirrorIntersection {
         double t = 0.0;
         Vec3 point;
         Vec3 normal;
     };
+
+    OpticalSurfaceHit traceToPlaneImpl(const Photon& photon,
+                                       const MirrorLayout& mirrors,
+                                       const OutputPlane& plane,
+                                       const OpticalEfficiency& eff,
+                                       IncomingPath incoming_path) const;
 
     static std::optional<MirrorIntersection>
     intersectMirror(const Vec3& p0, const Vec3& d, const MirrorTile& tile,

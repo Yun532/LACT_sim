@@ -154,6 +154,19 @@ int main()
     });
     ok &= check(default_csv.coordinate_frame == "telescope_local",
                 "PhotonCsv must default to the existing telescope-local frame");
+    const SourceRuntimeConfig default_eventio = buildSourceRuntimeConfig({
+        {"source.mode", "EventIO"},
+        {"source.eventio_path", "corsika.zst"},
+    });
+    ok &= check(near(default_eventio.eventio_2d_input_plane_z_m, -16.0),
+                "EventIO 2D local input-plane z must default to -16 m");
+    const SourceRuntimeConfig explicit_eventio_z0 = buildSourceRuntimeConfig({
+        {"source.mode", "EventIO"},
+        {"source.eventio_path", "corsika.zst"},
+        {"source.eventio_2d_input_plane_z_m", "0"},
+    });
+    ok &= check(near(explicit_eventio_z0.eventio_2d_input_plane_z_m, 0.0),
+                "EventIO 2D local input-plane z must remain configurable");
     const TelescopeConfig default_telescope = buildTelescopeConfig({});
     ok &= check(nearVec(default_telescope.position_m, {0.0, 0.0, 0.0}),
                 "unset telescope.position_m must default to the array origin");

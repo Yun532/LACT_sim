@@ -146,8 +146,10 @@ PhotonBunch transformEventIOBunchToTraceFrame(
     const SourceRuntimeConfig& source_runtime_cfg)
 {
     auto apply_2d_plane_z = [&](PhotonBunch& bunch) {
-        if (bunch.eventio_2d && source_runtime_cfg.eventio_2d_input_plane_z_m != 0.0) {
-            bunch.photon.pos.z += source_runtime_cfg.eventio_2d_input_plane_z_m;
+        if (bunch.eventio_2d &&
+            source_runtime_cfg.eventio_2d_input_plane_z_m != 0.0) {
+            bunch.photon.pos.z +=
+                source_runtime_cfg.eventio_2d_input_plane_z_m;
         }
     };
     TelescopeConfig telescope = telescope_cfg;
@@ -199,18 +201,16 @@ double mirrorFrontReferenceZ(const MirrorLayout& mirrors)
     return std::isfinite(z) ? z : -16.0;
 }
 
-bool shouldBackprojectEventIO2d(const SourceRuntimeConfig& source_runtime_cfg,
-                                const MirrorLayout& mirrors)
+bool shouldBackprojectEventIO2d(const SourceRuntimeConfig& source_runtime_cfg)
 {
     const std::string mode = lowerCopy(trim(source_runtime_cfg.eventio_2d_plane_mode));
-    if (mode == "backproject") {
-        return true;
-    }
     if (mode == "forward") {
         return false;
     }
-    const double mirror_front_z = mirrorFrontReferenceZ(mirrors);
-    return source_runtime_cfg.eventio_2d_input_plane_z_m <= mirror_front_z + 1e-6;
+    // A 2D EventIO bunch supplies an anchor on the unperturbed photon line,
+    // not a creation point. In both auto and explicit backproject modes the
+    // mirror may therefore lie at either sign of t relative to that anchor.
+    return true;
 }
 
 struct OutputEventMetadata {
@@ -381,6 +381,9 @@ CorsikaTraceOutputConfig buildCorsikaTraceOutputConfig(
                              getString(cfg, "output.whiteboard_csv", out.hits_csv));
     out.pixel_csv = getString(cfg, "output.pixel_csv", out.pixel_csv);
     out.summary_csv = getString(cfg, "output.summary_csv", out.summary_csv);
+    out.mirror_diagnostic_csv =
+        getString(cfg, "output.mirror_diagnostic_csv",
+                  out.mirror_diagnostic_csv);
     out.hdf5_path = getString(cfg, "output.hdf5_path",
                               getString(cfg, "output.h5_path", out.hdf5_path));
     out.lact_root_enabled =
@@ -859,6 +862,32 @@ void writeCorsikaWhiteboardHit(std::ofstream& ofs,
             << bunch.emitter_time_ns;
     }
     ofs << "\n";
+}
+
+void writeCorsikaMirrorDiagnosticHeader(std::ofstream& ofs)
+{
+    ofs << std::setprecision(10);
+    ofs << "event_id,telescope_id,photon_index,mirror_id,"
+        << "mirror_x_m,mirror_y_m,mirror_z_m,"
+        << "weight,relative_efficiency,status\n";
+}
+
+void writeCorsikaMirrorDiagnosticHit(std::ofstream& ofs,
+                                     const PhotonBunch& bunch,
+                                     std::uint64_t photon_index,
+                                     const OpticalSurfaceHit& hit,
+                                     const char* status)
+{
+    ofs << bunch.event_id << ","
+        << bunch.telescope_id << ","
+        << photon_index << ","
+        << hit.mirror_id << ","
+        << hit.mirror_point.x << ","
+        << hit.mirror_point.y << ","
+        << hit.mirror_point.z << ","
+        << hit.weight << ","
+        << hit.relative_efficiency << ","
+        << status << "\n";
 }
 
 WhiteboardHdf5Row makeWhiteboardHdf5Row(const PhotonBunch& bunch,
@@ -3315,7 +3344,7 @@ int main(int argc, char** argv) {
                              error_cfg.random_seed);
         const double eventio_mirror_front_z_m = mirrorFrontReferenceZ(mirrors);
         const bool eventio_2d_backproject =
-            shouldBackprojectEventIO2d(source_runtime_cfg, mirrors);
+            shouldBackprojectEventIO2d(source_runtime_cfg);
         CorsikaTraceOutputConfig output_cfg = buildCorsikaTraceOutputConfig(cfg);
         WaveformOutputConfig waveform_cfg = buildWaveformOutputConfig(cfg);
         CollectorDebugConfig collector_debug_cfg = buildCollectorDebugConfig(cfg);
@@ -3460,6 +3489,22 @@ int main(int argc, char** argv) {
             }
             writeCorsikaWhiteboardHeader(whiteboard_out,
                                          output_cfg.whiteboard_emitter_info);
+        }
+
+        std::ofstream mirror_diagnostic_out;
+        if (!output_cfg.mirror_diagnostic_csv.empty()) {
+            const std::filesystem::path out_path(
+                output_cfg.mirror_diagnostic_csv);
+            if (out_path.has_parent_path()) {
+                std::filesystem::create_directories(out_path.parent_path());
+            }
+            mirror_diagnostic_out.open(output_cfg.mirror_diagnostic_csv);
+            if (!mirror_diagnostic_out) {
+                throw std::runtime_error(
+                    "failed to write mirror diagnostic CSV: " +
+                    output_cfg.mirror_diagnostic_csv);
+            }
+            writeCorsikaMirrorDiagnosticHeader(mirror_diagnostic_out);
         }
 
         std::map<SummaryKey, TraceSummary> summaries;
@@ -3747,13 +3792,23 @@ int main(int argc, char** argv) {
                 if (profile_cfg.enabled) {
                     t_step = std::chrono::steady_clock::now();
                 }
-                if (incomingSegmentBlockedByObstruction(photon.pos, hit.mirror_point,
-                                                        obstruction, nullptr)) {
+                // A 2D EventIO position is only an anchor on the incoming
+                // line. Obstruction is checked on the physical upstream ray,
+                // independent of which side of the mirror contains the
+                // record plane.
+                if (incomingRayBlockedByObstruction(hit.mirror_point,
+                                                    photon.dir,
+                                                    obstruction, nullptr)) {
                     if (profile_cfg.enabled) {
                         addElapsed(profile_stats, &ProfileStats::obstruction_s, t_step);
                     }
                     summary.blocked_by_obstruction += 1;
                     summary.blocked_incoming += 1;
+                    if (mirror_diagnostic_out) {
+                        writeCorsikaMirrorDiagnosticHit(
+                            mirror_diagnostic_out, bunch, photon_index, hit,
+                            "blocked_incoming");
+                    }
                     return;
                 }
                 if (profile_cfg.enabled) {
@@ -3762,6 +3817,11 @@ int main(int argc, char** argv) {
                 summary.hit_mirror += 1;
             }
             if (!hit.hit_surface) {
+                if (hit.hit_mirror && mirror_diagnostic_out) {
+                    writeCorsikaMirrorDiagnosticHit(
+                        mirror_diagnostic_out, bunch, photon_index, hit,
+                        "reflected_missed_output");
+                }
                 return;
             }
             if (profile_cfg.enabled) {
@@ -3774,6 +3834,11 @@ int main(int argc, char** argv) {
                 }
                 summary.blocked_by_obstruction += 1;
                 summary.blocked_reflected += 1;
+                if (mirror_diagnostic_out) {
+                    writeCorsikaMirrorDiagnosticHit(
+                        mirror_diagnostic_out, bunch, photon_index, hit,
+                        "blocked_reflected");
+                }
                 return;
             }
             if (profile_cfg.enabled) {
@@ -3781,6 +3846,11 @@ int main(int argc, char** argv) {
             }
 
             summary.hit_output_plane += 1;
+            if (mirror_diagnostic_out) {
+                writeCorsikaMirrorDiagnosticHit(
+                    mirror_diagnostic_out, bunch, photon_index, hit,
+                    "reflected_to_output");
+            }
 
             if (!camera_cfg.enabled) {
                 if (candidate.stochastic &&
