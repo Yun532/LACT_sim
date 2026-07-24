@@ -444,9 +444,15 @@ int main(int argc, char** argv) {
                 if (hit.hit_surface) {
                     ++n_hit_surface_before_obstruction;
                 }
-                hit.obstruction_blocked_incoming =
-                    incomingSegmentBlockedByObstruction(photon.pos, hit.mirror_point,
-                                                        obstruction, &telescope_frame);
+                // A signed-line 2D record position is only an anchor on the
+                // incoming photon line. Check the physical upstream ray rather
+                // than the finite anchor-to-mirror segment, which can lie on
+                // the downstream side of the mirror after backprojection.
+                hit.obstruction_blocked_incoming = signed_line
+                    ? incomingRayBlockedByObstruction(hit.mirror_point, photon.dir,
+                                                      obstruction, &telescope_frame)
+                    : incomingSegmentBlockedByObstruction(photon.pos, hit.mirror_point,
+                                                          obstruction, &telescope_frame);
                 if (hit.obstruction_blocked_incoming) {
                     ++n_blocked;
                     ++n_blocked_incoming;

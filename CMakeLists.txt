@@ -268,6 +268,14 @@ add_test(NAME run_optical_sim_photon_csv_filter
 set_tests_properties(run_optical_sim_photon_csv_filter PROPERTIES
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_test(
+    NAME run_optical_sim_eventio_2d_obstruction
+    COMMAND run_optical_sim
+            ${CMAKE_CURRENT_SOURCE_DIR}/configs/test_eventio_2d_obstruction.cfg)
+set_tests_properties(run_optical_sim_eventio_2d_obstruction PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    PASS_REGULAR_EXPRESSION "blocked_incoming=1")
+
 add_test(NAME run_optical_sim_rejects_eventio
          COMMAND run_optical_sim ${CMAKE_CURRENT_SOURCE_DIR}/configs/official_tests/corsika_whiteboard.cfg)
 set_tests_properties(run_optical_sim_rejects_eventio PROPERTIES
