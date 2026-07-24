@@ -29,6 +29,19 @@ The plotting input is
 [`configs/sources/event1909_tel19_minimal_photons.csv`](../configs/sources/event1909_tel19_minimal_photons.csv).
 It contains only the six required columns.
 
+The CORSIKA-derived rows retain the raw 2D bunch convention `z_m=0`. Both
+example cfg files set:
+
+```ini
+source.eventio_2d=true
+```
+
+This is a cfg-level interpretation, not a seventh required CSV column. After
+the NWU-to-telescope rotation, LACT_sim applies the normal EventIO 2D local
+input-plane default of `-16 m` and treats the record as a complete ray for
+signed mirror intersection. Hand-written optical CSV files leave
+`source.eventio_2d` unset and their six positions remain literal.
+
 Pure optics produces a whiteboard image and a raw photon-count camera image:
 
 ```bash
@@ -79,6 +92,7 @@ python3 python/corsika_photon_csv_to_minimal.py \
 ```
 
 The helper retains CORSIKA North-West-Up coordinates, so use
-`source.coordinate_frame=corsika_nwu_relative`. The supplied file treats every
-CORSIKA bunch record as one photon row; it is intended for image-shape and
-coordinate checks, not for preserving the original bunch-weighted intensity.
+`source.coordinate_frame=corsika_nwu_relative` and set
+`source.eventio_2d=true`. The supplied file treats every CORSIKA bunch record
+as one photon row; it is intended for image-shape and coordinate checks, not
+for preserving the original bunch-weighted intensity.

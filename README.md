@@ -150,6 +150,9 @@ x_m,y_m,z_m,dir_x,dir_y,dir_z
 用于作图的 event 1909、19 号望远镜输入是
 [`configs/sources/event1909_tel19_minimal_photons.csv`](configs/sources/event1909_tel19_minimal_photons.csv)，
 同样只有六列。
+其中 `z_m=0` 保留 CORSIKA 2D bunch 的原始参考平面；两个示例 cfg 通过
+`source.eventio_2d=true` 声明其来源，程序再按直接读取 EventIO 的相同规则，
+自动使用望远镜本地 `-16 m` 输入面并进行有符号光线求交。
 
 ```bash
 # 纯光学：输出白板命中和逐像素光子数，可画两张焦平面诊断图

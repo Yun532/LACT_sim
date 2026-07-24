@@ -36,6 +36,12 @@ telescope_id=0
 atmosphere modeling is disabled or when the atmosphere config supplies an
 explicit default emission altitude.
 
+`eventio_2d` is also optional. For a six-column file cut from CORSIKA 2D
+bunches, prefer keeping the CSV minimal and setting `source.eventio_2d=true`
+in the cfg. LACT_sim then retains raw `z_m=0`, applies the normal local
+`-16 m` EventIO input-plane default after coordinate rotation, and uses signed
+ray intersection. Leave this setting off for literal hand-written positions.
+
 ## Coordinate Convention
 
 推荐的默认输入坐标是 PhotonCsv 光学调试原来使用的望远镜本地坐标：

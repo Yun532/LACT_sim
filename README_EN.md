@@ -120,6 +120,10 @@ See
 for a small reference file. The plotting input,
 [`configs/sources/event1909_tel19_minimal_photons.csv`](configs/sources/event1909_tel19_minimal_photons.csv),
 contains event 1909, telescope 19 in the same six-column format.
+Its `z_m=0` retains the raw CORSIKA 2D bunch reference plane. Both example
+cfg files set `source.eventio_2d=true`, so the programs apply the same
+telescope-local `-16 m` input-plane default and signed ray intersection as
+direct EventIO input.
 
 ```bash
 # Pure optics: whiteboard hits plus per-pixel photon counts; two diagnostic plots

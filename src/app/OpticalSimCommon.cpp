@@ -1902,6 +1902,8 @@ PhotonCsvConfig buildPhotonCsvConfig(const std::map<std::string, std::string>& c
     csv.default_multiplicity = source_cfg.multiplicity;
     csv.default_event_id = source_cfg.event_id;
     csv.default_telescope_id = source_cfg.telescope_id;
+    csv.default_eventio_2d =
+        getBool(cfg, "source.eventio_2d", csv.default_eventio_2d);
     csv.filter_telescope_id = runtime_cfg.filter_telescope_id;
     csv.selected_telescope_id = runtime_cfg.selected_telescope_id;
     csv.filter_event_id = runtime_cfg.filter_event_id;

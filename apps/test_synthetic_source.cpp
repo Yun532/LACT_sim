@@ -166,6 +166,7 @@ bool checkPhotonCsvRowIndex() {
 
     PhotonCsvConfig cfg;
     cfg.csv_path = path.string();
+    cfg.default_eventio_2d = true;
     PhotonCsvSource source(cfg);
     PhotonBunch first;
     PhotonBunch second;
@@ -178,6 +179,8 @@ bool checkPhotonCsvRowIndex() {
                 "PhotonCsv first implicit random-stream index");
     ok &= check(second.source_bunch_index == 1,
                 "PhotonCsv second implicit random-stream index");
+    ok &= check(first.eventio_2d && second.eventio_2d,
+                "PhotonCsv applies configured default 2D line semantics");
     return ok;
 }
 

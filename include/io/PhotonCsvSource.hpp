@@ -13,6 +13,7 @@ struct PhotonCsvConfig {
     double default_multiplicity = 1.0;
     int default_event_id = 0;
     int default_telescope_id = 0;
+    bool default_eventio_2d = false;
     bool filter_telescope_id = false;
     int selected_telescope_id = 0;
     bool filter_event_id = false;

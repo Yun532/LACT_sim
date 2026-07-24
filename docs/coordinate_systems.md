@@ -129,6 +129,9 @@ array/global metadata used for the shower wavefront and timing. Since bunch
 model all use the same local `-16 m` shift. Do not add a telescope's installation
 height to this local value.
 
+A six-column CSV cut from CORSIKA should retain raw `z_m=0` and set
+`source.eventio_2d=true` in its cfg instead of rewriting the NWU z column.
+
 ### 3. Telescope Pointing In The CORSIKA Frame
 
 For CORSIKA/EventIO mode, LACT_sim uses an azimuth convention compatible with

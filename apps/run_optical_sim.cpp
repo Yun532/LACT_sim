@@ -163,6 +163,19 @@ int main(int argc, char** argv) {
             printField("coordinate_frame", source_runtime_cfg.coordinate_frame);
             printField("coordinate_interpretation",
                        sourceCoordinateFrameDescription(source_runtime_cfg.coordinate_frame));
+            if (source_runtime_cfg.use_photon_csv &&
+                getBool(cfg, "source.eventio_2d", false)) {
+                printField("eventio_2d_input_plane_z_m",
+                           doubleToString(
+                               source_runtime_cfg.eventio_2d_input_plane_z_m));
+                printField("eventio_2d_plane_mode",
+                           source_runtime_cfg.eventio_2d_plane_mode);
+                printField(
+                    "eventio_2d_trace_direction",
+                    source_runtime_cfg.eventio_2d_plane_mode == "forward"
+                        ? "forward_only"
+                        : "signed_line_to_mirror_then_reflect");
+            }
             printField("filter_telescope_id",
                        source_runtime_cfg.filter_telescope_id
                            ? intToString(source_runtime_cfg.selected_telescope_id)
@@ -397,8 +410,13 @@ int main(int argc, char** argv) {
         while (source->next(raw_bunch)) {
             ++n_total;
 
-            const PhotonBunch bunch = transformBunchToTelescopeLocal(
+            PhotonBunch bunch = transformBunchToTelescopeLocal(
                 raw_bunch, telescope_cfg, source_runtime_cfg.coordinate_frame);
+            if (bunch.eventio_2d &&
+                source_runtime_cfg.eventio_2d_input_plane_z_m != 0.0) {
+                bunch.photon.pos.z +=
+                    source_runtime_cfg.eventio_2d_input_plane_z_m;
+            }
             Photon photon = bunch.photon;
             photon.normalizeDirection();
             photon.weight *= bunch.multiplicity;
@@ -415,7 +433,12 @@ int main(int argc, char** argv) {
                 }
             }
 
-            OpticalSurfaceHit hit = tracer.traceToPlane(photon, mirrors, plane, eff);
+            const bool signed_line =
+                bunch.eventio_2d &&
+                source_runtime_cfg.eventio_2d_plane_mode != "forward";
+            OpticalSurfaceHit hit = signed_line
+                ? tracer.traceBackprojectedToPlane(photon, mirrors, plane, eff)
+                : tracer.traceToPlane(photon, mirrors, plane, eff);
             if (hit.hit_mirror) {
                 ++n_hit_mirror_before_obstruction;
                 if (hit.hit_surface) {
