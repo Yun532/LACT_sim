@@ -38,9 +38,20 @@ the complete configured time range before `output.save_only_triggered` is
 applied, so output profile selection cannot change accidental-trigger or
 array-coincidence decisions.
 
-`trigger_time_ns` remains the raw local camera-trigger time. ROOT observations
-and HDF5 `/trigger/telescope` also store `geometric_delay_ns` and
+`trigger_time_ns` is the raw local time of the earliest sliding window that
+reaches `camera_multiplicity`. It is also repeated explicitly as
+`trigger_first_time_ns`. The diagnostic
+`trigger_max_multiplicity_time_ns` is the center of the earliest window having
+the largest multiplicity; it can be later than the physical trigger. Array
+coincidence always uses `trigger_time_ns`. ROOT observations and HDF5
+`/trigger/telescope` also store `geometric_delay_ns` and
 `coincidence_time_ns`, making the array timing decision directly auditable.
+
+ROOT `image_time_mean_ns` and `image_time_rms_ns` are the signal-weighted
+Cherenkov arrival-time moments accumulated before waveform binning. NSB is
+included in `image_pe` and the serialized waveform, but does not dilute these
+truth-signal timing moments. `image_time_peak_ns` remains the peak of the
+time-binned total p.e. waveform; equal-height peaks select the earliest bin.
 
 HDF5 waveform output defaults to sparse COO storage. The `waveforms/samples`
 dataset stores `image_index`, `pixel_id`, `time_bin`, `photon_count`, `pe`,

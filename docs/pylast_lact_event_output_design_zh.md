@@ -297,7 +297,9 @@ time_rms_ns                 double
 time_peak_ns                double         # camera-summed p.e. waveform peak time, optional
 impact_parameter_m          double         # optional
 n_pixels_above_threshold    int
-trigger_time_ns             double
+trigger_time_ns             double         # 首次达到相机 multiplicity 的窗口中心
+trigger_first_time_ns       double         # 与 trigger_time_ns 相同，显式语义字段
+trigger_max_multiplicity_time_ns double     # 最大 multiplicity 窗口中心，仅用于诊断
 ```
 
 `pixel_id` 和 `image_pe` 使用 sparse 表示，只保存需要保存的 pixel。对于
@@ -306,6 +308,11 @@ trigger_time_ns             double
 
 如果配置要求 dense 写出，可以把 `pixel_id` 写成完整 `[0, ..., n_pixels-1]`，
 这样 reader 逻辑不变。
+
+`image_time_mean_ns` 和 `image_time_rms_ns` 使用 Cherenkov 信号权重的原始
+到达时间矩计算，不用波形峰值代替，也不把 NSB p.e. 加入分母。因此负的相对
+到达时间是有效值。`image_time_peak_ns` 则来自包含 NSB 的离散 p.e. 波形，
+三者描述的是不同物理量。
 
 `image_time_peak_ns` 的定义：
 

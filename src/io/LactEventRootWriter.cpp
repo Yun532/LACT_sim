@@ -193,6 +193,9 @@ struct LactRootObservation {
     double impact_parameter_m = std::numeric_limits<double>::quiet_NaN();
     int n_pixels_above_threshold = 0;
     double trigger_time_ns = std::numeric_limits<double>::quiet_NaN();
+    double trigger_first_time_ns = std::numeric_limits<double>::quiet_NaN();
+    double trigger_max_multiplicity_time_ns =
+        std::numeric_limits<double>::quiet_NaN();
     double geometric_delay_ns = std::numeric_limits<double>::quiet_NaN();
     double coincidence_time_ns = std::numeric_limits<double>::quiet_NaN();
 };
@@ -299,6 +302,7 @@ LactRootPreparedData prepareLactRootObservations(
         std::vector<double> image_nsb_pe_by_col(n_pixels, 0.0);
         std::vector<double> time_sum_by_col(n_pixels, 0.0);
         std::vector<double> time2_sum_by_col(n_pixels, 0.0);
+        std::vector<double> time_weight_by_col(n_pixels, 0.0);
         std::unordered_map<std::size_t, double> waveform_pe;
         std::vector<double> waveform_peak_by_col;
         std::vector<std::size_t> waveform_peak_bin_by_col;
@@ -318,6 +322,24 @@ LactRootPreparedData prepareLactRootObservations(
                 obs.time_mean_ns = mean;
                 obs.time_rms_ns = std::sqrt(var);
             }
+        }
+
+        // Pixel timing moments describe the Cherenkov signal itself. They are
+        // independent of waveform binning and must not be diluted by NSB.
+        const PixelKey pixel_begin_key{
+            event_id, telescope_id, std::numeric_limits<int>::min()};
+        const PixelKey pixel_end_key{
+            event_id, telescope_id, std::numeric_limits<int>::max()};
+        for (auto it = pixels.lower_bound(pixel_begin_key);
+             it != pixels.end() && it->first <= pixel_end_key;
+             ++it) {
+            const auto& p = it->second;
+            const auto col_it = pixel_to_col.find(p.pixel_id);
+            if (col_it == pixel_to_col.end()) continue;
+            const std::size_t col = col_it->second;
+            time_weight_by_col[col] = p.signal;
+            time_sum_by_col[col] = p.time_sum;
+            time2_sum_by_col[col] = p.time2_sum;
         }
 
         if (evaluate_time_series) {
@@ -416,20 +438,11 @@ LactRootPreparedData prepareLactRootObservations(
                 const std::size_t col = entry.first / n_bins;
                 const std::size_t bin = entry.first % n_bins;
                 const double pe = entry.second;
-                if (pe > waveform_peak_by_col[col]) {
+                if (pe > waveform_peak_by_col[col] ||
+                    (pe == waveform_peak_by_col[col] &&
+                     bin < waveform_peak_bin_by_col[col])) {
                     waveform_peak_by_col[col] = pe;
                     waveform_peak_bin_by_col[col] = bin;
-                }
-            }
-            for (std::size_t col = 0; col < n_pixels; ++col) {
-                const double total = image_pe_by_col[col];
-                const double peak = waveform_peak_by_col[col];
-                const std::size_t peak_bin = waveform_peak_bin_by_col[col];
-                if (total > 0.0 && peak > 0.0) {
-                    const double peak_time =
-                        reference_time_ns + prepared.time_centers_ns[peak_bin];
-                    time_sum_by_col[col] = total * peak_time;
-                    time2_sum_by_col[col] = total * peak_time * peak_time;
                 }
             }
 
@@ -455,11 +468,13 @@ LactRootPreparedData prepareLactRootObservations(
             obs.n_pixels_above_threshold =
                 final_trigger.n_pixels_above_threshold;
             trigger_time_ns = final_trigger.trigger_time_ns;
+            obs.trigger_first_time_ns =
+                final_trigger.first_trigger_time_ns;
+            obs.trigger_max_multiplicity_time_ns =
+                final_trigger.max_multiplicity_time_ns;
         } else {
-            const PixelKey begin_key{event_id, telescope_id, std::numeric_limits<int>::min()};
-            const PixelKey end_key{event_id, telescope_id, std::numeric_limits<int>::max()};
-            for (auto it = pixels.lower_bound(begin_key);
-                 it != pixels.end() && it->first <= end_key;
+            for (auto it = pixels.lower_bound(pixel_begin_key);
+                 it != pixels.end() && it->first <= pixel_end_key;
                  ++it) {
                 const auto& p = it->second;
                 const auto col_it = pixel_to_col.find(p.pixel_id);
@@ -467,8 +482,6 @@ LactRootPreparedData prepareLactRootObservations(
                 const std::size_t col = col_it->second;
                 image_pe_by_col[col] = p.pe;
                 image_cherenkov_pe_by_col[col] = p.pe;
-                time_sum_by_col[col] = p.time_sum;
-                time2_sum_by_col[col] = p.time2_sum;
             }
             generateIntegratedNsbPe(
                 nsb_cfg,
@@ -492,12 +505,14 @@ LactRootPreparedData prepareLactRootObservations(
             if (output_cfg.lact_root_write_components) {
                 obs.image_nsb_pe.push_back(static_cast<float>(image_nsb_pe_by_col[col]));
             }
-            const double mean = time_sum_by_col[col] > 0.0
-                ? time_sum_by_col[col] / pe
+            const double time_weight = time_weight_by_col[col];
+            const double mean = time_weight > 0.0
+                ? time_sum_by_col[col] / time_weight
                 : std::numeric_limits<double>::quiet_NaN();
             double rms = std::numeric_limits<double>::quiet_NaN();
-            if (time2_sum_by_col[col] > 0.0 && std::isfinite(mean)) {
-                const double var = std::max(0.0, time2_sum_by_col[col] / pe - mean * mean);
+            if (time_weight > 0.0 && std::isfinite(mean)) {
+                const double var = std::max(
+                    0.0, time2_sum_by_col[col] / time_weight - mean * mean);
                 rms = std::sqrt(var);
             }
             obs.image_time_mean_ns.push_back(static_cast<float>(mean));
@@ -526,6 +541,12 @@ LactRootPreparedData prepareLactRootObservations(
                 std::isfinite(trigger_time_ns) ? trigger_time_ns :
                 (std::isfinite(obs.time_peak_ns) ? obs.time_peak_ns :
                  (std::isfinite(obs.time_mean_ns) ? obs.time_mean_ns : 0.0));
+            if (!std::isfinite(obs.trigger_first_time_ns)) {
+                obs.trigger_first_time_ns = obs.trigger_time_ns;
+            }
+            if (!std::isfinite(obs.trigger_max_multiplicity_time_ns)) {
+                obs.trigger_max_multiplicity_time_ns = obs.trigger_time_ns;
+            }
             telescope_trigger_times_by_event[event_id].push_back(
                 TelescopeTriggerTime{telescope_id, obs.trigger_time_ns});
         }
@@ -664,6 +685,8 @@ struct LactEventRootStreamWriter::Impl {
     double time_rms_ns = 0.0, time_peak_ns = 0.0, impact_parameter_m = 0.0;
     int n_pixels_above_threshold = 0;
     double trigger_time_ns = 0.0;
+    double trigger_first_time_ns = 0.0;
+    double trigger_max_multiplicity_time_ns = 0.0;
     double geometric_delay_ns = 0.0, coincidence_time_ns = 0.0;
 
     bool waveform_enabled = true;
@@ -889,6 +912,10 @@ struct LactEventRootStreamWriter::Impl {
       observation_tree->Branch("n_pixels_above_threshold",
                                &n_pixels_above_threshold);
       observation_tree->Branch("trigger_time_ns", &trigger_time_ns);
+      observation_tree->Branch("trigger_first_time_ns",
+                               &trigger_first_time_ns);
+      observation_tree->Branch("trigger_max_multiplicity_time_ns",
+                               &trigger_max_multiplicity_time_ns);
       observation_tree->Branch("geometric_delay_ns", &geometric_delay_ns);
       observation_tree->Branch("coincidence_time_ns", &coincidence_time_ns);
       configureRootTreeAutoFlush(observation_tree.get(),
@@ -1015,6 +1042,9 @@ struct LactEventRootStreamWriter::Impl {
         impact_parameter_m = obs.impact_parameter_m;
         n_pixels_above_threshold = obs.n_pixels_above_threshold;
         trigger_time_ns = obs.trigger_time_ns;
+        trigger_first_time_ns = obs.trigger_first_time_ns;
+        trigger_max_multiplicity_time_ns =
+            obs.trigger_max_multiplicity_time_ns;
         geometric_delay_ns = obs.geometric_delay_ns;
         coincidence_time_ns = obs.coincidence_time_ns;
         observation_tree->Fill();

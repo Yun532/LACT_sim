@@ -62,19 +62,35 @@ BinnedPeTriggerDecision evaluateBinnedPeTrigger(
         }
     }
 
+    bool found_first_trigger = false;
     for (std::size_t start = 0; start < n_bins; ++start) {
+        if (!found_first_trigger &&
+            pixels_above_threshold[start] >= trigger.camera_multiplicity) {
+            out.first_trigger_window_start_bin = start;
+            found_first_trigger = true;
+        }
         if (pixels_above_threshold[start] > out.n_pixels_above_threshold) {
             out.n_pixels_above_threshold = pixels_above_threshold[start];
             out.window_start_bin = start;
         }
     }
-    out.triggered =
-        out.n_pixels_above_threshold >= trigger.camera_multiplicity;
-    const std::size_t center_offset = std::min(
-        n_bins - 1 - out.window_start_bin, window_bins / 2);
-    out.trigger_time_ns = first_bin_center_time_ns +
-                          static_cast<double>(out.window_start_bin + center_offset) *
-                              bin_width_ns;
+    const auto window_center_time_ns =
+        [&](std::size_t window_start_bin) {
+            const std::size_t center_offset = std::min(
+                n_bins - 1 - window_start_bin, window_bins / 2);
+            return first_bin_center_time_ns +
+                static_cast<double>(window_start_bin + center_offset) *
+                    bin_width_ns;
+        };
+    out.max_multiplicity_time_ns =
+        window_center_time_ns(out.window_start_bin);
+    out.trigger_time_ns = out.max_multiplicity_time_ns;
+    out.triggered = found_first_trigger;
+    if (out.triggered) {
+        out.first_trigger_time_ns =
+            window_center_time_ns(out.first_trigger_window_start_bin);
+        out.trigger_time_ns = out.first_trigger_time_ns;
+    }
     return out;
 }
 
