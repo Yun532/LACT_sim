@@ -1775,6 +1775,8 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             std::int32_t n_pixels_above_threshold;
             double total_pe;
             float trigger_time_ns;
+            float trigger_first_time_ns;
+            float trigger_max_multiplicity_time_ns;
             float geometric_delay_ns = std::numeric_limits<float>::quiet_NaN();
             float coincidence_time_ns = std::numeric_limits<float>::quiet_NaN();
         };
@@ -1923,6 +1925,8 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                     camera_trigger.n_pixels_above_threshold),
                 total_pe,
                 static_cast<float>(camera_trigger.trigger_time_ns),
+                static_cast<float>(camera_trigger.first_trigger_time_ns),
+                static_cast<float>(camera_trigger.max_multiplicity_time_ns),
             });
         }
         std::set<int> trigger_event_ids;
@@ -2439,6 +2443,13 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                   HOFFSET(TelescopeTriggerRow, total_pe), H5T_NATIVE_DOUBLE);
         H5Tinsert(telescope_trigger_type, "trigger_time_ns",
                   HOFFSET(TelescopeTriggerRow, trigger_time_ns), H5T_NATIVE_FLOAT);
+        H5Tinsert(telescope_trigger_type, "trigger_first_time_ns",
+                  HOFFSET(TelescopeTriggerRow, trigger_first_time_ns),
+                  H5T_NATIVE_FLOAT);
+        H5Tinsert(telescope_trigger_type, "trigger_max_multiplicity_time_ns",
+                  HOFFSET(TelescopeTriggerRow,
+                          trigger_max_multiplicity_time_ns),
+                  H5T_NATIVE_FLOAT);
         H5Tinsert(telescope_trigger_type, "geometric_delay_ns",
                   HOFFSET(TelescopeTriggerRow, geometric_delay_ns),
                   H5T_NATIVE_FLOAT);

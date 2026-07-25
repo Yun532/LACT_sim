@@ -12,8 +12,19 @@ namespace lact {
 struct BinnedPeTriggerDecision {
     bool triggered = false;
     int n_pixels_above_threshold = 0;
+    // Earliest window whose multiplicity satisfies the camera trigger.
+    std::size_t first_trigger_window_start_bin = 0;
+    // Window with the largest multiplicity. Ties select the earliest window.
     std::size_t window_start_bin = 0;
-    double trigger_time_ns = 0.0;
+    double first_trigger_time_ns =
+        std::numeric_limits<double>::quiet_NaN();
+    double max_multiplicity_time_ns =
+        std::numeric_limits<double>::quiet_NaN();
+    // Canonical local camera-trigger time. For triggered cameras this is the
+    // first threshold crossing, not the later maximum-multiplicity window.
+    // Untriggered decisions retain the diagnostic maximum-window time for
+    // backward-compatible HDF5 rows.
+    double trigger_time_ns = std::numeric_limits<double>::quiet_NaN();
 };
 
 struct TelescopeTriggerTime {

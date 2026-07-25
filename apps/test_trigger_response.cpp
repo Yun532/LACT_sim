@@ -43,8 +43,39 @@ int main()
                 "camera multiplicity is incorrect");
     ok &= check(camera.window_start_bin == 1,
                 "camera trigger selected the wrong time window");
+    ok &= check(camera.first_trigger_window_start_bin == 1,
+                "camera trigger selected the wrong first threshold window");
     ok &= check(std::abs(camera.trigger_time_ns - 102.5) < 1.0e-12,
                 "camera trigger time is incorrect");
+    ok &= check(std::abs(camera.first_trigger_time_ns - 102.5) < 1.0e-12 &&
+                    std::abs(camera.max_multiplicity_time_ns - 102.5) < 1.0e-12,
+                "camera trigger diagnostic times are incorrect");
+
+    const std::vector<std::vector<double>> growing_pe{
+        {3.0, 0.0, 3.0, 0.0},
+        {3.0, 0.0, 3.0, 0.0},
+        {0.0, 0.0, 3.0, 0.0},
+    };
+    trigger.camera_coincidence_window_ns = 1.0;
+    const auto growing_camera = evaluateBinnedPeTrigger(
+        growing_pe.size(), growing_pe.front().size(), 1.0, 100.5, trigger,
+        [&](std::size_t pixel, std::size_t bin) {
+            return growing_pe[pixel][bin];
+        });
+    ok &= check(growing_camera.triggered,
+                "growing camera trigger was missed");
+    ok &= check(growing_camera.first_trigger_window_start_bin == 0 &&
+                    growing_camera.window_start_bin == 2,
+                "first and maximum-multiplicity windows were not separated");
+    ok &= check(std::abs(growing_camera.trigger_time_ns - 100.5) < 1.0e-12 &&
+                    std::abs(growing_camera.first_trigger_time_ns - 100.5) <
+                        1.0e-12 &&
+                    std::abs(growing_camera.max_multiplicity_time_ns - 102.5) <
+                        1.0e-12,
+                "first and maximum-multiplicity times are incorrect");
+    ok &= check(growing_camera.n_pixels_above_threshold == 3,
+                "maximum camera multiplicity was not retained");
+    trigger.camera_coincidence_window_ns = 2.0;
 
     const auto array = evaluateArrayTrigger(
         {{1, 100.0}, {2, 107.0}, {3, 130.0}}, trigger);
