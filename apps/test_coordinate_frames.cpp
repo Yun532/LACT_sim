@@ -158,15 +158,49 @@ int main()
         {"source.mode", "EventIO"},
         {"source.eventio_path", "corsika.zst"},
     });
-    ok &= check(near(default_eventio.eventio_2d_input_plane_z_m, -16.0),
-                "EventIO 2D local input-plane z must default to -16 m");
+    ok &= check(near(default_eventio.eventio_reference_z_m, -16.0),
+                "EventIO reference-to-optical z must default to -16 m");
     const SourceRuntimeConfig explicit_eventio_z0 = buildSourceRuntimeConfig({
         {"source.mode", "EventIO"},
         {"source.eventio_path", "corsika.zst"},
-        {"source.eventio_2d_input_plane_z_m", "0"},
+        {"source.eventio_reference_z_m", "0"},
     });
-    ok &= check(near(explicit_eventio_z0.eventio_2d_input_plane_z_m, 0.0),
-                "EventIO 2D local input-plane z must remain configurable");
+    ok &= check(near(explicit_eventio_z0.eventio_reference_z_m, 0.0),
+                "EventIO reference-to-optical z must remain configurable");
+    const SourceRuntimeConfig legacy_eventio_z = buildSourceRuntimeConfig({
+        {"source.mode", "EventIO"},
+        {"source.eventio_path", "corsika.zst"},
+        {"source.eventio_2d_input_plane_z_m", "-12.5"},
+    });
+    ok &= check(near(legacy_eventio_z.eventio_reference_z_m, -12.5),
+                "legacy EventIO 2D z key must remain a compatible scalar alias");
+    try {
+        (void)buildSourceRuntimeConfig({
+            {"source.mode", "EventIO"},
+            {"source.eventio_path", "corsika.zst"},
+            {"source.eventio_reference_z_m", "-16"},
+            {"source.eventio_2d_input_plane_z_m", "0"},
+        });
+        ok = false;
+        std::cerr << "conflicting EventIO z-origin keys were accepted\n";
+    } catch (...) {
+    }
+
+    PhotonBunch eventio_2d_position;
+    eventio_2d_position.eventio_2d = true;
+    eventio_2d_position.photon.pos = {1.25, -2.5, 0.0};
+    applyEventIOReferenceZOffset(eventio_2d_position, -16.0);
+    ok &= check(nearVec(eventio_2d_position.photon.pos,
+                        {1.25, -2.5, -16.0}),
+                "2D EventIO offset must preserve physical x/y and shift only z");
+
+    PhotonBunch eventio_3d_position;
+    eventio_3d_position.eventio_2d = false;
+    eventio_3d_position.photon.pos = {1.25, -2.5, 0.75};
+    applyEventIOReferenceZOffset(eventio_3d_position, -16.0);
+    ok &= check(nearVec(eventio_3d_position.photon.pos,
+                        {1.25, -2.5, -15.25}),
+                "3D EventIO must use the same scalar z-origin offset");
     const TelescopeConfig default_telescope = buildTelescopeConfig({});
     ok &= check(nearVec(default_telescope.position_m, {0.0, 0.0, 0.0}),
                 "unset telescope.position_m must default to the array origin");

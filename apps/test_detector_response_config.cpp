@@ -31,6 +31,18 @@ bool expectInvalid(const std::map<std::string, std::string>& cfg,
     return false;
 }
 
+bool expectInvalidEfficiency(const std::map<std::string, std::string>& cfg,
+                             const std::string& label)
+{
+    try {
+        (void)buildEfficiencyConfig(cfg);
+    } catch (...) {
+        return true;
+    }
+    std::cerr << "expected invalid efficiency config: " << label << "\n";
+    return false;
+}
+
 } // namespace
 
 int main()
@@ -152,6 +164,23 @@ int main()
     ok &= expectInvalid({{"trigger.camera_multiplicity", "0"}}, "zero camera multiplicity");
     ok &= expectInvalid({{"trigger.array_time_correction", "unknown"}},
                         "unknown array timing correction");
+    ok &= expectInvalidEfficiency(
+        {{"efficiency.mirror_reflectivity", "1.1"}},
+        "reflectivity above one");
+    ok &= expectInvalidEfficiency(
+        {{"atmosphere.model", "modtran_tau"},
+         {"efficiency.atmosphere_transmission", "0.9"}},
+        "duplicate atmosphere response");
+    ok &= expectInvalidEfficiency(
+        {{"camera.collector", "bezier"},
+         {"efficiency.funnel_acceptance", "true"}},
+        "duplicate collector angular response");
+    const auto intentional_atmosphere = buildEfficiencyConfig(
+        {{"atmosphere.model", "modtran_tau"},
+         {"efficiency.atmosphere_transmission", "0.9"},
+         {"atmosphere.allow_additional_spectral_factor", "true"}});
+    ok &= check(intentional_atmosphere.atmosphere_transmission.enabled,
+                "intentional additional atmosphere factor should be explicit");
 
     std::cout << "detector response config checks passed\n";
     return ok ? 0 : 1;

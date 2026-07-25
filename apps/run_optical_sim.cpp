@@ -1,4 +1,5 @@
 #include "app/OpticalSimCommon.hpp"
+#include "app/PhotonResponseSampler.hpp"
 
 using namespace lact;
 
@@ -165,9 +166,9 @@ int main(int argc, char** argv) {
                        sourceCoordinateFrameDescription(source_runtime_cfg.coordinate_frame));
             if (source_runtime_cfg.use_photon_csv &&
                 getBool(cfg, "source.eventio_2d", false)) {
-                printField("eventio_2d_input_plane_z_m",
+                printField("eventio_reference_z_m",
                            doubleToString(
-                               source_runtime_cfg.eventio_2d_input_plane_z_m));
+                               source_runtime_cfg.eventio_reference_z_m));
                 printField("eventio_2d_plane_mode",
                            source_runtime_cfg.eventio_2d_plane_mode);
                 printField(
@@ -412,12 +413,12 @@ int main(int argc, char** argv) {
 
             PhotonBunch bunch = transformBunchToTelescopeLocal(
                 raw_bunch, telescope_cfg, source_runtime_cfg.coordinate_frame);
-            if (bunch.eventio_2d &&
-                source_runtime_cfg.eventio_2d_input_plane_z_m != 0.0) {
-                bunch.photon.pos.z +=
-                    source_runtime_cfg.eventio_2d_input_plane_z_m;
+            if (bunch.eventio_2d) {
+                applyEventIOReferenceZOffset(
+                    bunch, source_runtime_cfg.eventio_reference_z_m);
             }
             Photon photon = bunch.photon;
+            photon.random_stream_id = photonIdentityStreamId(bunch, 0);
             photon.normalizeDirection();
             photon.weight *= bunch.multiplicity;
             applyTelescopeFrame(photon, telescope_frame);
@@ -480,8 +481,10 @@ int main(int argc, char** argv) {
                                           hit.obstruction_blocked_reflected;
                 const bool physically_reaches_output = !hit.obstruction_blocked;
                 if (camera_cfg.enabled && physically_reaches_output) {
-                    applyCameraResponse(camera, light_collector.get(), plane, sipm_cfg,
-                                        electronics, hit);
+                    applyCameraResponse(
+                        camera, light_collector.get(), plane, sipm_cfg,
+                        electronics, hit,
+                        propagation_cfg.speed_of_light_m_per_ns);
                     if (hit.hit_camera) {
                         ++n_hit_camera;
                         unique_hit_pixels.insert(hit.pixel_id);

@@ -7,18 +7,10 @@
 #include <stdexcept>
 #include <utility>
 
+#include "core/DeterministicSeed.hpp"
+
 namespace lact {
 namespace {
-
-constexpr std::uint64_t kPreGeometryStage = 1;
-constexpr std::uint64_t kPostGeometryStage = 2;
-
-std::uint64_t mixSeed(std::uint64_t seed, std::uint64_t value)
-{
-    seed ^= value + 0x9e3779b97f4a7c15ULL +
-            (seed << 6U) + (seed >> 2U);
-    return seed;
-}
 
 std::string lowerCopy(std::string value)
 {
@@ -53,6 +45,11 @@ double probability(double value)
 {
     if (!std::isfinite(value)) {
         throw std::runtime_error("photon response probability must be finite");
+    }
+    constexpr double tolerance = 1.0e-12;
+    if (value < -tolerance || value > 1.0 + tolerance) {
+        throw std::runtime_error(
+            "photon response probability must be in [0,1]");
     }
     return std::clamp(value, 0.0, 1.0);
 }
@@ -91,23 +88,35 @@ std::uint64_t photonResponseStreamId(const PhotonResponseConfig& cfg,
                                      const PhotonBunch& bunch,
                                      std::uint64_t represented_index)
 {
-    std::uint64_t seed = cfg.seed;
-    seed = mixSeed(seed,
-                   static_cast<std::uint64_t>(bunch.shower_event_id + 1000003));
-    seed = mixSeed(seed, static_cast<std::uint64_t>(bunch.array_id + 100003));
-    seed = mixSeed(seed, static_cast<std::uint64_t>(bunch.telescope_id + 10007));
-    seed = mixSeed(seed, bunch.source_bunch_index + 1ULL);
-    return mixSeed(seed, represented_index + 1ULL);
+    return deriveSeed(
+        cfg.seed, photonIdentityStreamId(bunch, represented_index));
+}
+
+std::uint64_t photonIdentityStreamId(const PhotonBunch& bunch,
+                                     std::uint64_t represented_index)
+{
+    std::uint64_t identity = 0x4c41435450484f54ULL; // "LACTPHOT"
+    identity = deriveSeed(
+        identity,
+        static_cast<std::uint64_t>(
+            static_cast<std::int64_t>(bunch.shower_event_id) + 1000003));
+    identity = deriveSeed(
+        identity,
+        static_cast<std::uint64_t>(
+            static_cast<std::int64_t>(bunch.array_id) + 100003));
+    identity = deriveSeed(
+        identity,
+        static_cast<std::uint64_t>(
+            static_cast<std::int64_t>(bunch.telescope_id) + 10007));
+    identity = deriveSeed(identity, bunch.source_bunch_index + 1ULL);
+    const auto result = deriveSeed(identity, represented_index + 1ULL);
+    return result == 0 ? 0x4c41435450484f54ULL : result;
 }
 
 double photonResponseUniform01(std::uint64_t stream_id,
                                std::uint64_t stage)
 {
-    std::uint64_t seed = mixSeed(stream_id, stage);
-    seed += 0x9e3779b97f4a7c15ULL;
-    seed = (seed ^ (seed >> 30U)) * 0xbf58476d1ce4e5b9ULL;
-    seed = (seed ^ (seed >> 27U)) * 0x94d049bb133111ebULL;
-    seed ^= seed >> 31U;
+    const std::uint64_t seed = splitMix64(deriveSeed(stream_id, stage));
     constexpr double scale = 1.0 / 9007199254740992.0;
     return static_cast<double>(seed >> 11U) * scale;
 }
@@ -121,13 +130,16 @@ PhotonResponseSampler::PhotonResponseSampler(PhotonResponseConfig response,
 std::uint64_t PhotonResponseSampler::candidateCount(
     const PhotonBunch& bunch) const
 {
-    if (!response_.stochastic()) {
-        return 1;
-    }
     if (!std::isfinite(bunch.multiplicity) || bunch.multiplicity < 0.0) {
         throw std::runtime_error(
-            "response.mode=stochastic_pe requires a finite, non-negative "
-            "EventIO bunch multiplicity");
+            "photon response requires a finite, non-negative bunch multiplicity");
+    }
+    if (!std::isfinite(bunch.photon.weight) || bunch.photon.weight < 0.0) {
+        throw std::runtime_error(
+            "photon response requires a finite, non-negative photon weight");
+    }
+    if (!response_.stochastic()) {
+        return bunch.multiplicity == 0.0 ? 0 : 1;
     }
     if (bunch.multiplicity == 0.0) {
         return 0;
@@ -152,6 +164,10 @@ PhotonCandidate PhotonResponseSampler::candidate(
     out.photon = bunch.photon;
     out.represented_index = represented_index;
     out.stochastic = response_.stochastic();
+    out.stream_id = photonResponseStreamId(
+        response_, bunch, represented_index);
+    out.photon.random_stream_id = photonIdentityStreamId(
+        bunch, represented_index);
     if (!out.stochastic) {
         out.represented_fraction = bunch.multiplicity;
         out.photon.weight *= bunch.multiplicity;
@@ -166,9 +182,6 @@ PhotonCandidate PhotonResponseSampler::candidate(
     out.represented_fraction = std::min(
         1.0, bunch.multiplicity - static_cast<double>(represented_index));
     out.remaining_probability = out.represented_fraction;
-    out.stream_id = photonResponseStreamId(
-        response_, bunch, represented_index);
-    out.photon.random_stream_id = out.stream_id;
     out.photon.wavelength_nm = resolveEventIOPhotonWavelength(
         bunch, represented_index, eventio_);
     return out;
@@ -207,7 +220,9 @@ PreGeometryResponse PhotonResponseSampler::applyPreGeometry(
         candidate.remaining_probability * atmosphere *
         probability(wavelength_detection_probability));
     result.survives = photonResponseUniform01(
-        candidate.stream_id, kPreGeometryStage) < pretrace_probability;
+        candidate.stream_id,
+        static_cast<std::uint64_t>(RandomStage::PreGeometryAcceptance)) <
+        pretrace_probability;
     if (result.survives) {
         candidate.remaining_probability = 1.0;
         candidate.photon.optical_efficiency_preapplied = true;
@@ -225,7 +240,9 @@ bool PhotonResponseSampler::acceptPostGeometry(
     const double detection_probability = probability(
         hit.relative_efficiency * candidate.remaining_probability);
     const bool accepted = photonResponseUniform01(
-        candidate.stream_id, kPostGeometryStage) < detection_probability;
+        candidate.stream_id,
+        static_cast<std::uint64_t>(RandomStage::PostGeometryAcceptance)) <
+        detection_probability;
     hit.accepted = accepted;
     if (accepted) {
         hit.relative_efficiency = 1.0;

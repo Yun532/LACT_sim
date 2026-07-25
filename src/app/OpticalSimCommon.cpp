@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/DeterministicSeed.hpp"
 #include "geometry/MirrorFacetValidation.hpp"
 #include "io/CorsikaTraceOutputTypes.hpp"
 #include "io/MirrorFacetCsvReader.hpp"
@@ -40,19 +41,6 @@ std::mt19937_64 makeNsbEventTelescopeRng(const NsbConfig& nsb,
     seed = mixNsbSeed(seed, static_cast<std::uint64_t>(
                                 static_cast<std::int64_t>(event_id) + 0x80000000LL));
     seed = mixNsbSeed(seed, static_cast<std::uint64_t>(telescope_id + 1));
-    return std::mt19937_64(seed);
-}
-
-std::mt19937_64 makeNsbEventTelescopeCellRng(const NsbConfig& nsb,
-                                             int event_id,
-                                             int telescope_id,
-                                             std::size_t cell)
-{
-    std::uint64_t seed = nsb.seed;
-    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(
-                                static_cast<std::int64_t>(event_id) + 0x80000000LL));
-    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(telescope_id + 1));
-    seed = mixNsbSeed(seed, static_cast<std::uint64_t>(cell + 1));
     return std::mt19937_64(seed);
 }
 
@@ -758,6 +746,19 @@ PhotonBunch transformBunchToTelescopeLocal(const PhotonBunch& input,
     return out;
 }
 
+void applyEventIOReferenceZOffset(PhotonBunch& bunch,
+                                  double eventio_reference_z_m)
+{
+    if (!std::isfinite(eventio_reference_z_m)) {
+        throw std::runtime_error(
+            "source.eventio_reference_z_m must be finite");
+    }
+    // The user config remains one scalar. Internally it is the
+    // telescope-local translation (0,0,z); the physical x/y carried by the
+    // bunch are deliberately left unchanged.
+    bunch.photon.pos.z += eventio_reference_z_m;
+}
+
 Vec3 sourceDirectionInWorld(const PhotonBunch& input,
                             const TelescopeConfig& telescope,
                             const std::string& frame_name)
@@ -880,6 +881,10 @@ EfficiencyFactorConfig parseEfficiencyFactor(const std::map<std::string, std::st
 
     double constant = 1.0;
     if (parseDoubleStrict(value, constant)) {
+        if (!std::isfinite(constant) || constant < 0.0 || constant > 1.0) {
+            throw std::runtime_error(
+                base_key + " constant must be finite and in [0,1]");
+        }
         factor.enabled = true;
         factor.use_curve = false;
         factor.constant = constant;
@@ -1111,6 +1116,11 @@ std::string getRequiredCell(const std::vector<std::string>& cells,
     return value;
 }
 
+namespace {
+void validateCameraGeometry(const CameraGeometry& camera,
+                            const std::string& description);
+}
+
 CameraGeometry readCameraCsv(const std::string& path)
 {
     std::ifstream ifs(path);
@@ -1139,14 +1149,30 @@ CameraGeometry readCameraCsv(const std::string& path)
         auto cells = splitCsvCells(line);
 
         CameraPixel pixel;
-        pixel.id = std::stoi(getRequiredCell(cells, header, "id"));
+        const std::string id_text = getRequiredCell(cells, header, "id");
+        std::size_t id_consumed = 0;
+        pixel.id = std::stoi(id_text, &id_consumed);
+        if (id_consumed != id_text.size() || pixel.id < 0) {
+            throw std::runtime_error(
+                "camera CSV line " + std::to_string(line_no) +
+                " has an invalid non-negative integer id");
+        }
         const std::string x_text = getOptionalCell(cells, header, "x_m").empty()
             ? getRequiredCell(cells, header, "center_x")
             : getOptionalCell(cells, header, "x_m");
         const std::string y_text = getOptionalCell(cells, header, "y_m").empty()
             ? getRequiredCell(cells, header, "center_y")
             : getOptionalCell(cells, header, "y_m");
-        pixel.center = {std::stod(x_text), std::stod(y_text), 0.0};
+        double center_x = 0.0;
+        double center_y = 0.0;
+        if (!parseDoubleStrict(x_text, center_x) ||
+            !parseDoubleStrict(y_text, center_y) ||
+            !std::isfinite(center_x) || !std::isfinite(center_y)) {
+            throw std::runtime_error(
+                "camera CSV line " + std::to_string(line_no) +
+                " has a non-finite or invalid pixel center");
+        }
+        pixel.center = {center_x, center_y, 0.0};
 
         const std::string shape = getOptionalCell(cells, header, "shape");
         pixel.shape = shape.empty() ? PixelShape::Hexagonal : parsePixelShape(shape);
@@ -1156,15 +1182,217 @@ CameraGeometry readCameraCsv(const std::string& path)
             throw std::runtime_error("camera CSV line " + std::to_string(line_no) +
                                      " missing size_m");
         }
-        pixel.size = std::stod(size);
+        if (!parseDoubleStrict(size, pixel.size) ||
+            !std::isfinite(pixel.size) || pixel.size <= 0.0) {
+            throw std::runtime_error(
+                "camera CSV line " + std::to_string(line_no) +
+                " requires finite size_m > 0");
+        }
         camera.addPixel(pixel);
     }
 
     if (camera.empty()) {
         throw std::runtime_error("camera CSV has no data rows: " + path);
     }
+    validateCameraGeometry(camera, "camera CSV " + path);
     return camera;
 }
+
+namespace {
+
+std::vector<Vec3> cameraPixelPolygon(const CameraPixel& pixel)
+{
+    if (pixel.shape == PixelShape::Square) {
+        const double h = 0.5 * pixel.size;
+        return {
+            {pixel.center.x - h, pixel.center.y - h, 0.0},
+            {pixel.center.x + h, pixel.center.y - h, 0.0},
+            {pixel.center.x + h, pixel.center.y + h, 0.0},
+            {pixel.center.x - h, pixel.center.y + h, 0.0},
+        };
+    }
+    if (pixel.shape == PixelShape::Hexagonal) {
+        const double a = 0.5 * pixel.size;
+        const double y1 = a / std::sqrt(3.0);
+        const double y2 = 2.0 * y1;
+        return {
+            {pixel.center.x,     pixel.center.y - y2, 0.0},
+            {pixel.center.x + a, pixel.center.y - y1, 0.0},
+            {pixel.center.x + a, pixel.center.y + y1, 0.0},
+            {pixel.center.x,     pixel.center.y + y2, 0.0},
+            {pixel.center.x - a, pixel.center.y + y1, 0.0},
+            {pixel.center.x - a, pixel.center.y - y1, 0.0},
+        };
+    }
+    return {};
+}
+
+std::pair<double, double> polygonProjection(
+    const std::vector<Vec3>& polygon,
+    const Vec3& axis)
+{
+    double minimum = std::numeric_limits<double>::max();
+    double maximum = std::numeric_limits<double>::lowest();
+    for (const auto& point : polygon) {
+        const double value = point.dot(axis);
+        minimum = std::min(minimum, value);
+        maximum = std::max(maximum, value);
+    }
+    return {minimum, maximum};
+}
+
+bool projectionsHaveInteriorOverlap(double min_a,
+                                    double max_a,
+                                    double min_b,
+                                    double max_b,
+                                    double tolerance)
+{
+    return max_a > min_b + tolerance &&
+           max_b > min_a + tolerance;
+}
+
+std::vector<Vec3> polygonAxes(const std::vector<Vec3>& polygon)
+{
+    std::vector<Vec3> axes;
+    axes.reserve(polygon.size());
+    for (std::size_t i = 0; i < polygon.size(); ++i) {
+        const Vec3 edge = polygon[(i + 1) % polygon.size()] - polygon[i];
+        const Vec3 axis{-edge.y, edge.x, 0.0};
+        if (axis.norm2() > 0.0) {
+            axes.push_back(axis.normalized());
+        }
+    }
+    return axes;
+}
+
+bool polygonInteriorsOverlap(const std::vector<Vec3>& first,
+                             const std::vector<Vec3>& second,
+                             double tolerance)
+{
+    auto axes = polygonAxes(first);
+    auto second_axes = polygonAxes(second);
+    axes.insert(axes.end(), second_axes.begin(), second_axes.end());
+    for (const auto& axis : axes) {
+        const auto [min_a, max_a] = polygonProjection(first, axis);
+        const auto [min_b, max_b] = polygonProjection(second, axis);
+        if (!projectionsHaveInteriorOverlap(
+                min_a, max_a, min_b, max_b, tolerance)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool circlePolygonInteriorsOverlap(const CameraPixel& circle,
+                                   const std::vector<Vec3>& polygon,
+                                   double tolerance)
+{
+    std::vector<Vec3> axes = polygonAxes(polygon);
+    const Vec3 center = circle.center;
+    const auto closest = std::min_element(
+        polygon.begin(), polygon.end(),
+        [&center](const Vec3& lhs, const Vec3& rhs) {
+            return (lhs - center).norm2() < (rhs - center).norm2();
+        });
+    if (closest != polygon.end() && (*closest - center).norm2() > 0.0) {
+        axes.push_back((*closest - center).normalized());
+    }
+    const double radius = 0.5 * circle.size;
+    for (const auto& axis : axes) {
+        const auto [min_polygon, max_polygon] =
+            polygonProjection(polygon, axis);
+        const double projected_center = center.dot(axis);
+        if (!projectionsHaveInteriorOverlap(
+                projected_center - radius,
+                projected_center + radius,
+                min_polygon,
+                max_polygon,
+                tolerance)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool cameraPixelInteriorsOverlap(const CameraPixel& first,
+                                 const CameraPixel& second)
+{
+    const double tolerance = std::max(
+        1.0e-12, std::max(first.size, second.size) * 1.0e-10);
+    const auto boundingRadius = [](const CameraPixel& pixel) {
+        if (pixel.shape == PixelShape::Square) {
+            return pixel.size / std::sqrt(2.0);
+        }
+        if (pixel.shape == PixelShape::Hexagonal) {
+            return pixel.size / std::sqrt(3.0);
+        }
+        return 0.5 * pixel.size;
+    };
+    const double center_distance = (first.center - second.center).norm();
+    if (center_distance >=
+        boundingRadius(first) + boundingRadius(second) - tolerance) {
+        return false;
+    }
+    const bool first_circle = first.shape == PixelShape::Circular;
+    const bool second_circle = second.shape == PixelShape::Circular;
+    if (first_circle && second_circle) {
+        const double radius_sum = 0.5 * (first.size + second.size);
+        return (first.center - second.center).norm() <
+               radius_sum - tolerance;
+    }
+    if (first_circle) {
+        return circlePolygonInteriorsOverlap(
+            first, cameraPixelPolygon(second), tolerance);
+    }
+    if (second_circle) {
+        return circlePolygonInteriorsOverlap(
+            second, cameraPixelPolygon(first), tolerance);
+    }
+    return polygonInteriorsOverlap(
+        cameraPixelPolygon(first), cameraPixelPolygon(second), tolerance);
+}
+
+void validateCameraGeometry(const CameraGeometry& camera,
+                            const std::string& description)
+{
+    if (camera.empty()) {
+        throw std::runtime_error(description + " has no pixels");
+    }
+    std::set<int> ids;
+    const auto& pixels = camera.pixels();
+    for (const auto& pixel : pixels) {
+        if (pixel.id < 0 || !ids.insert(pixel.id).second) {
+            throw std::runtime_error(
+                description + " has a negative or duplicate pixel id " +
+                std::to_string(pixel.id));
+        }
+        if (!std::isfinite(pixel.center.x) ||
+            !std::isfinite(pixel.center.y) ||
+            !std::isfinite(pixel.center.z) ||
+            !std::isfinite(pixel.size) || pixel.size <= 0.0) {
+            throw std::runtime_error(
+                description + " pixel " + std::to_string(pixel.id) +
+                " has invalid geometry");
+        }
+    }
+
+    // CameraGeometry returns one pixel for a point. Overlapping interiors
+    // therefore make the selected pixel depend on tie-breaking. Boundary
+    // contact is allowed; only positive-area overlap is rejected.
+    for (std::size_t i = 0; i < pixels.size(); ++i) {
+        for (std::size_t j = i + 1; j < pixels.size(); ++j) {
+            if (cameraPixelInteriorsOverlap(pixels[i], pixels[j])) {
+                throw std::runtime_error(
+                    description + " pixels " +
+                    std::to_string(pixels[i].id) + " and " +
+                    std::to_string(pixels[j].id) +
+                    " have overlapping interiors");
+            }
+        }
+    }
+}
+
+} // namespace
 
 std::vector<std::pair<double, double>> readCollectorReflectivityCsv(const std::string& path)
 {
@@ -1204,11 +1432,31 @@ std::vector<std::pair<double, double>> readCollectorReflectivityCsv(const std::s
                 "collector reflectivity CSV line " + std::to_string(line_no) +
                 " must provide theta_deg/angle_deg and reflectivity/efficiency");
         }
-        points.emplace_back(std::stod(theta), std::stod(reflectivity));
+        double theta_deg = 0.0;
+        double value = 0.0;
+        if (!parseDoubleStrict(theta, theta_deg) ||
+            !parseDoubleStrict(reflectivity, value) ||
+            !std::isfinite(theta_deg) || theta_deg < 0.0 ||
+            theta_deg > 90.0 ||
+            !std::isfinite(value) || value < 0.0 || value > 1.0) {
+            throw std::runtime_error(
+                "collector reflectivity CSV line " +
+                std::to_string(line_no) +
+                " requires theta_deg in [0,90] and reflectivity in [0,1]");
+        }
+        points.emplace_back(theta_deg, value);
     }
 
     if (points.empty()) {
         throw std::runtime_error("collector reflectivity CSV has no data rows: " + path);
+    }
+    std::sort(points.begin(), points.end());
+    for (std::size_t i = 1; i < points.size(); ++i) {
+        if (points[i - 1].first == points[i].first) {
+            throw std::runtime_error(
+                "collector reflectivity CSV has duplicate angle " +
+                doubleToString(points[i].first));
+        }
     }
     return points;
 }
@@ -1728,8 +1976,27 @@ SourceRuntimeConfig buildSourceRuntimeConfig(const std::map<std::string, std::st
         runtime.coordinate_frame = "telescope_local";
     }
     runtime.eventio_coordinate_frame = runtime.coordinate_frame;
-    runtime.eventio_2d_input_plane_z_m =
-        getDouble(cfg, "source.eventio_2d_input_plane_z_m", -16.0);
+    const auto reference_z = cfg.find("source.eventio_reference_z_m");
+    const auto legacy_2d_z = cfg.find("source.eventio_2d_input_plane_z_m");
+    if (reference_z != cfg.end() && legacy_2d_z != cfg.end()) {
+        const double new_value = getDouble(
+            cfg, "source.eventio_reference_z_m", -16.0);
+        const double legacy_value = getDouble(
+            cfg, "source.eventio_2d_input_plane_z_m", -16.0);
+        if (std::abs(new_value - legacy_value) > 1e-12) {
+            throw std::runtime_error(
+                "source.eventio_reference_z_m conflicts with deprecated "
+                "source.eventio_2d_input_plane_z_m");
+        }
+    }
+    runtime.eventio_reference_z_m = getDouble(
+        cfg,
+        "source.eventio_reference_z_m",
+        getDouble(cfg, "source.eventio_2d_input_plane_z_m", -16.0));
+    if (!std::isfinite(runtime.eventio_reference_z_m)) {
+        throw std::runtime_error(
+            "source.eventio_reference_z_m must be finite");
+    }
     runtime.eventio_2d_plane_mode =
         lowerCopy(getString(cfg, "source.eventio_2d_plane_mode", "auto"));
     if (runtime.eventio_2d_plane_mode != "auto" &&
@@ -2214,27 +2481,6 @@ void generateTimeBinnedNsbPe(const NsbConfig& nsb,
     }
 }
 
-float sampleTimeBinnedNsbPeCell(const NsbConfig& nsb,
-                                const WaveformOutputConfig& waveform_cfg,
-                                int event_id,
-                                int telescope_id,
-                                std::size_t n_pixels,
-                                std::size_t n_bins,
-                                std::size_t col,
-                                std::size_t bin)
-{
-    if (!nsb.enabled || nsb.rate_pe_per_ns_per_pixel <= 0.0 ||
-        waveform_cfg.time_bin_width_ns <= 0.0 ||
-        col >= n_pixels || bin >= n_bins || n_pixels == 0 || n_bins == 0) {
-        return 0.0f;
-    }
-    const std::size_t cell = col * n_bins + bin;
-    auto rng = makeNsbEventTelescopeCellRng(nsb, event_id, telescope_id, cell);
-    std::poisson_distribution<int> poisson(
-        nsb.rate_pe_per_ns_per_pixel * waveform_cfg.time_bin_width_ns);
-    return static_cast<float>(poisson(rng));
-}
-
 TriggerConfig buildTriggerConfig(const std::map<std::string, std::string>& cfg) {
     TriggerConfig trigger;
     trigger.enabled = getBool(cfg, "trigger.enabled", trigger.enabled);
@@ -2314,7 +2560,9 @@ CameraGeometry buildCameraGeometry(const CameraConfig& cfg) {
         }
         return readCameraCsv(cfg.csv_path);
     }
-    return makeGeneratedCamera(cfg);
+    auto camera = makeGeneratedCamera(cfg);
+    validateCameraGeometry(camera, "generated camera");
+    return camera;
 }
 
 double cameraPixelSizeForCollector(const CameraConfig& cfg, const CameraGeometry& camera)
@@ -2335,10 +2583,39 @@ std::unique_ptr<Cone::SquareCone> buildLightCollector(const CameraConfig& cfg,
     if (isDisabledText(collector)) {
         return nullptr;
     }
+    if (camera.empty()) {
+        throw std::runtime_error(
+            "camera.collector requires an enabled, non-empty camera");
+    }
+    const double reference_size = camera.pixels().front().size;
+    for (const auto& pixel : camera.pixels()) {
+        if (pixel.shape != PixelShape::Square) {
+            throw std::runtime_error(
+                "square-cone camera.collector currently requires square pixels; "
+                "pixel " + std::to_string(pixel.id) + " is not square");
+        }
+        if (std::abs(pixel.size - reference_size) >
+            std::max(1.0e-12, reference_size * 1.0e-9)) {
+            throw std::runtime_error(
+                "camera.collector requires all pixels to have one common size");
+        }
+    }
 
     // 这里仅把 output-plane 局部坐标转换为单个 square cone 的局部坐标。
     std::unique_ptr<Cone::SquareCone> cone;
     const double entrance_size_m = cameraPixelSizeForCollector(cfg, camera);
+    if (!std::isfinite(entrance_size_m) || entrance_size_m <= 0.0 ||
+        !std::isfinite(cfg.collector_exit_size_m) ||
+        cfg.collector_exit_size_m <= 0.0 ||
+        !std::isfinite(cfg.collector_height_m) ||
+        cfg.collector_height_m <= 0.0) {
+        throw std::runtime_error(
+            "camera collector entrance, exit, and height must be finite and > 0");
+    }
+    if (entrance_size_m <= cfg.collector_exit_size_m) {
+        throw std::runtime_error(
+            "camera collector entrance size must exceed its exit size");
+    }
     if (collector == "bezier" || collector == "square_cone_bezier") {
         cone.reset(Cone::create_cone_bezier_surface(
             entrance_size_m * 1000.0,
@@ -2346,6 +2623,13 @@ std::unique_ptr<Cone::SquareCone> buildLightCollector(const CameraConfig& cfg,
             cfg.collector_height_m * 1000.0,
             0.0));
     } else if (collector == "parabolic" || collector == "square_cone_parabolic") {
+        if (std::abs(entrance_size_m - 0.0243992) > 1.0e-9 ||
+            std::abs(cfg.collector_exit_size_m - 0.0150014) > 1.0e-9 ||
+            std::abs(cfg.collector_height_m - 0.0252718) > 1.0e-9) {
+            throw std::runtime_error(
+                "parabolic collector has fixed geometry: entrance=0.0243992 m, "
+                "exit=0.0150014 m, height=0.0252718 m");
+        }
         cone.reset(Cone::create_cone_parabolic_surface());
     } else {
         throw std::runtime_error("unsupported camera.collector: " + cfg.collector);
@@ -2391,17 +2675,22 @@ CollectorTraceResult traceLightCollector(const Cone::SquareCone& cone,
         hit.out_dir.dot(plane.normal.normalized())
     };
     double intensity = 1.0;
-    auto [out_intensity, exits_collector, exit_pos, exit_dir, reflections] =
-        cone.ray_trace_impl(pos, dir, intensity);
+    const auto trace_result = cone.ray_trace_impl(pos, dir, intensity);
+    const auto& exit_pos = trace_result.position;
+    const auto& exit_dir = trace_result.direction;
     const double sipm_half_mm = 0.5 * sipm.size_m * 1000.0;
     const bool hits_sipm =
         std::abs(exit_pos.x_) <= sipm_half_mm + 1e-9 &&
         std::abs(exit_pos.y_) <= sipm_half_mm + 1e-9;
 
     CollectorTraceResult result;
-    result.hit_sipm = exits_collector && hits_sipm && out_intensity > 0.0;
-    result.intensity = out_intensity;
-    result.reflections = reflections;
+    result.hit_sipm = trace_result.exits_collector && hits_sipm &&
+                      trace_result.intensity > 0.0;
+    result.intensity = trace_result.intensity;
+    result.reflections = trace_result.reflections;
+    result.path_length_m = trace_result.path_length * 0.001;
+    result.reflection_limit_reached =
+        trace_result.reflection_limit_reached;
     result.exit_position = exit_pos;
     result.exit_direction = exit_dir;
     return result;
@@ -2412,8 +2701,14 @@ void applyCameraResponse(const CameraGeometry& camera,
                          const OutputPlane& plane,
                          const SipmConfig& sipm,
                          const ElectronicsResponse& electronics,
-                         OpticalSurfaceHit& hit)
+                         OpticalSurfaceHit& hit,
+                         double speed_of_light_m_per_ns)
 {
+    if (!std::isfinite(speed_of_light_m_per_ns) ||
+        speed_of_light_m_per_ns <= 0.0) {
+        throw std::runtime_error(
+            "collector propagation speed must be finite and > 0");
+    }
     hit.camera_enabled = true;
     const double front_face_cosine =
         hit.out_dir.dot(plane.normal.normalized());
@@ -2436,6 +2731,11 @@ void applyCameraResponse(const CameraGeometry& camera,
         hit.hit_camera = collector_result.hit_sipm;
         hit.collector_reflections = collector_result.reflections;
         hit.collector_intensity = collector_result.intensity;
+        hit.collector_path_length_m = collector_result.path_length_m;
+        hit.collector_time_delay_ns =
+            collector_result.path_length_m / speed_of_light_m_per_ns;
+        hit.collector_reflection_limit_reached =
+            collector_result.reflection_limit_reached;
         hit.collector_exit_x_m = collector_result.exit_position.x_ * 0.001;
         hit.collector_exit_y_m = collector_result.exit_position.y_ * 0.001;
         hit.collector_exit_z_m = collector_result.exit_position.z_ * 0.001;
@@ -2443,6 +2743,9 @@ void applyCameraResponse(const CameraGeometry& camera,
         hit.collector_dir_v = collector_result.exit_direction.y_;
         hit.collector_dir_w = collector_result.exit_direction.z_;
         hit.relative_efficiency *= collector_result.intensity;
+        if (collector_result.hit_sipm) {
+            hit.time_ns += hit.collector_time_delay_ns;
+        }
     }
 
     if (hit.hit_camera) {
@@ -3254,9 +3557,6 @@ void applyFacetErrors(std::vector<MirrorFacet>& facets, const ErrorConfig& error
         return;
     }
 
-    std::mt19937_64 rng(error.random_seed);
-    std::normal_distribution<double> unit_normal(0.0, 1.0);
-
     // A positive per-facet column activates the whole column. In that mode zero
     // is an explicit zero for that facet and the uniform sigma is not added.
     // If the column is absent or all zeros, fall back to errors.cfg.
@@ -3266,9 +3566,19 @@ void applyFacetErrors(std::vector<MirrorFacet>& facets, const ErrorConfig& error
 
     for (auto& facet : facets) {
         Vec3 ideal_normal = facet.normal.normalized();
+        const auto facet_seed = deriveSeed(
+            error.random_seed,
+            static_cast<std::uint64_t>(
+                static_cast<std::int64_t>(facet.id) + 1));
+        auto normal_deviate = [&](RandomStage stage) {
+            std::mt19937_64 rng(stageSeed(facet_seed, stage));
+            std::normal_distribution<double> unit_normal(0.0, 1.0);
+            return unit_normal(rng);
+        };
 
         if (error.facet_radial_position_sigma_m > 0.0) {
-            double offset = error.facet_radial_position_sigma_m * unit_normal(rng);
+            const double offset = error.facet_radial_position_sigma_m *
+                normal_deviate(RandomStage::FacetPositionError);
             facet.center += ideal_normal * offset;
         }
 
@@ -3276,20 +3586,25 @@ void applyFacetErrors(std::vector<MirrorFacet>& facets, const ErrorConfig& error
             ? facet.misalign_sigma_rad
             : normal_sigma_rad;
         if (facet_normal_sigma_rad > 0.0) {
+            std::mt19937_64 normal_rng(stageSeed(
+                facet_seed, RandomStage::FacetNormalError));
             facet.normal = perturbVectorOnSphere(
-                ideal_normal, facet_normal_sigma_rad, rng);
+                ideal_normal, facet_normal_sigma_rad, normal_rng);
         }
 
         if (error.radius_of_curvature_sigma_m > 0.0 &&
             std::isfinite(facet.radius_of_curvature)) {
             double radius = facet.radius_of_curvature +
-                            error.radius_of_curvature_sigma_m * unit_normal(rng);
+                            error.radius_of_curvature_sigma_m *
+                                normal_deviate(RandomStage::FacetRadiusError);
             facet.radius_of_curvature = std::max(1e-9, radius);
         }
 
         if (error.reflectivity_scale_sigma > 0.0) {
-            double scale = 1.0 + error.reflectivity_scale_sigma * unit_normal(rng);
-            facet.reflectivity_scale *= std::max(0.0, scale);
+            double scale = 1.0 + error.reflectivity_scale_sigma *
+                normal_deviate(RandomStage::FacetReflectivityError);
+            facet.reflectivity_scale = std::clamp(
+                facet.reflectivity_scale * scale, 0.0, 1.0);
         }
     }
 }
@@ -3299,9 +3614,10 @@ void applyFacetEfficiencyScales(std::vector<MirrorFacet>& facets,
 {
     const double uniform_scale =
         getDouble(cfg, "efficiency.mirror_reflectivity_scale", 1.0);
-    if (!std::isfinite(uniform_scale) || uniform_scale < 0.0) {
+    if (!std::isfinite(uniform_scale) ||
+        uniform_scale < 0.0 || uniform_scale > 1.0) {
         throw std::runtime_error(
-            "efficiency.mirror_reflectivity_scale must be finite and >= 0");
+            "efficiency.mirror_reflectivity_scale must be finite and in [0,1]");
     }
 
     const std::string csv_path =
@@ -3341,11 +3657,12 @@ void applyFacetEfficiencyScales(std::vector<MirrorFacet>& facets,
             double scale = 0.0;
             const std::string text =
                 getRequiredCell(cells, header, "reflectivity_scale");
-            if (!parseDoubleStrict(text, scale) || !std::isfinite(scale) || scale < 0.0) {
+            if (!parseDoubleStrict(text, scale) ||
+                !std::isfinite(scale) || scale < 0.0 || scale > 1.0) {
                 throw std::runtime_error(
                     "per-facet reflectivity scale CSV line " +
                     std::to_string(line_no) +
-                    " has invalid reflectivity_scale");
+                    " requires reflectivity_scale in [0,1]");
             }
             if (!scales.emplace(id, scale).second) {
                 throw std::runtime_error(
@@ -3399,6 +3716,10 @@ double effectiveReflectDirectionSigmaRad(const std::vector<MirrorFacet>& facets,
 OpticalEfficiencyConfig buildEfficiencyConfig(const std::map<std::string, std::string>& cfg) {
     OpticalEfficiencyConfig eff;
     eff.constant_scale = getDouble(cfg, "efficiency.constant_scale", eff.constant_scale);
+    if (!std::isfinite(eff.constant_scale) || eff.constant_scale < 0.0) {
+        throw std::runtime_error(
+            "efficiency.constant_scale must be finite and >= 0");
+    }
 
     eff.mirror_reflectivity = parseEfficiencyFactor(cfg, "efficiency.mirror_reflectivity");
     eff.filter_transmission = parseEfficiencyFactor(cfg, "efficiency.filter_transmission");
@@ -3416,6 +3737,28 @@ OpticalEfficiencyConfig buildEfficiencyConfig(const std::map<std::string, std::s
     eff.use_funnel_acceptance =
         getBool(cfg, "efficiency.funnel_acceptance",
                 getBool(cfg, "efficiency.use_funnel_acceptance", false));
+
+    const std::string atmosphere_model =
+        lowerCopy(trim(getString(cfg, "atmosphere.model", "none")));
+    if (eff.atmosphere_transmission.enabled &&
+        !isDisabledText(atmosphere_model) &&
+        !getBool(cfg, "atmosphere.allow_additional_spectral_factor", false)) {
+        throw std::runtime_error(
+            "both atmosphere.model and a spectral atmosphere transmission "
+            "factor are enabled; set "
+            "atmosphere.allow_additional_spectral_factor=true only when the "
+            "second factor is intentional");
+    }
+
+    const std::string collector =
+        getString(cfg, "camera.collector", "none");
+    if (eff.use_funnel_acceptance && !isDisabledText(collector) &&
+        !getBool(cfg, "camera.allow_analytic_funnel_with_collector", false)) {
+        throw std::runtime_error(
+            "efficiency.funnel_acceptance and camera.collector would apply "
+            "two angular collector models; disable one or explicitly set "
+            "camera.allow_analytic_funnel_with_collector=true");
+    }
 
     return eff;
 }

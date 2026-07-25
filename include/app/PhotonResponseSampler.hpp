@@ -67,6 +67,8 @@ private:
 std::uint64_t photonResponseStreamId(const PhotonResponseConfig& cfg,
                                      const PhotonBunch& bunch,
                                      std::uint64_t represented_index);
+std::uint64_t photonIdentityStreamId(const PhotonBunch& bunch,
+                                     std::uint64_t represented_index);
 
 double photonResponseUniform01(std::uint64_t stream_id,
                                std::uint64_t stage);

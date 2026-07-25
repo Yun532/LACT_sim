@@ -8,6 +8,22 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include_directories(include)
 enable_testing()
 
+find_package(Git QUIET)
+set(LACT_PRODUCER_VERSION "source-tree")
+if(GIT_FOUND)
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" describe --always --dirty
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        OUTPUT_VARIABLE LACT_GIT_DESCRIBE
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(NOT LACT_GIT_DESCRIBE STREQUAL "")
+        set(LACT_PRODUCER_VERSION "${LACT_GIT_DESCRIBE}")
+    endif()
+endif()
+message(STATUS "LACT_sim producer version: ${LACT_PRODUCER_VERSION}")
+
 option(LACT_ENABLE_HESSIO "Enable direct CORSIKA/EventIO support through hessioxxx" ON)
 set(HESSIO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/external/hessioxxx/source" CACHE PATH "hessioxxx source/build root")
 if(LACT_ENABLE_HESSIO)
@@ -66,6 +82,7 @@ add_library(simlite_core
     src/io/MirrorFacetCsvReader.cpp
     src/io/EventIOPhotonSemantics.cpp
     src/io/EventIOArrayTiming.cpp
+    src/io/Sha256.cpp
     src/app/OpticalSimCommon.cpp
     src/app/ArrayTimingCorrection.cpp
     src/app/PhotonResponseSampler.cpp
@@ -74,6 +91,10 @@ add_library(simlite_core
     src/geometry/FacetFactory.cpp
     src/optics/AtmosphereTransmission.cpp
     src/optics/OpticalTracer.cpp
+)
+target_compile_definitions(
+    simlite_core PUBLIC
+    LACT_PRODUCER_VERSION="${LACT_PRODUCER_VERSION}"
 )
 
 if(LACT_HAS_HESSIO)
@@ -88,6 +109,12 @@ add_executable(test_synthetic_source
 )
 target_link_libraries(test_synthetic_source PRIVATE simlite_core)
 add_test(NAME test_synthetic_source COMMAND test_synthetic_source)
+
+add_executable(test_sha256
+    apps/test_sha256.cpp
+)
+target_link_libraries(test_sha256 PRIVATE simlite_core)
+add_test(NAME test_sha256 COMMAND test_sha256)
 
 add_executable(run_optical_sim
     apps/run_optical_sim.cpp

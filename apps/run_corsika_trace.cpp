@@ -3,6 +3,7 @@
 #include "io/EventIOArrayTiming.hpp"
 #include "app/TelescopeOpticsCache.hpp"
 #include "app/TriggerResponse.hpp"
+#include "core/Sha256.hpp"
 #include "io/CorsikaTraceOutputTypes.hpp"
 
 #ifdef LACT_HAS_HDF5
@@ -100,7 +101,9 @@ struct CollectorDebugPhotonRow {
     int pixel_id = -1;
     int accepted = 0;
     int collector_reflections = 0;
+    int collector_reflection_limit_reached = 0;
     double time_ns = 0.0;
+    double collector_path_length_m = 0.0;
     double collector_time_delay_ns = 0.0;
     double wavelength_nm = 0.0;
     double photon_weight = 0.0;
@@ -145,13 +148,6 @@ PhotonBunch transformEventIOBunchToTraceFrame(
     const EventIOMetadata& metadata,
     const SourceRuntimeConfig& source_runtime_cfg)
 {
-    auto apply_2d_plane_z = [&](PhotonBunch& bunch) {
-        if (bunch.eventio_2d &&
-            source_runtime_cfg.eventio_2d_input_plane_z_m != 0.0) {
-            bunch.photon.pos.z +=
-                source_runtime_cfg.eventio_2d_input_plane_z_m;
-        }
-    };
     TelescopeConfig telescope = telescope_cfg;
     const std::string frame_name = normalizeSourceCoordinateFrame(
         source_runtime_cfg.coordinate_frame);
@@ -170,7 +166,10 @@ PhotonBunch transformEventIOBunchToTraceFrame(
         }
     }
     PhotonBunch out = transformBunchToTelescopeLocal(input, telescope, frame_name);
-    apply_2d_plane_z(out);
+    if (source_runtime_cfg.use_eventio || out.eventio_2d) {
+        applyEventIOReferenceZOffset(
+            out, source_runtime_cfg.eventio_reference_z_m);
+    }
     return out;
 }
 
@@ -750,8 +749,10 @@ void appendCollectorDebugPhoton(std::vector<CollectorDebugPhotonRow>& rows,
         hit.pixel_id,
         hit.accepted ? 1 : 0,
         hit.collector_reflections,
+        hit.collector_reflection_limit_reached ? 1 : 0,
         hit.time_ns,
-        0.0,
+        hit.collector_path_length_m,
+        hit.collector_time_delay_ns,
         hit.wavelength_nm,
         hit.weight,
         hit.relative_efficiency,
@@ -781,7 +782,9 @@ void writeCollectorDebugCsv(const CollectorDebugConfig& cfg,
                                  cfg.photon_csv);
     }
     out << "event_id,telescope_id,pixel_id,accepted,collector_reflections,"
-        << "time_ns,collector_time_delay_ns,wavelength_nm,photon_weight,"
+        << "collector_reflection_limit_reached,time_ns,"
+        << "collector_path_length_m,collector_time_delay_ns,"
+        << "wavelength_nm,photon_weight,"
         << "relative_efficiency,signal_weight,exit_x_m,exit_y_m,exit_z_m,"
         << "dir_u,dir_v,dir_w\n";
     out << std::setprecision(10);
@@ -791,7 +794,9 @@ void writeCollectorDebugCsv(const CollectorDebugConfig& cfg,
             << row.pixel_id << ','
             << row.accepted << ','
             << row.collector_reflections << ','
+            << row.collector_reflection_limit_reached << ','
             << row.time_ns << ','
+            << row.collector_path_length_m << ','
             << row.collector_time_delay_ns << ','
             << row.wavelength_nm << ','
             << row.photon_weight << ','
@@ -1213,6 +1218,15 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
     try {
         writeStringAttribute(file, "format", "LACT_sim trace HDF5");
         writeStringAttribute(file, "format_version", "0.1-cpp");
+        writeStringAttribute(
+            file, "producer_version",
+            getString(cfg, "provenance.producer_version", "source-tree"));
+        writeStringAttribute(
+            file, "source_path",
+            getString(cfg, "provenance.source_path", ""));
+        writeStringAttribute(
+            file, "source_sha256",
+            getString(cfg, "provenance.source_sha256", ""));
         writeStringAttribute(file, "image_storage", output_cfg.hdf5_storage);
         writeStringAttribute(file, "hdf5_write_components",
                              output_cfg.hdf5_write_components ? "true" : "false");
@@ -1583,9 +1597,9 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             double total_photons;
             double total_pe;
             double total_signal;
-            float time_mean_ns;
-            float time_rms_ns;
-            float time_first_ns;
+            double time_mean_ns;
+            double time_rms_ns;
+            double time_first_ns;
         };
         std::vector<SparsePixelRow> sparse_rows;
         std::vector<ImageIndexRow> image_rows;
@@ -1625,9 +1639,9 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                 total_photons += static_cast<double>(p.photon_count);
             }
 
-            float mean = 0.0f;
-            float rms = 0.0f;
-            float first = 0.0f;
+            double mean = 0.0;
+            double rms = 0.0;
+            double first = 0.0;
             auto summary_it = summaries.find(key);
             if (summary_it != summaries.end()) {
                 const auto& s = summary_it->second;
@@ -1635,13 +1649,13 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                 total_pe = s.weighted_signal;
                 total_photons = static_cast<double>(s.hit_camera);
                 if (std::isfinite(s.first_cherenkov_time_ns)) {
-                    first = static_cast<float>(s.first_cherenkov_time_ns);
+                    first = s.first_cherenkov_time_ns;
                 }
                 if (s.weighted_signal > 0.0) {
                     const double m = s.weighted_time_sum / s.weighted_signal;
                     const double v = std::max(0.0, s.weighted_time2_sum / s.weighted_signal - m * m);
-                    mean = static_cast<float>(m);
-                    rms = static_cast<float>(std::sqrt(v));
+                    mean = m;
+                    rms = std::sqrt(v);
                 }
             }
             const auto count = static_cast<std::int32_t>(
@@ -1774,11 +1788,11 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             std::int8_t triggered;
             std::int32_t n_pixels_above_threshold;
             double total_pe;
-            float trigger_time_ns;
-            float trigger_first_time_ns;
-            float trigger_max_multiplicity_time_ns;
-            float geometric_delay_ns = std::numeric_limits<float>::quiet_NaN();
-            float coincidence_time_ns = std::numeric_limits<float>::quiet_NaN();
+            double trigger_time_ns;
+            double trigger_first_time_ns;
+            double trigger_max_multiplicity_time_ns;
+            double geometric_delay_ns = std::numeric_limits<double>::quiet_NaN();
+            double coincidence_time_ns = std::numeric_limits<double>::quiet_NaN();
         };
         struct ArrayTriggerRow {
             std::int64_t event_id;
@@ -1857,22 +1871,28 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                             it->second.pixel_id, it->second.time_bin, it->second.pe);
                     }
                 }
-                pe_at = [&, event_id = static_cast<int>(image.event_id),
-                         telescope_id = static_cast<int>(image.telescope_id)](
-                            std::size_t col, std::size_t bin) {
+
+                // Use the same deterministic NSB realization as the dense
+                // image and serialized waveform.  A separately seeded
+                // per-cell sampler would have the same distribution but
+                // would make the trigger impossible to reproduce from the
+                // saved waveform.
+                generateTimeBinnedNsbPe(
+                    nsb_cfg,
+                    waveform_cfg,
+                    static_cast<int>(image.event_id),
+                    static_cast<int>(image.telescope_id),
+                    trigger_pixels,
+                    trigger_bins,
+                    [&](std::size_t col, std::size_t bin, float pe) {
+                        trigger_waveform_pe[col * trigger_bins + bin] += pe;
+                    });
+                pe_at = [&](std::size_t col, std::size_t bin) {
                     const auto found = trigger_waveform_pe.find(
                         col * trigger_bins + bin);
-                    const double cherenkov_pe =
-                        found == trigger_waveform_pe.end() ? 0.0 : found->second;
-                    return cherenkov_pe + sampleTimeBinnedNsbPeCell(
-                        nsb_cfg,
-                        waveform_cfg,
-                        event_id,
-                        telescope_id,
-                        trigger_pixels,
-                        trigger_bins,
-                        col,
-                        bin);
+                    return found == trigger_waveform_pe.end()
+                        ? 0.0
+                        : found->second;
                 };
             } else if (have_dense_images) {
                 const std::size_t row = static_cast<std::size_t>(image.image_index);
@@ -1924,9 +1944,9 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                 static_cast<std::int32_t>(
                     camera_trigger.n_pixels_above_threshold),
                 total_pe,
-                static_cast<float>(camera_trigger.trigger_time_ns),
-                static_cast<float>(camera_trigger.first_trigger_time_ns),
-                static_cast<float>(camera_trigger.max_multiplicity_time_ns),
+                camera_trigger.trigger_time_ns,
+                camera_trigger.first_trigger_time_ns,
+                camera_trigger.max_multiplicity_time_ns,
             });
         }
         std::set<int> trigger_event_ids;
@@ -1950,12 +1970,11 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                         "array timing result has no HDF5 telescope trigger row");
                 }
                 auto& row = telescope_trigger_rows[row_index->second];
-                row.geometric_delay_ns = static_cast<float>(
-                    trigger_time.geometric_delay_ns);
-                row.coincidence_time_ns = static_cast<float>(
+                row.geometric_delay_ns = trigger_time.geometric_delay_ns;
+                row.coincidence_time_ns =
                     std::isfinite(trigger_time.coincidence_time_ns)
                         ? trigger_time.coincidence_time_ns
-                        : trigger_time.trigger_time_ns);
+                        : trigger_time.trigger_time_ns;
             }
             const auto decision = evaluateArrayTrigger(
                 telescope_trigger_times_by_event[event_id], trigger_cfg);
@@ -2320,11 +2339,11 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         H5Tinsert(image_type, "total_signal",
                   HOFFSET(ImageIndexRow, total_signal), H5T_NATIVE_DOUBLE);
         H5Tinsert(image_type, "time_mean_ns",
-                  HOFFSET(ImageIndexRow, time_mean_ns), H5T_NATIVE_FLOAT);
+                  HOFFSET(ImageIndexRow, time_mean_ns), H5T_NATIVE_DOUBLE);
         H5Tinsert(image_type, "time_rms_ns",
-                  HOFFSET(ImageIndexRow, time_rms_ns), H5T_NATIVE_FLOAT);
+                  HOFFSET(ImageIndexRow, time_rms_ns), H5T_NATIVE_DOUBLE);
         H5Tinsert(image_type, "time_first_ns",
-                  HOFFSET(ImageIndexRow, time_first_ns), H5T_NATIVE_FLOAT);
+                  HOFFSET(ImageIndexRow, time_first_ns), H5T_NATIVE_DOUBLE);
         writeCompound1D(images_group, "index", image_type, image_rows);
         H5Tclose(image_type);
 
@@ -2442,20 +2461,20 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         H5Tinsert(telescope_trigger_type, "total_pe",
                   HOFFSET(TelescopeTriggerRow, total_pe), H5T_NATIVE_DOUBLE);
         H5Tinsert(telescope_trigger_type, "trigger_time_ns",
-                  HOFFSET(TelescopeTriggerRow, trigger_time_ns), H5T_NATIVE_FLOAT);
+                  HOFFSET(TelescopeTriggerRow, trigger_time_ns), H5T_NATIVE_DOUBLE);
         H5Tinsert(telescope_trigger_type, "trigger_first_time_ns",
                   HOFFSET(TelescopeTriggerRow, trigger_first_time_ns),
-                  H5T_NATIVE_FLOAT);
+                  H5T_NATIVE_DOUBLE);
         H5Tinsert(telescope_trigger_type, "trigger_max_multiplicity_time_ns",
                   HOFFSET(TelescopeTriggerRow,
                           trigger_max_multiplicity_time_ns),
-                  H5T_NATIVE_FLOAT);
+                  H5T_NATIVE_DOUBLE);
         H5Tinsert(telescope_trigger_type, "geometric_delay_ns",
                   HOFFSET(TelescopeTriggerRow, geometric_delay_ns),
-                  H5T_NATIVE_FLOAT);
+                  H5T_NATIVE_DOUBLE);
         H5Tinsert(telescope_trigger_type, "coincidence_time_ns",
                   HOFFSET(TelescopeTriggerRow, coincidence_time_ns),
-                  H5T_NATIVE_FLOAT);
+                  H5T_NATIVE_DOUBLE);
         writeCompound1D(trigger_group, "telescope", telescope_trigger_type,
                         telescope_trigger_rows);
         H5Tclose(telescope_trigger_type);
@@ -2827,8 +2846,8 @@ void printCorsikaOpticalConfiguration(
     printField("source_coordinate_frame", source_runtime_cfg.coordinate_frame);
     printField("coordinate_interpretation",
                sourceCoordinateFrameDescription(source_runtime_cfg.coordinate_frame));
-    printField("eventio_2d_input_plane_z_m",
-               doubleToString(source_runtime_cfg.eventio_2d_input_plane_z_m));
+    printField("eventio_reference_z_m",
+               doubleToString(source_runtime_cfg.eventio_reference_z_m));
     printField("eventio_2d_plane_mode", source_runtime_cfg.eventio_2d_plane_mode);
     printField("eventio_mirror_front_z_m", doubleToString(eventio_mirror_front_z_m));
     printField("eventio_2d_trace_direction",
@@ -3384,11 +3403,25 @@ int main(int argc, char** argv) {
                 "Load/install ROOT >= 6.24 and re-run CMake, or disable output.lact_root_enabled.");
 #endif
         }
+        cfg["provenance.producer_version"] = LACT_PRODUCER_VERSION;
+        if (save_hdf5 || save_lact_root) {
+            const std::string provenance_source_path =
+                source_runtime_cfg.use_photon_csv
+                    ? source_runtime_cfg.csv_path
+                    : source_runtime_cfg.eventio_path;
+            cfg["provenance.source_path"] = provenance_source_path;
+            std::cerr << "run_corsika_trace: hashing input source "
+                      << provenance_source_path << "\n";
+            cfg["provenance.source_sha256"] =
+                sha256File(provenance_source_path);
+        }
 
         std::cout << "========================================\n";
         std::cout << "LACT CORSIKA/EventIO trace\n";
         std::cout << "========================================\n";
         printSection("Configuration files");
+        printField("producer_version",
+                   getString(cfg, "provenance.producer_version", "source-tree"));
         printField("main", argv[1]);
         if (!component_paths.telescope.empty()) printField("telescope", component_paths.telescope);
         if (!component_paths.mirror.empty()) printField("mirror", component_paths.mirror);
@@ -3409,6 +3442,9 @@ int main(int argc, char** argv) {
             printField("source", photon_csv_mode
                                      ? "inline PhotonCsv settings"
                                      : "inline EventIO settings");
+        }
+        if (cfg.find("provenance.source_sha256") != cfg.end()) {
+            printField("source_sha256", cfg.at("provenance.source_sha256"));
         }
 
         printSection("Run");
@@ -3891,7 +3927,9 @@ int main(int argc, char** argv) {
             if (profile_cfg.enabled) {
                 t_step = std::chrono::steady_clock::now();
             }
-            applyCameraResponse(camera, light_collector.get(), plane, sipm_cfg, electronics, hit);
+            applyCameraResponse(camera, light_collector.get(), plane, sipm_cfg,
+                                electronics, hit,
+                                propagation_cfg.speed_of_light_m_per_ns);
             if (profile_cfg.enabled) {
                 addElapsed(profile_stats, &ProfileStats::camera_response_s, t_step);
             }

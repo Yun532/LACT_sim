@@ -22,7 +22,9 @@ public:
 
         points_.clear();
         std::string line;
+        std::size_t line_no = 0;
         while (std::getline(ifs, line)) {
+            ++line_no;
             auto comment = line.find('#');
             if (comment != std::string::npos) {
                 line = line.substr(0, comment);
@@ -36,6 +38,17 @@ public:
             double efficiency = 0.0;
             if (!(ss >> wavelength_nm >> efficiency)) {
                 continue;
+            }
+            if (!std::isfinite(wavelength_nm) || wavelength_nm <= 0.0) {
+                throw std::runtime_error(
+                    "efficiency curve has non-positive or non-finite wavelength at line " +
+                    std::to_string(line_no) + ": " + path);
+            }
+            if (!std::isfinite(efficiency) ||
+                efficiency < 0.0 || efficiency > 1.0) {
+                throw std::runtime_error(
+                    "efficiency curve value must be finite and in [0,1] at line " +
+                    std::to_string(line_no) + ": " + path);
             }
             points_.push_back({wavelength_nm, efficiency});
         }

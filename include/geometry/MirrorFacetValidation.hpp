@@ -63,8 +63,10 @@ inline bool validateMirrorFacets(const std::vector<MirrorFacet>& facets,
             return fail("Polynomial surface is declared but not supported by current raytrace");
         }
 
-        if (!std::isfinite(facet.reflectivity_scale) || facet.reflectivity_scale < 0.0) {
-            return fail("reflectivity_scale must be finite and non-negative");
+        if (!std::isfinite(facet.reflectivity_scale) ||
+            facet.reflectivity_scale < 0.0 ||
+            facet.reflectivity_scale > 1.0) {
+            return fail("reflectivity_scale must be finite and in [0,1]");
         }
         if (!std::isfinite(facet.roughness_sigma_rad) || facet.roughness_sigma_rad < 0.0) {
             return fail("roughness_sigma_rad must be finite and non-negative");

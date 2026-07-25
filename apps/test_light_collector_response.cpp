@@ -1,6 +1,8 @@
 #include "app/OpticalSimCommon.hpp"
 
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 
 using namespace lact;
@@ -56,6 +58,22 @@ OpticalSurfaceHit makeHit(double u, double v, const Vec3& out_dir)
 
 int main()
 {
+    {
+        const auto [delta, first, second] =
+            MathUtils::quadratic_equation_root(0.0, 0.0, 1.0);
+        if (!(delta < 0.0) || std::isfinite(first) ||
+            std::isfinite(second)) {
+            std::cerr << "degenerate quadratic equation was not rejected\n";
+            return 1;
+        }
+        MathUtils::DMatrix<2, 3> original{1, 2, 3, 4, 5, 6};
+        const MathUtils::DMatrix<2, 3> copied(original);
+        if (copied(1, 2) != 6.0) {
+            std::cerr << "non-square matrix copy changed its dimensions\n";
+            return 1;
+        }
+    }
+
     const auto camera = onePixelCamera();
     const auto plane = outputPlane();
     SipmConfig sipm;
@@ -71,6 +89,9 @@ int main()
     ok &= check(direct.pixel_id == 7, "direct center hit should map to pixel id 7");
     ok &= check(std::abs(direct.relative_efficiency - 1.0) < 1e-12,
                 "direct center hit should keep ideal electronics weight");
+    ok &= check(direct.collector_path_length_m == 0.0 &&
+                    std::abs(direct.time_ns - 12.0) < 1e-12,
+                "camera response without a collector must not add optical path");
 
     auto backside = makeHit(0.0, 0.0, {0.0, 0.0, -1.0});
     applyCameraResponse(camera, nullptr, plane, sipm, electronics, backside);
@@ -93,6 +114,51 @@ int main()
     auto collector = buildLightCollector(collector_cfg, camera);
     ElectronicsResponse ideal_electronics;
 
+    CameraGeometry hex_camera;
+    CameraPixel hex_pixel;
+    hex_pixel.id = 1;
+    hex_pixel.center = {0.0, 0.0, 0.0};
+    hex_pixel.size = 0.0244;
+    hex_pixel.shape = PixelShape::Hexagonal;
+    hex_camera.addPixel(hex_pixel);
+    try {
+        (void)buildLightCollector(collector_cfg, hex_camera);
+        ok = false;
+        std::cerr << "square-cone collector accepted a hexagonal pixel\n";
+    } catch (...) {
+    }
+
+    CameraConfig overlapping_cfg;
+    overlapping_cfg.enabled = true;
+    overlapping_cfg.mode = "square_grid";
+    overlapping_cfg.pixel_shape = "square";
+    overlapping_cfg.pixel_size_m = 0.02;
+    overlapping_cfg.pixel_pitch_m = 0.01;
+    overlapping_cfg.radius_m = 0.03;
+    try {
+        (void)buildCameraGeometry(overlapping_cfg);
+        ok = false;
+        std::cerr << "camera geometry accepted overlapping pixel interiors\n";
+    } catch (...) {
+    }
+
+    const auto duplicate_camera_path =
+        std::filesystem::temp_directory_path() /
+        "lact_duplicate_camera_ids.csv";
+    {
+        std::ofstream output(duplicate_camera_path);
+        output << "id,x_m,y_m,shape,size_m\n"
+               << "3,0,0,square,0.01\n"
+               << "3,0.02,0,square,0.01\n";
+    }
+    try {
+        (void)readCameraCsv(duplicate_camera_path.string());
+        ok = false;
+        std::cerr << "camera CSV accepted duplicate pixel ids\n";
+    } catch (...) {
+    }
+    std::filesystem::remove(duplicate_camera_path);
+
     auto normal = makeHit(0.0, 0.0, {0.0, 0.0, 1.0});
     applyCameraResponse(camera, collector.get(), plane, sipm, ideal_electronics, normal);
     ok &= check(normal.hit_camera, "normal center ray should reach the SiPM");
@@ -101,6 +167,17 @@ int main()
                 "normal center ray should pass through without wall reflections");
     ok &= check(std::abs(normal.collector_intensity - 1.0) < 1e-12,
                 "normal center ray should keep full collector weight");
+    ok &= check(normal.collector_path_length_m > 0.0,
+                "normal center ray should report its collector path length");
+    ok &= check(std::abs(normal.time_ns -
+                        (12.0 + normal.collector_path_length_m / 0.299792458)) <
+                    1e-12,
+                "collector path length should be included in photon time");
+    ok &= check(std::abs(normal.collector_time_delay_ns -
+                        normal.collector_path_length_m / 0.299792458) < 1e-12,
+                "collector should expose the same time delay added to the hit");
+    ok &= check(!normal.collector_reflection_limit_reached,
+                "normal center ray must not reach the collector reflection limit");
 
     auto angled = makeHit(0.010, 0.0, {0.35, 0.0, 1.0});
     applyCameraResponse(camera, collector.get(), plane, sipm, ideal_electronics, angled);
@@ -109,6 +186,11 @@ int main()
                 "angled ray should reflect inside the collector");
     ok &= check(angled.collector_intensity < normal.collector_intensity,
                 "true_reflect material should reduce angled-ray collector weight");
+    ok &= check(angled.collector_path_length_m > 0.0 &&
+                    angled.time_ns > 12.0,
+                "angled collector ray should report positive path and delay");
+    ok &= check(!angled.collector_reflection_limit_reached,
+                "ordinary angled ray must not reach the reflection limit");
 
     std::cout << "collector normal ray: reflections="
               << normal.collector_reflections

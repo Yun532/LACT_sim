@@ -7,6 +7,8 @@
 #include <cstddef>
 #include <initializer_list>
 #include <iostream>
+#include <limits>
+#include <stdexcept>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -22,20 +24,37 @@ namespace MathUtils {
     }
 
     inline auto quadratic_equation_root(double a, double b, double c) {
-        if (fabs(a) < 1e-5) {
-            return std::make_tuple(1.0, -c / b, -c / b);
+        constexpr double epsilon = 1.0e-12;
+        if (std::fabs(a) < epsilon) {
+            if (std::fabs(b) < epsilon) {
+                const double invalid =
+                    std::numeric_limits<double>::quiet_NaN();
+                return std::make_tuple(-1.0, invalid, invalid);
+            }
+            const double root = -c / b;
+            return std::make_tuple(0.0, root, root);
         }
         double delta = b * b - 4 * a * c;
-        double min_root = 0.0;
-        double max_root = 0.0;
-
-        if (delta >= 0) {
-            min_root = (-b - sqrt(delta)) / (2 * a);
-            max_root = (-b + sqrt(delta)) / (2 * a);
+        if (delta < 0.0 || !std::isfinite(delta)) {
+            return std::make_tuple(
+                delta,
+                std::numeric_limits<double>::quiet_NaN(),
+                std::numeric_limits<double>::quiet_NaN());
+        }
+        const double sqrt_delta = std::sqrt(delta);
+        const double q = -0.5 * (b + std::copysign(sqrt_delta, b));
+        double first = 0.0;
+        double second = 0.0;
+        if (std::fabs(q) < epsilon) {
+            first = -b / (2.0 * a);
+            second = first;
+        } else {
+            first = q / a;
+            second = c / q;
         }
         return std::make_tuple(delta,
-                               min_root <= max_root ? min_root : max_root,
-                               max_root >= min_root ? max_root : min_root);
+                               std::min(first, second),
+                               std::max(first, second));
     }
     template <size_t n, size_t m>
     struct DMatrix;
@@ -54,12 +73,12 @@ namespace MathUtils {
         DMatrix(std::initializer_list<double> &&values) : data_(values) {}
 
         DMatrix(const DMatrix &other) {
-            n_ = other.m_;
+            n_ = other.n_;
             m_ = other.m_;
             data_ = other.data_;
         }
         DMatrix &operator=(const DMatrix &other) {
-            n_ = other.m_;
+            n_ = other.n_;
             m_ = other.m_;
             data_ = other.data_;
             return *this;
@@ -346,17 +365,21 @@ namespace MathUtils {
         std::reference_wrapper<double> y_ = data_[1];
         std::reference_wrapper<double> z_ = data_[2];
 
-        DMatrix<3, 1>() = default;
-        DMatrix<3, 1>(double x, double y, double z) : data_{x, y, z} {}
-        DMatrix<3, 1>(const std::vector<double> &data) {
+        DMatrix() = default;
+        DMatrix(double x, double y, double z) : data_{x, y, z} {}
+        DMatrix(const std::vector<double> &data) {
+            if (data.size() != 3) {
+                throw std::runtime_error(
+                    "D3Vector requires exactly three components");
+            }
             data_.resize(3, 0);
             for (size_t i = 0; i < 3; i++) {
                 data_[i] = data[i];
             }
         }
-        DMatrix<3, 1>(const DMatrix<3, 1> &v)
+        DMatrix(const DMatrix<3, 1> &v)
             : data_(v.data_), x_(data_[0]), y_(data_[1]), z_(data_[2]) {}
-        DMatrix<3, 1>(DMatrix<3, 1> &&v) noexcept
+        DMatrix(DMatrix<3, 1> &&v) noexcept
             : data_(std::move(v.data_)), x_(data_[0]), y_(data_[1]),
               z_(data_[2]) {}
 
@@ -407,6 +430,10 @@ namespace MathUtils {
 
         D3Vecter &normalize_vector() {
             double norm = magtitude(x_, y_, z_);
+            if (!std::isfinite(norm) || norm <= 1.0e-15) {
+                throw std::runtime_error(
+                    "D3Vector cannot normalize a zero or non-finite vector");
+            }
             if (!((std::fabs(norm - 1.0)) < kcutoff)) {
                 for (size_t i = 0; i < 3; i++) {
                     data_[i] /= norm;

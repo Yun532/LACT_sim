@@ -6,6 +6,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <cstdint>
+#include <cmath>
 
 namespace {
 
@@ -153,6 +154,23 @@ void PhotonCsvSource::load() {
             std::stod(requiredCell(cells, header, "dir_y", line_no)),
             std::stod(requiredCell(cells, header, "dir_z", line_no))
         };
+        const auto finiteVec = [](const Vec3& value) {
+            return std::isfinite(value.x) &&
+                   std::isfinite(value.y) &&
+                   std::isfinite(value.z);
+        };
+        if (!finiteVec(bunch.photon.pos)) {
+            throw std::runtime_error(
+                "PhotonCsvSource line " + std::to_string(line_no) +
+                " has a non-finite position");
+        }
+        if (!finiteVec(bunch.photon.dir) ||
+            !std::isfinite(bunch.photon.dir.norm2()) ||
+            bunch.photon.dir.norm2() <= 1.0e-30) {
+            throw std::runtime_error(
+                "PhotonCsvSource line " + std::to_string(line_no) +
+                " has a non-finite or zero direction");
+        }
         bunch.photon.normalizeDirection();
         bunch.photon.time_ns =
             optionalDouble(cells, header, "time_ns", cfg_.default_time_ns);
@@ -183,6 +201,43 @@ void PhotonCsvSource::load() {
         bunch.emission_altitude_km =
             optionalDouble(cells, header, "emission_altitude_km",
                            bunch.emission_altitude_km);
+
+        if (!std::isfinite(bunch.photon.time_ns)) {
+            throw std::runtime_error(
+                "PhotonCsvSource line " + std::to_string(line_no) +
+                " has a non-finite time_ns");
+        }
+        if (!std::isfinite(bunch.photon.wavelength_nm) ||
+            bunch.photon.wavelength_nm <= 0.0) {
+            throw std::runtime_error(
+                "PhotonCsvSource line " + std::to_string(line_no) +
+                " requires a finite, positive wavelength_nm");
+        }
+        if (!std::isfinite(bunch.raw_wavelength_nm)) {
+            throw std::runtime_error(
+                "PhotonCsvSource line " + std::to_string(line_no) +
+                " has a non-finite raw_wavelength_nm");
+        }
+        if (!std::isfinite(bunch.photon.weight) ||
+            bunch.photon.weight < 0.0) {
+            throw std::runtime_error(
+                "PhotonCsvSource line " + std::to_string(line_no) +
+                " requires a finite, non-negative weight");
+        }
+        if (!std::isfinite(bunch.multiplicity) ||
+            bunch.multiplicity < 0.0) {
+            throw std::runtime_error(
+                "PhotonCsvSource line " + std::to_string(line_no) +
+                " requires a finite, non-negative multiplicity");
+        }
+        const std::string emission_altitude_text =
+            optionalCell(cells, header, "emission_altitude_km");
+        if (!emission_altitude_text.empty() &&
+            !std::isfinite(bunch.emission_altitude_km)) {
+            throw std::runtime_error(
+                "PhotonCsvSource line " + std::to_string(line_no) +
+                " has a non-finite emission_altitude_km");
+        }
 
         if (cfg_.filter_telescope_id &&
             bunch.telescope_id != cfg_.selected_telescope_id) {

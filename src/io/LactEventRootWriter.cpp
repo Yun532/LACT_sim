@@ -411,26 +411,18 @@ LactRootPreparedData prepareLactRootObservations(
                 return it == waveform_pe.end() ? 0.0 : it->second;
             };
 
-            // Triggering must see one complete, deterministic NSB realization.
-            // Whether the waveform is serialized is an independent decision.
-            if (nsb_cfg.enabled) {
-                for (std::size_t col = 0; col < n_pixels; ++col) {
-                    for (std::size_t bin = 0; bin < n_bins; ++bin) {
-                        const float nsb_pe = sampleTimeBinnedNsbPeCell(
-                            nsb_cfg,
-                            waveform_cfg,
-                            event_id,
-                            telescope_id,
-                            n_pixels,
-                            n_bins,
-                            col,
-                            bin);
-                        if (nsb_pe > 0.0f) {
-                            add_waveform_pe(col, bin, nsb_pe, 0.0, nsb_pe);
-                        }
-                    }
-                }
-            }
+            // Triggering, the integrated image and serialized waveforms must
+            // all see exactly the same deterministic NSB realization.
+            generateTimeBinnedNsbPe(
+                nsb_cfg,
+                waveform_cfg,
+                event_id,
+                telescope_id,
+                n_pixels,
+                n_bins,
+                [&](std::size_t col, std::size_t bin, float nsb_pe) {
+                    add_waveform_pe(col, bin, nsb_pe, 0.0, nsb_pe);
+                });
 
             waveform_peak_by_col.assign(n_pixels, -1.0);
             waveform_peak_bin_by_col.assign(n_pixels, 0);
@@ -743,13 +735,15 @@ struct LactEventRootStreamWriter::Impl {
       int schema_version = 1;
       std::string profile = output_cfg.lact_profile;
       std::string producer = "LACT_sim";
-      std::string producer_version = "unknown";
+      std::string producer_version = LACT_PRODUCER_VERSION;
       std::string source_kind =
           source_runtime_cfg.use_photon_csv ? "PhotonCsv" : "EventIO";
       std::string source_path = source_runtime_cfg.use_photon_csv
                                     ? source_runtime_cfg.csv_path
                                     : source_runtime_cfg.eventio_path;
-      std::string source_sha256;
+      const auto source_hash_it = cfg.find("provenance.source_sha256");
+      std::string source_sha256 =
+          source_hash_it == cfg.end() ? std::string{} : source_hash_it->second;
       run_id = 0;
       std::string coordinate_convention =
           "CORSIKA IACT NWU; azimuth North-to-East";
@@ -856,7 +850,7 @@ struct LactEventRootStreamWriter::Impl {
 
       corsika_tree = std::make_unique<TTree>("corsika_events",
                                              "CORSIKA event truth/provenance");
-      corsika_tree->SetDirectory(nullptr);
+      corsika_tree->SetDirectory(file.get());
       corsika_tree->Branch("event_id", &root_event_id);
       corsika_tree->Branch("shower_event_id", &shower_event_id);
       corsika_tree->Branch("array_id", &array_id);
@@ -888,7 +882,7 @@ struct LactEventRootStreamWriter::Impl {
 
       observation_tree = std::make_unique<TTree>(
           "observations", "Event-telescope integrated p.e. observations");
-      observation_tree->SetDirectory(nullptr);
+      observation_tree->SetDirectory(file.get());
       observation_tree->Branch("event_id", &obs_event_id);
       observation_tree->Branch("telescope_id", &obs_telescope_id);
       observation_tree->Branch("triggered", &triggered);
@@ -928,7 +922,7 @@ struct LactEventRootStreamWriter::Impl {
       if (write_time_series) {
         waveform_tree = std::make_unique<TTree>(
             "waveforms", "Sparse p.e. waveform COO rows");
-        waveform_tree->SetDirectory(nullptr);
+        waveform_tree->SetDirectory(file.get());
         waveform_tree->Branch("event_id", &wf_event_id);
         waveform_tree->Branch("telescope_id", &wf_telescope_id);
         waveform_tree->Branch("n_pixels_camera", &wf_n_pixels_camera);
@@ -942,7 +936,7 @@ struct LactEventRootStreamWriter::Impl {
 
       trace_tree = std::make_unique<TTree>("trace_summary",
                                            "Event-telescope trace summary");
-      trace_tree->SetDirectory(nullptr);
+      trace_tree->SetDirectory(file.get());
       trace_tree->Branch("event_id", &trace_event_id);
       trace_tree->Branch("telescope_id", &trace_telescope_id);
       trace_tree->Branch("input_bunches", &input_bunches);
@@ -1017,7 +1011,9 @@ struct LactEventRootStreamWriter::Impl {
         ground_muons = event_it->ground_muons;
         has_simtel_mc_shower = event_it->has_simtel_mc_shower;
       }
-      corsika_tree->Fill();
+      if (corsika_tree->Fill() < 0) {
+        throw std::runtime_error("failed to fill ROOT corsika_events tree");
+      }
     }
 
     void writeObservation(const LactRootObservation& obs)
@@ -1047,7 +1043,9 @@ struct LactEventRootStreamWriter::Impl {
             obs.trigger_max_multiplicity_time_ns;
         geometric_delay_ns = obs.geometric_delay_ns;
         coincidence_time_ns = obs.coincidence_time_ns;
-        observation_tree->Fill();
+        if (observation_tree->Fill() < 0) {
+            throw std::runtime_error("failed to fill ROOT observations tree");
+        }
     }
 
     void writeWaveformConfig(const LactRootPreparedData& prepared)
@@ -1088,7 +1086,9 @@ struct LactEventRootStreamWriter::Impl {
         wf_pixel_id = wf.pixel_id;
         wf_time_bin = wf.time_bin;
         wf_pe = wf.pe;
-        waveform_tree->Fill();
+        if (waveform_tree->Fill() < 0) {
+            throw std::runtime_error("failed to fill ROOT waveforms tree");
+        }
     }
 
     void
@@ -1117,7 +1117,9 @@ struct LactEventRootStreamWriter::Impl {
               std::max(0.0, s.weighted_time2_sum / s.weighted_signal -
                                 trace_time_mean_ns * trace_time_mean_ns));
         }
-        trace_tree->Fill();
+        if (trace_tree->Fill() < 0) {
+          throw std::runtime_error("failed to fill ROOT trace_summary tree");
+        }
       }
     }
 
@@ -1125,8 +1127,14 @@ struct LactEventRootStreamWriter::Impl {
     {
         auto flush_tree = [](TTree* tree) {
             if (!tree) return;
-            tree->FlushBaskets();
-            tree->AutoSave("SaveSelf");
+            if (tree->FlushBaskets() < 0) {
+                throw std::runtime_error(
+                    std::string("failed to flush ROOT tree ") + tree->GetName());
+            }
+            if (tree->AutoSave("SaveSelf") < 0) {
+                throw std::runtime_error(
+                    std::string("failed to autosave ROOT tree ") + tree->GetName());
+            }
         };
         flush_tree(corsika_tree.get());
         flush_tree(observation_tree.get());
@@ -1164,11 +1172,17 @@ struct LactEventRootStreamWriter::Impl {
     {
         if (finished) return;
         file->cd();
-        if (corsika_tree) corsika_tree->Write();
-        if (observation_tree) observation_tree->Write();
-        if (waveform_tree) waveform_tree->Write();
-        if (trace_tree) trace_tree->Write();
-        file->Write();
+        flushBufferedTrees();
+        if (file->Write("", TObject::kOverwrite) < 0) {
+            throw std::runtime_error("failed to finalize lact_event ROOT file");
+        }
+        // Streaming trees must be attached while filling so ROOT can flush
+        // their baskets.  Detach them before closing the file because the
+        // unique_ptr members, rather than TFile, own their lifetime.
+        if (corsika_tree) corsika_tree->SetDirectory(nullptr);
+        if (observation_tree) observation_tree->SetDirectory(nullptr);
+        if (waveform_tree) waveform_tree->SetDirectory(nullptr);
+        if (trace_tree) trace_tree->SetDirectory(nullptr);
         file->Close();
         finished = true;
     }

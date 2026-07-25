@@ -27,25 +27,38 @@ namespace Cone {
         return (p1 - p2).get_magtitude();
     }
 
+    struct SurfaceIntersection {
+        bool hit = false;
+        double ray_distance = 0.0;
+        double surface_parameter = 0.0;
+        Position position{0.0, 0.0, 0.0};
+        DirectionVecter normal{0.0, 0.0, 0.0};
+    };
+
+    struct ConeIntersection {
+        bool hit = false;
+        size_t surface_index = 0;
+        double ray_distance = 0.0;
+        Position position{0.0, 0.0, 0.0};
+        DirectionVecter normal{0.0, 0.0, 0.0};
+    };
+
+    struct RayTraceResult {
+        double intensity = 0.0;
+        bool exits_collector = false;
+        Position position{0.0, 0.0, 0.0};
+        DirectionVecter direction{0.0, 0.0, 0.0};
+        int reflections = 0;
+        double path_length = 0.0;
+        bool reflection_limit_reached = false;
+    };
+
     class Surface {
     public:
         Surface() = default;
         virtual ~Surface() = default;
-        virtual DirectionVecter get_normal_vector(const Position &p) const = 0;
-        virtual std::pair<Position, bool>
-        get_intersect_position(const Position &p,
-                               const DirectionVecter &d) const = 0;
-        // 根据反射角等于入射角，可以通过向量的计算得到反射光的方向：
-        // R=I-2*(I \dot N)N
-        auto get_reflect_direction(const Position &p, DirectionVecter &v) {
-            auto ray_direction = v;
-            DirectionVecter result;
-            ray_direction.normalize_vector();
-            auto normal_vector = get_normal_vector(p);
-            auto product = ray_direction.dot_product(normal_vector);
-            auto reflect = (ray_direction - (2 * product * normal_vector));
-            return reflect.normalize_vector();
-        }
+        virtual SurfaceIntersection
+        intersect(const Position &p, const DirectionVecter &d) const = 0;
 
     protected:
         Surface(const Surface &s) = default;
@@ -75,23 +88,30 @@ namespace Cone {
                 std::move(transform_->inverse()));
         }
 
-        std::pair<Position, bool>
-        get_intersect_position(const Position &pos,
-                               const DirectionVecter &vec) const override {
+        SurfaceIntersection
+        intersect(const Position &pos,
+                  const DirectionVecter &vec) const override {
             auto p = inverse_transform_->product(pos);
             auto v = inverse_transform_->product(vec);
             v.normalize_vector();
             // 平行于柱面方向的光线，不会与柱面相交
             if ((fabs(v.x_) < 1e-6) && (fabs(v.z_) < 1e-6)) {
-                return std::make_pair(pos, false);
+                return {};
             }
-            bool is_intersect = false;
-            Position result;
 
             auto [delta, roots] = solve_equation(p.x_, v.x_, p.z_, v.z_);
-            std::vector<std::pair<double, Position>> positions;
+            struct Candidate {
+                double ray_distance = 0.0;
+                double theta = 0.0;
+                Position position;
+            };
+            std::vector<Candidate> positions;
             if (delta >= 0) {
                 for (auto root : roots) {
+                    if (!std::isfinite(root) || root < -1.0 || root > 1.0) {
+                        continue;
+                    }
+                    root = std::clamp(root, -1.0, 1.0);
                     auto theta = acos(root);
                     // 限制 theta 的范围
                     if (theta <= theta_min_ || theta >= theta_max_) {
@@ -111,32 +131,34 @@ namespace Cone {
                         (fabs(distance - fabs(t)) > 1e-4)) {
                         continue;
                     }
-                    positions.push_back(
-                        std::make_pair(distance, Position(x, y, z)));
+                    positions.push_back({distance, theta, Position(x, y, z)});
                 }
             }
-            if (!positions.empty()) {
-                auto result_ptr = std::min_element(
-                    positions.begin(), positions.end(),
-                    [](const std::pair<double, Position> &p1,
-                       const std::pair<double, Position> &p2) {
-                        return std::fabs(p1.first) < std::fabs(p2.first);
-                    });
-                result = result_ptr->second;
-                is_intersect = (result.x_ > 0 && result.z_ > 0);
+            if (positions.empty()) {
+                return {};
             }
-            return std::make_pair(result.pre_multiply(*transform_),
-                                  is_intersect);
+            const auto result_ptr = std::min_element(
+                positions.begin(), positions.end(),
+                [](const Candidate &p1, const Candidate &p2) {
+                    return p1.ray_distance < p2.ray_distance;
+                });
+            if (!(result_ptr->position.x_ > 0 &&
+                  result_ptr->position.z_ > 0)) {
+                return {};
+            }
+            SurfaceIntersection result;
+            result.hit = true;
+            result.ray_distance = result_ptr->ray_distance;
+            result.surface_parameter = result_ptr->theta;
+            result.position = result_ptr->position.pre_multiply(*transform_);
+            result.normal = normalAtTheta(result_ptr->theta);
+            return result;
         }
 
         // 求解抛物柱面的法向量。
         // x=a*sin(theta-b)/(1-cos(theta))+c;z=a*cos(theta-b)/(1-cos(theta))。
         // 对 t 和 自由变量 y 求导，得到两个切向量，再求叉积即可得到法向量。
-        DirectionVecter get_normal_vector(const Position &pos) const override {
-            auto p = inverse_transform_->product(pos);
-            auto theta = (fabs(p.z_) > 1e-6)
-                             ? atan(((p.x_ + para_c_) / p.z_)) + para_b_
-                             : M_PI / 2 + para_b_;
+        DirectionVecter normalAtTheta(double theta) const {
             auto sin_theta = sin(theta);
             auto cos_theta = cos(theta);
             auto x = para_a_ * cos(para_b_ - theta) / (1 - cos_theta) +
@@ -150,7 +172,7 @@ namespace Cone {
             auto n = vector_1.cross_product(vector_2)
                          .normalize_vector()
                          .pre_multiply(*transform_);
-            return n;
+            return n.normalize_vector();
         }
 
     private:
@@ -210,17 +232,15 @@ namespace Cone {
             inverse_transform_ = (std::move(transform_.inverse()));
         }
 
-        std::pair<Position, bool>
-        get_intersect_position(const Position &pos,
-                               const DirectionVecter &vec) const override {
+        SurfaceIntersection
+        intersect(const Position &pos,
+                  const DirectionVecter &vec) const override {
             auto p = pos.pre_multiply(inverse_transform_);
             auto v = vec.pre_multiply(inverse_transform_).normalize_vector();
             // 平行于柱面方向的光线，不会与柱面相交
             if ((fabs(v.x_) < 1e-6) && (fabs(v.z_) < 1e-6)) {
-                return std::make_pair(pos, false);
+                return {};
             }
-            Position result;
-            bool is_intersect = false;
 
             auto x = control_x_.pre_multiply(bezier_matrix_);
             auto z = control_z_.pre_multiply(bezier_matrix_);
@@ -229,11 +249,16 @@ namespace Cone {
             auto c = x[0] * v.z_ - z[0] * v.x_ - p.x_ * v.z_ + p.z_ * v.x_;
             // a == 0 的时候返回的大小根都是一样的，delta == 1.0
             auto [delta, min_root, max_root] = quadratic_equation_root(a, b, c);
-            std::vector<std::pair<double, Position>> positions;
-            if (delta > 0) {
+            struct Candidate {
+                double ray_distance = 0.0;
+                double parameter = 0.0;
+                Position position;
+            };
+            std::vector<Candidate> positions;
+            if (delta >= 0) {
                 for (auto root : {min_root, max_root}) {
                     // t 的范围一定是 0~1
-                    if (root < 0 || root > 1) {
+                    if (!std::isfinite(root) || root < 0 || root > 1) {
                         continue;
                     }
                     MathUtils::D3Vecter t_vector(1, root, root * root);
@@ -248,55 +273,45 @@ namespace Cone {
                         (fabs(distance - fabs(s)) > 1e-4)) {
                         continue;
                     }
-                    positions.emplace_back(std::make_pair(
-                        distance, Position(pos_x, pos_y, pos_z)));
+                    positions.push_back(
+                        {distance, root, Position(pos_x, pos_y, pos_z)});
                 }
             }
-            if (!positions.empty()) {
-                auto result_ptr = std::min_element(
-                    positions.begin(), positions.end(),
-                    [](const std::pair<double, Position> &p1,
-                       const std::pair<double, Position> &p2) {
-                        return std::fabs(p1.first) < std::fabs(p2.first);
-                    });
-                result = result_ptr->second;
-                is_intersect = (result.x_ > 0 && result.z_ > 0 &&
-                                (fabs(result.y_) < result.x_));
+            if (positions.empty()) {
+                return {};
             }
-            return std::make_pair(result.pre_multiply(transform_),
-                                  is_intersect);
-        }
-
-        DirectionVecter get_normal_vector(const Position &pos) const override {
-            auto p = pos.pre_multiply(inverse_transform_);
-            DirectionVecter result;
-            auto x = bezier_matrix_.product(control_x_);
-            auto z = bezier_matrix_.product(control_z_);
-
-            auto [deltaz, min_rootz, max_rootz] =
-                quadratic_equation_root(z[2], z[1], z[0] - p.z_);
-            auto [deltax, min_rootx, max_rootx] =
-                quadratic_equation_root(x[2], x[1], x[0] - p.x_);
-            std::vector<double> roots{min_rootz, max_rootz, min_rootx,
-                                      max_rootx};
-            // 有两个根相等，说明是切线对应的那个点
-            auto it =
-                std::find_if(roots.begin(), roots.end(), [&roots](double num) {
-                    return std::count_if(
-                               roots.begin(), roots.end(), [num](double other) {
-                                   return std::fabs(num - other) < 1e-5;
-                               }) > 1;
+            const auto result_ptr = std::min_element(
+                positions.begin(), positions.end(),
+                [](const Candidate &p1, const Candidate &p2) {
+                    return p1.ray_distance < p2.ray_distance;
                 });
+            if (!(result_ptr->position.x_ > 0 &&
+                  result_ptr->position.z_ > 0 &&
+                  fabs(result_ptr->position.y_) < result_ptr->position.x_)) {
+                return {};
+            }
 
-            auto t = *it;
-            MathUtils::D3Vecter t_vector(0, 1, t * 2);
-            auto dx = x.dot_product(t_vector);
-            auto dz = z.dot_product(t_vector);
+            auto x_coeff = control_x_.pre_multiply(bezier_matrix_);
+            auto z_coeff = control_z_.pre_multiply(bezier_matrix_);
+            MathUtils::D3Vecter derivative_vector(
+                0, 1, result_ptr->parameter * 2);
+            auto dx = x_coeff.dot_product(derivative_vector);
+            auto dz = z_coeff.dot_product(derivative_vector);
             DirectionVecter vector_1{0.0, 1.0, 0.0};
             DirectionVecter vector_2{dx, 0, dz};
-            result = vector_1.cross_product(vector_2)
-                         .normalize_vector()
-                         .pre_multiply(transform_);
+            auto normal = vector_1.cross_product(vector_2);
+            if (!std::isfinite(normal.get_magtitude()) ||
+                normal.get_magtitude() <= 1e-12) {
+                return {};
+            }
+
+            SurfaceIntersection result;
+            result.hit = true;
+            result.ray_distance = result_ptr->ray_distance;
+            result.surface_parameter = result_ptr->parameter;
+            result.position = result_ptr->position.pre_multiply(transform_);
+            result.normal =
+                normal.normalize_vector().pre_multiply(transform_).normalize_vector();
             return result;
         }
     };
@@ -329,12 +344,9 @@ namespace Cone {
             return *this;
         }
 
-        DirectionVecter get_normal_vector(const Position &p) const override {
-            return normal_vector_;
-        }
-        std::pair<Position, bool>
-        get_intersect_position(const Position &p,
-                               const DirectionVecter &v) const override {
+        SurfaceIntersection
+        intersect(const Position &p,
+                  const DirectionVecter &v) const override {
             // 分数 0/0 会导致无穷大，这里处理一下
             auto up = normal_vector_.dot_product(p - center_);
             auto down = normal_vector_.dot_product(v);
@@ -351,33 +363,41 @@ namespace Cone {
                 is_intersect =
                     ((fabs(x) < length_ / 2) && (fabs(y) < width_ / 2));
             } else {
+                result = p;
                 auto x = (p - center_).dot_product(x_axis_) /
                          x_axis_.get_magtitude();
                 auto y = (p - center_).dot_product(y_axis_) /
                          y_axis_.get_magtitude();
-                is_intersect =
+                is_intersect = std::fabs(up) < 1e-9 &&
                     ((fabs(x) < length_ / 2) && (fabs(y) < width_ / 2));
             }
-            return std::make_pair(result, is_intersect);
+            SurfaceIntersection intersection;
+            intersection.hit = is_intersect && t >= -1e-9;
+            intersection.ray_distance = intersection.hit
+                ? get_distance(p, result)
+                : 0.0;
+            intersection.position = result;
+            intersection.normal = normal_vector_;
+            return intersection;
         }
 
         std::pair<bool, Position>
         is_in_plane(const Position &p, const DirectionVecter &v,
                     std::function<bool(double, double)> fn = nullptr) const {
-            auto [pos, is_intersect] = get_intersect_position(p, v);
+            auto intersection = intersect(p, v);
+            const auto &pos = intersection.position;
+            const bool is_intersect = intersection.hit;
             auto dv = (pos - center_);
             auto x = dv.dot_product(x_axis_) / x_axis_.get_magtitude();
             auto y = dv.dot_product(y_axis_) / y_axis_.get_magtitude();
-            auto is_out = ((is_intersect) && (fabs(pos.x_) < length_ / 2) &&
-                           (fabs(pos.y_) < width_ / 2));
-
             if (fn == nullptr) {
-                is_out = is_intersect && (fabs(pos.x_) < length_ / 2) &&
-                         (fabs(pos.y_) < width_ / 2);
+                return std::make_pair(
+                    is_intersect && (fabs(x) < length_ / 2) &&
+                        (fabs(y) < width_ / 2),
+                    pos);
             } else {
-                is_out = is_intersect && fn(x, y);
+                return std::make_pair(is_intersect && fn(x, y), pos);
             }
-            return std::make_pair(is_out, pos);
         }
         DirectionVecter normal_vector_{0, 0, 1};
         DirectionVecter x_axis_{1, 0, 0};
@@ -518,67 +538,72 @@ namespace Cone {
             return *this;
         }
 
-        std::pair<std::tuple<size_t, double, Position>, bool>
-        get_intersect_position(const Position &pos,
-                               DirectionVecter &vec) const {
+        ConeIntersection get_intersect_position(const Position &pos,
+                                                DirectionVecter &vec) const {
             auto v = vec;
             v.normalize_vector();
-            std::vector<std::tuple<size_t, double, Position>> positions;
-            bool is_intersect = false;
-            std::tuple<size_t, double, Position> result;
+            std::vector<ConeIntersection> positions;
 
             for (size_t index = 0; index < surfaces_.size(); index++) {
-                auto [res, _is_intersect] =
-                    surfaces_[index]->get_intersect_position(pos, v);
-                auto distance = get_distance(res, pos);
-                if (!_is_intersect || distance < 1e-6) {
+                const auto intersection = surfaces_[index]->intersect(pos, v);
+                if (!intersection.hit ||
+                    !std::isfinite(intersection.ray_distance) ||
+                    intersection.ray_distance < 1e-6) {
                     continue;
                 }
-                positions.push_back(std::make_tuple(index, distance, res));
+                ConeIntersection candidate;
+                candidate.hit = true;
+                candidate.surface_index = index;
+                candidate.ray_distance = intersection.ray_distance;
+                candidate.position = intersection.position;
+                candidate.normal = intersection.normal;
+                positions.push_back(candidate);
             }
 
-            if (!positions.empty()) {
-                // 如果在对角线上需要返回固定的顺序 0->1->2->3->0 返回第二个面
-                // 这里特殊处理第三个，因为第三个后面是 0
-                if (positions.size() == 2 &&
-                    fabs(fabs(pos.x_) - fabs(pos.y_)) < 1e-6 &&
-                    std::get<0>(positions[0]) == 0 &&
-                    std::get<0>(positions[1]) == 3) {
-                    std::swap(positions[0], positions[1]);
+            if (positions.empty()) {
+                return {};
+            }
+
+            const auto result_ptr = std::min_element(
+                positions.begin(), positions.end(),
+                [](const ConeIntersection &p1, const ConeIntersection &p2) {
+                    if (p1.ray_distance != p2.ray_distance) {
+                        return p1.ray_distance < p2.ray_distance;
+                    }
+                    return p1.surface_index < p2.surface_index;
+                });
+            ConeIntersection result = *result_ptr;
+
+            // At a collector seam/corner the mathematical surface normal is
+            // not unique. Average every wall normal at the same first
+            // intersection, using a deterministic tolerance and index tie
+            // break above.
+            DirectionVecter seam_normal{0.0, 0.0, 0.0};
+            for (const auto &candidate : positions) {
+                if (std::fabs(candidate.ray_distance -
+                              result.ray_distance) < 1e-6) {
+                    seam_normal = seam_normal + candidate.normal;
                 }
-                auto result_ptr = std::min_element(
-                    positions.begin(), positions.end(),
-                    [](const std::tuple<size_t, double, Position> &p1,
-                       const std::tuple<size_t, double, Position> &p2) {
-                        auto d1 = std::get<1>(p1);
-                        auto d2 = std::get<1>(p2);
-                        return d1 < d2 || fabs(d1 - d2) < 1e-6;
-                    });
-                result = *result_ptr;
-                is_intersect = true;
             }
-            return std::make_pair(result, is_intersect);
-        }
-
-        DirectionVecter get_reflect_direction(const Position &p,
-                                              DirectionVecter &v,
-                                              size_t index) const {
-            DirectionVecter result;
-            if (fabs(fabs(p.x_) - fabs(p.y_)) < 1e-6) {
-                auto i1 = index;
-                auto i2 = (index == 0) ? 3 : index - 1;
-                auto norm1 = surfaces_[i1]->get_normal_vector(p);
-                auto norm2 = surfaces_[i2]->get_normal_vector(p);
-                auto norm = (norm1 + norm2).normalize_vector();
-                auto product = v.dot_product(norm);
-                result = (v - 2 * product * norm).normalize_vector();
-            } else {
-                result = surfaces_[index]->get_reflect_direction(p, v);
+            const double seam_norm = seam_normal.get_magtitude();
+            if (std::isfinite(seam_norm) && seam_norm > 1e-12) {
+                result.normal = seam_normal.normalize_vector();
             }
             return result;
         }
 
-        std::tuple<double, bool, Position, DirectionVecter, int>
+        DirectionVecter get_reflect_direction(const DirectionVecter &v,
+                                              DirectionVecter normal) const {
+            auto ray = v;
+            ray.normalize_vector();
+            normal.normalize_vector();
+            const auto product = ray.dot_product(normal);
+            auto result = ray - 2 * product * normal;
+            result.normalize_vector();
+            return result;
+        }
+
+        RayTraceResult
         ray_trace_impl(const Position &pos, const DirectionVecter &vec,
                        const double in_intensity) const {
             Position p = pos;
@@ -586,75 +611,110 @@ namespace Cone {
             v.normalize_vector();
             double intensity = in_intensity;
             size_t number = 0;
+            double path_length = 0.0;
+            bool reflection_limit_reached = false;
+            constexpr size_t max_reflections = 500;
             // 检查是否直接出去
-            auto [is_on, postion] = out_plane_->is_in_plane(p, v);
+            auto [is_on, position] = out_plane_->is_in_plane(p, v);
             bool is_out =
                 (is_on && (out_plane_->normal_vector_.dot_product(v) < 0));
-            p = is_out ? postion : p;
+            if (is_out) {
+                path_length += get_distance(p, position);
+                p = position;
+            }
 
             // 检查能否在入口平面上
             if (!is_out) {
-                auto [is_on_in_plane, _] = in_plane_->is_in_plane(p, v);
+                auto [is_on_in_plane, input_position] =
+                    in_plane_->is_in_plane(p, v);
                 bool is_out_in_plane =
                     is_on_in_plane &&
                     (in_plane_->normal_vector_.dot_product(v) > 0);
 
                 if (!is_out_in_plane && is_on_in_plane) {
                     bool is_outside = false;
-                    do {
-                        auto [pos_tuple, is_intersect] =
+                    while (!is_outside && number < max_reflections) {
+                        const auto intersection =
                             get_intersect_position(p, v);
-                        auto [index, distance, position] = pos_tuple;
-                        if (!is_intersect) {
-                            // 意外情况默认从上面离开，一般是浮点数误差造成的。
+                        if (!intersection.hit) {
                             is_out = false;
                             break;
                         }
+                        path_length += intersection.ray_distance;
                         // 检查反射率
-                        auto reflect_direcion =
-                            get_reflect_direction(position, v, index);
-                        auto theta =
-                            90 -
-                            57.3 * acos(reflect_direcion.dot_product(v)) / 2.0;
+                        auto reflect_direction =
+                            get_reflect_direction(v, intersection.normal);
+                        const double reflected_dot = std::clamp(
+                            reflect_direction.dot_product(v), -1.0, 1.0);
+                        auto theta = 90 -
+                            (180.0 / M_PI) * acos(reflected_dot) / 2.0;
                         auto is_reflective = material_->is_reflective(theta);
                         if (!is_reflective) {
                             is_out = false;
                             break;
                         }
                         intensity *= material_->get_reflect_intensity(theta);
+                        if (!std::isfinite(intensity) || intensity <= 0.0) {
+                            intensity = 0.0;
+                            is_out = false;
+                            break;
+                        }
                         //  反射光线方向检查
                         auto reflect = material_->get_reflect_direction(
-                            position, reflect_direcion);
+                            intersection.position, reflect_direction);
+                        reflect.normalize_vector();
                         // 检查是否在离开
-                        auto [_is_on_out_plane, _p] =
-                            out_plane_->is_in_plane(position, reflect);
-                        auto [_is_on_in_plane, _] =
-                            in_plane_->is_in_plane(position, reflect);
+                        auto [_is_on_out_plane, out_position] =
+                            out_plane_->is_in_plane(
+                                intersection.position, reflect);
+                        auto [_is_on_in_plane, in_position] =
+                            in_plane_->is_in_plane(
+                                intersection.position, reflect);
                         is_out_in_plane =
                             _is_on_in_plane &&
                             (in_plane_->normal_vector_.dot_product(reflect) >
                              0);
                         is_out = _is_on_out_plane &&
-                                 (out_plane_->normal_vector_.dot_product(
-                                      reflect) < 0);
+                                  (out_plane_->normal_vector_.dot_product(
+                                       reflect) < 0);
                         is_outside = is_out || is_out_in_plane;
-                        p = (is_out) ? _p : position;
+                        if (is_out) {
+                            path_length +=
+                                get_distance(intersection.position, out_position);
+                            p = out_position;
+                        } else if (is_out_in_plane) {
+                            path_length +=
+                                get_distance(intersection.position, in_position);
+                            p = in_position;
+                        } else {
+                            p = intersection.position;
+                        }
                         v = reflect;
                         number++;
-                    } while (!is_outside && (number <= 500));
+                    }
+                    reflection_limit_reached =
+                        !is_outside && number >= max_reflections;
                 }
                 intensity = (number == 0) ? 0.0 : intensity;
             }
-            return std::make_tuple(intensity, is_out, p, v, number);
+            RayTraceResult result;
+            result.intensity = intensity;
+            result.exits_collector = is_out;
+            result.position = p;
+            result.direction = v;
+            result.reflections = static_cast<int>(number);
+            result.path_length = path_length;
+            result.reflection_limit_reached = reflection_limit_reached;
+            return result;
         }
 
         inline bool ray_trace(Position &pos, DirectionVecter &vec,
                               double &intensity) const {
-            auto [i, is_out, p, v, n] = ray_trace_impl(pos, vec, intensity);
-            intensity = i;
-            pos = p;
-            vec = v;
-            return is_out;
+            const auto result = ray_trace_impl(pos, vec, intensity);
+            intensity = result.intensity;
+            pos = result.position;
+            vec = result.direction;
+            return result.exits_collector;
         }
 
         std::vector<std::unique_ptr<Surface>> surfaces_;

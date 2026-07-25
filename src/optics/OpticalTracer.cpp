@@ -2,8 +2,9 @@
 #include <cmath>
 #include <limits>
 #include <algorithm>
-#include <functional>
 #include <random>
+#include <stdexcept>
+#include "core/DeterministicSeed.hpp"
 #include "optics/Reflection.hpp"
 
 namespace {
@@ -43,17 +44,6 @@ bool insideAperture(const Vec3& rel, const Vec3& normal, const MirrorTile& tile)
     }
 
     return false;
-}
-
-std::uint64_t mixSeed(std::uint64_t seed, std::uint64_t value)
-{
-    seed ^= value + 0x9E3779B97F4A7C15ULL + (seed << 6) + (seed >> 2);
-    return seed;
-}
-
-std::uint64_t hashDouble(double value)
-{
-    return static_cast<std::uint64_t>(std::hash<double>{}(value));
 }
 
 Vec3 perturbDirection(const Vec3& direction, double sigma_rad, std::uint64_t seed)
@@ -165,17 +155,18 @@ OpticalSurfaceHit OpticalTracer::traceToPlaneImpl(
 
     Vec3 n = best_sol.normal.normalized();
     Vec3 out_dir = reflectDirection(photon.dir, n);
-    std::uint64_t scatter_seed = random_seed_;
-    scatter_seed = mixSeed(scatter_seed, static_cast<std::uint64_t>(best_tile->id + 1));
-    scatter_seed = mixSeed(scatter_seed, hashDouble(photon.pos.x));
-    scatter_seed = mixSeed(scatter_seed, hashDouble(photon.pos.y));
-    scatter_seed = mixSeed(scatter_seed, hashDouble(photon.pos.z));
-    scatter_seed = mixSeed(scatter_seed, hashDouble(photon.dir.x));
-    scatter_seed = mixSeed(scatter_seed, hashDouble(photon.dir.y));
-    scatter_seed = mixSeed(scatter_seed, hashDouble(photon.dir.z));
-    scatter_seed = mixSeed(scatter_seed, photon.random_stream_id);
     const double scatter_sigma_rad = std::hypot(reflect_direction_sigma_rad_,
                                                 best_tile->roughness_sigma_rad);
+    if (scatter_sigma_rad > 0.0 && photon.random_stream_id == 0) {
+        throw std::runtime_error(
+            "non-zero mirror scatter requires Photon.random_stream_id");
+    }
+    std::uint64_t scatter_seed =
+        lact::stageSeed(random_seed_, lact::RandomStage::MirrorRoughness);
+    scatter_seed = lact::deriveSeed(
+        scatter_seed, photon.random_stream_id);
+    scatter_seed = lact::deriveSeed(
+        scatter_seed, static_cast<std::uint64_t>(best_tile->id + 1));
     out_dir = perturbDirection(out_dir, scatter_sigma_rad, scatter_seed);
 
     auto surf_sol = intersectOutputPlane(best_sol.point, out_dir, plane);

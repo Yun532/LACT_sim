@@ -184,6 +184,41 @@ bool checkPhotonCsvRowIndex() {
     return ok;
 }
 
+bool checkInvalidPhotonCsvRows() {
+    bool ok = true;
+    const auto path =
+        std::filesystem::temp_directory_path() / "lact_photon_csv_invalid.csv";
+    const auto expectInvalidRow =
+        [&path, &ok](const std::string& row, const char* label) {
+            {
+                std::ofstream output(path);
+                output << "x_m,y_m,z_m,dir_x,dir_y,dir_z,"
+                          "wavelength_nm,weight,multiplicity\n"
+                       << row << "\n";
+            }
+            PhotonCsvConfig cfg;
+            cfg.csv_path = path.string();
+            try {
+                PhotonCsvSource source(cfg);
+                (void)source;
+                std::cerr << label << "\n";
+                ok = false;
+            } catch (...) {
+            }
+        };
+
+    expectInvalidRow("0,0,1,0,0,0,400,1,1",
+                     "PhotonCsv accepted a zero direction");
+    expectInvalidRow("0,0,1,0,0,-1,400,-1,1",
+                     "PhotonCsv accepted a negative weight");
+    expectInvalidRow("0,0,1,0,0,-1,400,1,-1",
+                     "PhotonCsv accepted a negative multiplicity");
+    expectInvalidRow("nan,0,1,0,0,-1,400,1,1",
+                     "PhotonCsv accepted a non-finite position");
+    std::filesystem::remove(path);
+    return ok;
+}
+
 } // namespace
 
 int main() {
@@ -192,6 +227,7 @@ int main() {
     ok &= checkPointSource();
     ok &= checkInvalidConfigs();
     ok &= checkPhotonCsvRowIndex();
+    ok &= checkInvalidPhotonCsvRows();
 
     if (ok) {
         std::cout << "Synthetic photon source checks passed\n";

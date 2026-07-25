@@ -46,7 +46,16 @@ struct FileGuard {
 };
 
 double downwardDirZ(double cx, double cy) {
+    if (!std::isfinite(cx) || !std::isfinite(cy)) {
+        throw std::runtime_error(
+            "EventIO 2D photon has non-finite direction cosines");
+    }
     double z2 = 1.0 - cx * cx - cy * cy;
+    constexpr double tolerance = 1.0e-6;
+    if (z2 < -tolerance) {
+        throw std::runtime_error(
+            "EventIO 2D photon direction cosines satisfy cx^2+cy^2 > 1");
+    }
     if (z2 < 0.0) {
         z2 = 0.0;
     }
@@ -549,6 +558,14 @@ PhotonBunch makeBunch(const struct bunch& b,
                       std::uint64_t source_bunch_index,
                       const EventIOPhotonConfig& cfg)
 {
+    if (!std::isfinite(b.x) || !std::isfinite(b.y) ||
+        !std::isfinite(b.ctime) || !std::isfinite(b.photons) ||
+        !std::isfinite(b.lambda) ||
+        !std::isfinite(cfg.default_weight) ||
+        !std::isfinite(cfg.default_multiplicity)) {
+        throw std::runtime_error(
+            "EventIO 2D photon bunch contains non-finite input");
+    }
     PhotonBunch out;
     out.photon.pos = {b.x * 0.01, b.y * 0.01, 0.0};
     out.photon.dir = {b.cx, b.cy, downwardDirZ(b.cx, b.cy)};
@@ -557,6 +574,10 @@ PhotonBunch makeBunch(const struct bunch& b,
     out.photon.weight = cfg.default_weight;
     out.photon.optical_efficiency_preapplied = b.lambda < 0.0;
     out.multiplicity = b.photons * cfg.default_multiplicity;
+    if (out.photon.weight < 0.0 || out.multiplicity < 0.0) {
+        throw std::runtime_error(
+            "EventIO 2D photon bunch requires non-negative weight and multiplicity");
+    }
     out.event_id = event_id;
     out.shower_event_id = shower_event_id;
     out.array_id = array_id;
@@ -603,6 +624,26 @@ PhotonBunch makeBunch3d(const struct bunch3d& b,
                         std::uint64_t source_bunch_index,
                         const EventIOPhotonConfig& cfg)
 {
+    if (!std::isfinite(b.x) || !std::isfinite(b.y) ||
+        !std::isfinite(b.z) || !std::isfinite(b.cx) ||
+        !std::isfinite(b.cy) || !std::isfinite(b.cz) ||
+        !std::isfinite(b.ctime) || !std::isfinite(b.photons) ||
+        !std::isfinite(b.lambda) || !std::isfinite(b.dist) ||
+        !std::isfinite(cfg.default_weight) ||
+        !std::isfinite(cfg.default_multiplicity)) {
+        throw std::runtime_error(
+            "EventIO 3D photon bunch contains non-finite input");
+    }
+    const double direction_norm2 =
+        b.cx * b.cx + b.cy * b.cy + b.cz * b.cz;
+    if (!std::isfinite(direction_norm2) || direction_norm2 <= 1.0e-30) {
+        throw std::runtime_error(
+            "EventIO 3D photon bunch has a zero direction");
+    }
+    if (std::abs(direction_norm2 - 1.0) > 1.0e-4) {
+        throw std::runtime_error(
+            "EventIO 3D photon direction cosines are not unit length");
+    }
     PhotonBunch out;
     out.photon.pos = {b.x * 0.01, b.y * 0.01, b.z * 0.01};
     out.photon.dir = {b.cx, b.cy, b.cz};
@@ -611,6 +652,10 @@ PhotonBunch makeBunch3d(const struct bunch3d& b,
     out.photon.weight = cfg.default_weight;
     out.photon.optical_efficiency_preapplied = b.lambda < 0.0;
     out.multiplicity = b.photons * cfg.default_multiplicity;
+    if (out.photon.weight < 0.0 || out.multiplicity < 0.0) {
+        throw std::runtime_error(
+            "EventIO 3D photon bunch requires non-negative weight and multiplicity");
+    }
     out.event_id = event_id;
     out.shower_event_id = shower_event_id;
     out.array_id = array_id;

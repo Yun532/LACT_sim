@@ -56,6 +56,38 @@ int main()
         return 1;
     }
 
+    auto order_a = makeFacet();
+    auto order_b = makeFacet();
+    order_b.id = 2;
+    order_b.center = {-0.5, 0.75, -7.9};
+    std::vector<MirrorFacet> ordered{order_a, order_b};
+    std::vector<MirrorFacet> reversed{order_b, order_a};
+    applyFacetErrors(ordered, error);
+    applyFacetErrors(reversed, error);
+    std::map<int, MirrorFacet> ordered_by_id;
+    std::map<int, MirrorFacet> reversed_by_id;
+    for (const auto& facet : ordered) {
+        ordered_by_id.emplace(facet.id, facet);
+    }
+    for (const auto& facet : reversed) {
+        reversed_by_id.emplace(facet.id, facet);
+    }
+    for (const auto& [id, lhs] : ordered_by_id) {
+        const auto& rhs = reversed_by_id.at(id);
+        if (lhs.center.x != rhs.center.x ||
+            lhs.center.y != rhs.center.y ||
+            lhs.center.z != rhs.center.z ||
+            lhs.normal.x != rhs.normal.x ||
+            lhs.normal.y != rhs.normal.y ||
+            lhs.normal.z != rhs.normal.z ||
+            lhs.radius_of_curvature != rhs.radius_of_curvature ||
+            lhs.reflectivity_scale != rhs.reflectivity_scale) {
+            std::cerr << "facet errors depend on CSV row order for facet "
+                      << id << "\n";
+            return 1;
+        }
+    }
+
     auto zero_reflectivity = makeFacet();
     zero_reflectivity.reflectivity_scale = 0.0;
     std::vector<MirrorFacet> zero_facets{zero_reflectivity};

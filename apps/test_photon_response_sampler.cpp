@@ -47,6 +47,20 @@ int main()
     auto expected = expectation.candidate(bunch, 0);
     ok &= check(std::abs(expected.photon.weight - 3.25) < 1.0e-12,
                 "expectation mode lost bunch multiplicity");
+    ok &= check(expected.stream_id != 0 &&
+                    expected.photon.random_stream_id != 0,
+                "expectation mode should assign non-zero response and photon streams");
+    const auto expected_repeat = expectation.candidate(bunch, 0);
+    ok &= check(expected_repeat.stream_id == expected.stream_id &&
+                    expected_repeat.photon.random_stream_id ==
+                        expected.photon.random_stream_id,
+                "expectation mode streams should be reproducible");
+    auto translated_bunch = bunch;
+    translated_bunch.photon.pos = {123.0, -456.0, 789.0};
+    translated_bunch.photon.dir = {0.1, 0.2, -0.97};
+    const auto translated_expected = expectation.candidate(translated_bunch, 0);
+    ok &= check(translated_expected.stream_id == expected.stream_id,
+                "photon identity stream must not depend on coordinates");
     auto expected_pre = expectation.applyPreGeometry(expected, 0.4, 0.2);
     ok &= check(expected_pre.survives &&
                 std::abs(expected.photon.weight - 1.3) < 1.0e-12,
@@ -91,6 +105,16 @@ int main()
     auto impossible_pre = stochastic.applyPreGeometry(impossible, 0.0, 1.0);
     ok &= check(!impossible_pre.survives,
                 "zero pre-geometry probability should never survive");
+    try {
+        auto invalid_probability = stochastic.candidate(bunch, 0);
+        OpticalSurfaceHit invalid_hit;
+        invalid_hit.relative_efficiency = 1.01;
+        (void)stochastic.acceptPostGeometry(
+            invalid_probability, invalid_hit);
+        ok = false;
+        std::cerr << "post-geometry probability above one was silently clamped\n";
+    } catch (...) {
+    }
 
     std::uint64_t pre_survivors = 0;
     std::uint64_t detected = 0;
@@ -141,6 +165,13 @@ int main()
         (void)stochastic.candidateCount(invalid_bunch);
         ok = false;
         std::cerr << "negative stochastic multiplicity was accepted\n";
+    } catch (...) {
+    }
+    try {
+        auto invalid_bunch = makeBunch(-1.0);
+        (void)expectation.candidateCount(invalid_bunch);
+        ok = false;
+        std::cerr << "negative expectation multiplicity was accepted\n";
     } catch (...) {
     }
 

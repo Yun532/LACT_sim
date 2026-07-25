@@ -1,0 +1,252 @@
+{
+  "counts": {
+    "array_trigger_rows": 7,
+    "camera_pixels": 1616,
+    "corsika_event_rows": 7,
+    "corsika_shower_headers": 1000,
+    "image_rows": 12,
+    "telescope_trigger_rows": 12,
+    "telescopes": 2
+  },
+  "dataset_shapes": {
+    "/camera/pixels": [
+      1616
+    ],
+    "/config/components/atmosphere_text": [],
+    "/config/components/camera_text": [],
+    "/config/components/efficiency_text": [],
+    "/config/components/error_text": [],
+    "/config/components/mirror_text": [],
+    "/config/components/obstruction_text": [],
+    "/config/components/output_text": [],
+    "/config/components/sipm_text": [],
+    "/config/components/telescope_text": [],
+    "/config/main_config_text": [],
+    "/events/corsika": [
+      7
+    ],
+    "/events/corsika_showers": [
+      1000
+    ],
+    "/events/table": [
+      7
+    ],
+    "/images/dense/cherenkov_pe": [
+      12,
+      1616
+    ],
+    "/images/dense/nsb_pe": [
+      12,
+      1616
+    ],
+    "/images/dense/pe": [
+      12,
+      1616
+    ],
+    "/images/dense/photon_count": [
+      12,
+      1616
+    ],
+    "/images/dense/pixel_id_axis": [
+      1616
+    ],
+    "/images/dense/signal": [
+      12,
+      1616
+    ],
+    "/images/dense/time_mean_ns": [
+      12,
+      1616
+    ],
+    "/images/dense/time_rms_ns": [
+      12,
+      1616
+    ],
+    "/images/index": [
+      12
+    ],
+    "/images/sparse/pixels": [
+      51
+    ],
+    "/mirrors/facets": [
+      54
+    ],
+    "/telescopes/table": [
+      2
+    ],
+    "/trigger/array": [
+      7
+    ],
+    "/trigger/telescope": [
+      12
+    ],
+    "/waveforms/pixel_id_axis": [
+      1616
+    ],
+    "/waveforms/reference_time_ns": [
+      12
+    ],
+    "/waveforms/samples": [
+      85077
+    ],
+    "/waveforms/time_centers_ns": [
+      31
+    ],
+    "/waveforms/time_edges_ns": [
+      32
+    ]
+  },
+  "hdf5_path": "run_logs/trust_validation/muon_first_event_canonical_nsb/corsika_trace.h5",
+  "images": {
+    "cherenkov_pe": {
+      "count": 19392,
+      "finite": 19392,
+      "max": 25.196041107177734,
+      "mean": 0.016267885629315988,
+      "median": 0.0,
+      "min": 0.0,
+      "negative": 0,
+      "nonfinite": 0,
+      "sum": 315.46683812369565
+    },
+    "decomposition_max_abs_error": 9.5367431640625e-07,
+    "nsb_pe": {
+      "count": 19392,
+      "finite": 19392,
+      "max": 16.0,
+      "mean": 4.7213283828382835,
+      "median": 5.0,
+      "min": 0.0,
+      "negative": 0,
+      "nonfinite": 0,
+      "sum": 91556.0
+    },
+    "pe": {
+      "count": 19392,
+      "finite": 19392,
+      "max": 35.196041107177734,
+      "mean": 4.73759626835683,
+      "median": 5.0,
+      "min": 0.0,
+      "negative": 0,
+      "nonfinite": 0,
+      "sum": 91871.46683597565
+    },
+    "per_image_cherenkov_pe": {
+      "count": 12,
+      "finite": 12,
+      "max": 124.603750705719,
+      "mean": 26.28890317697464,
+      "median": 6.997585187423056,
+      "min": 0.0,
+      "negative": 0,
+      "nonfinite": 0,
+      "sum": 315.46683812369565
+    },
+    "per_image_nsb_pe": {
+      "count": 12,
+      "finite": 12,
+      "max": 7766.0,
+      "mean": 7629.666666666667,
+      "median": 7617.5,
+      "min": 7528.0,
+      "negative": 0,
+      "nonfinite": 0,
+      "sum": 91556.0
+    },
+    "per_image_total_pe": {
+      "count": 12,
+      "finite": 12,
+      "max": 7766.0,
+      "mean": 7655.955569664638,
+      "median": 7651.301874637604,
+      "min": 7567.594987869263,
+      "negative": 0,
+      "nonfinite": 0,
+      "sum": 91871.46683597565
+    }
+  },
+  "provenance": {
+    "producer_version": "source-tree",
+    "source_path": "/tmp/LACT_review_muon_E100_th0_run000001.zst",
+    "source_sha256": "20250674adb895df40382f212fa99378dc22fd4ea3f3352bac2e9c868af2962b"
+  },
+  "root_hdf5_trigger": {
+    "checked": 12,
+    "failure_count": 0,
+    "failures": [],
+    "passed": true
+  },
+  "sanity": {
+    "failures": [],
+    "passed": true
+  },
+  "stdout_event_totals": {
+    "completed_shower_lines": 1,
+    "sums": {
+      "accepted": 407.0,
+      "blocked": 203.0,
+      "blocked_incoming": 189.0,
+      "blocked_reflected": 14.0,
+      "hit_camera": 533.0,
+      "hit_output": 684.0,
+      "hit_output_before_obstruction": 887.0,
+      "input_bunches": 1360.0,
+      "input_photons": 6397.6,
+      "output_transmission_after_obstruction": 0.771139,
+      "pe": 315.467
+    }
+  },
+  "trigger": {
+    "array_fraction": 0.0,
+    "array_total": 7,
+    "array_triggered": 0,
+    "telescope_fraction": 0.16666666666666666,
+    "telescope_total": 12,
+    "telescope_triggered": 2
+  },
+  "trigger_from_saved_waveform": {
+    "available": true,
+    "checked": 12,
+    "failure_count": 0,
+    "failures": [],
+    "passed": true
+  },
+  "waveforms": {
+    "available": true,
+    "cherenkov_pe": {
+      "count": 85077,
+      "finite": 85077,
+      "max": 25.1960391998291,
+      "mean": 0.0037080154380316364,
+      "median": 0.0,
+      "min": 0.0,
+      "negative": 0,
+      "nonfinite": 0,
+      "sum": 315.4668294214175
+    },
+    "nsb_pe": {
+      "count": 85077,
+      "finite": 85077,
+      "max": 5.0,
+      "mean": 1.0761545423557484,
+      "median": 1.0,
+      "min": 0.0,
+      "negative": 0,
+      "nonfinite": 0,
+      "sum": 91556.0
+    },
+    "pe": {
+      "count": 85077,
+      "finite": 85077,
+      "max": 25.636783599853516,
+      "mean": 1.079862557794393,
+      "median": 1.0,
+      "min": 0.0,
+      "negative": 0,
+      "nonfinite": 0,
+      "sum": 91871.46682947357
+    },
+    "rows": 85077
+  }
+}

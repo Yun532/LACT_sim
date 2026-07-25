@@ -1,4 +1,5 @@
 #include "app/TriggerResponse.hpp"
+#include "io/CorsikaTraceOutputTypes.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -106,5 +107,52 @@ int main()
     ok &= check(no_window.triggered &&
                     no_window.coincident_telescope_ids.size() == 3,
                 "zero array window should retain legacy count-only behavior");
+
+    NsbConfig nsb;
+    nsb.enabled = true;
+    nsb.rate_pe_per_ns_per_pixel = 1.5;
+    nsb.seed = 1234567;
+    WaveformOutputConfig waveform;
+    waveform.enabled = true;
+    waveform.source = "pe";
+    waveform.time_bin_width_ns = 1.0;
+    constexpr std::size_t nsb_pixels = 8;
+    constexpr std::size_t nsb_bins = 6;
+    const auto generate_nsb = [&](int event_id) {
+        std::vector<double> cells(nsb_pixels * nsb_bins, 0.0);
+        generateTimeBinnedNsbPe(
+            nsb, waveform, event_id, 2, nsb_pixels, nsb_bins,
+            [&](std::size_t pixel, std::size_t bin, float value) {
+                cells[pixel * nsb_bins + bin] += value;
+            });
+        return cells;
+    };
+    const auto nsb_first = generate_nsb(101);
+    const auto nsb_repeat = generate_nsb(101);
+    const auto nsb_other_event = generate_nsb(102);
+    ok &= check(nsb_first == nsb_repeat,
+                "time-binned NSB realization is not reproducible");
+    ok &= check(nsb_first != nsb_other_event,
+                "time-binned NSB realization did not separate events");
+
+    trigger.pixel_threshold_pe = 3.0;
+    trigger.camera_multiplicity = 2;
+    trigger.camera_coincidence_window_ns = 2.0;
+    const auto nsb_trigger = evaluateBinnedPeTrigger(
+        nsb_pixels, nsb_bins, waveform.time_bin_width_ns, 0.5, trigger,
+        [&](std::size_t pixel, std::size_t bin) {
+            return nsb_first[pixel * nsb_bins + bin];
+        });
+    const auto nsb_trigger_repeat = evaluateBinnedPeTrigger(
+        nsb_pixels, nsb_bins, waveform.time_bin_width_ns, 0.5, trigger,
+        [&](std::size_t pixel, std::size_t bin) {
+            return nsb_repeat[pixel * nsb_bins + bin];
+        });
+    ok &= check(nsb_trigger.triggered == nsb_trigger_repeat.triggered &&
+                    nsb_trigger.n_pixels_above_threshold ==
+                        nsb_trigger_repeat.n_pixels_above_threshold &&
+                    nsb_trigger.trigger_time_ns ==
+                        nsb_trigger_repeat.trigger_time_ns,
+                "trigger did not reproduce the saved NSB realization");
     return ok ? 0 : 1;
 }

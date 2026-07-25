@@ -29,6 +29,8 @@ inline bool writeSurfaceHitsCSV(const std::string& path,
         << "obstruction_blocked,obstruction_blocked_incoming,obstruction_blocked_reflected,"
         << "camera_enabled,hit_camera,accepted,pixel_id,camera_x_m,camera_y_m,"
         << "collector_enabled,hit_collector,collector_reflections,collector_intensity,"
+        << "collector_path_length_m,collector_time_delay_ns,"
+        << "collector_reflection_limit_reached,"
         << "collector_exit_x_m,collector_exit_y_m,collector_exit_z_m,"
         << "collector_dir_u,collector_dir_v,collector_dir_w,"
         << "time_ns,wavelength_nm,weight,relative_efficiency";
@@ -58,6 +60,9 @@ inline bool writeSurfaceHitsCSV(const std::string& path,
             << (h.hit_collector ? 1 : 0) << ","
             << h.collector_reflections << ","
             << h.collector_intensity << ","
+            << h.collector_path_length_m << ","
+            << h.collector_time_delay_ns << ","
+            << (h.collector_reflection_limit_reached ? 1 : 0) << ","
             << h.collector_exit_x_m << "," << h.collector_exit_y_m << ","
             << h.collector_exit_z_m << ","
             << h.collector_dir_u << "," << h.collector_dir_v << ","

@@ -50,6 +50,9 @@ struct OpticalSurfaceHit {
     bool hit_collector = false;
     int collector_reflections = 0;
     double collector_intensity = 1.0;
+    double collector_path_length_m = 0.0;
+    double collector_time_delay_ns = 0.0;
+    bool collector_reflection_limit_reached = false;
     double collector_exit_x_m = 0.0;
     double collector_exit_y_m = 0.0;
     double collector_exit_z_m = 0.0;

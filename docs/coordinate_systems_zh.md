@@ -88,7 +88,7 @@ EventIO bunch 保存相对各台望远镜的 `x、y`，但没有逐 bunch 的 `z
 旋转到望远镜局部坐标后，程序用原有的单值配置将它平移到光学模型的局部原点：
 
 ```ini
-source.eventio_2d_input_plane_z_m=-16
+source.eventio_reference_z_m=-16
 ```
 
 当前默认值为 `-16 m`。这是当前导入 LACT 光学模型的坐标映射：镜面顶点约在

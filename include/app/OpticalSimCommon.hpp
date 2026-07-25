@@ -208,10 +208,11 @@ struct SourceRuntimeConfig {
     std::string csv_path;
     std::string eventio_path;
     std::string eventio_coordinate_frame = "corsika_iact";
-    // Telescope-local optical-origin shift applied to 2D EventIO bunch
-    // anchors after rotation. It maps the CORSIKA telescope reference to the
-    // imported LACT coordinates, whose mirror vertex is near z=-16 m.
-    double eventio_2d_input_plane_z_m = -16.0;
+    // User-facing scalar telescope-local z offset from the EventIO
+    // telescope/fiducial reference to the imported LACT optical origin.
+    // Internally this is the translation (0,0,z) and applies to both 2D and
+    // 3D EventIO positions after their input frame is converted to local.
+    double eventio_reference_z_m = -16.0;
     std::string eventio_2d_plane_mode = "auto";
     std::string event_id_mode = "event";
     bool use_eventio_telescope_position = true;
@@ -229,6 +230,8 @@ struct CollectorTraceResult {
     bool hit_sipm = false;
     double intensity = 1.0;
     int reflections = 0;
+    double path_length_m = 0.0;
+    bool reflection_limit_reached = false;
     Cone::Position exit_position{0.0, 0.0, 0.0};
     Cone::DirectionVecter exit_direction{0.0, 0.0, 0.0};
 };
@@ -292,6 +295,8 @@ std::string sourceCoordinateFrameDescription(const std::string& frame_name);
 PhotonBunch transformBunchToTelescopeLocal(const PhotonBunch& input,
                                            const TelescopeConfig& telescope,
                                            const std::string& frame_name);
+void applyEventIOReferenceZOffset(PhotonBunch& bunch,
+                                  double eventio_reference_z_m);
 Vec3 sourceDirectionInWorld(const PhotonBunch& input,
                             const TelescopeConfig& telescope,
                             const std::string& frame_name);
@@ -350,14 +355,6 @@ void generateTimeBinnedNsbPe(const NsbConfig& nsb,
                              std::size_t n_pixels,
                              std::size_t n_bins,
                              const std::function<void(std::size_t, std::size_t, float)>& add_sample);
-float sampleTimeBinnedNsbPeCell(const NsbConfig& nsb,
-                                const WaveformOutputConfig& waveform_cfg,
-                                int event_id,
-                                int telescope_id,
-                                std::size_t n_pixels,
-                                std::size_t n_bins,
-                                std::size_t col,
-                                std::size_t bin);
 TriggerConfig buildTriggerConfig(const std::map<std::string, std::string>& cfg);
 CameraGeometry buildCameraGeometry(const CameraConfig& cfg);
 double cameraPixelSizeForCollector(const CameraConfig& cfg, const CameraGeometry& camera);
@@ -374,7 +371,8 @@ void applyCameraResponse(const CameraGeometry& camera,
                          const OutputPlane& plane,
                          const SipmConfig& sipm,
                          const ElectronicsResponse& electronics,
-                         OpticalSurfaceHit& hit);
+                         OpticalSurfaceHit& hit,
+                         double speed_of_light_m_per_ns = 0.299792458);
 void accumulatePixelHit(std::map<PixelKey, PixelAccumulator>& pixels,
                         int event_id,
                         int telescope_id,

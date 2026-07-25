@@ -82,6 +82,18 @@ int main()
     ok &= check(near(duplicate_curve.evaluate(450.0), 0.55),
                 "interpolation after duplicate merge");
 
+    const auto invalid_curve_path = writeCurve(
+        "lact_efficiency_invalid_test.csv",
+        "wavelength_nm,efficiency\n"
+        "400,1.01\n");
+    try {
+        EfficiencyCurve invalid_curve;
+        invalid_curve.loadCsv(invalid_curve_path.string());
+        ok = false;
+        std::cerr << "efficiency above one was accepted\n";
+    } catch (...) {
+    }
+
     OpticalEfficiencyConfig cfg;
     cfg.constant_scale = 2.0;
     cfg.mirror_reflectivity = curveFactor(curve_path);

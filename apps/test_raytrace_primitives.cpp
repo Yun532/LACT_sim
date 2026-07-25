@@ -207,6 +207,46 @@ int main() {
     }
 
     {
+        OpticalTracer scattered_tracer(0.299792458, 0.01, 987654321ULL);
+        MirrorTile mirror;
+        mirror.id = 9;
+        mirror.center = {0.0, 0.0, 0.0};
+        mirror.normal = {0.0, 0.0, 1.0};
+        mirror.aperture_radius = 2.0;
+        mirror.type = SurfaceType::Planar;
+        MirrorLayout base_layout;
+        base_layout.addTile(mirror);
+        auto base_plane = makeZPlane(5.0);
+        auto base_photon = makePhoton({0.2, -0.1, 10.0},
+                                      {0.0, 0.0, -1.0});
+        base_photon.random_stream_id = 11223344ULL;
+        const auto base_hit = scattered_tracer.traceToPlane(
+            base_photon, base_layout, base_plane, eff);
+
+        const Vec3 translation{13.0, -21.0, 7.0};
+        mirror.center += translation;
+        MirrorLayout translated_layout;
+        translated_layout.addTile(mirror);
+        auto translated_plane = base_plane;
+        translated_plane.point += translation;
+        auto translated_photon = base_photon;
+        translated_photon.pos += translation;
+        const auto translated_hit = scattered_tracer.traceToPlane(
+            translated_photon, translated_layout, translated_plane, eff);
+
+        ok &= check(base_hit.hit_surface && translated_hit.hit_surface,
+                    "translated roughness test rays should reach the output plane");
+        ok &= check(nearlyEqual(base_hit.out_dir.x, translated_hit.out_dir.x, 0.0) &&
+                        nearlyEqual(base_hit.out_dir.y, translated_hit.out_dir.y, 0.0) &&
+                        nearlyEqual(base_hit.out_dir.z, translated_hit.out_dir.z, 0.0),
+                    "roughness random draw must be coordinate-translation invariant");
+        ok &= check(nearlyEqual(base_hit.u_m, translated_hit.u_m) &&
+                        nearlyEqual(base_hit.v_m, translated_hit.v_m) &&
+                        nearlyEqual(base_hit.time_ns, translated_hit.time_ns),
+                    "translated optical system should preserve local hit and travel time");
+    }
+
+    {
         lact::ObstructionMask obstruction;
         obstruction.enabled = true;
         obstruction.mode = "primitives";

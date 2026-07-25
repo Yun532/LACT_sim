@@ -102,8 +102,13 @@ After rotating that anchor into telescope-local coordinates, the existing
 scalar setting translates it to the optical model's local origin:
 
 ```ini
-source.eventio_2d_input_plane_z_m=-16
+source.eventio_reference_z_m=-16
 ```
+
+The scalar is applied internally as the telescope-local offset `(0,0,-16 m)`.
+It preserves each bunch's physical x/y. The same setting applies to 2D and 3D
+EventIO: 2D starts from its implicit `z=0`, while 3D retains its explicit z
+before adding the offset.
 
 The default is `-16 m`. This is the coordinate mapping for the current imported
 LACT model: the mirror vertex is near `z=-16 m` and the camera near `z=-8 m`,
