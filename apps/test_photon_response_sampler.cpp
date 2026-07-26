@@ -40,7 +40,9 @@ int main()
     eventio.missing_wavelength_max_nm = 1000.0;
     eventio.missing_wavelength_seed = 246813579ULL;
 
-    PhotonResponseSampler expectation({}, eventio);
+    PhotonResponseConfig expectation_cfg;
+    expectation_cfg.mode = PhotonResponseMode::Expectation;
+    PhotonResponseSampler expectation(expectation_cfg, eventio);
     auto bunch = makeBunch(3.25);
     ok &= check(expectation.candidateCount(bunch) == 1,
                 "expectation mode should keep one weighted ray");
@@ -150,6 +152,13 @@ int main()
                 std::abs(ceffic.remaining_probability - 0.25) < 1.0e-12,
                 "CEFFIC bunch should bypass wavelength response but retain remainder probability");
 
+    const auto default_config = buildPhotonResponseConfig({});
+    ok &= check(default_config.stochastic(),
+                "unspecified response mode should default to stochastic_pe");
+    const auto explicit_expectation = buildPhotonResponseConfig({
+        {"response.mode", "expectation"}});
+    ok &= check(!explicit_expectation.stochastic(),
+                "explicit expectation response mode was not preserved");
     const auto parsed = buildPhotonResponseConfig({
         {"response.mode", "stochastic"}, {"response.seed", "99"}});
     ok &= check(parsed.stochastic() && parsed.seed == 99,

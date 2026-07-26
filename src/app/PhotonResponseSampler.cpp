@@ -75,7 +75,9 @@ PhotonResponseConfig buildPhotonResponseConfig(
     }
     if (mode == "stochastic_pe") {
         response.mode = PhotonResponseMode::StochasticPe;
-    } else if (mode != "expectation") {
+    } else if (mode == "expectation") {
+        response.mode = PhotonResponseMode::Expectation;
+    } else {
         throw std::runtime_error(
             "response.mode must be expectation or stochastic_pe");
     }

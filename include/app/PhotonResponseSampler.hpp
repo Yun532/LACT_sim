@@ -16,7 +16,7 @@ enum class PhotonResponseMode {
 };
 
 struct PhotonResponseConfig {
-    PhotonResponseMode mode = PhotonResponseMode::Expectation;
+    PhotonResponseMode mode = PhotonResponseMode::StochasticPe;
     std::uint64_t seed = 1357913579ULL;
 
     bool stochastic() const { return mode == PhotonResponseMode::StochasticPe; }

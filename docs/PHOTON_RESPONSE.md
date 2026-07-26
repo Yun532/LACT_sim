@@ -2,9 +2,9 @@
 
 `run_corsika_trace` supports two detector-response modes:
 
-- `response.mode=expectation` (default) traces one ray per EventIO bunch and
+- `response.mode=expectation` traces one ray per EventIO bunch and
   carries the bunch multiplicity and efficiencies as a continuous weight.
-- `response.mode=stochastic_pe` expands the bunch into represented photons,
+- `response.mode=stochastic_pe` (default) expands the bunch into represented photons,
   samples a wavelength and random stream for each one, and writes discrete
   photoelectrons. A fractional final photon is handled as a Bernoulli trial.
 
