@@ -69,6 +69,11 @@ bool SyntheticPhotonSource::next(PhotonBunch& out) {
             throw std::runtime_error("SyntheticPhotonSource: unsupported synthetic mode");
     }
 
+    // Preserve a stable, unique identity for every generated bunch.  Optical
+    // stochastic stages derive their per-photon streams from this index; if it
+    // remains at the PhotonBunch default (zero), every synthetic photon that
+    // hits the same facet receives the same roughness deflection.
+    out.source_bunch_index = static_cast<std::uint64_t>(index_);
     ++index_;
     return true;
 }

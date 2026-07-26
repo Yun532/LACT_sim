@@ -223,6 +223,24 @@ int main() {
         const auto base_hit = scattered_tracer.traceToPlane(
             base_photon, base_layout, base_plane, eff);
 
+        auto independent_photon = base_photon;
+        independent_photon.random_stream_id += 1ULL;
+        const auto independent_hit = scattered_tracer.traceToPlane(
+            independent_photon, base_layout, base_plane, eff);
+        const auto replay_hit = scattered_tracer.traceToPlane(
+            base_photon, base_layout, base_plane, eff);
+
+        ok &= check(independent_hit.hit_surface && replay_hit.hit_surface,
+                    "roughness independence test rays should reach the output plane");
+        ok &= check(!nearlyEqual(base_hit.out_dir.x, independent_hit.out_dir.x, 0.0) ||
+                        !nearlyEqual(base_hit.out_dir.y, independent_hit.out_dir.y, 0.0) ||
+                        !nearlyEqual(base_hit.out_dir.z, independent_hit.out_dir.z, 0.0),
+                    "different photon stream ids must draw different roughness directions");
+        ok &= check(nearlyEqual(base_hit.out_dir.x, replay_hit.out_dir.x, 0.0) &&
+                        nearlyEqual(base_hit.out_dir.y, replay_hit.out_dir.y, 0.0) &&
+                        nearlyEqual(base_hit.out_dir.z, replay_hit.out_dir.z, 0.0),
+                    "the same photon stream id must reproduce its roughness direction");
+
         const Vec3 translation{13.0, -21.0, 7.0};
         mirror.center += translation;
         MirrorLayout translated_layout;

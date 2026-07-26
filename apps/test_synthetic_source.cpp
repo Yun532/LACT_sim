@@ -66,11 +66,16 @@ bool checkParallelBeam() {
     ok &= check(nearlyEqual(first.multiplicity, cfg.multiplicity), "parallel multiplicity");
     ok &= check(first.event_id == cfg.event_id, "parallel event id");
     ok &= check(first.telescope_id == cfg.telescope_id, "parallel telescope id");
+    ok &= check(first.source_bunch_index == 0,
+                "parallel first random-stream index");
 
     int produced = 1;
     PhotonBunch bunch;
     while (source.next(bunch)) {
         ++produced;
+        ok &= check(bunch.source_bunch_index ==
+                        static_cast<std::uint64_t>(produced - 1),
+                    "parallel random-stream indices are sequential");
         ok &= check(nearlyEqual(bunch.photon.pos.z, cfg.source_plane_z), "parallel all z");
         ok &= check(nearlyEqual(bunch.photon.dir.norm(), 1.0), "parallel all directions unit");
     }
@@ -80,6 +85,8 @@ bool checkParallelBeam() {
     source.reset();
     PhotonBunch replay;
     ok &= check(source.next(replay), "parallel reset produces bunch");
+    ok &= check(replay.source_bunch_index == 0,
+                "parallel reset restarts random-stream index");
     ok &= check(nearlyEqual(replay.photon.pos.x, first.photon.pos.x), "parallel reset x");
     ok &= check(nearlyEqual(replay.photon.pos.y, first.photon.pos.y), "parallel reset y");
     ok &= check(nearlyEqual(replay.photon.pos.z, first.photon.pos.z), "parallel reset z");
@@ -104,6 +111,9 @@ bool checkPointSource() {
     PhotonBunch bunch;
     while (source.next(bunch)) {
         ++produced;
+        ok &= check(bunch.source_bunch_index ==
+                        static_cast<std::uint64_t>(produced - 1),
+                    "point-source random-stream indices are sequential");
         ok &= check(nearlyEqual(bunch.photon.pos.x, cfg.source_position.x), "point source pos x");
         ok &= check(nearlyEqual(bunch.photon.pos.y, cfg.source_position.y), "point source pos y");
         ok &= check(nearlyEqual(bunch.photon.pos.z, cfg.source_position.z), "point source pos z");
