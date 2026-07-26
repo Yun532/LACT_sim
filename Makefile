@@ -1,39 +1,34 @@
-# Convenience wrapper for normal server builds.
-#
-# Common usage:
-#   make          # build hessioxxx and LACT_sim in ./build
-#   make test     # build and run the CTest suite
-#   make clean    # remove CMake build output only
-#   make distclean# remove CMake build output and hessioxxx build products
+# Minimal user build wrapper.
 
 BUILD_DIR ?= build
 BUILD_TYPE ?= Release
 HESSIO_ROOT ?= $(CURDIR)/external/hessioxxx/source
 CMAKE ?= cmake
 JOBS ?= $(shell command -v nproc >/dev/null 2>&1 && nproc || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+CMAKE_OSX_ARCHITECTURES ?= $(shell uname -m)
+LACT_ENABLE_HDF5 ?= ON
+LACT_ENABLE_ROOT ?= ON
 
-.PHONY: all hessio configure build test clean distclean no-hessio no-root
+.PHONY: all hessio hdf5 configure build clean distclean no-hessio
 
 all: build
 
 hessio:
-	tools/build_hessio.sh
+	bash tools/build_hessio.sh
 
-configure: hessio
-	$(CMAKE) -S . -B "$(BUILD_DIR)" -DCMAKE_BUILD_TYPE="$(BUILD_TYPE)" -DHESSIO_ROOT="$(HESSIO_ROOT)"
+hdf5:
+ifeq ($(LACT_ENABLE_HDF5),ON)
+	bash tools/ensure_hdf5.sh "$(CMAKE_OSX_ARCHITECTURES)" "$(CMAKE)"
+endif
+
+configure: hessio hdf5
+	$(CMAKE) -S . -B "$(BUILD_DIR)" -DCMAKE_BUILD_TYPE="$(BUILD_TYPE)" -DLACT_ENABLE_HESSIO=ON -DLACT_ENABLE_HDF5="$(LACT_ENABLE_HDF5)" -DLACT_ENABLE_ROOT="$(LACT_ENABLE_ROOT)" -DHESSIO_ROOT="$(HESSIO_ROOT)" -DCMAKE_OSX_ARCHITECTURES="$(CMAKE_OSX_ARCHITECTURES)"
 
 build: configure
 	$(CMAKE) --build "$(BUILD_DIR)" -j$(JOBS)
 
-test: build
-	ctest --test-dir "$(BUILD_DIR)" --output-on-failure
-
 no-hessio:
-	$(CMAKE) -S . -B "$(BUILD_DIR)" -DCMAKE_BUILD_TYPE="$(BUILD_TYPE)" -DLACT_ENABLE_HESSIO=OFF
-	$(CMAKE) --build "$(BUILD_DIR)" -j$(JOBS)
-
-no-root: hessio
-	$(CMAKE) -S . -B "$(BUILD_DIR)" -DCMAKE_BUILD_TYPE="$(BUILD_TYPE)" -DHESSIO_ROOT="$(HESSIO_ROOT)" -DLACT_ENABLE_ROOT=OFF
+	$(CMAKE) -S . -B "$(BUILD_DIR)" -DCMAKE_BUILD_TYPE="$(BUILD_TYPE)" -DLACT_ENABLE_HESSIO=OFF -DLACT_ENABLE_HDF5=OFF -DLACT_ENABLE_ROOT=OFF -DCMAKE_OSX_ARCHITECTURES="$(CMAKE_OSX_ARCHITECTURES)"
 	$(CMAKE) --build "$(BUILD_DIR)" -j$(JOBS)
 
 clean:
