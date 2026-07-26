@@ -1,6 +1,6 @@
 # LACT_sim 用户版 v2
 
-这是最新 `main` 的用户发行版：运行时源码和功能保持一致，只移除开发测试、扫描程序、内部验证结果、notebook 和额外示例。仓库只提供四个可直接修改的 cfg：
+这是最新 `main` 的用户发行版：运行时源码和功能保持一致，只移除开发测试、扫描程序、内部验证结果和额外示例。仓库只保留一个面向用户的完整 pyLAST notebook，并提供四个可直接修改的 cfg：
 
 1. `configs/examples/parallel_light.cfg`：平行光白板
 2. `configs/examples/photon_csv_source.cfg`：Photon CSV 完整相机响应（ROOT/pyLAST）
@@ -103,5 +103,11 @@ python3 python/plot_lact_root_pylast.py \
 ```
 
 这个配置默认处理全部 shower、加入光谱 NSB、只保留触发事件，并写入稀疏 p.e. waveform。绘图脚本按主线 notebook 的流程使用 `LactEventSource → Calibrator(LocalPeakExtractor) → plot_raw_images`，显示 pyLAST 从 R1 waveform 抽取的 DL0 相机图。首次小规模检查可暂时把 `source.max_shower_events` 改为 `10`。
+
+完整的事件读取、相机图像、触发时延与 p.e.、Hillas 和 SDP 重建流程位于：
+
+```text
+notebooks/lact_root_to_pylast_visualize.ipynb
+```
 
 所有相对路径都以仓库根目录为工作目录解析，请从仓库根目录运行命令。
