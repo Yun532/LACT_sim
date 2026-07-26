@@ -35,7 +35,7 @@ make no-hessio
 
 HDF5 可通过 `make LACT_ENABLE_HDF5=OFF` 关闭。LACT ROOT 是可选功能，编译器找到 ROOT 6.24+ 时自动启用；也可用 `make LACT_ENABLE_ROOT=OFF` 关闭。
 
-两个 ROOT 示例的画图命令需要安装与 LACT ROOT adapter 配套的 pyLAST，并确保下面的导入成功：
+两个 ROOT 示例的画图命令需要安装我们维护的 [pyLAST `lact_sim` 分支](https://github.com/Yun532/pylast/tree/lact_sim)。该分支包含 LACT ROOT adapter、触发时间和阵列可视化接口；安装后请确认下面的导入成功：
 
 ```bash
 python3 -c "from pylast.io import LactEventSource"
@@ -104,10 +104,6 @@ python3 python/plot_lact_root_pylast.py \
 
 这个配置默认处理全部 shower、加入光谱 NSB、只保留触发事件，并写入稀疏 p.e. waveform。绘图脚本按主线 notebook 的流程使用 `LactEventSource → Calibrator(LocalPeakExtractor) → plot_raw_images`，显示 pyLAST 从 R1 waveform 抽取的 DL0 相机图。首次小规模检查可暂时把 `source.max_shower_events` 改为 `10`。
 
-完整的事件读取、相机图像、触发时延与 p.e.、Hillas 和 SDP 重建流程位于：
-
-```text
-notebooks/lact_root_to_pylast_visualize.ipynb
-```
+完整的事件读取、相机图像、触发时延与 p.e.、Hillas 和 SDP 重建流程见 [完整 pyLAST Jupyter notebook](notebooks/lact_root_to_pylast_visualize.ipynb)。
 
 所有相对路径都以仓库根目录为工作目录解析，请从仓库根目录运行命令。
