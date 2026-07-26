@@ -66,13 +66,15 @@ python3 python/plot_photon_csv_root_pylast.py \
 
 该示例与 `main` 的 Photon CSV 用户流程一致：读取 event 1909、telescope 19 的 CORSIKA 二维 bunch 六列数据，通过正常相机链生成随机 p.e.，写入 `image_pe` LACT ROOT，再由 `pylast.io.LactEventSource` 和 `pylast.visualize` 绘图。
 
+从安装环境、拉取两个仓库到 CSV 字段说明和出图命令，见 [Photon CSV 从零运行指南](PHOTON_CSV_QUICKSTART.md)。
+
 输入 CSV 的最小列为：
 
 ```csv
 x_m,y_m,z_m,dir_x,dir_y,dir_z
 ```
 
-示例输入保存在 `configs/sources/event1909_tel19_minimal_photons.csv`。最新 Photon CSV 读取器还支持每行的 `time_ns`、`wavelength_nm`、`weight`、`multiplicity`、`event_id`、`telescope_id`、`emission_altitude_m`、`eventio_2d` 和阵列位置字段。从 EventIO 二维 bunch 导出的 CSV 使用 `corsika_nwu_relative` 坐标、`eventio_2d=true` 和 `-16 m` 参考平面。
+示例输入保存在 `configs/sources/event1909_tel19_minimal_photons.csv`。最新 Photon CSV 读取器还支持每行的 `time_ns`、`wavelength_nm`、`weight`、`multiplicity`、`event_id`、`telescope_id`、`emission_altitude_km`、`eventio_2d` 和阵列位置字段。从 EventIO 二维 bunch 导出的 CSV 使用 `corsika_nwu_relative` 坐标、`eventio_2d=true` 和 `-16 m` 参考平面。
 
 ## 3. CORSIKA 完整相机响应
 
