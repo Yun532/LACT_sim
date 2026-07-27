@@ -73,14 +73,14 @@ def basis_from_corsika_pointing(az_deg: float, el_deg: float) -> tuple[np.ndarra
     az = np.radians(float(az_deg))
     el = np.radians(float(el_deg))
     x_axis = np.array([
+        np.sin(az),
+        np.cos(az),
+        0.0,
+    ])
+    y_axis = np.array([
         -np.sin(el) * np.cos(az),
         np.sin(el) * np.sin(az),
         np.cos(el),
-    ])
-    y_axis = np.array([
-        -np.sin(az),
-        -np.cos(az),
-        0.0,
     ])
     global_up = np.array([0.0, 0.0, 1.0])
     up_in_xy = np.array([np.dot(global_up, x_axis), np.dot(global_up, y_axis)])

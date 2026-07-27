@@ -599,14 +599,14 @@ def source_telescope_frame_from_config(cfg):
 
     if name in {"corsika_nwu_relative", "corsika_nwu_global"}:
         axes = (
+            [sin_az, cos_az, 0.0],
             [-sin_el * cos_az, sin_el * sin_az, cos_el],
-            [-sin_az, -cos_az, 0.0],
             [cos_el * cos_az, -cos_el * sin_az, sin_el],
         )
     elif name in {"enu_east_relative", "enu_east_global"}:
         axes = (
+            [-sin_az, cos_az, 0.0],
             [-sin_el * cos_az, -sin_el * sin_az, cos_el],
-            [sin_az, -cos_az, 0.0],
             [cos_el * cos_az, cos_el * sin_az, sin_el],
         )
     elif name == "telescope_local":
