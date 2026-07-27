@@ -270,6 +270,7 @@ pylast reading, ROOT trees, and the notebook workflow.
 
 ## Documentation
 
+- [Documentation index by topic](docs/README.md)
 - [Complete user guide](docs/user_guide_en.md)
 - [All official tests](docs/official_tests.md)
 - [Photon CSV format](docs/photon_csv_format.md)

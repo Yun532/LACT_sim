@@ -301,6 +301,7 @@ pylast 读取、ROOT tree 说明和 notebook 流程见
 
 ## 文档
 
+- [文档总目录：按使用场景分类](docs/README.md)
 - [用户使用手册：安装、运行、输出和画图](docs/user_guide_zh.md)
 - [所有 official tests](docs/official_tests.md)
 - [Photon CSV 格式](docs/photon_csv_format.md)
