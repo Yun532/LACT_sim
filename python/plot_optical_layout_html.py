@@ -142,6 +142,47 @@ def aperture_polygon(facet):
     return [list((center + x * u + y * v).astype(float)) for x, y in local]
 
 
+def load_camera_pixel_polygons(path, plane_point, u_axis, v_axis, plane_normal):
+    """Load the real camera CSV and place each pixel on the configured u/v plane."""
+    polygons = []
+    with Path(path).open(newline="", encoding="utf-8-sig") as handle:
+        for row in csv.DictReader(handle):
+            x_m = float(row["x_m"])
+            y_m = float(row["y_m"])
+            size_m = float(row["size_m"])
+            shape = row.get("shape", "square").strip().lower()
+            center = (
+                plane_point
+                + x_m * u_axis
+                + y_m * v_axis
+                + 0.002 * plane_normal
+            )
+            if shape in {"hex", "hexagon", "hexagonal"}:
+                radius = size_m / math.sqrt(3.0)
+                angles = math.radians(30.0) + np.arange(6) * math.pi / 3.0
+                offsets = [(radius * math.cos(a), radius * math.sin(a)) for a in angles]
+            elif shape in {"circle", "circular"}:
+                radius = 0.5 * size_m
+                angles = np.arange(16) * math.pi / 8.0
+                offsets = [(radius * math.cos(a), radius * math.sin(a)) for a in angles]
+            else:
+                half = 0.5 * size_m
+                offsets = [(half, half), (-half, half), (-half, -half), (half, -half)]
+            points = [
+                list((center + dx * u_axis + dy * v_axis).astype(float))
+                for dx, dy in offsets
+            ]
+            polygons.append({
+                "points": points,
+                "color": "#ffd166",
+                "role": "camera_pixel",
+                "name": f"camera pixel {row['id']}",
+                "fill_alpha": 0.34,
+                "width": 0.45,
+            })
+    return polygons
+
+
 def regular_prism_edges(center, radius, height, rotation, sides):
     if radius <= 0 or height <= 0 or sides < 3:
         return []
@@ -285,6 +326,16 @@ def main():
         help="draw input, telescope-local, camera, sky, and photon directions",
     )
     parser.add_argument(
+        "--show-camera-pixels",
+        action="store_true",
+        help="draw every pixel from camera.csv_path on the configured u/v plane",
+    )
+    parser.add_argument(
+        "--show-ground",
+        action="store_true",
+        help="draw a schematic horizontal ground grid and pedestal in the input frame",
+    )
+    parser.add_argument(
         "--coordinate-frame-mode",
         choices=("layout", "source"),
         default="layout",
@@ -344,15 +395,39 @@ def main():
         list((plane_point - plane_radius * u + plane_radius * v).astype(float)),
     ]
 
-    polygons = [{"points": aperture_polygon(f), "color": "#75aadb", "role": "mirror"} for f in facets]
-    polygons.append({"points": plane, "color": "#e05a47", "role": "output_plane"})
+    focal_length_m = float(cfg.get("telescope.focal_length_m", 8.0))
+    local_mirror_vertex = local_plane_point + focal_length_m * local_plane_normal
+    mirror_origin = point_to_global(local_mirror_vertex, frame)
+
+    polygons = [
+        {
+            "points": aperture_polygon(f),
+            "color": "#75aadb",
+            "role": "mirror",
+            "fill_alpha": 0.22,
+        }
+        for f in facets
+    ]
+    polygons.append({
+        "points": plane,
+        "color": "#e05a47",
+        "role": "output_plane",
+        "fill_alpha": 0.12,
+    })
+    camera_pixel_count = 0
+    if args.show_camera_pixels:
+        camera_csv = cfg.get("camera.csv_path")
+        if not camera_csv:
+            raise SystemExit("--show-camera-pixels requires camera.csv_path")
+        pixel_polygons = load_camera_pixel_polygons(
+            camera_csv, plane_point, u, v, plane_normal
+        )
+        camera_pixel_count = len(pixel_polygons)
+        polygons.extend(pixel_polygons)
 
     lines = []
     labels = []
     if args.show_coordinate_axes:
-        focal_length_m = float(cfg.get("telescope.focal_length_m", 8.0))
-        local_mirror_vertex = local_plane_point + focal_length_m * local_plane_normal
-        mirror_origin = point_to_global(local_mirror_vertex, frame)
         labels.append({
             "point": list(mirror_origin.astype(float)),
             "text": f"mirror vertex / input record plane z={local_mirror_vertex[2]:g} m",
@@ -393,8 +468,44 @@ def main():
         for direction, label_text, color in local_axes:
             add_axis(mirror_origin, direction, 4.4, label_text, color, "telescope_local_axis")
 
+        local_grid_extent = 3.2
+        for offset in np.arange(-3.0, 3.01, 1.0):
+            lines.append({
+                "points": [
+                    list((mirror_origin + offset * frame["x_axis"] - local_grid_extent * frame["y_axis"]).astype(float)),
+                    list((mirror_origin + offset * frame["x_axis"] + local_grid_extent * frame["y_axis"]).astype(float)),
+                ],
+                "color": "#9aa7b5",
+                "role": "local_xy_grid",
+                "name": "mirror/obstruction local x-y reference plane",
+                "width": 0.7,
+                "alpha": 0.34,
+            })
+            lines.append({
+                "points": [
+                    list((mirror_origin - local_grid_extent * frame["x_axis"] + offset * frame["y_axis"]).astype(float)),
+                    list((mirror_origin + local_grid_extent * frame["x_axis"] + offset * frame["y_axis"]).astype(float)),
+                ],
+                "color": "#9aa7b5",
+                "role": "local_xy_grid",
+                "name": "mirror/obstruction local x-y reference plane",
+                "width": 0.7,
+                "alpha": 0.34,
+            })
+        labels.append({
+            "point": list((mirror_origin - 3.2 * frame["x_axis"] + 3.2 * frame["y_axis"]).astype(float)),
+            "text": "mirror + obstruction CSV: telescope-local x/y/z",
+            "color": "#9aa7b5",
+        })
+
         add_axis(plane_point, u, 2.2, "camera +u = output x_m", "#ffd84d", "camera_axis")
         add_axis(plane_point, v, 2.2, "camera +v = output y_m", "#68e88b", "camera_axis")
+        if camera_pixel_count:
+            labels.append({
+                "point": list((plane_point - 0.72 * u + 0.72 * v).astype(float)),
+                "text": f"{camera_pixel_count} real camera pixels from CSV",
+                "color": "#ffd166",
+            })
         add_axis(
             plane_point,
             plane_normal,
@@ -436,7 +547,7 @@ def main():
         })
         labels.append({
             "point": list((mirror_origin + 0.58 * (plane_point - mirror_origin)).astype(float)),
-            "text": "reflected light -> camera",
+            "text": "ideal on-axis reference ray -> camera",
             "color": "#ff74d4",
         })
     for p in load_primitives(resolve_primitives_path(cfg)):
@@ -474,6 +585,114 @@ def main():
             if is_highlighted:
                 labels.append({"point": list(point_to_global(center, frame).astype(float)), "text": p["name"], "color": color})
 
+    if args.show_ground:
+        scene_points = (
+            [pt for poly in polygons if poly["role"] != "camera_pixel" for pt in poly["points"]]
+            + [pt for item in lines for pt in item["points"]]
+        )
+        scene_arr = np.asarray(scene_points, dtype=float)
+        ground_z = float(scene_arr[:, 2].min() - 0.65)
+        ground_center_x = float(0.5 * (scene_arr[:, 0].min() + scene_arr[:, 0].max()))
+        ground_center_y = float(0.5 * (scene_arr[:, 1].min() + scene_arr[:, 1].max()))
+        ground_half = max(
+            7.0,
+            0.72 * float(scene_arr[:, 0].max() - scene_arr[:, 0].min()),
+            0.72 * float(scene_arr[:, 1].max() - scene_arr[:, 1].min()),
+        )
+        ground = [
+            [ground_center_x - ground_half, ground_center_y - ground_half, ground_z],
+            [ground_center_x + ground_half, ground_center_y - ground_half, ground_z],
+            [ground_center_x + ground_half, ground_center_y + ground_half, ground_z],
+            [ground_center_x - ground_half, ground_center_y + ground_half, ground_z],
+        ]
+        polygons.insert(0, {
+            "points": ground,
+            "color": "#56705d",
+            "role": "ground_plane",
+            "name": "schematic horizontal ground",
+            "fill_alpha": 0.16,
+            "width": 1.2,
+        })
+        grid_step = 2.0
+        grid_min = math.floor(-ground_half / grid_step) * grid_step
+        grid_max = math.ceil(ground_half / grid_step) * grid_step
+        for offset in np.arange(grid_min, grid_max + 0.01, grid_step):
+            lines.append({
+                "points": [
+                    [ground_center_x + offset, ground_center_y - ground_half, ground_z],
+                    [ground_center_x + offset, ground_center_y + ground_half, ground_z],
+                ],
+                "color": "#789080",
+                "role": "ground_grid",
+                "width": 0.7,
+                "alpha": 0.35,
+            })
+            lines.append({
+                "points": [
+                    [ground_center_x - ground_half, ground_center_y + offset, ground_z],
+                    [ground_center_x + ground_half, ground_center_y + offset, ground_z],
+                ],
+                "color": "#789080",
+                "role": "ground_grid",
+                "width": 0.7,
+                "alpha": 0.35,
+            })
+
+        base_bottom = ground_z
+        base_top = ground_z + 0.9
+        base_center = np.array([
+            mirror_origin[0], mirror_origin[1], 0.5 * (base_bottom + base_top)
+        ])
+        for edge in box_edges(base_center, [0.75, 0.75, 0.45]):
+            lines.append({
+                "points": [list(np.asarray(point, dtype=float)) for point in edge],
+                "color": "#b5bdc8",
+                "role": "schematic_pedestal",
+                "name": "schematic pedestal",
+                "width": 2,
+                "alpha": 0.75,
+            })
+        labels.append({
+            "point": [ground_center_x - ground_half, ground_center_y - ground_half, ground_z],
+            "text": "GROUND: horizontal input x-y plane (schematic)",
+            "color": "#90aa97",
+        })
+        labels.append({
+            "point": list(base_center.astype(float)),
+            "text": "schematic pedestal / orientation reference",
+            "color": "#b5bdc8",
+        })
+
+        compass_origin = np.array([mirror_origin[0], mirror_origin[1], ground_z + 0.02])
+        ground_axes = input_axes if source_frame_name != "telescope_local" else [
+            (np.array([1.0, 0.0, 0.0]), "ground +X", "#ff5c5c"),
+            (np.array([0.0, 1.0, 0.0]), "ground +Y", "#54d67a"),
+            (np.array([0.0, 0.0, 1.0]), "UP / sky side", "#4aa3ff"),
+        ]
+        for direction, axis_name, axis_color in ground_axes:
+            direction = np.asarray(direction, dtype=float)
+            direction /= np.linalg.norm(direction)
+            axis_length = 4.2 if abs(direction[2]) > 0.9 else 3.8
+            axis_end = compass_origin + axis_length * direction
+            ground_label = (
+                "UP / input +z / sky is above this ground"
+                if abs(direction[2]) > 0.9
+                else "ground " + axis_name
+            )
+            lines.append({
+                "points": [list(compass_origin.astype(float)), list(axis_end.astype(float))],
+                "color": axis_color,
+                "role": "ground_compass_axis",
+                "name": ground_label,
+                "width": 5,
+                "arrow": True,
+            })
+            labels.append({
+                "point": list(axis_end.astype(float)),
+                "text": ground_label,
+                "color": axis_color,
+            })
+
     input_photon_count = 0
     if args.input_photon_csv:
         input_lines = load_input_local_photon_lines(
@@ -501,10 +720,13 @@ def main():
         f"(<code>{escape(source_frame_name)}</code>)<br>"
         f"<b>Pointing:</b> az={pointing_az:g} deg, elevation={pointing_el:g} deg; "
         "local +z points to the sky, incoming photons travel along local -z.<br>"
-        "<b>Camera/output:</b> u=local +x, v=local +y; stored "
-        "<code>x_m=u</code>, <code>y_m=v</code>.<br>"
+        "<b>Geometry:</b> mirror and obstruction CSV x/y/z are telescope-local; "
+        "the page embeds that local geometry into the input frame only for display.<br>"
+        f"<b>Camera/output:</b> {camera_pixel_count} CSV pixels; u=local +x, "
+        "v=local +y; stored <code>x_m=u</code>, <code>y_m=v</code>.<br>"
         "<b>pyLAST:</b> <code>pix_x=-u</code>, <code>pix_y=-v</code>; current camera plot "
-        "uses horizontal=-v and vertical=-u."
+        "uses horizontal=-v and vertical=-u.<br>"
+        "<b>Ground/base:</b> schematic orientation references, not engineering geometry."
     )
     html = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>LACT 3D Coordinate System</title>
@@ -516,7 +738,7 @@ html,body{{margin:0;height:100%;background:#101216;color:#e8edf2;font-family:Seg
 #bar code{{color:#ffd84d}}
 canvas{{width:100vw;height:100vh;display:block;cursor:grab}}canvas:active{{cursor:grabbing}}
 </style>
-</head><body><canvas id="view"></canvas><div id="bar"><div class="title">LACT physical 3D coordinate model</div>{coordinate_summary}<div class="controls">Drag to rotate · Wheel to zoom · Blue facets: mirrors · Red plane: camera/output · Orange/green/cyan: telescope structure{input_photon_legend}</div></div>
+</head><body><canvas id="view"></canvas><div id="bar"><div class="title">LACT physical 3D coordinate model</div>{coordinate_summary}<div class="controls">Drag to rotate · Wheel to zoom · Blue facets: mirrors · Yellow cells: real camera pixels · Red plane: camera/output · Green grid: schematic ground{input_photon_legend}</div></div>
 <script>
 const data = {json.dumps(data)};
 const canvas=document.getElementById('view'),ctx=canvas.getContext('2d');let rx=-0.7,ry=0.8,zoom=1,drag=false,lx=0,ly=0;
@@ -524,10 +746,11 @@ const b=data.bounds,center=[(b[0][0]+b[1][0])/2,(b[0][1]+b[1][1])/2,(b[0][2]+b[1
 function resize(){{canvas.width=innerWidth*devicePixelRatio;canvas.height=innerHeight*devicePixelRatio;draw();}}
 function rot(p){{let x=(p[0]-center[0])/span,y=(p[1]-center[1])/span,z=(p[2]-center[2])/span;const cy=Math.cos(ry),sy=Math.sin(ry),cx=Math.cos(rx),sx=Math.sin(rx);let x1=x*cy+z*sy,z1=-x*sy+z*cy;let y1=y*cx-z1*sx,z2=y*sx+z1*cx;return[x1,y1,z2];}}
 function proj(p){{const r=rot(p),s=Math.min(canvas.width,canvas.height)*0.78*zoom;return[canvas.width/2+r[0]*s,canvas.height/2-r[1]*s,r[2]];}}
-function line(points,color,width=1,closed=false,arrow=false){{if(!points.length)return;ctx.beginPath();let p=proj(points[0]);ctx.moveTo(p[0],p[1]);for(let i=1;i<points.length;i++){{p=proj(points[i]);ctx.lineTo(p[0],p[1]);}}if(closed)ctx.closePath();ctx.strokeStyle=color;ctx.lineWidth=width*devicePixelRatio;ctx.stroke();if(arrow&&points.length>1){{const a=proj(points[points.length-2]),b=proj(points[points.length-1]),angle=Math.atan2(b[1]-a[1],b[0]-a[0]),size=(7+width)*devicePixelRatio;ctx.beginPath();ctx.moveTo(b[0],b[1]);ctx.lineTo(b[0]-size*Math.cos(angle-.48),b[1]-size*Math.sin(angle-.48));ctx.lineTo(b[0]-size*Math.cos(angle+.48),b[1]-size*Math.sin(angle+.48));ctx.closePath();ctx.fillStyle=color;ctx.fill();}}}}
-function poly(points,color){{ctx.beginPath();let p=proj(points[0]);ctx.moveTo(p[0],p[1]);for(let i=1;i<points.length;i++){{p=proj(points[i]);ctx.lineTo(p[0],p[1]);}}ctx.closePath();ctx.fillStyle=color+'44';ctx.strokeStyle=color;ctx.lineWidth=devicePixelRatio;ctx.fill();ctx.stroke();}}
+function line(points,color,width=1,closed=false,arrow=false,alpha=1){{if(!points.length)return;ctx.globalAlpha=alpha;ctx.beginPath();let p=proj(points[0]);ctx.moveTo(p[0],p[1]);for(let i=1;i<points.length;i++){{p=proj(points[i]);ctx.lineTo(p[0],p[1]);}}if(closed)ctx.closePath();ctx.strokeStyle=color;ctx.lineWidth=width*devicePixelRatio;ctx.stroke();if(arrow&&points.length>1){{const a=proj(points[points.length-2]),b=proj(points[points.length-1]),angle=Math.atan2(b[1]-a[1],b[0]-a[0]),size=(7+width)*devicePixelRatio;ctx.beginPath();ctx.moveTo(b[0],b[1]);ctx.lineTo(b[0]-size*Math.cos(angle-.48),b[1]-size*Math.sin(angle-.48));ctx.lineTo(b[0]-size*Math.cos(angle+.48),b[1]-size*Math.sin(angle+.48));ctx.closePath();ctx.fillStyle=color;ctx.fill();}}ctx.globalAlpha=1;}}
+function poly(points,color,fillAlpha=.22,width=1){{ctx.beginPath();let p=proj(points[0]);ctx.moveTo(p[0],p[1]);for(let i=1;i<points.length;i++){{p=proj(points[i]);ctx.lineTo(p[0],p[1]);}}ctx.closePath();ctx.globalAlpha=fillAlpha;ctx.fillStyle=color;ctx.fill();ctx.globalAlpha=1;ctx.strokeStyle=color;ctx.lineWidth=width*devicePixelRatio;ctx.stroke();}}
 function label(item){{const p=proj(item.point);ctx.font=`${{13*devicePixelRatio}}px Segoe UI,Arial,sans-serif`;ctx.textBaseline='middle';const pad=4*devicePixelRatio,w=ctx.measureText(item.text).width+2*pad,h=20*devicePixelRatio;ctx.fillStyle='rgba(16,18,22,.78)';ctx.strokeStyle=item.color;ctx.lineWidth=1.5*devicePixelRatio;ctx.fillRect(p[0]+6*devicePixelRatio,p[1]-h/2,w,h);ctx.strokeRect(p[0]+6*devicePixelRatio,p[1]-h/2,w,h);ctx.fillStyle='#fff';ctx.fillText(item.text,p[0]+6*devicePixelRatio+pad,p[1]);}}
-function draw(){{ctx.fillStyle='#101216';ctx.fillRect(0,0,canvas.width,canvas.height);for(const p of data.polygons)poly(p.points,p.color);for(const l of data.lines)line(l.points,l.color,l.width||1,false,!!l.arrow);for(const item of data.labels)label(item);}}
+function avgDepth(points){{let total=0;for(const p of points)total+=rot(p)[2];return total/points.length;}}
+function draw(){{ctx.fillStyle='#101216';ctx.fillRect(0,0,canvas.width,canvas.height);const surfaces=data.polygons.filter(p=>p.role!=='camera_pixel').sort((a,b)=>avgDepth(a.points)-avgDepth(b.points));for(const p of surfaces)poly(p.points,p.color,p.fill_alpha??.22,p.width||1);for(const p of data.polygons.filter(p=>p.role==='camera_pixel'))poly(p.points,p.color,p.fill_alpha??.34,p.width||.45);for(const l of data.lines)line(l.points,l.color,l.width||1,false,!!l.arrow,l.alpha??1);for(const item of data.labels)label(item);}}
 canvas.addEventListener('mousedown',e=>{{drag=true;lx=e.clientX;ly=e.clientY;}});addEventListener('mouseup',()=>drag=false);addEventListener('mousemove',e=>{{if(!drag)return;ry+=(e.clientX-lx)*.008;rx+=(e.clientY-ly)*.008;lx=e.clientX;ly=e.clientY;draw();}});canvas.addEventListener('wheel',e=>{{e.preventDefault();zoom*=Math.exp(-e.deltaY*.001);zoom=Math.max(.2,Math.min(5,zoom));draw();}},{{passive:false}});addEventListener('resize',resize);resize();
 </script></body></html>"""
     output = Path(args.output)

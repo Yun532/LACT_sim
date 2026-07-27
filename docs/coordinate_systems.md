@@ -41,8 +41,9 @@ before comparing to GPS/geographic coordinates.
 
 Open the [physical LACT 3D coordinate model](assets/lact-coordinate-system-3d.html)
 to rotate and zoom the telescope from the real `mirror_1229` configuration,
-camera plane, structure,
-input NWU axes, local optical axes, sky/photon directions, and camera `u/v` axes.
+camera plane, obstruction structure, all 1616 real camera pixels, input NWU
+axes, local optical axes, sky/photon directions, and camera `u/v` axes. The
+ground and pedestal are schematic orientation references, not engineering geometry.
 The [interactive coordinate-system explorer](assets/coordinate-system-explorer.html)
 provides the complementary switchable view of file fields and the final pyLAST
 display orientation.
@@ -54,7 +55,9 @@ python python/plot_optical_layout_html.py \
   --config configs/official_tests/corsika_full_response_camera.cfg \
   --output docs/assets/lact-coordinate-system-3d.html \
   --coordinate-frame-mode source \
-  --show-coordinate-axes
+  --show-coordinate-axes \
+  --show-camera-pixels \
+  --show-ground
 ```
 
 ### 1. CORSIKA / EventIO Array Frame
