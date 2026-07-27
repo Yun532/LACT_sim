@@ -175,9 +175,11 @@ python3 python/plot_photon_csv_root_pylast.py \
 完整示例与 EventIO 输入共用 `run_corsika_trace` 的相机处理和 ROOT 输出。
 CSV 未提供 `multiplicity` 时使用 cfg 的 `source.multiplicity`，本例设为 1，
 即每行一个光子；示例还在 cfg 中统一设置 `400 nm`，并关闭 NSB、trigger
-和 waveform。纯光学的两张图保持 LACT_sim
-焦平面方向；只有 ROOT/pyLAST 相机图采用天空视角
-（`pix_x=-x_m`、`pix_y=-y_m`）。
+和 waveform。纯光学的两张图保持 LACT_sim 物理焦平面 `(u, v)`。
+`LactEventSource` 将它映射为 pyLAST 的 `camera_x=-u`、`camera_y=-v`，
+原版 pyLAST 相机显示以 `camera_y` 为横轴、`camera_x` 为纵轴。
+绘图脚本默认采用这一 pyLAST 视图；需要直接对照 LACT_sim 焦平面时可增加
+`--coordinate-view lact-uv`。
 更完整的说明见[最简 Photon CSV 示例](docs/minimal_photon_csv.md)。
 
 如需在输出中保存实际进入光追的位置和方向：
@@ -282,6 +284,11 @@ python3 python/plot_lact_root_output.py \
 
 pylast 读取、ROOT tree 说明和 notebook 流程见
 [ROOT 输出与 pylast 检查](docs/server_root_output_check_zh.md)。
+
+完整的阵列/core、触发时延、相机图像、Hillas、方向/芯位重建和 3D SDP
+流程见 [pyLAST Jupyter notebook](notebooks/lact_root_to_pylast_visualize.ipynb)。
+LACT ROOT adapter 和这些可视化接口位于
+[pyLAST `lact_sim` 分支](https://github.com/Yun532/pylast/tree/lact_sim)。
 
 ## 常用 cfg
 
