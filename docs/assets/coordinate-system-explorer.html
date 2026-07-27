@@ -200,11 +200,11 @@
         <text x="330" y="165" class="label">相机面 z≈−8 m</text>
         <line x1="250" y1="290" x2="250" y2="43" stroke="var(--green)" stroke-width="2.5" marker-end="url(#arrow2)"/>
         <text x="260" y="45" class="label">local +z → sky</text>
-        <line x1="250" y1="276" x2="340" y2="276" stroke="var(--blue)" stroke-width="2.5" marker-end="url(#arrow2)"/>
-        <text x="344" y="280" class="label">local +x</text>
-        <circle cx="250" cy="276" r="8" fill="none" stroke="var(--purple)" stroke-width="2"/>
-        <circle cx="250" cy="276" r="2.8" fill="var(--purple)"/>
-        <text x="222" y="302" text-anchor="middle" class="label">+y 出屏</text>
+        <line x1="250" y1="276" x2="340" y2="276" stroke="var(--purple)" stroke-width="2.5" marker-end="url(#arrow2)"/>
+        <text x="344" y="280" class="label">local +y / sky-up</text>
+        <circle cx="250" cy="276" r="8" fill="none" stroke="var(--blue)" stroke-width="2"/>
+        <circle cx="250" cy="276" r="2.8" fill="var(--blue)"/>
+        <text x="222" y="302" text-anchor="middle" class="label">+x 出屏</text>
         <line id="incoming-ray" x1="225" y1="35" x2="250" y2="276" stroke="var(--blue)" stroke-width="3" stroke-dasharray="8 6" marker-end="url(#arrow2)"/>
         <line id="reflected-ray" x1="250" y1="276" x2="240" y2="160" stroke="var(--orange)" stroke-width="3" marker-end="url(#arrow2)"/>
         <circle id="sky-source" cx="225" cy="35" r="7" fill="var(--blue)"/>
@@ -232,14 +232,14 @@
         <line x1="250" y1="190" x2="250" y2="55" stroke="var(--orange)" stroke-width="2.5" marker-end="url(#arrow3)"/>
         <text x="397" y="195" class="label">+u = camera x = local +x</text>
         <text x="256" y="60" class="label">+v = camera y = local +y</text>
-        <circle id="raw-hit" cx="190" cy="220" r="9" fill="var(--red)"/>
-        <path id="raw-glyph" d="M190 220l22 0l0 -13" fill="none" stroke="var(--red)" stroke-width="4"/>
-        <text id="raw-readout" x="250" y="362" text-anchor="middle" class="small">u=−0.279 m, v=−0.140 m</text>
+        <circle id="raw-hit" cx="300.3" cy="215.1" r="9" fill="var(--red)"/>
+        <path id="raw-glyph" d="M300.3 215.1l22 0l0 -13" fill="none" stroke="var(--red)" stroke-width="4"/>
+        <text id="raw-readout" x="250" y="362" text-anchor="middle" class="small">u=+0.279 m, v=−0.140 m</text>
 
         <path d="M455 190H545" stroke="var(--muted)" stroke-width="2" marker-end="url(#arrow3)"/>
         <text x="500" y="165" text-anchor="middle" class="small">LactEventSource</text>
-        <text x="500" y="213" text-anchor="middle" class="small">pix_x=−u</text>
-        <text x="500" y="229" text-anchor="middle" class="small">pix_y=−v</text>
+        <text x="500" y="213" text-anchor="middle" class="small">pix_x=−v</text>
+        <text x="500" y="229" text-anchor="middle" class="small">pix_y=+u</text>
 
         <text x="750" y="28" text-anchor="middle" class="label">pyLAST 当前 plot_camera_image</text>
         <circle cx="750" cy="190" r="130" fill="none" stroke="var(--line)" stroke-width="1.5"/>
@@ -247,11 +247,11 @@
         <line x1="750" y1="45" x2="750" y2="335" class="gridline"/>
         <line x1="750" y1="190" x2="890" y2="190" stroke="var(--purple)" stroke-width="2.5" marker-end="url(#arrow3)"/>
         <line x1="750" y1="190" x2="750" y2="55" stroke="var(--green)" stroke-width="2.5" marker-end="url(#arrow3)"/>
-        <text x="897" y="195" class="label">水平 = pix_y = −v</text>
-        <text x="756" y="60" class="label">垂直 = pix_x = −u</text>
-        <circle id="pylast-hit" cx="780" cy="130" r="9" fill="var(--red)"/>
-        <path id="pylast-glyph" d="M780 130l0 -22l13 0" fill="none" stroke="var(--red)" stroke-width="4"/>
-        <text id="pylast-readout" x="750" y="362" text-anchor="middle" class="small">pix_x=+0.279 m, pix_y=+0.140 m</text>
+        <text x="897" y="195" class="label">水平 = pix_y = +u</text>
+        <text x="756" y="60" class="label">垂直 = pix_x = −v</text>
+        <circle id="pylast-hit" cx="800.3" cy="164.9" r="9" fill="var(--red)"/>
+        <path id="pylast-glyph" d="M800.3 164.9l0 -22l13 0" fill="none" stroke="var(--red)" stroke-width="4"/>
+        <text id="pylast-readout" x="750" y="362" text-anchor="middle" class="small">pix_x=+0.140 m, pix_y=+0.279 m</text>
       </svg>
       <div class="legend"><span style="color:var(--blue)"><i class="dot"></i>u / camera x</span><span style="color:var(--orange)"><i class="dot"></i>v / camera y</span><span style="color:var(--red)"><i class="dot"></i>同一像点与方向标记</span></div>
     </section>
@@ -264,7 +264,7 @@
       <div class="step"><strong>望远镜局部光追</strong><code>local_pos = Rᵀ(pos − T)</code><code>relative 模式不减 T</code><code>dir 只旋转、不平移</code></div>
       <div class="step"><strong>输出平面</strong><code>u_m = dot(hit−plane, u_axis)</code><code>v_m = dot(hit−plane, v_axis)</code><code>标准配置 u=local x, v=local y</code></div>
       <div class="step"><strong>LACT 文件</strong><code>HDF5 /camera/pixels: x_m=u, y_m=v</code><code>ROOT camera_pixels: x_m=u, y_m=v</code><code>pixel_id 与 PE 不变</code></div>
-      <div class="step"><strong>pyLAST 与显示</strong><code>pix_x = −u</code><code>pix_y = −v</code><code>plot horizontal=pix_y</code><code>plot vertical=pix_x</code></div>
+      <div class="step"><strong>pyLAST 与显示</strong><code>pix_x = −v</code><code>pix_y = +u</code><code>plot horizontal=pix_y</code><code>plot vertical=pix_x</code></div>
     </div>
     <div class="numbers">
       <div>
@@ -275,7 +275,7 @@
         <li><strong>位置 x/y</strong> 和 <strong>方向 dir_x/dir_y</strong> 共用所选输入坐标，但方向代表光子的传播方向，不是天空来向。</li>
         <li><strong>EventIO 2D</strong> 的 x/y 已相对各台望远镜，z=0 是记录面；默认再加局部 <code>eventio_reference_z_m=-16</code>。</li>
         <li><strong>u/v 不是阵列 x/y</strong>；它们是输出平面内积定义的二维轴。</li>
-        <li><strong>pyLAST 负号</strong>把反射镜焦平面像恢复为 source-offset/天空视角；当前绘图函数又交换横纵显示轴。</li>
+        <li><strong>pyLAST 输入适配</strong>把焦平面 <code>u/v</code> 映射为“仰角型 pix_x / 方位型 pix_y”；当前绘图函数按天空图习惯把 pix_y 放在横轴。</li>
       </ul>
     </div>
   </section>
@@ -331,10 +331,10 @@
     const a = rad(azDeg), e = rad(elDeg);
     const sa = Math.sin(a), ca = Math.cos(a), se = Math.sin(e), ce = Math.cos(e);
     if (family === "corsika") {
-      return { x: [-se * ca, se * sa, ce], y: [-sa, -ca, 0], z: [ce * ca, -ce * sa, se] };
+      return { x: [sa, ca, 0], y: [-se * ca, se * sa, ce], z: [ce * ca, -ce * sa, se] };
     }
     if (family === "enu") {
-      return { x: [-se * ca, -se * sa, ce], y: [sa, -ca, 0], z: [ce * ca, ce * sa, se] };
+      return { x: [-sa, ca, 0], y: [-se * ca, -se * sa, ce], z: [ce * ca, ce * sa, se] };
     }
     if (family === "local") return { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
     return { x: [-sa, ca, 0], y: [-se * ca, -se * sa, ce], z: [ce * ca, ce * sa, se] };
@@ -398,15 +398,15 @@
     setText("elevation-label", Math.max(36, erx * .62), 145 - ery * .55, `el = ${el}°`);
 
     const focal = 8.0;
-    const u = -focal * Math.tan(rad(sx));
+    const u = focal * Math.tan(rad(sx));
     const v = -focal * Math.tan(rad(sy));
     const scale = 180;
     const rawX = 250 + scale * u, rawY = 190 - scale * v;
-    const pyX = 750 + scale * (-v), pyY = 190 - scale * (-u);
+    const pyX = 750 + scale * u, pyY = 190 - scale * (-v);
     setPoint("raw-hit", rawX, rawY); $("raw-glyph").setAttribute("d", `M${rawX} ${rawY}l22 0l0 -13`);
     setPoint("pylast-hit", pyX, pyY); $("pylast-glyph").setAttribute("d", `M${pyX} ${pyY}l0 -22l13 0`);
     $("raw-readout").textContent = `u=${fmt(u)} m, v=${fmt(v)} m`;
-    $("pylast-readout").textContent = `pix_x=${fmt(-u)} m, pix_y=${fmt(-v)} m`;
+    $("pylast-readout").textContent = `pix_x=${fmt(-v)} m, pix_y=${fmt(u)} m`;
 
     const skyX = 250 + sx * 13, skyY = 35 - sy * 5;
     setPoint("sky-source", skyX, skyY); setText("sky-source-label", skyX, 20, `天空光源 α=(${fmt(sx,1)}°, ${fmt(sy,1)}°)`, "middle");
@@ -424,8 +424,8 @@
       frame.suffix,
       `天空偏移 α=(${fmt(sx, 2)}°, ${fmt(sy, 2)}°)`,
       `示意焦平面: u≈${fmt(u)} m, v≈${fmt(v)} m`,
-      `pyLAST: pix_x=${fmt(-u)} m, pix_y=${fmt(-v)} m`,
-      `pyLAST 图: horizontal=${fmt(-v)} m, vertical=${fmt(-u)} m`
+      `pyLAST: pix_x=${fmt(-v)} m, pix_y=${fmt(u)} m`,
+      `pyLAST 图: horizontal=${fmt(u)} m, vertical=${fmt(-v)} m`
     ].join("\n");
   }
   controls.forEach((control) => control.addEventListener("input", update));

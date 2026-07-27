@@ -176,7 +176,7 @@ python3 python/plot_photon_csv_root_pylast.py \
 CSV 未提供 `multiplicity` 时使用 cfg 的 `source.multiplicity`，本例设为 1，
 即每行一个光子；示例还在 cfg 中统一设置 `400 nm`，并关闭 NSB、trigger
 和 waveform。纯光学的两张图保持 LACT_sim 物理焦平面 `(u, v)`。
-`LactEventSource` 将它映射为 pyLAST 的 `camera_x=-u`、`camera_y=-v`，
+`LactEventSource` 在输入边界将它映射为 pyLAST 的 `camera_x=-v`、`camera_y=+u`，
 原版 pyLAST 相机显示以 `camera_y` 为横轴、`camera_x` 为纵轴。
 绘图脚本默认采用这一 pyLAST 视图；需要直接对照 LACT_sim 焦平面时可增加
 `--coordinate-view lact-uv`。

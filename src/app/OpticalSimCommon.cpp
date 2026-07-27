@@ -583,12 +583,13 @@ TelescopeFrame buildTelescopeFrame(const TelescopeConfig& telescope)
 
 TelescopeFrame buildCorsikaNwuTelescopeFrame(const TelescopeConfig& telescope)
 {
-    // Existing CORSIKA/sim_telarray input-adapter basis in magnetic
-    // North-West-Up coordinates. This converts input rows only; it does not
-    // redefine the generic trace/output or plotting frames.
+    // CORSIKA/sim_telarray input adapter in magnetic North-West-Up
+    // coordinates.  The returned axes are the canonical telescope-local
+    // optical axes used by the mirror, obstruction, output plane, and camera:
     //   local +z: boresight toward the sky
-    //   local +x: increasing elevation (toward zenith)
-    //   local +y: increasing azimuth (North -> East)
+    //   local +y: increasing elevation (toward zenith / sky-up)
+    //   local +x: completes the right-handed frame; opposite increasing
+    //             azimuth (West at az=0)
     // This is right-handed: x cross y = z.
     const double az = telescope.pointing_az_deg * DEG_TO_RAD;
     const double el = telescope.pointing_el_deg * DEG_TO_RAD;
@@ -599,8 +600,8 @@ TelescopeFrame buildCorsikaNwuTelescopeFrame(const TelescopeConfig& telescope)
 
     TelescopeFrame frame;
     frame.origin = telescope.position_m;
-    frame.x_axis = Vec3{-sin_el * cos_az, sin_el * sin_az, cos_el}.normalized();
-    frame.y_axis = Vec3{-sin_az, -cos_az, 0.0}.normalized();
+    frame.x_axis = Vec3{sin_az, cos_az, 0.0}.normalized();
+    frame.y_axis = Vec3{-sin_el * cos_az, sin_el * sin_az, cos_el}.normalized();
     frame.z_axis = Vec3{cos_el * cos_az, -cos_el * sin_az, sin_el}.normalized();
     return frame;
 }
@@ -611,10 +612,9 @@ TelescopeFrame buildEnuEastTelescopeFrame(const TelescopeConfig& telescope)
     //   global +x: East, +y: North, +z: Up
     //   pointing az=0: East, az=90: North
     //
-    // Keep the same right-handed telescope-local optical axes as the CORSIKA
-    // adapter: local +x increases elevation, local +y follows conventional
-    // North-to-East sky azimuth (therefore decreasing ENU east-start azimuth),
-    // and local +z is the boresight.
+    // Keep the same canonical right-handed telescope-local optical axes as
+    // the CORSIKA adapter: local +y is sky-up, local +x is the transverse
+    // horizontal axis, and local +z is the boresight.
     TelescopeConfig nwu_telescope = telescope;
     nwu_telescope.position_m = {
         telescope.position_m.y, -telescope.position_m.x, telescope.position_m.z};

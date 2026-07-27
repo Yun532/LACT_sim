@@ -38,14 +38,27 @@ int main()
 
     const double el = 70.0 * DEG_TO_RAD;
     const TelescopeFrame frame = buildCorsikaNwuTelescopeFrame(telescope);
-    ok &= check(nearVec(frame.x_axis, {-std::sin(el), 0.0, std::cos(el)}),
-                "CORSIKA local +x must point toward increasing elevation");
-    ok &= check(nearVec(frame.y_axis, {0.0, -1.0, 0.0}),
-                "CORSIKA local +y must point toward increasing azimuth/East at az=0");
+    ok &= check(nearVec(frame.x_axis, {0.0, 1.0, 0.0}),
+                "CORSIKA optical local +x must point West at az=0");
+    ok &= check(nearVec(frame.y_axis, {-std::sin(el), 0.0, std::cos(el)}),
+                "CORSIKA optical local +y must point toward increasing elevation");
     ok &= check(nearVec(frame.z_axis, {std::cos(el), 0.0, std::sin(el)}),
                 "CORSIKA local +z must be the boresight");
     ok &= check(nearVec(frame.x_axis.cross(frame.y_axis), frame.z_axis),
                 "CORSIKA optical frame must be right-handed");
+
+    // Cross-entry regression: a source one degree above an az=0, el=70
+    // pointing must enter the shared optical tracer with the same local
+    // direction as run_optical_sim's telescope_local ParallelBeam case.
+    const double source_el = 71.0 * DEG_TO_RAD;
+    PhotonBunch elevated_source;
+    elevated_source.photon.dir = {
+        -std::cos(source_el), 0.0, -std::sin(source_el)};
+    const PhotonBunch elevated_local = transformBunchToTelescopeLocal(
+        elevated_source, telescope, "corsika_nwu_relative");
+    ok &= check(nearVec(elevated_local.photon.dir,
+                        {0.0, -std::sin(DEG_TO_RAD), -std::cos(DEG_TO_RAD)}),
+                "NWU source above pointing must map to optical local -y");
 
     PhotonBunch local;
     local.photon.pos = {1.0, -2.0, 3.0};
@@ -86,10 +99,10 @@ int main()
                              nwu_direction.z};
     ok &= check(nearVec(enu_frame.x_axis,
                         {-frame.x_axis.y, frame.x_axis.x, frame.x_axis.z}),
-                "ENU and NWU elevation axes must describe the same physical direction");
+                "ENU and NWU optical x axes must describe the same physical direction");
     ok &= check(nearVec(enu_frame.y_axis,
                         {-frame.y_axis.y, frame.y_axis.x, frame.y_axis.z}),
-                "ENU and NWU camera-y axes must describe the same physical direction");
+                "ENU and NWU sky-up axes must describe the same physical direction");
     ok &= check(nearVec(enu_frame.z_axis,
                         {-frame.z_axis.y, frame.z_axis.x, frame.z_axis.z}),
                 "ENU and NWU boresights must describe the same physical direction");

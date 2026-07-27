@@ -148,8 +148,10 @@ ROOT writer with EventIO input. When the CSV omits `multiplicity`, the cfg
 fallback is used; this example sets it to one photon per row. The cfg also
 supplies a fixed `400 nm` wavelength and disables NSB, trigger, and waveform
 generation. The two optical diagnostics retain the LACT_sim focal-plane
-orientation; only the ROOT/pyLAST plot uses the sky-view conversion
-(`pix_x=-x_m`, `pix_y=-y_m`). See the
+orientation. At the ROOT/pyLAST boundary, the reader converts canonical
+optical coordinates once with `pix_x=-y_m` and `pix_y=+x_m`; the native
+pyLAST camera view then places `pix_y` horizontally and `pix_x` vertically.
+See the
 [minimal Photon CSV example](docs/minimal_photon_csv.md) for details.
 
 To save the photon position and direction actually passed into ray tracing:

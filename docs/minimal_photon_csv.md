@@ -75,8 +75,8 @@ The optical plots retain the native focal-plane orientation. At the ROOT/pyLAST
 boundary, `LactEventSource` applies the normal source-offset display convention:
 
 ```text
-pyLAST pix_x = -LACT_sim camera_x
-pyLAST pix_y = -LACT_sim camera_y
+pyLAST pix_x = -LACT_sim camera_y
+pyLAST pix_y = +LACT_sim camera_x
 ```
 
 ## Creating the six-column input

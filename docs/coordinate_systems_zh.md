@@ -39,7 +39,7 @@ EventIO NWU photon bunch
   -> hit.u/v = dot(surface - plane_point, plane_u/v)
   -> camera_x/y = u/v
   -> ROOT: x_m/y_m = u/v
-  -> pyLAST: pix_x=-u, pix_y=-v
+  -> pyLAST: pix_x=-v, pix_y=+u
 ```
 
 审计中修正了三处会造成误读或画图不一致的地方：
@@ -214,16 +214,16 @@ telescope.pointing_el_deg=70
 令 `A=azimuth`、`E=elevation`。程序在 NWU 中构造：
 
 ```text
-e_x = (-sin(E) cos(A),  sin(E) sin(A), cos(E))
-e_y = (-sin(A),        -cos(A),        0     )
+e_x = ( sin(A),         cos(A),        0     )
+e_y = (-sin(E) cos(A),  sin(E) sin(A), cos(E))
 e_z = ( cos(E) cos(A), -cos(E) sin(A), sin(E))
 ```
 
 三条轴的含义是：
 
 ```text
-local +x : 高度角增加方向，朝天顶
-local +y : 方位角从北向东增加方向
+local +x : 水平横向轴；A=0 时指向西，与方位角增加方向相反
+local +y : 高度角增加方向，朝天顶（sky-up）
 local +z : 望远镜光轴，从镜面指向天空
 local -z : 正入射光子的传播方向
 ```
@@ -372,8 +372,8 @@ LACT_sim ROOT 输出保存原始焦平面坐标。`LactEventSource` 在进入 py
 相机几何时转换成 source-offset/天空视图坐标：
 
 ```text
-pyLAST pix_x = -LACT_sim camera_x
-pyLAST pix_y = -LACT_sim camera_y
+pyLAST pix_x = -LACT_sim camera_y
+pyLAST pix_y = +LACT_sim camera_x
 ```
 
 这只是完整相机图的显示约定，不是 CORSIKA NWU 输入转换，也不改变
@@ -383,8 +383,8 @@ pyLAST pix_y = -LACT_sim camera_y
 第一个坐标画在垂直轴”的显示方式：
 
 ```text
-Matplotlib horizontal = pyLAST pix_y = -LACT_sim v
-Matplotlib vertical   = pyLAST pix_x = -LACT_sim u
+Matplotlib horizontal = pyLAST pix_y = +LACT_sim u
+Matplotlib vertical   = pyLAST pix_x = -LACT_sim v
 ```
 
 若需要用同一个 pyLAST event 检查 LACT_sim 原始焦平面 `u/v`，运行：

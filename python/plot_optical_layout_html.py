@@ -517,8 +517,8 @@ def main():
             add_axis(mirror_origin, direction, 3.2, label_text, color, "input_axis")
 
         if args.coordinate_frame_mode == "source" and source_frame_name != "telescope_local":
-            local_x_label = "local +x / increasing elevation"
-            local_y_label = "local +y / azimuth N -> E"
+            local_x_label = "local +x / horizontal"
+            local_y_label = "local +y / increasing elevation / sky up"
         else:
             local_x_label = "local +x"
             local_y_label = "local +y"
@@ -799,8 +799,8 @@ def main():
         "the page embeds that local geometry into the input frame only for display.<br>"
         f"<b>Camera/output:</b> {camera_pixel_count} CSV pixels; u=local +x, "
         "v=local +y; stored <code>x_m=u</code>, <code>y_m=v</code>.<br>"
-        "<b>pyLAST:</b> <code>pix_x=-u</code>, <code>pix_y=-v</code>; current camera plot "
-        "uses horizontal=-v and vertical=-u.<br>"
+        "<b>pyLAST:</b> <code>pix_x=-v</code>, <code>pix_y=+u</code>; current camera plot "
+        "uses horizontal=+u and vertical=-v.<br>"
         "<b>Ground/base:</b> schematic orientation references, not engineering geometry."
     )
     if trace_metadata["count"]:
