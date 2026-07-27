@@ -274,6 +274,7 @@ pylast reading, ROOT trees, and the notebook workflow.
 - [Complete user guide](docs/user_guide_en.md)
 - [All official tests](docs/official_tests.md)
 - [Photon CSV format](docs/photon_csv_format.md)
+- [Interactive coordinate-system explorer](docs/assets/coordinate-system-explorer.html)
 - [Coordinate conventions](docs/coordinate_systems.md)
 - [HDF5 output format](docs/hdf5_output_format.md)
 - [Camera timing and waveforms](docs/camera_timing_waveform_zh.md)

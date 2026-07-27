@@ -4,6 +4,10 @@
 pyLAST 相机图分别使用什么坐标。英文参考版及更多输出字段说明见
 [coordinate_systems.md](coordinate_systems.md)。
 
+建议先打开[交互式坐标系总图](assets/coordinate-system-explorer.html)。它可以切换
+`source.coordinate_frame`、望远镜方位/高度和天空偏移，同时对照输入 `x/y`、
+局部光学坐标、相机 `u/v`、ROOT/HDF5 字段和 pyLAST 的最终画图轴。
+
 ## 先区分五层坐标
 
 | 层次 | `x` 方向 | `y` 方向 | 说明 |
@@ -305,6 +309,26 @@ pyLAST pix_y = -LACT_sim camera_y
 
 这只是完整相机图的显示约定，不是 CORSIKA NWU 输入转换，也不改变
 `pixel_id` 和每个像素的 PE。
+
+当前 `pylast.visualize.plot_camera_image()` 还采用“第二个坐标画在水平轴、
+第一个坐标画在垂直轴”的显示方式：
+
+```text
+Matplotlib horizontal = pyLAST pix_y = -LACT_sim v
+Matplotlib vertical   = pyLAST pix_x = -LACT_sim u
+```
+
+若需要用同一个 pyLAST event 检查 LACT_sim 原始焦平面 `u/v`，运行：
+
+```bash
+python3 python/plot_photon_csv_root_pylast.py \
+  run_logs/examples/photon_csv_full_camera/lact_events.root \
+  --event-id 1909 --telescope-id 19 \
+  --coordinate-view lact-uv \
+  --output run_logs/examples/photon_csv_full_camera/camera_uv.png
+```
+
+`lact-uv` 只改变绘图坐标与轴标签，不改变 pixel 顺序或 PE 数组。
 
 ## Event 1909 示例
 

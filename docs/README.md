@@ -11,6 +11,7 @@
 
 ## 输入与坐标
 
+- [交互式坐标系总图：输入 x/y、天空指向、相机 u/v 与 pyLAST](assets/coordinate-system-explorer.html)
 - [坐标系中文说明](coordinate_systems_zh.md)
 - [Coordinate systems reference](coordinate_systems.md)
 - [Photon CSV 格式](photon_csv_format.md)

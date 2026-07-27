@@ -39,6 +39,10 @@ before comparing to GPS/geographic coordinates.
 
 ## Coordinate Frames
 
+Open the [interactive coordinate-system explorer](assets/coordinate-system-explorer.html)
+for a linked view of input axes, sky pointing, telescope-local optics, camera
+`u/v`, file fields, and the final pyLAST display orientation.
+
 ### 1. CORSIKA / EventIO Array Frame
 
 CORSIKA IACT photon bunches and EventIO telescope tables are interpreted in the
@@ -451,6 +455,20 @@ x_m, y_m
 ```
 
 These are camera/image coordinates, not CORSIKA array coordinates.
+
+At the LACT ROOT/pyLAST boundary, `LactEventSource` converts focal-plane image
+coordinates to source-offset coordinates:
+
+```text
+pyLAST pix_x = -u
+pyLAST pix_y = -v
+```
+
+The current `pylast.visualize.plot_camera_image()` then draws `pix_y` on the
+horizontal Matplotlib axis and `pix_x` on the vertical axis. Therefore its
+display axes are `horizontal=-v`, `vertical=-u`. Use
+`python/plot_photon_csv_root_pylast.py --coordinate-view lact-uv` to draw the
+same pyLAST event with raw LACT_sim `u` horizontal and `v` vertical.
 
 ### Camera Handedness
 

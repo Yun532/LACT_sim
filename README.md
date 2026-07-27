@@ -305,6 +305,7 @@ pylast 读取、ROOT tree 说明和 notebook 流程见
 - [用户使用手册：安装、运行、输出和画图](docs/user_guide_zh.md)
 - [所有 official tests](docs/official_tests.md)
 - [Photon CSV 格式](docs/photon_csv_format.md)
+- [交互式坐标系总图](docs/assets/coordinate-system-explorer.html)
 - [坐标系中文说明](docs/coordinate_systems_zh.md)
 - [坐标系英文参考](docs/coordinate_systems.md)
 - [HDF5 输出格式](docs/hdf5_output_format.md)

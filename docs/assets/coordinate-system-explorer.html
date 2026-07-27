@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LACT_sim 坐标系交互图</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f3f6fb;
+      --panel: #ffffff;
+      --text: #182033;
+      --muted: #5e6b82;
+      --line: #d7deea;
+      --grid: #e8edf5;
+      --blue: #2267d8;
+      --orange: #d96b18;
+      --green: #16835d;
+      --purple: #7650c7;
+      --red: #c73f4f;
+      --shadow: 0 12px 30px rgba(32, 50, 80, .09);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111722;
+        --panel: #192231;
+        --text: #eef3fb;
+        --muted: #aeb9ca;
+        --line: #344155;
+        --grid: #273448;
+        --blue: #6ba2ff;
+        --orange: #ff9b52;
+        --green: #55c99b;
+        --purple: #ae91f4;
+        --red: #ff7887;
+        --shadow: 0 12px 30px rgba(0, 0, 0, .22);
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    main { width: min(1180px, calc(100% - 28px)); margin: 24px auto 48px; }
+    h1 { margin: 0 0 4px; font-size: clamp(25px, 4vw, 38px); line-height: 1.2; }
+    h2 { margin: 0 0 12px; font-size: 19px; }
+    p { margin: 0; }
+    code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .lead { color: var(--muted); max-width: 920px; }
+    .controls, .panel, .flow {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+    }
+    .controls {
+      margin: 20px 0;
+      padding: 14px;
+      display: grid;
+      grid-template-columns: minmax(220px, 1.6fr) repeat(4, minmax(140px, 1fr));
+      gap: 12px;
+      align-items: end;
+    }
+    label { display: grid; gap: 5px; color: var(--muted); font-size: 13px; }
+    label output { color: var(--text); font-variant-numeric: tabular-nums; }
+    select, input[type="range"] { width: 100%; accent-color: var(--blue); }
+    select {
+      min-height: 38px;
+      padding: 7px 9px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--text);
+    }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .panel { padding: 16px; min-width: 0; }
+    .panel.wide { grid-column: 1 / -1; }
+    .caption { min-height: 46px; color: var(--muted); font-size: 13px; }
+    svg { width: 100%; height: auto; display: block; }
+    .axis { stroke-width: 2.2; fill: none; marker-end: url(#arrow); }
+    .thin { stroke-width: 1.3; fill: none; }
+    .dashed { stroke-dasharray: 7 6; }
+    .gridline { stroke: var(--grid); stroke-width: 1; }
+    .neutral { stroke: var(--muted); color: var(--muted); }
+    .blue { stroke: var(--blue); color: var(--blue); }
+    .orange { stroke: var(--orange); color: var(--orange); }
+    .green { stroke: var(--green); color: var(--green); }
+    .purple { stroke: var(--purple); color: var(--purple); }
+    .red { stroke: var(--red); color: var(--red); }
+    .fill-blue { fill: color-mix(in srgb, var(--blue) 16%, transparent); stroke: var(--blue); }
+    .fill-orange { fill: color-mix(in srgb, var(--orange) 16%, transparent); stroke: var(--orange); }
+    .fill-green { fill: color-mix(in srgb, var(--green) 16%, transparent); stroke: var(--green); }
+    .fill-purple { fill: color-mix(in srgb, var(--purple) 16%, transparent); stroke: var(--purple); }
+    svg text { fill: var(--text); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+    svg .small { fill: var(--muted); font-size: 12px; }
+    svg .label { font-size: 13px; font-weight: 600; }
+    .legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 8px; color: var(--muted); font-size: 13px; }
+    .dot { display: inline-block; width: 9px; height: 9px; margin-right: 5px; border-radius: 50%; background: currentColor; }
+    .flow { margin-top: 16px; padding: 16px; }
+    .pipeline { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; align-items: stretch; }
+    .step { position: relative; padding: 12px; border: 1px solid var(--line); border-radius: 10px; min-height: 138px; }
+    .step:not(:last-child)::after { content: "→"; position: absolute; right: -13px; top: 54px; z-index: 2; color: var(--muted); font-size: 19px; }
+    .step strong { display: block; margin-bottom: 7px; }
+    .step code { display: block; overflow-wrap: anywhere; color: var(--muted); font-size: 12px; }
+    .numbers { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); display: grid; grid-template-columns: 1.3fr 1fr; gap: 12px; }
+    .readout { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; color: var(--muted); font-size: 12px; }
+    .rules { margin: 0; padding-left: 19px; color: var(--muted); }
+    .rules strong { color: var(--text); }
+    @media (max-width: 880px) {
+      .controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .controls label:first-child { grid-column: 1 / -1; }
+      .grid { grid-template-columns: 1fr; }
+      .panel.wide { grid-column: auto; }
+      .pipeline { grid-template-columns: 1fr; }
+      .step:not(:last-child)::after { content: "↓"; right: auto; left: 50%; top: auto; bottom: -19px; }
+      .numbers { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 520px) { .controls { grid-template-columns: 1fr; } .controls label:first-child { grid-column: auto; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>LACT_sim 坐标系交互图</h1>
+    <p class="lead">从输入文件的 <code>x/y</code>，经过望远镜局部光追和相机 <code>u/v</code>，一直到 ROOT/HDF5 与 pyLAST 的实际画图方向。</p>
+  </header>
+
+  <section class="controls" aria-label="坐标参数">
+    <label>输入坐标模式
+      <select id="frame">
+        <option value="corsika_rel">CORSIKA NWU · relative（默认）</option>
+        <option value="corsika_global">CORSIKA NWU · global</option>
+        <option value="enu_rel">ENU East-start · relative</option>
+        <option value="enu_global">ENU East-start · global</option>
+        <option value="local">telescope_local</option>
+        <option value="generic">lact_generic_global</option>
+      </select>
+    </label>
+    <label><span id="az-label">指向方位角</span> <output id="az-value">0°</output>
+      <input id="az" type="range" min="0" max="360" step="5" value="0">
+    </label>
+    <label>指向高度角 <output id="el-value">70°</output>
+      <input id="el" type="range" min="0" max="90" step="5" value="70">
+    </label>
+    <label>天空偏移 αx <output id="sx-value">+2.0°</output>
+      <input id="sx" type="range" min="-4" max="4" step="0.25" value="2">
+    </label>
+    <label>天空偏移 αy <output id="sy-value">+1.0°</output>
+      <input id="sy" type="range" min="-4" max="4" step="0.25" value="1">
+    </label>
+  </section>
+
+  <div class="grid">
+    <section class="panel">
+      <h2>1. 输入文件的 x/y 与天空指向</h2>
+      <p class="caption" id="frame-caption"></p>
+      <svg viewBox="0 0 500 330" role="img" aria-labelledby="array-title array-desc">
+        <title id="array-title">输入坐标与望远镜天空指向俯视图</title>
+        <desc id="array-desc">显示输入文件 x y 轴、物理方向以及望远镜方位和高度。</desc>
+        <defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="currentColor"/></marker></defs>
+        <circle cx="190" cy="165" r="120" fill="none" stroke="var(--line)" stroke-width="1.5"/>
+        <line x1="55" y1="165" x2="325" y2="165" class="gridline"/>
+        <line x1="190" y1="30" x2="190" y2="300" class="gridline"/>
+        <text x="190" y="24" text-anchor="middle" class="label" id="north-label">North</text>
+        <text x="336" y="170" class="label" id="east-label">East</text>
+        <text x="190" y="320" text-anchor="middle" class="small" id="south-label">South</text>
+        <text x="42" y="170" text-anchor="end" class="small" id="west-label">West</text>
+        <line id="input-x" x1="190" y1="165" x2="190" y2="83" class="axis blue"/>
+        <line id="input-y" x1="190" y1="165" x2="108" y2="165" class="axis orange"/>
+        <text id="input-x-label" x="195" y="78" class="label">文件 +x = North</text>
+        <text id="input-y-label" x="72" y="155" class="label">文件 +y = West</text>
+        <line id="pointing" x1="190" y1="165" x2="190" y2="65" class="axis green"/>
+        <circle id="zenith-dot" cx="190" cy="165" r="5" fill="var(--green)"/>
+        <text id="pointing-label" x="200" y="58" class="label">光轴 → 天空</text>
+        <g transform="translate(370 65)">
+          <line x1="0" y1="150" x2="100" y2="150" class="thin neutral"/>
+          <line x1="0" y1="150" x2="0" y2="40" class="thin neutral"/>
+          <path id="elevation-arc" d="M32 150 A32 32 0 0 0 22.6 127.4" fill="none" stroke="var(--green)" stroke-width="3"/>
+          <line id="elevation-ray" x1="0" y1="150" x2="72" y2="78" class="axis green"/>
+          <text x="50" y="172" text-anchor="middle" class="small">horizon</text>
+          <text x="-8" y="35" text-anchor="end" class="small">zenith</text>
+          <text id="elevation-label" x="55" y="112" class="label">el = 70°</text>
+        </g>
+      </svg>
+      <div class="legend"><span style="color:var(--blue)"><i class="dot"></i>输入 +x</span><span style="color:var(--orange)"><i class="dot"></i>输入 +y</span><span style="color:var(--green)"><i class="dot"></i>望远镜 +z / boresight</span></div>
+    </section>
+
+    <section class="panel">
+      <h2>2. 望远镜局部光学坐标</h2>
+      <p class="caption"><code>local +z</code> 永远从镜面指向天空；正入射光子沿 <code>local -z</code> 传播。相机在镜面与天空之间。</p>
+      <svg viewBox="0 0 500 330" role="img" aria-labelledby="local-title local-desc">
+        <title id="local-title">望远镜局部光学坐标侧视图</title>
+        <desc id="local-desc">显示天空、相机面、镜面、局部轴、入射和反射光线。</desc>
+        <defs><marker id="arrow2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="currentColor"/></marker></defs>
+        <path d="M72 276 Q250 315 428 276" fill="none" stroke="var(--blue)" stroke-width="5"/>
+        <text x="440" y="282" class="label">镜面 z≈−16 m</text>
+        <rect x="178" y="154" width="144" height="12" rx="3" class="fill-orange" stroke-width="2"/>
+        <text x="330" y="165" class="label">相机面 z≈−8 m</text>
+        <line x1="250" y1="290" x2="250" y2="43" stroke="var(--green)" stroke-width="2.5" marker-end="url(#arrow2)"/>
+        <text x="260" y="45" class="label">local +z → sky</text>
+        <line x1="250" y1="276" x2="340" y2="276" stroke="var(--blue)" stroke-width="2.5" marker-end="url(#arrow2)"/>
+        <text x="344" y="280" class="label">local +x</text>
+        <circle cx="250" cy="276" r="8" fill="none" stroke="var(--purple)" stroke-width="2"/>
+        <circle cx="250" cy="276" r="2.8" fill="var(--purple)"/>
+        <text x="222" y="302" text-anchor="middle" class="label">+y 出屏</text>
+        <line id="incoming-ray" x1="225" y1="35" x2="250" y2="276" stroke="var(--blue)" stroke-width="3" stroke-dasharray="8 6" marker-end="url(#arrow2)"/>
+        <line id="reflected-ray" x1="250" y1="276" x2="240" y2="160" stroke="var(--orange)" stroke-width="3" marker-end="url(#arrow2)"/>
+        <circle id="sky-source" cx="225" cy="35" r="7" fill="var(--blue)"/>
+        <text id="sky-source-label" x="214" y="20" text-anchor="middle" class="label">天空光源</text>
+        <circle id="camera-hit-side" cx="240" cy="160" r="6" fill="var(--red)"/>
+        <line x1="250" y1="146" x2="250" y2="190" stroke="var(--red)" stroke-width="2" marker-end="url(#arrow2)"/>
+        <text x="258" y="192" class="small">camera normal = local −z</text>
+        <text x="70" y="320" class="small">示意：天空偏移、光子横向传播与反射像点的符号关系；实际 u/v 由光追交点计算。</text>
+      </svg>
+      <div class="legend"><span style="color:var(--blue)"><i class="dot"></i>天空来光 / propagation</span><span style="color:var(--orange)"><i class="dot"></i>镜面到相机</span><span style="color:var(--red)"><i class="dot"></i>焦平面命中</span></div>
+    </section>
+
+    <section class="panel wide">
+      <h2>3. 相机 u/v、文件坐标与 pyLAST 画图</h2>
+      <p class="caption">同一个非对称像点在两种视图中的位置。左边是 LACT_sim 原始焦平面，右边严格按当前 <code>LactEventSource + plot_camera_image</code> 的规则。</p>
+      <svg viewBox="0 0 1000 380" role="img" aria-labelledby="camera-title camera-desc">
+        <title id="camera-title">LACT 相机 u v 与 pyLAST 画图坐标对照</title>
+        <desc id="camera-desc">左侧显示原始相机 u v；右侧显示 pyLAST 符号翻转和绘图轴交换后的同一像点。</desc>
+        <defs><marker id="arrow3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="currentColor"/></marker></defs>
+        <text x="250" y="28" text-anchor="middle" class="label">LACT_sim 原始焦平面 / 文件</text>
+        <circle cx="250" cy="190" r="130" fill="none" stroke="var(--line)" stroke-width="1.5"/>
+        <line x1="95" y1="190" x2="405" y2="190" class="gridline"/>
+        <line x1="250" y1="45" x2="250" y2="335" class="gridline"/>
+        <line x1="250" y1="190" x2="390" y2="190" stroke="var(--blue)" stroke-width="2.5" marker-end="url(#arrow3)"/>
+        <line x1="250" y1="190" x2="250" y2="55" stroke="var(--orange)" stroke-width="2.5" marker-end="url(#arrow3)"/>
+        <text x="397" y="195" class="label">+u = camera x = local +x</text>
+        <text x="256" y="60" class="label">+v = camera y = local +y</text>
+        <circle id="raw-hit" cx="190" cy="220" r="9" fill="var(--red)"/>
+        <path id="raw-glyph" d="M190 220l22 0l0 -13" fill="none" stroke="var(--red)" stroke-width="4"/>
+        <text id="raw-readout" x="250" y="362" text-anchor="middle" class="small">u=−0.279 m, v=−0.140 m</text>
+
+        <path d="M455 190H545" stroke="var(--muted)" stroke-width="2" marker-end="url(#arrow3)"/>
+        <text x="500" y="165" text-anchor="middle" class="small">LactEventSource</text>
+        <text x="500" y="213" text-anchor="middle" class="small">pix_x=−u</text>
+        <text x="500" y="229" text-anchor="middle" class="small">pix_y=−v</text>
+
+        <text x="750" y="28" text-anchor="middle" class="label">pyLAST 当前 plot_camera_image</text>
+        <circle cx="750" cy="190" r="130" fill="none" stroke="var(--line)" stroke-width="1.5"/>
+        <line x1="595" y1="190" x2="905" y2="190" class="gridline"/>
+        <line x1="750" y1="45" x2="750" y2="335" class="gridline"/>
+        <line x1="750" y1="190" x2="890" y2="190" stroke="var(--purple)" stroke-width="2.5" marker-end="url(#arrow3)"/>
+        <line x1="750" y1="190" x2="750" y2="55" stroke="var(--green)" stroke-width="2.5" marker-end="url(#arrow3)"/>
+        <text x="897" y="195" class="label">水平 = pix_y = −v</text>
+        <text x="756" y="60" class="label">垂直 = pix_x = −u</text>
+        <circle id="pylast-hit" cx="780" cy="130" r="9" fill="var(--red)"/>
+        <path id="pylast-glyph" d="M780 130l0 -22l13 0" fill="none" stroke="var(--red)" stroke-width="4"/>
+        <text id="pylast-readout" x="750" y="362" text-anchor="middle" class="small">pix_x=+0.279 m, pix_y=+0.140 m</text>
+      </svg>
+      <div class="legend"><span style="color:var(--blue)"><i class="dot"></i>u / camera x</span><span style="color:var(--orange)"><i class="dot"></i>v / camera y</span><span style="color:var(--red)"><i class="dot"></i>同一像点与方向标记</span></div>
+    </section>
+  </div>
+
+  <section class="flow">
+    <h2>4. 字段从输入到画图的真实路径</h2>
+    <div class="pipeline">
+      <div class="step"><strong>输入 Photon CSV / EventIO</strong><code>x_m, y_m, z_m</code><code>dir_x, dir_y, dir_z</code><code>source.coordinate_frame</code></div>
+      <div class="step"><strong>望远镜局部光追</strong><code>local_pos = Rᵀ(pos − T)</code><code>relative 模式不减 T</code><code>dir 只旋转、不平移</code></div>
+      <div class="step"><strong>输出平面</strong><code>u_m = dot(hit−plane, u_axis)</code><code>v_m = dot(hit−plane, v_axis)</code><code>标准配置 u=local x, v=local y</code></div>
+      <div class="step"><strong>LACT 文件</strong><code>HDF5 /camera/pixels: x_m=u, y_m=v</code><code>ROOT camera_pixels: x_m=u, y_m=v</code><code>pixel_id 与 PE 不变</code></div>
+      <div class="step"><strong>pyLAST 与显示</strong><code>pix_x = −u</code><code>pix_y = −v</code><code>plot horizontal=pix_y</code><code>plot vertical=pix_x</code></div>
+    </div>
+    <div class="numbers">
+      <div>
+        <strong>当前参数下的基底与示意数值</strong>
+        <div id="basis-readout" class="readout" aria-live="polite"></div>
+      </div>
+      <ul class="rules">
+        <li><strong>位置 x/y</strong> 和 <strong>方向 dir_x/dir_y</strong> 共用所选输入坐标，但方向代表光子的传播方向，不是天空来向。</li>
+        <li><strong>EventIO 2D</strong> 的 x/y 已相对各台望远镜，z=0 是记录面；默认再加局部 <code>eventio_reference_z_m=-16</code>。</li>
+        <li><strong>u/v 不是阵列 x/y</strong>；它们是输出平面内积定义的二维轴。</li>
+        <li><strong>pyLAST 负号</strong>把反射镜焦平面像恢复为 source-offset/天空视角；当前绘图函数又交换横纵显示轴。</li>
+      </ul>
+    </div>
+  </section>
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const controls = ["frame", "az", "el", "sx", "sy"].map($);
+  const fmt = (value, digits = 3) => `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(digits)}`;
+  const rad = (deg) => deg * Math.PI / 180;
+  const vec = (values) => `(${values.map((v) => fmt(v)).join(", ")})`;
+  const frames = {
+    corsika_rel: {
+      family: "corsika",
+      caption: "CORSIKA/EventIO 的文件轴是 NWU：+x=磁北、+y=西、+z=上；relative 表示 x/y 已相对当前望远镜，不再减 telescope.position_m。",
+      az: "方位角：0=北，90=东",
+      suffix: "relative：p_local = Rᵀ p（不减望远镜位置）"
+    },
+    corsika_global: {
+      family: "corsika",
+      caption: "CORSIKA NWU 全局模式：+x=磁北、+y=西、+z=上；输入位置是绝对阵列坐标，程序先减 telescope.position_m。",
+      az: "方位角：0=北，90=东",
+      suffix: "global：p_local = Rᵀ (p − telescope_position)"
+    },
+    enu_rel: {
+      family: "enu",
+      caption: "显式 ENU East-start：+x=东、+y=北、+z=上；relative 表示位置已相对望远镜。它不是 CORSIKA 默认轴。",
+      az: "方位角：0=东，90=北",
+      suffix: "relative：p_local = Rᵀ p（不减望远镜位置）"
+    },
+    enu_global: {
+      family: "enu",
+      caption: "ENU East-start 全局模式：+x=东、+y=北、+z=上；输入位置先减 ENU 下的 telescope.position_m。",
+      az: "方位角：0=东，90=北",
+      suffix: "global：p_local = Rᵀ (p − telescope_position)"
+    },
+    local: {
+      family: "local",
+      caption: "telescope_local：文件 x/y/z 已经是光学局部坐标。程序不旋转位置，只归一化方向；x/y 没有独立的 North/East 含义。",
+      az: "展示方位角：通用 +X → +Y",
+      suffix: "p_local = p_input；dir_local = normalize(dir_input)"
+    },
+    generic: {
+      family: "generic",
+      caption: "lact_generic_global：通用模拟全局 +X/+Y；方位角从 +X 朝 +Y 增加。不要把它自动解释成 CORSIKA North/West。",
+      az: "通用方位角：+X → +Y",
+      suffix: "global：p_local = Rᵀ (p − telescope_position)"
+    }
+  };
+
+  function basis(family, azDeg, elDeg) {
+    const a = rad(azDeg), e = rad(elDeg);
+    const sa = Math.sin(a), ca = Math.cos(a), se = Math.sin(e), ce = Math.cos(e);
+    if (family === "corsika") {
+      return { x: [-se * ca, se * sa, ce], y: [-sa, -ca, 0], z: [ce * ca, -ce * sa, se] };
+    }
+    if (family === "enu") {
+      return { x: [-se * ca, -se * sa, ce], y: [sa, -ca, 0], z: [ce * ca, ce * sa, se] };
+    }
+    if (family === "local") return { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
+    return { x: [-sa, ca, 0], y: [-se * ca, -se * sa, ce], z: [ce * ca, ce * sa, se] };
+  }
+
+  function setLine(id, x1, y1, x2, y2) {
+    const el = $(id); el.setAttribute("x1", x1); el.setAttribute("y1", y1); el.setAttribute("x2", x2); el.setAttribute("y2", y2);
+  }
+  function setText(id, x, y, text, anchor = "start") {
+    const el = $(id); el.setAttribute("x", x); el.setAttribute("y", y); el.setAttribute("text-anchor", anchor); el.textContent = text;
+  }
+  function setPoint(id, x, y) { const el = $(id); el.setAttribute("cx", x); el.setAttribute("cy", y); }
+
+  function update() {
+    const key = $("frame").value, frame = frames[key];
+    const az = Number($("az").value), el = Number($("el").value);
+    const sx = Number($("sx").value), sy = Number($("sy").value);
+    $("az-value").value = `${az}°`; $("el-value").value = `${el}°`;
+    $("sx-value").value = `${fmt(sx, 1)}°`; $("sy-value").value = `${fmt(sy, 1)}°`;
+    $("az-label").textContent = frame.az;
+    $("frame-caption").textContent = frame.caption;
+
+    let east, north;
+    if (frame.family === "corsika") { east = Math.sin(rad(az)); north = Math.cos(rad(az)); }
+    else { east = Math.cos(rad(az)); north = Math.sin(rad(az)); }
+    const projection = 103 * Math.cos(rad(el));
+    const px = 190 + east * projection, py = 165 - north * projection;
+    setLine("pointing", 190, 165, px, py);
+    setPoint("zenith-dot", px, py);
+    setText("pointing-label", px + 9, py - 9, el === 90 ? "光轴 → zenith" : "光轴 → 天空");
+
+    if (frame.family === "corsika") {
+      $("north-label").textContent = "North"; $("east-label").textContent = "East";
+      $("south-label").textContent = "South"; $("west-label").textContent = "West";
+      setLine("input-x", 190, 165, 190, 83); setLine("input-y", 190, 165, 108, 165);
+      setText("input-x-label", 195, 78, "文件 +x = North"); setText("input-y-label", 72, 155, "文件 +y = West");
+      $("input-x").style.display = $("input-y").style.display = "";
+    } else if (frame.family === "enu") {
+      $("north-label").textContent = "North"; $("east-label").textContent = "East";
+      $("south-label").textContent = "South"; $("west-label").textContent = "West";
+      setLine("input-x", 190, 165, 272, 165); setLine("input-y", 190, 165, 190, 83);
+      setText("input-x-label", 277, 155, "文件 +x = East"); setText("input-y-label", 195, 78, "文件 +y = North");
+      $("input-x").style.display = $("input-y").style.display = "";
+    } else if (frame.family === "generic") {
+      $("north-label").textContent = "+Y"; $("east-label").textContent = "+X";
+      $("south-label").textContent = "−Y"; $("west-label").textContent = "−X";
+      setLine("input-x", 190, 165, 272, 165); setLine("input-y", 190, 165, 190, 83);
+      setText("input-x-label", 277, 155, "文件 +x = generic X"); setText("input-y-label", 195, 78, "文件 +y = generic Y");
+      $("input-x").style.display = $("input-y").style.display = "";
+    } else {
+      $("north-label").textContent = "local +y"; $("east-label").textContent = "local +x";
+      $("south-label").textContent = "local −y"; $("west-label").textContent = "local −x";
+      setLine("input-x", 190, 165, 272, 165); setLine("input-y", 190, 165, 190, 83);
+      setText("input-x-label", 277, 155, "文件 +x = local x"); setText("input-y-label", 195, 78, "文件 +y = local y");
+      $("input-x").style.display = $("input-y").style.display = "";
+    }
+
+    const er = 72, erx = er * Math.cos(rad(el)), ery = er * Math.sin(rad(el));
+    setLine("elevation-ray", 0, 150, erx, 150 - ery);
+    $("elevation-arc").setAttribute("d", `M32 150 A32 32 0 0 0 ${32 * Math.cos(rad(el))} ${150 - 32 * Math.sin(rad(el))}`);
+    setText("elevation-label", Math.max(36, erx * .62), 145 - ery * .55, `el = ${el}°`);
+
+    const focal = 8.0;
+    const u = -focal * Math.tan(rad(sx));
+    const v = -focal * Math.tan(rad(sy));
+    const scale = 180;
+    const rawX = 250 + scale * u, rawY = 190 - scale * v;
+    const pyX = 750 + scale * (-v), pyY = 190 - scale * (-u);
+    setPoint("raw-hit", rawX, rawY); $("raw-glyph").setAttribute("d", `M${rawX} ${rawY}l22 0l0 -13`);
+    setPoint("pylast-hit", pyX, pyY); $("pylast-glyph").setAttribute("d", `M${pyX} ${pyY}l0 -22l13 0`);
+    $("raw-readout").textContent = `u=${fmt(u)} m, v=${fmt(v)} m`;
+    $("pylast-readout").textContent = `pix_x=${fmt(-u)} m, pix_y=${fmt(-v)} m`;
+
+    const skyX = 250 + sx * 13, skyY = 35 - sy * 5;
+    setPoint("sky-source", skyX, skyY); setText("sky-source-label", skyX, 20, `天空光源 α=(${fmt(sx,1)}°, ${fmt(sy,1)}°)`, "middle");
+    setLine("incoming-ray", skyX, skyY, 250, 276);
+    const sideHitX = 250 + Math.max(-65, Math.min(65, u * 120));
+    setLine("reflected-ray", 250, 276, sideHitX, 160); setPoint("camera-hit-side", sideHitX, 160);
+
+    const b = basis(frame.family, az, el);
+    const axisNames = frame.family === "corsika" ? "NWU" : frame.family === "enu" ? "ENU" : frame.family === "local" ? "local" : "generic XYZ";
+    $("basis-readout").textContent = [
+      `输入基底: ${axisNames}`,
+      `local e_x = ${vec(b.x)}`,
+      `local e_y = ${vec(b.y)}`,
+      `boresight e_z = ${vec(b.z)}`,
+      frame.suffix,
+      `天空偏移 α=(${fmt(sx, 2)}°, ${fmt(sy, 2)}°)`,
+      `示意焦平面: u≈${fmt(u)} m, v≈${fmt(v)} m`,
+      `pyLAST: pix_x=${fmt(-u)} m, pix_y=${fmt(-v)} m`,
+      `pyLAST 图: horizontal=${fmt(-v)} m, vertical=${fmt(-u)} m`
+    ].join("\n");
+  }
+  controls.forEach((control) => control.addEventListener("input", update));
+  update();
+})();
+</script>
+</body>
+</html>
