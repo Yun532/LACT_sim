@@ -5,7 +5,7 @@ pyLAST 相机图分别使用什么坐标。英文参考版及更多输出字段�
 [coordinate_systems.md](coordinate_systems.md)。
 
 建议先打开[真实 LACT 三维坐标模型](assets/lact-coordinate-system-3d.html)：拖动可旋转、
-滚轮可缩放；它使用正式 1229 镜面、相机面和结构配置，同时标出输入 NWU、望远镜
+滚轮可缩放；它使用正式 `mirror_1229` 镜面、相机面和结构配置，同时标出输入 NWU、望远镜
 局部 `x/y/z`、天空/入射光方向、相机 `u/v` 及 pyLAST 符号关系。
 
 [交互式坐标系总图](assets/coordinate-system-explorer.html)则适合切换

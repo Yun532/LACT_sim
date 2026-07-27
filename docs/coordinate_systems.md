@@ -40,7 +40,8 @@ before comparing to GPS/geographic coordinates.
 ## Coordinate Frames
 
 Open the [physical LACT 3D coordinate model](assets/lact-coordinate-system-3d.html)
-to rotate and zoom the actual 1229-facet telescope, camera plane, structure,
+to rotate and zoom the telescope from the real `mirror_1229` configuration,
+camera plane, structure,
 input NWU axes, local optical axes, sky/photon directions, and camera `u/v` axes.
 The [interactive coordinate-system explorer](assets/coordinate-system-explorer.html)
 provides the complementary switchable view of file fields and the final pyLAST
