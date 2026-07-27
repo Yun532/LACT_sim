@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from plot_orientation import basis_from_optical_config, orient_xy
+from plot_orientation import basis_from_config, orient_xy
 
 
 def containment_radii(center, points, fractions=(0.68, 0.80)):
@@ -57,7 +57,7 @@ def main():
     y_mm = df["v_m"].to_numpy(float) * 1000.0
     oriented = False
     if args.config:
-        display_x, display_y, oriented = basis_from_optical_config(args.config)
+        display_x, display_y, oriented = basis_from_config(args.config)
         x_mm, y_mm = orient_xy(x_mm, y_mm, display_x, display_y)
     w = df["weight"].to_numpy(float) * df["relative_efficiency"].to_numpy(float)
 

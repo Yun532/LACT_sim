@@ -17,6 +17,8 @@ from config_io import (
     expand_component_config,
     parse_vec3,
     rotate_local_vector,
+    source_coordinate_frame_name_from_config,
+    source_telescope_frame_from_config,
     telescope_frame_from_config,
 )
 
@@ -34,6 +36,24 @@ def display_basis_from_up_vector(up_in_plot_xy: np.ndarray) -> tuple[np.ndarray,
 def basis_from_optical_config(config_path: str | Path) -> tuple[np.ndarray, np.ndarray, bool]:
     cfg, _ = expand_component_config(Path(config_path).resolve())
     frame = telescope_frame_from_config(cfg)
+    local_u = parse_vec3(cfg.get("output.plane_u_axis"), [1.0, 0.0, 0.0])
+    local_v = parse_vec3(cfg.get("output.plane_v_axis"), [0.0, 1.0, 0.0])
+    global_u = rotate_local_vector(local_u, frame)
+    global_v = rotate_local_vector(local_v, frame)
+    global_up = np.array([0.0, 0.0, 1.0])
+    up_in_uv = np.array([np.dot(global_up, global_u), np.dot(global_up, global_v)])
+    return display_basis_from_up_vector(up_in_uv)
+
+
+def basis_from_config(config_path: str | Path) -> tuple[np.ndarray, np.ndarray, bool]:
+    """Use source adapters for external frames and layout pointing for local input."""
+    cfg, _ = expand_component_config(Path(config_path).resolve())
+    source_frame = source_coordinate_frame_name_from_config(cfg)
+    frame = (
+        telescope_frame_from_config(cfg)
+        if source_frame == "telescope_local"
+        else source_telescope_frame_from_config(cfg)
+    )
     local_u = parse_vec3(cfg.get("output.plane_u_axis"), [1.0, 0.0, 0.0])
     local_v = parse_vec3(cfg.get("output.plane_v_axis"), [0.0, 1.0, 0.0])
     global_u = rotate_local_vector(local_u, frame)

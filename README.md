@@ -66,6 +66,8 @@ python3 python/plot_photon_csv_root_pylast.py \
 
 该示例与 `main` 的 Photon CSV 用户流程一致：读取 event 1909、telescope 19 的 CORSIKA 二维 bunch 六列数据，通过正常相机链生成随机 p.e.，写入 `image_pe` LACT ROOT，再由 `pylast.io.LactEventSource` 和 `pylast.visualize` 绘图。
 
+坐标约定是：LACT_sim 白板和探测器直接输出使用物理焦平面 `(u, v)`；`LactEventSource` 读入后保存为 pyLAST 的 `camera_x=-u`、`camera_y=-v`。原版 pyLAST 相机显示以 `camera_y` 为横轴、`camera_x` 为纵轴。脚本默认使用这一 pyLAST 视图；如需直接对照 LACT_sim 焦平面，可增加 `--coordinate-view lact-uv`。
+
 从安装环境、拉取两个仓库到 CSV 字段说明和出图命令，见 [Photon CSV 从零运行指南](PHOTON_CSV_QUICKSTART.md)。
 
 输入 CSV 的最小列为：

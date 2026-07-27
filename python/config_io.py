@@ -9,7 +9,7 @@ def read_key_value_config(path):
     values = {}
     if path is None:
         return values
-    with open(path) as f:
+    with open(path, encoding="utf-8-sig") as f:
         for line in f:
             line = line.split("#", 1)[0].strip()
             if not line or "=" not in line:
@@ -532,6 +532,93 @@ def telescope_frame_from_config(cfg):
         "x_axis": x_axis,
         "y_axis": y_axis,
         "z_axis": z_axis,
+    }
+
+
+def normalize_source_coordinate_frame(frame_name):
+    """Mirror ``normalizeSourceCoordinateFrame`` in OpticalSimCommon.cpp."""
+    name = str(frame_name or "").strip().lower()
+    aliases = {
+        "": "telescope_local",
+        "local": "telescope_local",
+        "optical_local": "telescope_local",
+        "corsika_iact": "corsika_nwu_relative",
+        "corsika": "corsika_nwu_relative",
+        "simtelarray": "corsika_nwu_relative",
+        "corsika_global": "corsika_nwu_global",
+        "enu_relative": "enu_east_relative",
+        "east_north_up_relative": "enu_east_relative",
+        "east_start_relative": "enu_east_relative",
+        "enu_global": "enu_east_global",
+        "east_north_up_global": "enu_east_global",
+        "east_start_global": "enu_east_global",
+        "generic_global": "lact_generic_global",
+        "array_global": "lact_generic_global",
+        "global": "lact_generic_global",
+    }
+    name = aliases.get(name, name)
+    allowed = {
+        "telescope_local",
+        "corsika_nwu_relative",
+        "corsika_nwu_global",
+        "enu_east_relative",
+        "enu_east_global",
+        "lact_generic_global",
+    }
+    if name not in allowed:
+        raise ValueError(f"unsupported source.coordinate_frame: {frame_name}")
+    return name
+
+
+def source_coordinate_frame_name_from_config(cfg):
+    """Apply the same coordinate-frame default rules as the C++ runtime."""
+    if "source.coordinate_frame" in cfg:
+        return normalize_source_coordinate_frame(cfg["source.coordinate_frame"])
+
+    mode = str(cfg.get("source.mode", "ParallelBeam")).strip().lower()
+    if mode in {"eventio", "corsika", "corsikaeventio", "corsika_eventio", "iact"}:
+        return normalize_source_coordinate_frame(
+            cfg.get("source.eventio_coordinate_frame", "corsika_iact")
+        )
+    if mode in {"photoncsv", "photon_csv", "csv", "file"} and "source.local_telescope_frame" in cfg:
+        local = str(cfg["source.local_telescope_frame"]).strip().lower() in {
+            "1", "true", "yes", "on",
+        }
+        return "telescope_local" if local else "lact_generic_global"
+    return "telescope_local"
+
+
+def source_telescope_frame_from_config(cfg):
+    """Return the exact physical source-adapter basis used by the C++ runtime."""
+    name = source_coordinate_frame_name_from_config(cfg)
+    origin = parse_vec3(cfg.get("telescope.position_m"), [0.0, 0.0, 0.0])
+    az = math.radians(float(cfg.get("telescope.pointing_az_deg", 0.0)))
+    el = math.radians(float(cfg.get("telescope.pointing_el_deg", 90.0)))
+    sin_az, cos_az = math.sin(az), math.cos(az)
+    sin_el, cos_el = math.sin(el), math.cos(el)
+
+    if name in {"corsika_nwu_relative", "corsika_nwu_global"}:
+        axes = (
+            [-sin_el * cos_az, sin_el * sin_az, cos_el],
+            [-sin_az, -cos_az, 0.0],
+            [cos_el * cos_az, -cos_el * sin_az, sin_el],
+        )
+    elif name in {"enu_east_relative", "enu_east_global"}:
+        axes = (
+            [-sin_el * cos_az, -sin_el * sin_az, cos_el],
+            [sin_az, -cos_az, 0.0],
+            [cos_el * cos_az, cos_el * sin_az, sin_el],
+        )
+    elif name == "telescope_local":
+        axes = ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0])
+    else:
+        return telescope_frame_from_config(cfg)
+
+    return {
+        "origin": origin,
+        "x_axis": _normalize(axes[0]),
+        "y_axis": _normalize(axes[1]),
+        "z_axis": _normalize(axes[2]),
     }
 
 
