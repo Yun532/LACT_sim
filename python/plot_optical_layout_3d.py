@@ -17,6 +17,7 @@ from config_io import (
     parse_vec3,
     rotate_local_vector,
     source_direction_from_config,
+    source_telescope_frame_from_config,
     telescope_frame_from_config,
 )
 
@@ -321,6 +322,12 @@ def main():
         action="store_true",
         help="draw output-plane +u/+v image axes on the static layout",
     )
+    parser.add_argument(
+        "--coordinate-frame-mode",
+        choices=("layout", "source"),
+        default="layout",
+        help="layout uses the generic optical placement; source uses the cfg input adapter",
+    )
     parser.add_argument("--view", default="32,-58", help="elev,azim camera view")
     args = parser.parse_args()
 
@@ -331,7 +338,13 @@ def main():
         if args.elevation_deg is not None:
             cfg["telescope.pointing_el_deg"] = str(args.elevation_deg)
             cfg["mirror.series_elevation_deg"] = str(args.elevation_deg)
-    frame = telescope_frame_from_config(cfg) if cfg else None
+    frame = None
+    if cfg:
+        frame = (
+            source_telescope_frame_from_config(cfg)
+            if args.coordinate_frame_mode == "source"
+            else telescope_frame_from_config(cfg)
+        )
 
     plane_point = parse_vec3(cfg.get("output.plane_point"), [0.0, 0.0, 0.0])
     plane_normal = parse_vec3(cfg.get("output.plane_normal"), [0.0, 0.0, 1.0])

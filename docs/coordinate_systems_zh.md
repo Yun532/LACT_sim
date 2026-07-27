@@ -22,8 +22,60 @@ python python/plot_optical_layout_html.py \
   --coordinate-frame-mode source \
   --show-coordinate-axes \
   --show-camera-pixels \
-  --show-ground
+  --show-ground \
+  --trace-csv docs/assets/data/corsika-north-example-rays.csv \
+  --trace-provenance docs/assets/data/corsika-north-example-provenance.json
 ```
+
+## main 坐标审计与真实 CORSIKA 示例
+
+这次按实际调用链检查了 EventIO 读取、输入适配、镜面/遮挡、本地光追、输出平面、
+相机像素、CSV/HDF5/ROOT 字段、阵列画图和 pyLAST 边界。主数据流是：
+
+```text
+EventIO NWU photon bunch
+  -> transformBunchToTelescopeLocal()
+  -> telescope-local mirror + obstruction + output plane
+  -> hit.u/v = dot(surface - plane_point, plane_u/v)
+  -> camera_x/y = u/v
+  -> ROOT: x_m/y_m = u/v
+  -> pyLAST: pix_x=-u, pix_y=-v
+```
+
+审计中修正了三处会造成误读或画图不一致的地方：
+
+1. `run_corsika_trace` 日志原来打印的是通用光学布局 frame，容易让人误以为它就是
+   CORSIKA 输入适配器；现在直接打印真实 `source.coordinate_frame` 的本地轴在输入
+   坐标中的方向，并明确光追几何始终在 telescope-local 中。
+2. 白板 CSV 原来只保存输入位置，`dir_x/y/z` 实际是镜面反射后的方向；现在新增
+   `input_dir_x/y/z`，可以无歧义地重建“输入锚点/方向 → 镜面命中 → 输出命中”。
+3. 几个带 `--sky-up` 的 Python 图原来总使用通用布局 frame；现在统一通过
+   `config_io.py` 选择真实 source adapter，CORSIKA 图与 HDF5 相机图使用同一套 NWU
+   基底。静态坐标检查脚本也默认采用 source adapter。
+
+三维页面中的浅黄色光线不是示意线，而是当前 C++ 程序实际运行结果。可复现实例使用：
+
+```ini
+config=configs/examples/corsika_coordinate_north_example.cfg
+telescope.pointing_az_deg=0       # 指向磁北
+telescope.pointing_el_deg=70
+source.coordinate_frame=corsika_nwu_relative
+```
+
+输入文件为 `muon_E100_th0_run000001.zst`（SHA-256 和命令见
+[`corsika-north-example-provenance.json`](assets/data/corsika-north-example-provenance.json)）。
+实际 CORSIKA shower 1 的到达方位角为 `300.027133 deg`（北向东）、高度角为
+`88.282787 deg`；这是事例真值，不会覆盖望远镜的 `az=0, el=70` 指向。
+
+本次运行共保存 3385 个白板输出命中。页面从 `event_id=110, telescope_id=0` 的
+1557 个输出命中中等距选取 64 条完整光路；该流有 520 个输入 bunch、
+2474.320005 个加权输入光子、1885 个遮挡前镜面命中、328 个遮挡损失、1557 个
+最终输出命中。逐光子原始字段见
+[`corsika-north-example-rays.csv`](assets/data/corsika-north-example-rays.csv)，对应汇总见
+[`corsika-north-example-summary.csv`](assets/data/corsika-north-example-summary.csv)。
+
+这里把真实白板 `u/v` 命中叠加在真实 1616 像素几何上；白板运行没有启用相机响应，
+所以它展示的是“光学输出落在相机平面的哪里”，不是 PE、触发或电子学输出。
 
 ## 先区分五层坐标
 

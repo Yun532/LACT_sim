@@ -14,7 +14,7 @@ from matplotlib.collections import LineCollection
 from matplotlib.colors import LogNorm
 
 from plot_mirror_hit_map import mirror_display_basis, project_points_3d, projected_facet_outlines
-from plot_orientation import basis_from_optical_config, orient_xy
+from plot_orientation import basis_from_config, orient_xy
 
 
 def parse_args() -> argparse.Namespace:
@@ -126,7 +126,7 @@ def main() -> None:
         x = df["u_m"].to_numpy(dtype=float) * 1000.0
         y = df["v_m"].to_numpy(dtype=float) * 1000.0
         if args.sky_up:
-            display_x, display_y, oriented = basis_from_optical_config(args.config)
+            display_x, display_y, oriented = basis_from_config(args.config)
             output_display_basis = (display_x, display_y)
             x, y = orient_xy(x, y, output_display_basis[0], output_display_basis[1])
         xlabel = "Whiteboard display x [mm]" if oriented else "Whiteboard u [mm]"

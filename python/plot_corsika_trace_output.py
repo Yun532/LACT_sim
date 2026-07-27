@@ -18,7 +18,7 @@ import pandas as pd
 from matplotlib.collections import PatchCollection
 from matplotlib.patches import Polygon, Rectangle
 
-from plot_orientation import basis_from_optical_config, orient_points, orient_xy
+from plot_orientation import basis_from_config, orient_points, orient_xy
 
 
 def read_camera_pixels(path):
@@ -355,7 +355,7 @@ def main():
     pixels = read_camera_pixels(args.camera_csv) if is_pixel else None
     display_basis = None
     if args.config:
-        display_x, display_y, oriented = basis_from_optical_config(args.config)
+        display_x, display_y, oriented = basis_from_config(args.config)
         if oriented:
             display_basis = (display_x, display_y)
 

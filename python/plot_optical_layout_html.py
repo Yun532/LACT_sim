@@ -19,7 +19,9 @@ from config_io import (
     parse_vec3,
     point_to_global,
     rotate_local_vector,
+    source_coordinate_frame_name_from_config,
     source_direction_from_config,
+    source_telescope_frame_from_config,
     telescope_frame_from_config,
 )
 
@@ -34,39 +36,11 @@ def local_frame(normal):
 
 
 def source_coordinate_frame_from_config(cfg):
-    """Return the physical input-adapter basis used by OpticalSimCommon.cpp."""
-    raw_name = cfg.get("source.coordinate_frame", "telescope_local").strip().lower()
-    aliases = {
-        "local": "telescope_local",
-        "optical_local": "telescope_local",
-        "corsika_iact": "corsika_nwu_relative",
-        "corsika": "corsika_nwu_relative",
-        "simtelarray": "corsika_nwu_relative",
-        "corsika_global": "corsika_nwu_global",
-        "enu_relative": "enu_east_relative",
-        "east_north_up_relative": "enu_east_relative",
-        "east_start_relative": "enu_east_relative",
-        "enu_global": "enu_east_global",
-        "east_north_up_global": "enu_east_global",
-        "east_start_global": "enu_east_global",
-        "generic_global": "lact_generic_global",
-        "array_global": "lact_generic_global",
-        "global": "lact_generic_global",
-    }
-    name = aliases.get(raw_name, raw_name)
-    origin = parse_vec3(cfg.get("telescope.position_m"), [0.0, 0.0, 0.0])
-    az = math.radians(float(cfg.get("telescope.pointing_az_deg", 0.0)))
-    el = math.radians(float(cfg.get("telescope.pointing_el_deg", 90.0)))
-    sin_az, cos_az = math.sin(az), math.cos(az)
-    sin_el, cos_el = math.sin(el), math.cos(el)
+    """Return the shared C++-matching basis plus display labels."""
+    name = source_coordinate_frame_name_from_config(cfg)
+    frame = source_telescope_frame_from_config(cfg)
 
     if name in {"corsika_nwu_relative", "corsika_nwu_global"}:
-        frame = {
-            "origin": origin,
-            "x_axis": np.array([-sin_el * cos_az, sin_el * sin_az, cos_el]),
-            "y_axis": np.array([-sin_az, -cos_az, 0.0]),
-            "z_axis": np.array([cos_el * cos_az, -cos_el * sin_az, sin_el]),
-        }
         input_axes = [
             (np.array([1.0, 0.0, 0.0]), "input +x / magnetic North", "#ff5c5c"),
             (np.array([0.0, 1.0, 0.0]), "input +y / West", "#54d67a"),
@@ -74,12 +48,6 @@ def source_coordinate_frame_from_config(cfg):
         ]
         description = "CORSIKA NWU: +x magnetic North, +y West, +z Up"
     elif name in {"enu_east_relative", "enu_east_global"}:
-        frame = {
-            "origin": origin,
-            "x_axis": np.array([-sin_el * cos_az, -sin_el * sin_az, cos_el]),
-            "y_axis": np.array([sin_az, -cos_az, 0.0]),
-            "z_axis": np.array([cos_el * cos_az, cos_el * sin_az, sin_el]),
-        }
         input_axes = [
             (np.array([1.0, 0.0, 0.0]), "input +x / East", "#ff5c5c"),
             (np.array([0.0, 1.0, 0.0]), "input +y / North", "#54d67a"),
@@ -87,12 +55,6 @@ def source_coordinate_frame_from_config(cfg):
         ]
         description = "ENU: +x East, +y North, +z Up"
     elif name == "telescope_local":
-        frame = {
-            "origin": origin,
-            "x_axis": np.array([1.0, 0.0, 0.0]),
-            "y_axis": np.array([0.0, 1.0, 0.0]),
-            "z_axis": np.array([0.0, 0.0, 1.0]),
-        }
         input_axes = [
             (frame["x_axis"], "input +x / telescope local x", "#ff5c5c"),
             (frame["y_axis"], "input +y / telescope local y", "#54d67a"),
@@ -100,7 +62,6 @@ def source_coordinate_frame_from_config(cfg):
         ]
         description = "Input is already in telescope-local optical coordinates"
     elif name == "lact_generic_global":
-        frame = telescope_frame_from_config(cfg)
         input_axes = [
             (np.array([1.0, 0.0, 0.0]), "input +x / generic global X", "#ff5c5c"),
             (np.array([0.0, 1.0, 0.0]), "input +y / generic global Y", "#54d67a"),
@@ -108,10 +69,7 @@ def source_coordinate_frame_from_config(cfg):
         ]
         description = "Legacy LACT generic global XY"
     else:
-        raise ValueError(f"unsupported source.coordinate_frame: {raw_name}")
-
-    for key in ("x_axis", "y_axis", "z_axis"):
-        frame[key] = frame[key] / np.linalg.norm(frame[key])
+        raise ValueError(f"unsupported source.coordinate_frame: {name}")
     return frame, name, input_axes, description
 
 
@@ -263,6 +221,86 @@ def load_input_local_photon_lines(path, frame, stride, length_m):
     return lines
 
 
+def load_program_trace_lines(path, frame, stride, max_rays, incoming_length_m):
+    """Load real ray input/mirror/output rows written by the C++ tracers."""
+    aliases = {
+        "input_x": ("input_x_m", "input_local_x_m"),
+        "input_y": ("input_y_m", "input_local_y_m"),
+        "input_z": ("input_z_m", "input_local_z_m"),
+        "input_dx": ("input_dir_x", "input_local_dir_x"),
+        "input_dy": ("input_dir_y", "input_local_dir_y"),
+        "input_dz": ("input_dir_z", "input_local_dir_z"),
+        "mirror_x": ("mirror_x_m", "mirror_x"),
+        "mirror_y": ("mirror_y_m", "mirror_y"),
+        "mirror_z": ("mirror_z_m", "mirror_z"),
+        "surface_x": ("surface_x_m", "surface_x"),
+        "surface_y": ("surface_y_m", "surface_y"),
+        "surface_z": ("surface_z_m", "surface_z"),
+    }
+    trace_lines = []
+    u_values = []
+    v_values = []
+    event_ids = set()
+    telescope_ids = set()
+    with Path(path).open(newline="") as handle:
+        rows = csv.DictReader(handle)
+        available = set(rows.fieldnames or [])
+        columns = {}
+        for logical, choices in aliases.items():
+            columns[logical] = next((name for name in choices if name in available), None)
+        missing = [logical for logical, name in columns.items() if name is None]
+        if missing:
+            raise ValueError("program trace CSV is missing fields for: " + ", ".join(missing))
+
+        for index, row in enumerate(rows):
+            if index % stride:
+                continue
+            if len(trace_lines) >= max_rays:
+                break
+            input_pos = np.array([float(row[columns[f"input_{axis}"]]) for axis in "xyz"])
+            input_dir = np.array([float(row[columns[f"input_d{axis}"]]) for axis in "xyz"])
+            mirror = np.array([float(row[columns[f"mirror_{axis}"]]) for axis in "xyz"])
+            surface = np.array([float(row[columns[f"surface_{axis}"]]) for axis in "xyz"])
+            norm = float(np.linalg.norm(input_dir))
+            if not np.isfinite(norm) or norm == 0.0:
+                continue
+            upstream = mirror - incoming_length_m * input_dir / norm
+            points = [upstream, input_pos, mirror, surface]
+            world_points = [
+                list(point_to_global(point, frame).astype(float)) for point in points
+            ]
+            event_id = row.get("event_id", "?")
+            telescope_id = row.get("telescope_id", "?")
+            photon_index = row.get("photon_index", "?")
+            event_ids.add(event_id)
+            telescope_ids.add(telescope_id)
+            if row.get("u_m") not in (None, ""):
+                u_values.append(float(row["u_m"]))
+            if row.get("v_m") not in (None, ""):
+                v_values.append(float(row["v_m"]))
+            trace_lines.append({
+                "points": world_points,
+                "color": "#fff2a8",
+                "role": "real_program_trace",
+                "name": (
+                    f"real trace event={event_id}, telescope={telescope_id}, "
+                    f"photon={photon_index}"
+                ),
+                "width": 1.6,
+                "alpha": 0.62,
+                "arrow": True,
+            })
+
+    metadata = {
+        "count": len(trace_lines),
+        "events": sorted(event_ids),
+        "telescopes": sorted(telescope_ids),
+        "mean_u_m": float(np.mean(u_values)) if u_values else None,
+        "mean_v_m": float(np.mean(v_values)) if v_values else None,
+    }
+    return trace_lines, metadata
+
+
 def load_primitives(path: Path):
     primitives = []
     with path.open(newline="") as handle:
@@ -320,6 +358,11 @@ def main():
         default=3.0,
         help="world-space length of each overlaid input-photon direction segment",
     )
+    parser.add_argument("--trace-csv", default="", help="real C++ trace CSV with input, mirror, and output points")
+    parser.add_argument("--trace-provenance", default="", help="JSON provenance for the real trace")
+    parser.add_argument("--trace-stride", type=int, default=1, help="draw one real ray every N trace rows")
+    parser.add_argument("--trace-max-rays", type=int, default=64, help="maximum real rays embedded in the page")
+    parser.add_argument("--trace-incoming-length-m", type=float, default=7.0, help="visible upstream extension for each real ray")
     parser.add_argument(
         "--show-coordinate-axes",
         action="store_true",
@@ -354,6 +397,12 @@ def main():
         raise SystemExit("--input-photon-stride must be positive")
     if args.input_photon_length_m <= 0.0:
         raise SystemExit("--input-photon-length-m must be positive")
+    if args.trace_stride <= 0:
+        raise SystemExit("--trace-stride must be positive")
+    if args.trace_max_rays <= 0:
+        raise SystemExit("--trace-max-rays must be positive")
+    if args.trace_incoming_length_m <= 0.0:
+        raise SystemExit("--trace-incoming-length-m must be positive")
     highlighted = {name.strip() for name in args.highlight_primitives.split(",") if name.strip()}
 
     cfg_path = Path(args.config).resolve()
@@ -371,6 +420,19 @@ def main():
             (np.array([0.0, 0.0, 1.0]), "global +Z / Up", "#4aa3ff"),
         ]
         source_frame_description = "Generic optical-layout placement"
+    trace_lines = []
+    trace_metadata = {"count": 0, "events": [], "telescopes": []}
+    trace_provenance = {}
+    if args.trace_csv:
+        trace_lines, trace_metadata = load_program_trace_lines(
+            args.trace_csv,
+            frame,
+            args.trace_stride,
+            args.trace_max_rays,
+            args.trace_incoming_length_m,
+        )
+    if args.trace_provenance:
+        trace_provenance = json.loads(Path(args.trace_provenance).read_text(encoding="utf-8"))
     facets = apply_telescope_frame_to_facets(load_facets_from_config(cfg_path, cfg), frame)
 
     local_plane_point = parse_vec3(cfg.get("output.plane_point"), [0, 0, -8])
@@ -522,34 +584,35 @@ def main():
             "text": "SKY / telescope pointing",
             "color": "#33d6ff",
         })
-        photon_start = mirror_origin + 9.5 * boresight
-        photon_end = mirror_origin + 0.8 * boresight
-        lines.append({
-            "points": [list(photon_start.astype(float)), list(photon_end.astype(float))],
-            "color": "#ffffff",
-            "role": "incoming_photon_direction",
-            "name": "on-axis incoming photon: -local z",
-            "width": 4,
-            "arrow": True,
-        })
-        labels.append({
-            "point": list((photon_start + 0.25 * (photon_end - photon_start)).astype(float)),
-            "text": "incoming photon travels along -local z",
-            "color": "#ffffff",
-        })
-        lines.append({
-            "points": [list(mirror_origin.astype(float)), list(plane_point.astype(float))],
-            "color": "#ff74d4",
-            "role": "reflected_ray_direction",
-            "name": "reflected ray toward camera",
-            "width": 3,
-            "arrow": True,
-        })
-        labels.append({
-            "point": list((mirror_origin + 0.58 * (plane_point - mirror_origin)).astype(float)),
-            "text": "ideal on-axis reference ray -> camera",
-            "color": "#ff74d4",
-        })
+        if not trace_lines:
+            photon_start = mirror_origin + 9.5 * boresight
+            photon_end = mirror_origin + 0.8 * boresight
+            lines.append({
+                "points": [list(photon_start.astype(float)), list(photon_end.astype(float))],
+                "color": "#ffffff",
+                "role": "incoming_photon_direction",
+                "name": "on-axis incoming photon: -local z",
+                "width": 4,
+                "arrow": True,
+            })
+            labels.append({
+                "point": list((photon_start + 0.25 * (photon_end - photon_start)).astype(float)),
+                "text": "incoming photon travels along -local z",
+                "color": "#ffffff",
+            })
+            lines.append({
+                "points": [list(mirror_origin.astype(float)), list(plane_point.astype(float))],
+                "color": "#ff74d4",
+                "role": "reflected_ray_direction",
+                "name": "reflected ray toward camera",
+                "width": 3,
+                "arrow": True,
+            })
+            labels.append({
+                "point": list((mirror_origin + 0.58 * (plane_point - mirror_origin)).astype(float)),
+                "text": "ideal on-axis reference ray -> camera",
+                "color": "#ff74d4",
+            })
     for p in load_primitives(resolve_primitives_path(cfg)):
         role = p["role"]
         is_highlighted = p["name"] in highlighted
@@ -584,6 +647,14 @@ def main():
                 lines.append({"points": transform_line(edge, frame), "color": color if is_highlighted else "#00b9c7", "role": role, "name": p["name"], "width": 3 if is_highlighted else 2})
             if is_highlighted:
                 labels.append({"point": list(point_to_global(center, frame).astype(float)), "text": p["name"], "color": color})
+
+    if trace_lines:
+        lines.extend(trace_lines)
+        labels.append({
+            "point": trace_lines[0]["points"][-1],
+            "text": "real C++ trace: input -> mirror -> output u/v",
+            "color": "#fff2a8",
+        })
 
     if args.show_ground:
         scene_points = (
@@ -713,6 +784,10 @@ def main():
         f" · Purple: {input_photon_count} input-photon directions"
         if input_photon_count else ""
     )
+    real_trace_legend = (
+        f" · Pale yellow: {trace_metadata['count']} real C++ traced rays"
+        if trace_metadata["count"] else ""
+    )
     pointing_az = float(cfg.get("telescope.pointing_az_deg", 0.0))
     pointing_el = float(cfg.get("telescope.pointing_el_deg", 90.0))
     coordinate_summary = (
@@ -728,6 +803,25 @@ def main():
         "uses horizontal=-v and vertical=-u.<br>"
         "<b>Ground/base:</b> schematic orientation references, not engineering geometry."
     )
+    if trace_metadata["count"]:
+        event_text = ",".join(trace_metadata["events"])
+        telescope_text = ",".join(trace_metadata["telescopes"])
+        coordinate_summary += (
+            f"<br><b>Real example:</b> {trace_metadata['count']} rows from "
+            f"<code>run_corsika_trace</code>, event={escape(event_text)}, "
+            f"telescope={escape(telescope_text)}; every polyline uses the saved local "
+            "input direction/anchor, mirror hit, and output-plane hit."
+        )
+        corsika_event = trace_provenance.get("corsika_event", {})
+        if corsika_event:
+            coordinate_summary += (
+                "<br><b>CORSIKA shower:</b> "
+                f"shower={corsika_event.get('shower_event_id')}, "
+                f"energy={corsika_event.get('energy_gev'):g} GeV, arrival az="
+                f"{corsika_event.get('arrival_azimuth_north_to_east_deg'):g} deg N→E, "
+                f"altitude={corsika_event.get('altitude_deg'):g} deg. "
+                "This is event truth; it does not override the telescope's north pointing."
+            )
     html = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>LACT 3D Coordinate System</title>
 <style>
@@ -738,7 +832,7 @@ html,body{{margin:0;height:100%;background:#101216;color:#e8edf2;font-family:Seg
 #bar code{{color:#ffd84d}}
 canvas{{width:100vw;height:100vh;display:block;cursor:grab}}canvas:active{{cursor:grabbing}}
 </style>
-</head><body><canvas id="view"></canvas><div id="bar"><div class="title">LACT physical 3D coordinate model</div>{coordinate_summary}<div class="controls">Drag to rotate · Wheel to zoom · Blue facets: mirrors · Yellow cells: real camera pixels · Red plane: camera/output · Green grid: schematic ground{input_photon_legend}</div></div>
+</head><body><canvas id="view"></canvas><div id="bar"><div class="title">LACT physical 3D coordinate model</div>{coordinate_summary}<div class="controls">Drag to rotate · Wheel to zoom · Blue facets: mirrors · Yellow cells: real camera pixels · Red plane: camera/output · Green grid: schematic ground{input_photon_legend}{real_trace_legend}</div></div>
 <script>
 const data = {json.dumps(data)};
 const canvas=document.getElementById('view'),ctx=canvas.getContext('2d');let rx=-0.7,ry=0.8,zoom=1,drag=false,lx=0,ly=0;

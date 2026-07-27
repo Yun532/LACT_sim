@@ -818,6 +818,7 @@ void writeCorsikaWhiteboardHeader(std::ofstream& ofs, bool include_emitter_info)
         << "surface_x_m,surface_y_m,surface_z_m,"
         << "mirror_x_m,mirror_y_m,mirror_z_m,"
         << "input_x_m,input_y_m,input_z_m,"
+        << "input_dir_x,input_dir_y,input_dir_z,"
         << "u_m,v_m,dir_x,dir_y,dir_z,"
         << "time_ns,wavelength_nm,weight,relative_efficiency,"
         << "signal_weight";
@@ -848,6 +849,9 @@ void writeCorsikaWhiteboardHit(std::ofstream& ofs,
         << bunch.photon.pos.x << ","
         << bunch.photon.pos.y << ","
         << bunch.photon.pos.z << ","
+        << bunch.photon.dir.x << ","
+        << bunch.photon.dir.y << ","
+        << bunch.photon.dir.z << ","
         << hit.u_m << ","
         << hit.v_m << ","
         << hit.out_dir.x << ","
@@ -2779,7 +2783,7 @@ void printEventSummary(const std::map<SummaryKey, TraceSummary>& summaries,
 void printCorsikaOpticalConfiguration(
     const std::map<std::string, std::string>& cfg,
     const TelescopeConfig& telescope_cfg,
-    const TelescopeFrame& telescope_frame,
+    const TelescopeFrame& source_adapter_frame,
     const MirrorLayout& mirrors,
     const SyntheticPhotonConfig& source_cfg,
     const SourceRuntimeConfig& source_runtime_cfg,
@@ -2816,10 +2820,11 @@ void printCorsikaOpticalConfiguration(
     printField("pointing_el_deg", doubleToString(telescope_cfg.pointing_el_deg));
     printField("focal_length_m", doubleToString(telescope_cfg.focal_length_m));
     printField("coordinate_system", telescope_cfg.coordinate_system);
-    printField("coordinate_transform", "local telescope frame -> global frame");
-    printField("frame_x_axis", vec3ToString(telescope_frame.x_axis));
-    printField("frame_y_axis", vec3ToString(telescope_frame.y_axis));
-    printField("frame_z_axis", vec3ToString(telescope_frame.z_axis));
+    printField("trace_geometry_frame", "telescope-local; mirror/output geometry is not globally rotated");
+    printField("source_adapter_transform", "input frame -> telescope-local by projection onto the axes below");
+    printField("local_x_in_input_frame", vec3ToString(source_adapter_frame.x_axis));
+    printField("local_y_in_input_frame", vec3ToString(source_adapter_frame.y_axis));
+    printField("local_z_boresight_in_input_frame", vec3ToString(source_adapter_frame.z_axis));
 
     printSection("Mirror");
     printField("mode", mirror_mode);
@@ -3353,7 +3358,18 @@ int main(int argc, char** argv) {
         applyStructuralDeformation(nominal_facets, error_cfg, telescope_cfg);
         applyFacetEfficiencyScales(nominal_facets, cfg);
         OutputPlane plane = buildOutputPlane(cfg);
-        TelescopeFrame telescope_frame = buildTelescopeFrame(telescope_cfg);
+        TelescopeFrame telescope_frame;
+        const std::string trace_frame_name = normalizeSourceCoordinateFrame(
+            source_runtime_cfg.coordinate_frame);
+        if (trace_frame_name == "corsika_nwu_relative" ||
+            trace_frame_name == "corsika_nwu_global") {
+            telescope_frame = buildCorsikaNwuTelescopeFrame(telescope_cfg);
+        } else if (trace_frame_name == "enu_east_relative" ||
+                   trace_frame_name == "enu_east_global") {
+            telescope_frame = buildEnuEastTelescopeFrame(telescope_cfg);
+        } else if (trace_frame_name == "lact_generic_global") {
+            telescope_frame = buildTelescopeFrame(telescope_cfg);
+        }
         CameraConfig camera_cfg = buildCameraConfig(cfg);
         SipmConfig sipm_cfg = buildSipmConfig(cfg);
         ElectronicsConfig electronics_cfg = buildElectronicsConfig(cfg);

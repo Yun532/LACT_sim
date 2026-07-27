@@ -1,0 +1,42 @@
+{
+  "description": "Deterministic subset of actual run_corsika_trace whiteboard output",
+  "run_command": "build/run_corsika_trace configs/examples/corsika_coordinate_north_example.cfg muon_E100_th0_run000001.zst",
+  "source_eventio": {
+    "file": "muon_E100_th0_run000001.zst",
+    "size_bytes": 58064978,
+    "sha256": "20250674adb895df40382f212fa99378dc22fd4ea3f3352bac2e9c868af2962b"
+  },
+  "program_inputs": {
+    "config": "configs/examples/corsika_coordinate_north_example.cfg",
+    "config_sha256": "222f7998d78498e79c45d8e82a12cfbbc643ca867562cb824957c284f23eee1d",
+    "cpp_source": "apps/run_corsika_trace.cpp",
+    "cpp_source_sha256": "6fd29a9a62b2645f0c942f736b6c3ecf378f4ddb74ec947139256e53689f8657"
+  },
+  "full_trace": {
+    "file": "corsika_north_whiteboard_hits.csv",
+    "rows": 3385,
+    "sha256": "f3df5f5c3c399788024107f2977c6112dc51ba493083cc20cc627ded2273b0bb"
+  },
+  "selection": {
+    "event_id": "110",
+    "telescope_id": "0",
+    "available_rows": 1557,
+    "sample_rows": 64,
+    "method": "uniform indices across the event/telescope group with most saved output hits"
+  },
+  "sample": {
+    "file": "corsika-north-example-rays.csv",
+    "sha256": "f11ab47153a6f6bf0ca4f02af41e74d80a34b59bacb0fed082cde031620b9c39"
+  },
+  "corsika_event": {
+    "shower_event_id": 1,
+    "energy_gev": 6.136686,
+    "arrival_azimuth_north_to_east_deg": 300.027133,
+    "altitude_deg": 88.282787
+  },
+  "summary": {
+    "file": "corsika-north-example-summary.csv",
+    "source_sha256": "4c0e0604c301b825918ae9623e4ab2fcd549629aa4922355aabdb16e91d292a2",
+    "sample_sha256": "11deb736721cfbd30a83188aa0a8146f9a302af1cbb2173cd6c099c1764965c9"
+  }
+}

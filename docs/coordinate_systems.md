@@ -57,8 +57,35 @@ python python/plot_optical_layout_html.py \
   --coordinate-frame-mode source \
   --show-coordinate-axes \
   --show-camera-pixels \
-  --show-ground
+  --show-ground \
+  --trace-csv docs/assets/data/corsika-north-example-rays.csv \
+  --trace-provenance docs/assets/data/corsika-north-example-provenance.json
 ```
+
+### Audited real CORSIKA example
+
+The pale-yellow paths in the 3D page are actual `run_corsika_trace` output, not
+schematic rays. The reproducible configuration is
+`configs/examples/corsika_coordinate_north_example.cfg`: telescope azimuth 0
+(magnetic North), elevation 70 deg, and `corsika_nwu_relative` input. CORSIKA
+shower 1 itself arrives at azimuth 300.027133 deg North-to-East and altitude
+88.282787 deg; event truth does not override the configured telescope pointing.
+
+The run saved 3385 output-plane hits. The embedded sample selects 64 paths
+uniformly from the 1557 saved hits for event 110, telescope 0. Every row retains
+the real local input anchor/direction, mirror hit, reflected direction, output
+hit, and `u/v`. See
+[`corsika-north-example-rays.csv`](assets/data/corsika-north-example-rays.csv),
+[`corsika-north-example-summary.csv`](assets/data/corsika-north-example-summary.csv),
+and the hashes/command in
+[`corsika-north-example-provenance.json`](assets/data/corsika-north-example-provenance.json).
+
+The main coordinate audit also corrected three inconsistencies: the CORSIKA
+runner now logs the actual source-adapter basis instead of a generic layout
+basis; whiteboard CSV adds unambiguous `input_dir_x/y/z` fields (the existing
+`dir_x/y/z` fields are reflected output direction); and sky-up Python plots now
+select the source adapter through one shared implementation. The static
+coordinate-system wrapper also uses the source adapter by default.
 
 ### 1. CORSIKA / EventIO Array Frame
 

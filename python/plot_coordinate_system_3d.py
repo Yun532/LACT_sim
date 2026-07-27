@@ -76,6 +76,8 @@ def main() -> None:
         "--normal-scale",
         str(args.normal_scale),
         "--show-camera-axes",
+        "--coordinate-frame-mode",
+        "source",
     ]
     if args.elevation_deg is not None:
         plot_args.extend(["--elevation-deg", str(args.elevation_deg)])
