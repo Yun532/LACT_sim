@@ -9,7 +9,7 @@ def read_key_value_config(path):
     values = {}
     if path is None:
         return values
-    with open(path) as f:
+    with open(path, encoding="utf-8-sig") as f:
         for line in f:
             line = line.split("#", 1)[0].strip()
             if not line or "=" not in line:

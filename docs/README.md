@@ -11,6 +11,7 @@
 
 ## 输入与坐标
 
+- [真实 LACT 三维坐标模型：镜面、相机、天空、输入轴与 u/v](assets/lact-coordinate-system-3d.html)
 - [交互式坐标系总图：输入 x/y、天空指向、相机 u/v 与 pyLAST](assets/coordinate-system-explorer.html)
 - [坐标系中文说明](coordinate_systems_zh.md)
 - [Coordinate systems reference](coordinate_systems.md)

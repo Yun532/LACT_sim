@@ -4,9 +4,23 @@
 pyLAST 相机图分别使用什么坐标。英文参考版及更多输出字段说明见
 [coordinate_systems.md](coordinate_systems.md)。
 
-建议先打开[交互式坐标系总图](assets/coordinate-system-explorer.html)。它可以切换
+建议先打开[真实 LACT 三维坐标模型](assets/lact-coordinate-system-3d.html)：拖动可旋转、
+滚轮可缩放；它使用正式 1229 镜面、相机面和结构配置，同时标出输入 NWU、望远镜
+局部 `x/y/z`、天空/入射光方向、相机 `u/v` 及 pyLAST 符号关系。
+
+[交互式坐标系总图](assets/coordinate-system-explorer.html)则适合切换
 `source.coordinate_frame`、望远镜方位/高度和天空偏移，同时对照输入 `x/y`、
 局部光学坐标、相机 `u/v`、ROOT/HDF5 字段和 pyLAST 的最终画图轴。
+
+三维 HTML 由仓库中的 Python 代码按实际 cfg 生成：
+
+```bash
+python python/plot_optical_layout_html.py \
+  --config configs/official_tests/corsika_full_response_camera.cfg \
+  --output docs/assets/lact-coordinate-system-3d.html \
+  --coordinate-frame-mode source \
+  --show-coordinate-axes
+```
 
 ## 先区分五层坐标
 

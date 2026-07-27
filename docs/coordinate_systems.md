@@ -39,9 +39,22 @@ before comparing to GPS/geographic coordinates.
 
 ## Coordinate Frames
 
-Open the [interactive coordinate-system explorer](assets/coordinate-system-explorer.html)
-for a linked view of input axes, sky pointing, telescope-local optics, camera
-`u/v`, file fields, and the final pyLAST display orientation.
+Open the [physical LACT 3D coordinate model](assets/lact-coordinate-system-3d.html)
+to rotate and zoom the actual 1229-facet telescope, camera plane, structure,
+input NWU axes, local optical axes, sky/photon directions, and camera `u/v` axes.
+The [interactive coordinate-system explorer](assets/coordinate-system-explorer.html)
+provides the complementary switchable view of file fields and the final pyLAST
+display orientation.
+
+The 3D HTML is generated from the real configuration by repository Python code:
+
+```bash
+python python/plot_optical_layout_html.py \
+  --config configs/official_tests/corsika_full_response_camera.cfg \
+  --output docs/assets/lact-coordinate-system-3d.html \
+  --coordinate-frame-mode source \
+  --show-coordinate-axes
+```
 
 ### 1. CORSIKA / EventIO Array Frame
 
