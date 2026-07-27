@@ -1,6 +1,6 @@
 # LACT_sim 文档目录
 
-这里收录项目的长期使用说明、格式定义和设计文档。建议从用户手册开始；带日期的阶段性审计、计划和验收记录统一放在 `archive/`，不再堆放在本目录顶层。
+这里收录项目的长期使用说明、格式定义和设计文档。建议从用户手册开始；带日期的实施和验收记录统一放在 `archive/`，不再堆放在本目录顶层。
 
 ## 快速开始
 
@@ -31,7 +31,6 @@
 ## 输出与 pylast
 
 - [HDF5 输出格式](hdf5_output_format.md)
-- [LACT Event ROOT 输出设计](lact_event_root_output_design_zh.md)
 - [pylast event 数据层级](pylast_event_data_levels_zh.md)
 - [LACT 到 pylast 的事件输出设计](pylast_lact_event_output_design_zh.md)
 - [服务器 ROOT 输出与画图检查](server_root_output_check_zh.md)
@@ -43,7 +42,6 @@
 
 ## 历史记录
 
-- [2026-05 归档](archive/2026-05/)
 - [2026-07 归档](archive/2026-07/)
 
-归档用于保存阶段性的审计、实施方案和验收结论。运行生成的 HDF5、ROOT、JSON、图片和日志不属于文档，不应提交到仓库；项目根目录的 `results/` 已由 `.gitignore` 忽略。
+归档用于保存已经落地的实施记录和验收结论。运行生成的 HDF5、ROOT、JSON、图片和日志不属于文档，不应提交到仓库；项目根目录的 `results/` 已由 `.gitignore` 忽略。
