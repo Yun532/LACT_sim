@@ -27,13 +27,23 @@ EventIO NWU photon bunch
 |---|---|---|---|
 | CORSIKA / EventIO 原始输入 | North | West | Up；NWU |
 | 地图显示 East/North | East = `-West` | North = `x` | 只用于地图显示 |
-| 望远镜本地光学 | 水平横向 `local x` | 天空向上 `local y` | `local +z` 为光轴，指向天空 |
+| 望远镜本地光学 | 水平横向 `local x`，朝方位角增加方向；`A=0°` 时为 East | 天空向上 `local y` | `local +z` 为光轴，指向天空 |
 | 镜片与遮挡 CSV | local x | local y | local z；直接进入本地光学几何 |
 | 输出面 / LACT 相机 | `u = local x` | `v = local y` | 当前输出面约为 local `z=-8 m` |
 | pyLAST `LactEventSource` | `pix_x=-v` | `pix_y=+u` | 与最新版 `main` 一致 |
 | pyLAST 当前画布 | 横轴 `pix_y=+u` | 纵轴 `pix_x=-v` | `plot_camera_image()` 的参数顺序 |
 
-`buildTelescopeFrame()` 用于通用全局显示；`buildCorsikaNwuTelescopeFrame()` 用于 NWU 输入适配。两者的全局轴名称不同，但进入镜片、遮挡、输出面和相机的规范光学本地语义必须一致：`+x` 为横向、`+y` 为天空向上、`+z` 为光轴。网页不得再用旧的“CORSIKA local x=仰角、local y=方位”基底展开望远镜结构。
+`buildTelescopeFrame()` 用于通用全局显示；`buildCorsikaNwuTelescopeFrame()` 用于 NWU 输入适配。两者的全局轴名称不同，但进入镜片、遮挡、输出面和相机的规范光学本地语义必须一致：`+x/+u` 朝方位角增加方向，`+y/+v` 为天空向上，`+z` 为光轴。网页不得再用旧的“CORSIKA local x=West”基底展开望远镜结构。
+
+CORSIKA 方位角从 North 向 East 增加。令 `A=azimuth`、`E=elevation`，修正后的程序基底是：
+
+```text
+e_x = (-sin(A),        -cos(A),        0     )   # local +x / +u
+e_y = (-sin(E) cos(A),  sin(E) sin(A), cos(E))   # local +y / +v
+e_z = ( cos(E) cos(A), -cos(E) sin(A), sin(E))   # 光轴
+```
+
+NWU 的物理轴顺序 `North-West-Up` 是左手排列，所以这套物理右手光学基在 NWU 数值分量中满足 `e_x × e_y = -e_z`。不能为了让数值叉积变成 `+e_z` 而翻转 `e_x`；旧实现正是因此让同一个向东偏移的光源在通用入口与 CORSIKA 入口产生相反的相机 `u`。程序回归测试现已直接比较两种入口的“向东偏 1°”结果。
 
 ## theta / phi 的两种定义
 
@@ -76,7 +86,7 @@ delta_center_local = deformed_center_local - ideal_center_local
 
 第 3 页可在“指向偏转”和“中心位移”之间切换，默认显示指向偏转。指向模式的颜色及橙色/蓝色曲线分别表示每片镜子的法向夹角、54 片中的最大夹角和夹角 RMS，单位为 `mdeg`；箭头以实际形变法向为 1×，100×/500× 只放大相对理想法向的角差。位置模式的颜色及曲线表示中心位移模长，箭头表示原始 local `dx/dy/dz`。两种模式都让 0°–90° 的全部镜片共用从零到各自全局最大值的固定物理标尺。选择器只改变诊断显示，光线追迹始终同时采用形变 CSV 中真实的 center 和 normal。
 
-当前网页结果来自 `main@da51c09e9f93df44a3dc956a6a40eb028efb25f5` 更新后的仰角序列，并已重新运行 0°–90° 共 10 组平行光。相对上一版，第 3 页 output-plane 质心的 `v` 方向发生明显改变：例如 70° 从 `-2.089 mm` 变为 `+2.297 mm`，90° 从 `-3.061 mm` 变为 `+3.272 mm`。这些是新程序的原始 `u/v` 结果，不是网页坐标翻转；完整逐角度差异见审计笔记的 7.1 节。
+第 2、3 页的平行光与第 4 页 event 1909 都已在 `main@48ea631` 加坐标修复 `4fb44f8` 的同一份源码上重新运行；event 1909 重新读取了原始 4 GB EventIO 文件。各类数据的来源提交、二进制、输入和结果哈希均在网页数据与审计笔记中记录，不把旧二进制结果冒充为新运行。
 
 ## 生成与验证
 

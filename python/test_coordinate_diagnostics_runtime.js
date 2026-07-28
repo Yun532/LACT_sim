@@ -271,9 +271,12 @@ for (let facet = 0; facet < 54; ++facet) {
     const a = parallelFacets[facet].points[vertex].map((value, axis) =>
       value - parallelMirrorVertex[axis]
     );
-    const b = corsikaFacets[facet].points[vertex].map((value, axis) =>
+    const bNwu = corsikaFacets[facet].points[vertex].map((value, axis) =>
       value - corsikaOrigin[axis]
     );
+    // Compare physical vectors, not raw component arrays: generic is North-East-Up,
+    // while the CORSIKA page preserves North-West-Up, so East = -West.
+    const b = [bNwu[0], -bNwu[1], bNwu[2]];
     maxParallelCorsikaStructureError = Math.max(
       maxParallelCorsikaStructureError,
       Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
@@ -409,11 +412,7 @@ const corsikaDisplayElements = run("?page=corsika&case=event1909");
 const corsikaDisplay = corsikaDisplayElements.sandbox.displayBasis();
 const corsikaProgram = corsikaDisplayElements.sandbox.corsikaBasis({az_deg: 220, el_deg: -22});
 const corsikaDisplayError = maxBasisError(
-  {
-    x: corsikaDisplay.right.map(value => -value),
-    y: corsikaDisplay.up,
-    z: corsikaDisplay.forward,
-  },
+  {x: corsikaDisplay.right, y: corsikaDisplay.up, z: corsikaDisplay.forward},
   corsikaProgram
 );
 if (genericDisplayError > 1e-12 || corsikaDisplayError > 1e-12) {
@@ -431,7 +430,7 @@ const corsikaNorthFrame = corsikaDisplayElements.sandbox.corsikaBasis({az_deg: 0
 const sin70 = Math.sin(70 * Math.PI / 180);
 const cos70 = Math.cos(70 * Math.PI / 180);
 const expectedCorsikaNorthFrame = {
-  x: [0, 1, 0],
+  x: [0, -1, 0],
   y: [-sin70, 0, cos70],
   z: [cos70, 0, sin70],
 };
@@ -440,6 +439,24 @@ if (corsikaNorthFrameError > 1e-12) {
   throw new Error(`CORSIKA HTML basis differs from latest C++ formula: ${corsikaNorthFrameError}`);
 }
 console.log("runtime OK CORSIKA HTML basis matches latest C++ numeric frame", corsikaNorthFrameError);
+
+// The same physical source one degree East of a North-pointing telescope must
+// enter both source adapters with the same telescope-local u/v signs.
+const toLocal = (direction, basis) => [basis.x, basis.y, basis.z].map(axis =>
+  direction.reduce((sum, value, index) => sum + value * axis[index], 0)
+);
+const el70 = 70 * Math.PI / 180;
+const az1 = Math.PI / 180;
+const genericEastSource = [Math.cos(el70) * Math.cos(az1), Math.cos(el70) * Math.sin(az1), Math.sin(el70)];
+const corsikaEastSource = [genericEastSource[0], -genericEastSource[1], genericEastSource[2]];
+const genericNorthFrame = genericDisplayElements.sandbox.genericBasis({az_deg: 0, el_deg: 70});
+const genericEastLocal = toLocal(genericEastSource.map(value => -value), genericNorthFrame);
+const corsikaEastLocal = toLocal(corsikaEastSource.map(value => -value), corsikaNorthFrame);
+const horizontalEntryError = Math.max(...genericEastLocal.map((value, index) => Math.abs(value - corsikaEastLocal[index])));
+if (horizontalEntryError > 1e-12 || genericEastLocal[0] >= 0) {
+  throw new Error(`generic/CORSIKA East-offset local u mismatch: generic=${genericEastLocal}, CORSIKA=${corsikaEastLocal}`);
+}
+console.log("runtime OK generic and CORSIKA East-offset sources share local u/v signs", horizontalEntryError);
 
 const showerAngles = corsikaDisplayElements.sandbox.corsikaAngleDisplay();
 const expectedShowerAzimuth = ((showerAngles.array_rotation_deg - showerAngles.phi_deg + 180) % 360 + 360) % 360;

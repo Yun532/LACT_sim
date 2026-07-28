@@ -34,7 +34,7 @@ emission_altitude_km = b.zem*1e-5
 设 CORSIKA 方位角 `A` 从磁北向东增加，仰角 `E` 从地平线向天空增加。程序构造：
 
 ```text
-e_x = ( sin(A),         cos(A),        0)
+e_x = (-sin(A),        -cos(A),        0)
 e_y = (-sin(E)cos(A),   sin(E)sin(A), cos(E))
 e_z = ( cos(E)cos(A), -cos(E)sin(A), sin(E))
 ```
@@ -42,12 +42,12 @@ e_z = ( cos(E)cos(A), -cos(E)sin(A), sin(E))
 含义：
 
 ```text
-local +x = 水平横向；A=0 时指向 West，与方位角增加方向相反
+local +x = 水平横向；A=0 时指向 East，与方位角增加方向一致；相机 u=local x
 local +y = 仰角增加方向 / sky-up
 local +z = boresight，镜面指向相机/天空
 ```
 
-这是右手系：`e_x × e_y = e_z`。
+NWU 的物理轴顺序 `North-West-Up` 是左手排列。光学本地坐标本身仍按物理右手语义定义，但写成 NWU 数值分量时满足 `e_x × e_y = -e_z`。不能为了让数值叉积看起来为 `+e_z` 而翻转 `e_x`，否则同一个向东偏移光源会在通用入口和 CORSIKA 入口得到相反的相机 `u`。
 
 转换规则：
 
@@ -63,7 +63,7 @@ direction:             d_local = normalize(dot(d_nwu,e_x), dot(d_nwu,e_y), dot(d
 - `src/app/OpticalSimCommon.cpp:218`：`pointToLocal()` 先减 `origin`。
 - `src/app/OpticalSimCommon.cpp:584`：`buildCorsikaNwuTelescopeFrame()` 定义上面的三个基向量。
 - `src/app/OpticalSimCommon.cpp:690` 附近：`transformBunchToTelescopeLocal()`；`corsika_nwu_relative` 只旋转，`corsika_nwu_global` 先减望远镜位置再旋转。
-- `apps/test_coordinate_frames.cpp:31-83`：对 az=0、el=70° 的三轴数值、右手性、relative/global 往返以及 71° 光源映射做断言。
+- `apps/test_coordinate_frames.cpp`：对 az=0、el=70° 的三轴数值、NWU 物理手性、relative/global 往返、71° 光源映射，以及同一向东偏 1° 光源跨通用/CORSIKA 入口的 `u/v` 符号一致性做断言。
 
 ### 1.3 通用/合成光线追迹全局基底
 
@@ -83,17 +83,17 @@ generic e_y = e_z × e_x
 - `apps/run_optical_sim.cpp:26-45`：读取 telescope、先应用结构形变，再将镜片和输出面送入通用 frame。
 - `apps/run_optical_sim.cpp:410-430`：输入先转入本地，再由 `applyTelescopeFrame(photon, telescope_frame)` 转入通用全局追迹坐标。
 
-重要审计结论：两者的全局坐标语义仍不同——通用全局只定义 `az: +x→+y`，不能自动把其 `+x/+y` 宣称为 CORSIKA 的 North/East；但最新版已经统一进入镜片、遮挡、输出面和相机后的规范光学本地语义：`local +x` 为水平横向、`local +y` 为 sky-up、`local +z` 为光轴。旧网页把 CORSIKA 的 `x/y` 按修正前定义交换后再展开整台望远镜，是绘图错误。
+重要审计结论：两者的全局坐标语义仍不同——通用全局只定义 `az: +x→+y`，不能自动把其 `+x/+y` 宣称为 CORSIKA 的 North/East；但进入镜片、遮挡、输出面和相机后的规范光学本地语义必须一致：`local +x/+u` 朝方位角增加方向，`local +y/+v` 为 sky-up，`local +z` 为光轴。早期网页曾把 CORSIKA `local x/y` 交换；随后网页虽跟随了程序，却也如实暴露出程序把水平轴取成 West 的缺陷。两者现在都由跨入口向东偏 1° 的数值回归锁定。
 
 对 `A=0°、E=70°`，最新版函数必须实际返回：
 
 ```text
-CORSIKA NWU e_x = (0, 1, 0)
+CORSIKA NWU e_x = (0, -1, 0)  # 物理 East
 CORSIKA NWU e_y = (-sin70°, 0, cos70°)
 CORSIKA NWU e_z = ( cos70°, 0, sin70°)
 ```
 
-网页运行时测试不读取注释，而是调用页面公式计算上述数值；同时把平行光和 CORSIKA 的 54 块镜片逐顶点减去各自镜面顶点后比较，最大误差必须小于 `1e-9 m`。
+网页运行时测试不读取注释，而是调用页面公式计算上述数值；比较通用 NEU 与 CORSIKA NWU 几何时先应用唯一的物理轴边界 `East=-West`，再把 54 块镜片逐顶点减去各自镜面顶点比较，最大误差必须小于 `1e-9 m`。测试还直接构造同一物理向东偏 1° 的光源，要求两种入口得到完全相同的 local `u/v` 符号。
 
 ## 2. EventIO 二维参考面的 z 平移
 
@@ -312,11 +312,11 @@ time=89.006516 ns, zem=1600121 cm, photons=4.921779
 
 页面不允许相机与三维区各自保留不同事例。平行光右上角图像可以被点击，但它修改的是唯一的 `selectedCase`，相机、三维光路、镜片统计和左侧说明必须同步切换。
 
-本轮平行光和 CORSIKA 数据都来自 `main@da51c09e9f93df44a3dc956a6a40eb028efb25f5` 的同一份隔离源码编译。源码归档 SHA-256 为 `754ace32cb16fe85986ddf941c22ccbe22043a802f85727dc3e0dd77ba982b86`；包含基线、10 个仰角、四方向、event 1909 ROOT/CSV 和运行日志的结果归档 SHA-256 为 `65cc270d45f039287ca7c12b2a471e1872762a3dac24b1619caa0af706bf3b43`；四方向输入/输出组合 SHA-256 为 `28ecd32d55d7c5cb3b1d84d6aed43c7564993e56bc0746412f3530a3f8a0de9e`。结果包下载后再次计算得到相同 SHA-256。
+本轮平行光和 CORSIKA 数据都来自坐标修复提交 `4fb44f876f37a7c920f0705abc3a8552533588e9`（基于当时最新 `main@48ea631`）的同一份隔离源码编译。源码归档 SHA-256 为 `e528d7f24e1410c2daf0822e9e920da82cfd53518b0a1a9bcd57fb9fb60917e7`；包含基线、10 个仰角、四方向、event 1909 ROOT/CSV 和运行日志的结果归档 SHA-256 为 `db2e5e5a7b02fe3f511f6c7564713ea9841a8ce9ced0d602594846b54bc57b0d`；四方向输入/输出组合 SHA-256 为 `e860355e4cf1a52f71a65a9e4fd0bd324e6d1625fedca914a5cfcbe2405eea12`。结果包下载后再次计算得到相同 SHA-256。
 
-实际执行文件 SHA-256：`test_coordinate_frames=d76d70351f01a2e4a94f197d2813562892a54054d94763fff895d0450856d717`、`run_optical_sim=86f5c2d1aa6f0b4a8e5ce6b54d8efcbbcb1598158a95c8023c0da19360e8102a`、`run_corsika_trace=b27a9e9ef8c03add657854846a023bb0f00ca20d4ef0c6351d7b30c396b11905`。`test_coordinate_frames` 在该构建中返回 0。关键执行路径文件的 SHA-256 为：`apps/run_optical_sim.cpp=13bb4068…`、`apps/run_corsika_trace.cpp=ea301842…`、`src/app/OpticalSimCommon.cpp=dc1efe8d…`、`include/io/SurfaceHitCsvWriter.hpp=de7885de…`、`apps/test_coordinate_frames.cpp=bc895299…`。
+实际执行文件 SHA-256：`test_coordinate_frames=fd5e28bca7dc3d43deaf0883cfd0ed10255066d9e5f18cfac3086b59e73e8c36`、`run_optical_sim=4058e7a9c0cba8e2f3d662f646043f0fb4c30ed75a009070ee573af09800cddb`、`run_corsika_trace=d53f84de2db69de785c5f9e5b7e84b1bba8407694a90c26b588c41615bec12ff`。`test_coordinate_frames` 在该构建中返回 0。服务器实际执行路径文件的 SHA-256 为：`apps/run_optical_sim.cpp=ebf65379…`、`apps/run_corsika_trace.cpp=6682d808…`、`src/app/OpticalSimCommon.cpp=9685f610…`、`include/io/SurfaceHitCsvWriter.hpp=df7a1de1…`、`apps/test_coordinate_frames.cpp=91963c3c…`。
 
-4 GB EventIO 原文件大小为 `4,002,090,371` 字节，SHA-256 为 `3feee5b7f3a001858201eea2cf75ba3f5f0277283e29900b5f259bd2c9bc4220`；本轮 event 1909 ROOT 的 SHA-256 为 `7fd24c278b1d50e6159dd72cf605b67190dc022e72ea242feec9a9dc3554a4c5`，运行日志 SHA-256 为 `e00cc91e1f1a2a2265007dfbc9c2797a2022663dc128eaddcd2de6b6b3cfef54`。网页生成器会拒绝缺少这些哈希、来源提交不一致或平行光/CORSIKA 源归档不一致的数据。
+4 GB EventIO 原文件大小为 `4,002,090,371` 字节，SHA-256 为 `3feee5b7f3a001858201eea2cf75ba3f5f0277283e29900b5f259bd2c9bc4220`；本轮 event 1909 ROOT 的 SHA-256 为 `36876c1e586c3c6dcc1ff5d2f7a49cc66430a0cfce3db019454dde3684bf29bc`，运行日志 SHA-256 为 `6133e36b173121087cc1b5b066db128284b782f239a9cd50fa6dfdf832f7887f`。网页生成器会拒绝缺少这些哈希、来源提交不一致或平行光/CORSIKA 源归档不一致的数据。
 
 ### 7.1 `da51c09` 镜片仰角序列更新的实测影响
 
@@ -337,7 +337,7 @@ time=89.006516 ns, zem=1600121 cm, photons=4.921779
 | 80° | 10,789→10,898 | `(-0.318,-2.596)`→`(+0.309,+2.805)` | 5.438 mm | 4.757→4.914 mm |
 | 90° | 10,919→11,063 | `(-0.389,-3.061)`→`(+0.380,+3.272)` | 6.380 mm | 4.932→5.087 mm |
 
-独立重跑后，第 2 页的 baseline、四方向 `summary/full_output_uv_m/full_camera_hit_uv_m/camera_signal/rays` 与上一轮逐值一致；第 4 页的 event、pointing、array、camera views、逐望远镜光子抽样、数值校验和空间尺度也逐值一致。它们仍重新写入了本轮来源提交、二进制和结果哈希，避免网页混用旧来源记录。
+独立重跑后，第 2、3 页的 baseline、四方向与 10 个仰角结果在排除来源元数据后均与上一轮逐值一致，说明本次修复没有改变通用平行光入口。第 4 页的 event、pointing、array、原始 bunch、`zem` 反演点和空间尺度不变，但相机水平方向按修复后的 CORSIKA 入口重新追迹；不能再声称其 camera views 与旧版逐值一致。
 
 四方向真实输出摘要如下；质心是 LACT 原始 `(u,v)`，不是网页重投影值：
 
@@ -348,13 +348,35 @@ time=89.006516 ns, zem=1600121 cm, photons=4.921779
 | 左 `az=-1°, el=70°` | 14,748 | 2,952 / 116 | 14,632 | 9,100 | `(+0.048908, -0.000399)` |
 | 右 `az=+1°, el=70°` | 14,795 | 2,904 / 121 | 14,674 | 9,133 | `(-0.048943, -0.000386)` |
 
-网页运行时测试直接比较三页结构，而不是比较标签文字：全局/平行光理想镜片最大顶点误差为 `4.681018003915913e-10 m`；平行光/CORSIKA 在各自镜面中心归一后的最大顶点误差为 `9.769163457519441e-11 m`；平行光/仰角页基底误差为 0；CORSIKA `az=0°/el=70°` 数值基底与最新版 C++ 公式误差为 0；三维 x/y/z 等比例缩放测试通过。
+网页运行时测试直接比较三页结构，而不是比较标签文字：全局/平行光理想镜片最大顶点误差为 `4.681018003915913e-10 m`；通用 NEU 与 CORSIKA NWU 先按 `East=-West` 还原成同一物理轴后，镜面中心归一的最大顶点误差为 `9.769163457519441e-11 m`；平行光/仰角页基底误差为 0；CORSIKA `az=0°/el=70°` 数值基底与最新版 C++ 公式误差为 0；同一向东偏 1° 光源跨入口的 local `u/v` 误差为 0；三维 x/y/z 等比例缩放测试通过。
 
 右上角相机核对不使用抽样：四组分别嵌入全部物理 output-plane `u/v`，并按程序 `plot_whiteboard()` 的方式以原始包围盒取景、留 8% 边距、使用 `140×140` count/bin。LACT 模式显示未平移的绝对 `u/v`；pyLAST 模式对同一批点显示横轴 `+u`、纵轴 `-v`。具体行数必须从本轮最新版真实输出重新写入来源记录，不能沿用旧二进制结果。完整 camera-hit `x/y` 继续参与逐行和逐像素强校验。三维区绘制全部 `hit_mirror` 反射点以及全部 incoming/reflected 遮挡记录诊断端点；只有光路线允许抽样。
 
 相机画布不从三维图重新投影落点。二维热图逐行读取每个 run 的完整 hits CSV `u_m/v_m` 并统计 count/bin；完整 `camera_x_m/camera_y_m` 与 camera CSV 像素计数继续参与生成期校验。生成期逐行验证 `camera_x_m==u_m、camera_y_m==v_m`，并用该 run 保存的 `buildTelescopeFrame` 基底把 global surface 投影回局部面复现同一 `u/v`。LACT 模式不做变换；pyLAST 模式只在画布入口应用 `horizontal=+u、vertical=-v`，不回写原始数组。
 
 为保留遮挡诊断行，四方向配置显式设置 `obstruction.mark_only=true`。CSV 的 `obstruction_blocked_incoming/reflected` 是 C++ 原始标志；`mirror_point` 和 `surface_point` 也是 tracer 输出原值。程序没有输出光线与 obstruction primitive 的精确交点，因此页面将全部 incoming-blocked 行画成其理论镜面端点红叉，将全部 reflected-blocked 行画成其理论输出端点紫叉。它们是完整的遮挡记录诊断点集合，但不能冒充 primitive 的精确相交位置。
+
+### 7.2 CORSIKA `u` 方向问题的版本时间线与实测影响
+
+这不是最近一次网页配色或相机画法单独引入的问题，时间线如下：
+
+| 时间 / 提交 | 程序或网页状态 | 结论 |
+|---|---|---|
+| 2026-07-27 19:20，程序 `f2b6617` | CORSIKA 本地轴由“`x=sky-up、y=East`”改成“`x=West、y=sky-up`” | 修正了 `x/y` 语义次序，但水平轴符号选反；相机 `u=local x` 从此与通用入口相反 |
+| 2026-07-28 12:17，网页 `ae94c96` | 网页仍画旧的 `x=sky-up、y=East` | 网页与当时程序轴次序不一致 |
+| 2026-07-28 13:25，网页 `693aaa9` | 网页改为 `x=West、y=sky-up` | 网页开始忠实复现程序，但也把程序的 `u` 反号完整显示出来 |
+| 2026-07-28 23:00，程序 `4fb44f8` | CORSIKA 改为 `x=East、y=sky-up`，新增向东偏 1° 跨入口回归 | `u/v` 的定义与第 1–3 页统一；网页与真实输出同步重建 |
+
+因此，“CORSIKA 与 1–3 页的 `u` 不一致”是 `f2b6617` 的最近一次坐标重构引入的程序问题；网页后来的变化只是先后经历了“轴次序画错”和“正确展示程序反号”两种状态，并不是网页在最后几次界面优化中把已有正确结果翻坏。
+
+使用同一个 4 GB 输入、同一个 event 1909、同一相机像素几何比较修复前后 ROOT，相机 PE 加权质心如下。`v` 基本不变，`u` 精确呈镜像翻转，正是本次水平轴修复应有的特征；PE 总数的极小差异来自方形像素边界上的重新归属。
+
+| 望远镜 | 旧版 `(u,v)` m | 修正版 `(u,v)` m | PE 总数 旧→新 |
+|---|---:|---:|---:|
+| tel19 | `(-0.141253, +0.080178)` | `(+0.141268, +0.080214)` | 51,438 → 51,417 |
+| tel16 | `(+0.172656, +0.064227)` | `(-0.172621, +0.064210)` | 15,161 → 15,166 |
+| tel21 | `(-0.376956, +0.055549)` | `(+0.377051, +0.055642)` | 9,444 → 9,445 |
+| tel20 | `(-0.348826, -0.225677)` | `(+0.348708, -0.225621)` | 9,324 → 9,334 |
 
 ## 8. 生成期强制校验
 
@@ -374,6 +396,6 @@ time=89.006516 ns, zem=1600121 cm, photons=4.921779
 - event 1909 必须包含 32 台望远镜；四台 EventIO raw bunch 数必须逐台等于 ROOT `input_bunches`，其中 tel19 为 27,159 条；相机图只读同一 ROOT 的 `image_cherenkov_pe`。
 - event 1909 的观测高度必须直接来自所选 EventIO event header；每个显示发射点必须同时复现原始 `zem` 高度并与原始 anchor/direction 共线。
 - CORSIKA 的 EventIO cm→m、ROOT m 和网页单一等比例 span 必须显式记录；仅标记半径允许使用屏幕像素。
-- 两套 telescope frame 都保持单位长度、正交、右手性；CORSIKA 的实际数值必须与最新版 C++ 公式一致，页面不得再交换 `local x/y`。
+- 两套 telescope frame 都保持单位长度和正交；通用数值基满足 `x×y=z`，CORSIKA NWU 数值基因 `North-West-Up` 的左手物理轴顺序满足 `x×y=-z`。CORSIKA 的实际数值必须与最新版 C++ 公式一致，页面不得翻转或交换 `local x/y`。
 - 平行光与 CORSIKA 在 `az=0°/el=70°` 下的 54 块镜片必须在各自镜面顶点归一后逐顶点一致，最大误差 `<1e-9 m`。
 - pyLAST 选择器必须对同一批点实现 `horizontal=+u、vertical=-v`，且切换前后三维几何逐值不变。

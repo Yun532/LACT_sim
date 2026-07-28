@@ -318,7 +318,7 @@ The optical ray tracer works in a telescope-local frame:
 ```text
 local +z : telescope optical axis, from mirror toward sky
 local -z : on-axis incoming photon direction, from sky toward mirror
-local +x : transverse horizontal axis, opposite increasing azimuth
+local +x : transverse horizontal axis, toward increasing azimuth
 local +y : increasing elevation / sky-up axis
 ```
 
@@ -346,10 +346,16 @@ source.coordinate_frame=corsika_nwu_relative
 LACT_sim constructs this CORSIKA-NWU-to-local basis:
 
 ```text
-local x_axis = ( -sin(el) cos(az),  sin(el) sin(az), cos(el) )
-local y_axis = ( -sin(az),         -cos(az),         0       )
+local x_axis = ( -sin(az),         -cos(az),         0       )
+local y_axis = ( -sin(el) cos(az),  sin(el) sin(az), cos(el) )
 local z_axis = (  cos(el) cos(az), -cos(el) sin(az), sin(el) )
 ```
+
+`North-West-Up` is physically left-handed.  Consequently this physically
+right-handed optical basis satisfies `x_axis cross y_axis = -z_axis` when the
+vectors are written as NWU numeric components.  Flipping `x_axis` merely to
+make the component-space cross product positive would reverse camera `u`
+between the generic and CORSIKA entry paths.
 
 Then each EventIO photon bunch is rotated by dot products:
 
