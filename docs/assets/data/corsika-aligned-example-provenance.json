@@ -1,0 +1,85 @@
+{
+  "description": "Deterministic subset of actual run_corsika_trace whiteboard output",
+  "run_command": "build/run_corsika_trace configs/examples/corsika_coordinate_shower_aligned_example.cfg",
+  "source_eventio": {
+    "file": "muon_E100_th0_run000001.zst",
+    "size_bytes": 58064978,
+    "sha256": "20250674adb895df40382f212fa99378dc22fd4ea3f3352bac2e9c868af2962b"
+  },
+  "program_inputs": {
+    "config": "configs/examples/corsika_coordinate_shower_aligned_example.cfg",
+    "config_sha256": "5912a159c78fc66bd4ee2cfde0b585fc25921b0e6d66512e85baa1b87d84143f",
+    "cpp_source": "apps/run_corsika_trace.cpp",
+    "cpp_source_sha256": "e2a8e538f84d0283921dc3584b0eec52851524315f6a3b9b49e551c4dcae89b6",
+    "camera_config": "configs/examples/corsika_coordinate_shower_aligned_camera.cfg",
+    "camera_config_sha256": "8e8742c2a5cf3a27fce579c3d3af71223651088299014b1ae46064222ff898af"
+  },
+  "full_trace": {
+    "file": "corsika_aligned_whiteboard_hits.csv",
+    "rows": 3171,
+    "sha256": "eb81d8baec2fa19f3b47dc6d2b460e7112a4b66211abc18119f6a4a8bea729ec"
+  },
+  "selection": {
+    "event_id": "117",
+    "telescope_id": "0",
+    "available_rows": 1351,
+    "sample_rows": 128,
+    "method": "uniform indices across the event/telescope group with most saved output hits"
+  },
+  "sample": {
+    "file": "corsika-aligned-example-rays.csv",
+    "sha256": "9f8902e1124ccc92200649264bed715075905a6c8c47e1c5bf5e8f6684b145a4"
+  },
+  "corsika_event": {
+    "shower_event_id": 1,
+    "energy_gev": 6.136686,
+    "arrival_azimuth_north_to_east_deg": 300.027133,
+    "altitude_deg": 88.282787,
+    "output_event_id": 117,
+    "array_id": 17,
+    "core_x_north_m": 6.724,
+    "core_y_west_m": 2.308,
+    "core_source": "negative_MC_TELOFF_array_offset",
+    "core_program_log": "core_N_m=6.724 core_E_m=-2.308"
+  },
+  "telescope_eventio": {
+    "position_nwu_m": [0.0, 0.0, 4.0],
+    "radius_m": 4.0,
+    "position_source": "EventIO telescope table"
+  },
+  "summary": {
+    "file": "corsika-aligned-example-summary.csv",
+    "source_sha256": "c9ae666d553193530341bae13da38c8535dd1168465b13ec2c60d35fb6f7f9be",
+    "sample_sha256": "e464d2e1ac0f49884fbbd1034ccdb49a44a7da3ffa0302dc22942fcfc1e1124e"
+  },
+  "output_plane": {
+    "file": "corsika-aligned-output-plane.csv",
+    "rows": 1351,
+    "sha256": "9b9b60b381a12d92d51b91d8d901ae5311a6df473e24030fc2242e2e7bc88da8"
+  },
+  "companion_outputs": {
+    "raw_input": {
+      "file": "corsika-aligned-example-raw-input.csv",
+      "rows": 481,
+      "source_sha256": "80ed03075eb241fcafdce5fa6640548f0a2a8ba694faba8d65a45f8dbb52f238",
+      "sample_sha256": "5bf9aae64b28b152a90b95bdeb5b97cb0435f9d4276f488cdcfa059a360ae216"
+    },
+    "camera_pixel": {
+      "file": "corsika-aligned-camera-pixels.csv",
+      "rows": 18,
+      "source_sha256": "5f2cf77b6ce6141c4846dabbc0efc4a3e1886063154fbe677535f773d0e24a2e",
+      "sample_sha256": "2d8fc0deb8e80ef79b51d2f0a16d86492edf299c81b14ecf9a812215e1c529fa"
+    },
+    "camera_summary": {
+      "file": "corsika-aligned-camera-summary.csv",
+      "rows": 1,
+      "source_sha256": "7c54516efe3d9f51de850cb5e9843eb2569992d7ce5f261bcd753e0f1db7cbec",
+      "sample_sha256": "99226fc84b389d2e9bd9add10ec31ebb590804c10499648cd412a3e16d973270"
+    }
+  },
+  "corsika_input_reference": {
+    "observation_altitude_m": 4400.0,
+    "telescope_z_m": 4.0,
+    "emission_point_status": "derived from the raw 2D photon-bunch anchor/direction and zem; it is not an explicit 3D EventIO photon coordinate"
+  }
+}
