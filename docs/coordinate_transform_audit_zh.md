@@ -2,7 +2,7 @@
 
 这份笔记是 `docs/assets/lact-coordinate-system-3d.html` 的坐标审计记录。页面只能展示已经由实际代码、数值测试或真实输出证明的定义；没有程序原值的内容必须标记为“派生”或“仅用于坐标演示”。注释只能帮助定位，不能单独作为结论。
 
-本轮审计基线是远端 `main` 提交 `f2b6617c67e799456d1e92ee7a25af038c8e63be`（`Align CORSIKA optical coordinates`）。判定顺序是：读取实际函数实现 → 独立计算已知角度的数值基向量 → 运行 C++ 回归测试 → 用最新版二进制重新生成输出 → 由网页运行时测试逐顶点比较结构。任何一项不一致都不得标记为通过。
+本轮审计基线是远端 `main` 提交 `da51c09e9f93df44a3dc956a6a40eb028efb25f5`（`Update base0 elevation-dependent mirror geometry`）。判定顺序是：读取实际函数实现 → 独立计算已知角度的数值基向量 → 运行 C++ 回归测试 → 用最新版二进制重新生成输出 → 由网页运行时测试逐顶点比较结构。任何一项不一致都不得标记为通过。
 
 ## 1. 三层必须明确边界的三维基底
 
@@ -143,7 +143,7 @@ normal = 邻近仰角锚点的 SLERP
 delta_local = deformed_center_local - ideal_center_local
 ```
 
-镜片颜色使用 `|delta_local|`；只有箭头端点允许乘显示倍率。
+第 3 页默认以镜片法向夹角 `acos(normal_ideal·normal_deformed)` 着色，并绘制 54 片镜子的最大夹角/RMS 曲线；用户可切换到 `|delta_local|` 中心位移着色及其最大值/RMS 曲线。指向模式的箭头在 1× 时使用真实形变法向，100×/500× 只放大相对理想法向的角差；位置模式的箭头端点按同一倍率放大 `delta_local`。颜色归一范围不得按当前仰角自动变化：两种模式分别让 0°–90° 的全部镜片共用从零到各自全局最大值的固定范围。选择器不得修改实际镜片或光路数据。
 
 ## 4. 输出面、相机 u/v 和法向
 
@@ -312,11 +312,32 @@ time=89.006516 ns, zem=1600121 cm, photons=4.921779
 
 页面不允许相机与三维区各自保留不同事例。平行光右上角图像可以被点击，但它修改的是唯一的 `selectedCase`，相机、三维光路、镜片统计和左侧说明必须同步切换。
 
-本轮平行光和 CORSIKA 数据都来自 `main@f2b6617c67e799456d1e92ee7a25af038c8e63be` 的同一份隔离源码编译。源码归档 SHA-256 为 `f1561ec9f123142e7a68faac64dabea4b2f120db2e31fdc8e17e3c3aba500d7f`；包含基线、10 个仰角、四方向、event 1909 ROOT/CSV 和运行日志的结果归档 SHA-256 为 `2f8147d43a19c291840b5775fefd64265bf4a8bf8297d36de97cfe62b868dd3e`；四方向输入/输出组合 SHA-256 为 `6164d0a869bab1275850424b26f68b4c087e6564fec0d8675f2491dea2ef3327`。结果包下载后再次计算得到相同 SHA-256。
+本轮平行光和 CORSIKA 数据都来自 `main@da51c09e9f93df44a3dc956a6a40eb028efb25f5` 的同一份隔离源码编译。源码归档 SHA-256 为 `754ace32cb16fe85986ddf941c22ccbe22043a802f85727dc3e0dd77ba982b86`；包含基线、10 个仰角、四方向、event 1909 ROOT/CSV 和运行日志的结果归档 SHA-256 为 `65cc270d45f039287ca7c12b2a471e1872762a3dac24b1619caa0af706bf3b43`；四方向输入/输出组合 SHA-256 为 `28ecd32d55d7c5cb3b1d84d6aed43c7564993e56bc0746412f3530a3f8a0de9e`。结果包下载后再次计算得到相同 SHA-256。
 
-实际执行文件 SHA-256：`test_coordinate_frames=ef3005b818a2fe16a5a45f22207463b8482fd25e8b5be416ce95a08d219cef78`、`run_optical_sim=608e4113548f52ebc93daaaa37ee0387be383bca409c10fe730c577d3739eee0`、`run_corsika_trace=05d2c13b0852f5dbc8b0eff1ebfe37fca0b78854b7b94211902c5081529af79c`。`test_coordinate_frames` 在该构建中返回 0。关键执行路径文件的 SHA-256 为：`apps/run_optical_sim.cpp=13bb4068…`、`apps/run_corsika_trace.cpp=ea301842…`、`src/app/OpticalSimCommon.cpp=dc1efe8d…`、`include/io/SurfaceHitCsvWriter.hpp=de7885de…`、`apps/test_coordinate_frames.cpp=bc895299…`。
+实际执行文件 SHA-256：`test_coordinate_frames=d76d70351f01a2e4a94f197d2813562892a54054d94763fff895d0450856d717`、`run_optical_sim=86f5c2d1aa6f0b4a8e5ce6b54d8efcbbcb1598158a95c8023c0da19360e8102a`、`run_corsika_trace=b27a9e9ef8c03add657854846a023bb0f00ca20d4ef0c6351d7b30c396b11905`。`test_coordinate_frames` 在该构建中返回 0。关键执行路径文件的 SHA-256 为：`apps/run_optical_sim.cpp=13bb4068…`、`apps/run_corsika_trace.cpp=ea301842…`、`src/app/OpticalSimCommon.cpp=dc1efe8d…`、`include/io/SurfaceHitCsvWriter.hpp=de7885de…`、`apps/test_coordinate_frames.cpp=bc895299…`。
 
-4 GB EventIO 原文件大小为 `4,002,090,371` 字节，SHA-256 为 `3feee5b7f3a001858201eea2cf75ba3f5f0277283e29900b5f259bd2c9bc4220`；本轮 event 1909 ROOT 的 SHA-256 为 `bbdf4c2dbb391984421b15973c58c34acb23682c64402cd91575dac49182f5f7`，运行日志 SHA-256 为 `9a01327a6396ac4f28e513209f524e858e429f20d51d9c0cf2e4000ccd83c2db`。网页生成器会拒绝缺少这些哈希、来源提交不一致或平行光/CORSIKA 源归档不一致的数据。
+4 GB EventIO 原文件大小为 `4,002,090,371` 字节，SHA-256 为 `3feee5b7f3a001858201eea2cf75ba3f5f0277283e29900b5f259bd2c9bc4220`；本轮 event 1909 ROOT 的 SHA-256 为 `7fd24c278b1d50e6159dd72cf605b67190dc022e72ea242feec9a9dc3554a4c5`，运行日志 SHA-256 为 `e00cc91e1f1a2a2265007dfbc9c2797a2022663dc128eaddcd2de6b6b3cfef54`。网页生成器会拒绝缺少这些哈希、来源提交不一致或平行光/CORSIKA 源归档不一致的数据。
+
+### 7.1 `da51c09` 镜片仰角序列更新的实测影响
+
+从上一轮基线 `f2b6617` 到本轮 `da51c09`，程序仓库中唯一变化的文件是 `configs/mirror_1229_elevation_series.csv`。逐镜片比较显示：不同仰角下中心位置最大变化为 `2.732–3.956 mm`，中心位置 RMS 变化为 `2.088–3.195 mm`，法向最大夹角变化为 `41.674–155.472 arcsec`。因此第 3 页必须重跑，不能只替换网页里的 CSV。
+
+下表是同一批平行光输入、同一模拟流程的旧版 → 新版结果；质心和 RMS 都直接由程序 output-plane 原始 `u/v` 统计：
+
+| 仰角 | `hit_output_plane` 旧→新 | 质心 `(u,v)` mm 旧→新 | 质心位移 | RMS 旧→新 |
+|---:|---:|---:|---:|---:|
+| 0° | 8,556→8,496 | `(-0.010,+0.065)`→`(-0.008,+0.133)` | 0.067 mm | 4.039→4.010 mm |
+| 10° | 8,462→8,687 | `(-0.010,-0.073)`→`(-0.006,+0.273)` | 0.346 mm | 4.015→4.021 mm |
+| 20° | 8,710→8,837 | `(-0.023,-0.248)`→`(+0.009,+0.450)` | 0.699 mm | 4.027→4.069 mm |
+| 30° | 8,984→9,051 | `(-0.049,-0.471)`→`(+0.036,+0.674)` | 1.149 mm | 4.077→4.151 mm |
+| 40° | 9,294→9,327 | `(-0.086,-0.804)`→`(+0.075,+1.009)` | 1.820 mm | 4.162→4.263 mm |
+| 50° | 9,673→9,845 | `(-0.133,-1.158)`→`(+0.123,+1.365)` | 2.537 mm | 4.280→4.402 mm |
+| 60° | 10,260→10,358 | `(-0.189,-1.702)`→`(+0.178,+1.908)` | 3.629 mm | 4.421→4.558 mm |
+| 70° | 10,685→10,676 | `(-0.251,-2.089)`→`(+0.241,+2.297)` | 4.413 mm | 4.581→4.730 mm |
+| 80° | 10,789→10,898 | `(-0.318,-2.596)`→`(+0.309,+2.805)` | 5.438 mm | 4.757→4.914 mm |
+| 90° | 10,919→11,063 | `(-0.389,-3.061)`→`(+0.380,+3.272)` | 6.380 mm | 4.932→5.087 mm |
+
+独立重跑后，第 2 页的 baseline、四方向 `summary/full_output_uv_m/full_camera_hit_uv_m/camera_signal/rays` 与上一轮逐值一致；第 4 页的 event、pointing、array、camera views、逐望远镜光子抽样、数值校验和空间尺度也逐值一致。它们仍重新写入了本轮来源提交、二进制和结果哈希，避免网页混用旧来源记录。
 
 四方向真实输出摘要如下；质心是 LACT 原始 `(u,v)`，不是网页重投影值：
 

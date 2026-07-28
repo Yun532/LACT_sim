@@ -25,6 +25,7 @@ for (const marker of [
   'const PARALLEL_COLORS=["#ff6d7a","#64c7ff","#ffd45e","#70e39c"]',
   'caseDensityColor(plotColor',
   'id="cameraCoords"',
+  'id="deformMetric"',
   'cameraCoordinateMode()==="pylast"?[p[0],-p[1]]',
   'pyLAST +pix_x = -v',
   'pyLAST +pix_y = +u',
@@ -54,7 +55,7 @@ function canvasContext() {
 
 function element(id, dataset = {}) {
   const context = canvasContext();
-  const initialValues = {cameraScale: "spot", cameraCoords: "lact", globalAz: "0", globalEl: "70", photonTel: "19"};
+  const initialValues = {cameraScale: "spot", cameraCoords: "lact", deformMetric: "normal", globalAz: "0", globalEl: "70", photonTel: "19"};
   return {
     id, dataset, style: {}, classList: {add() {}, remove() {}, toggle() {}},
     value: initialValues[id] || "0", hidden: false,
@@ -67,10 +68,10 @@ function element(id, dataset = {}) {
 
 function run(search) {
   const ids = ["scene", "camera", "info", "cameraPanel", "cameraPanelTitle", "cameraScale", "cameraCoords", "cameraHead",
-    "cameraCaption", "deformPanel", "deformChart", "deformStat", "colorMin", "colorMax",
+    "cameraCaption", "deformPanel", "deformChart", "deformTitle", "deformStat", "colorMetric", "colorMin", "colorMax",
     "globalToolbar", "parallelToolbar", "elevationToolbar", "corsikaToolbar", "globalAz",
     "globalAzValue", "globalEl", "globalElValue", "angleValue", "bunch", "photonTel",
-    "bunchValue", "elevation", "arrowScale", "corsikaCase", "groundView", "showerView",
+    "bunchValue", "elevation", "deformMetric", "arrowScale", "corsikaCase", "groundView", "showerView",
     "zoomOut", "zoomIn", "subtitle", "legend"];
   const elements = new Map(ids.map(id => [id, element(id)]));
   const pageButtons = ["global", "parallel", "elevation", "corsika"].map(p => element("page-" + p, {page: p}));
@@ -139,6 +140,27 @@ if (!elevationWhiteboardElements.get("cameraHead").textContent.includes("程序�
   throw new Error("elevation page does not reuse the complete program-style whiteboard output");
 }
 console.log("runtime OK elevation uses complete program-style whiteboard output");
+
+const normalScale = elevationWhiteboardElements.sandbox.deformationColorScale();
+const normalScene = elevationWhiteboardElements.sandbox.buildScene();
+if (elevationWhiteboardElements.get("deformMetric").value !== "normal" ||
+    normalScale.min !== 0 || !Number.isFinite(normalScale.max) || normalScale.max <= 0 ||
+    elevationWhiteboardElements.get("colorMin").textContent !== "0.000 mdeg" ||
+    !elevationWhiteboardElements.get("colorMax").textContent.includes(normalScale.max.toFixed(3)) ||
+    !elevationWhiteboardElements.get("colorMetric").textContent.includes("Δnormal") ||
+    !normalScene.lines.some(line => line.name.includes("法向偏转"))) {
+  throw new Error("elevation page does not default to a shared normal-angle scale");
+}
+elevationWhiteboardElements.get("deformMetric").listeners.change({target: {value: "position"}});
+const positionScale = elevationWhiteboardElements.sandbox.deformationColorScale();
+const positionScene = elevationWhiteboardElements.sandbox.buildScene();
+if (positionScale.min !== 0 || Math.abs(positionScale.max - 2.2563430904) > 1e-9 ||
+    elevationWhiteboardElements.get("colorMin").textContent !== "0.000 mm" ||
+    !elevationWhiteboardElements.get("colorMetric").textContent.includes("Δcenter") ||
+    !positionScene.lines.some(line => line.name.includes("中心位移向量"))) {
+  throw new Error("elevation page cannot switch to the shared center-displacement scale");
+}
+console.log("runtime OK selectable deformation metrics", {normalScale, positionScale});
 
 const corsikaFullCameraElements = run("?page=corsika&case=event1909");
 if (corsikaFullCameraElements.get("cameraScale").value !== "full" ||

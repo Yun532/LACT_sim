@@ -155,6 +155,7 @@ def read_geometry(ideal_path: Path, deformation_path: Path,
         facets = sorted(series[elevation], key=lambda item: item["id"])
         components = [[f["delta"][i] * 1000.0 for f in facets] for i in range(3)]
         values = [f["delta_mm"] for f in facets]
+        normal_values = [f["normal_delta_mdeg"] for f in facets]
         deformation.append({
             "elevation_deg": elevation,
             "zenith_deg": 90.0 - elevation,
@@ -166,6 +167,9 @@ def read_geometry(ideal_path: Path, deformation_path: Path,
                 "mean_dy_mm": sum(components[1]) / len(facets),
                 "mean_dz_mm": sum(components[2]) / len(facets),
                 "max_normal_mdeg": max(f["normal_delta_mdeg"] for f in facets),
+                "rms_normal_mdeg": math.sqrt(
+                    sum(x * x for x in normal_values) / len(normal_values)
+                ),
             },
         })
 
