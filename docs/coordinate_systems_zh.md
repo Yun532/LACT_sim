@@ -1,60 +1,88 @@
 # LACT_sim 坐标系说明
 
-这份说明只给出使用入口；完整定义、公式、转换顺序和代码行出处见 [坐标与转换审计笔记](coordinate_transform_audit_zh.md)。交互核查页见 [坐标系与真实事例核查](assets/lact-coordinate-system-3d.html)。
+完整公式、转换顺序、数值验证和代码出处见[坐标与转换审计笔记](coordinate_transform_audit_zh.md)。交互核查页见[坐标系与真实事例核查](assets/lact-coordinate-system-3d.html)。
 
-## 页面现在分成四个独立部分
+## 四个页面
 
-1. **全局坐标定义**：只画坐标定义，不绑定任何 event。完整镜片、遮挡和相机严格按 `run_optical_sim` 的 `buildTelescopeFrame()` 通用追迹基底放置；CORSIKA NWU 输入基底只作为淡色三轴叠加，绝不旋转结构。程序角度默认 `az=0° / el=70°`，可与第 2、3 页直接核对；默认显示相机为 `el=0° / az=180°`，所以地面侧视成一条水平地平线。
-2. **平行光**：望远镜固定 az=0° / el=70°；四个真实光源取 el=71°、el=69°、az=-1°、az=+1°。右上角同时显示四张完整白板输出图；绘法与程序 `plot_whiteboard()` 一致，每组按自身包围盒中心自动取正方形范围并留 8% 边距，使用完整 output 点的 `140×140` 二维 count/bin 热图。默认“LACT 原始 u/v”保持未转换的绝对 `u/v` 刻度；显式选择“pyLAST 相机显示”后才按横轴 `-v`、纵轴 `-u` 重排。取景中心不强制为 `(0,0)`，仅当零点落入取景范围时才画零线；白叉为全量质心，白圈为 R68。点击任一图会统一切换当前 case；三维区画该组全部真实镜面反射点、全部遮挡记录诊断端点和少量抽样光路线。
-3. **不同天顶角平行光**：镜片颜色直接表示相对理想中心的位移大小；切换角度时，同角度光路、落点和相机必须整体切换。当前角度的相机光斑改为与第 2 页完全相同的程序白板风格：全部 output `u/v`、自动正方形取景、8% 边距、`140×140` count/bin、绝对坐标刻度、全量质心和 R68。默认显示相机同样为 `el=0° / az=180°`，这里的显示角度不会修改望远镜程序角度。
-4. **CORSIKA 事例**：芯位、到达方向、望远镜指向、二维 photon bunch 的三维反演、望远镜光路、输出面和相机由同一个 event/array/telescope 事例驱动；四台各显示 240 个较大的 `zem` 反演发射点，默认用完整簇射尺度容纳全部散点。四台二维图默认显示完整 1616 像素物理相机；仍可手动选择光斑放大。主视图滚轮改为以鼠标位置为缩放锚点并把最大倍率提高到 800 倍，因此可在完整簇射视图中把鼠标放在地面处连续放大；“聚焦地面 / 阵列”可一步切换到地面尺度。
+1. **全局坐标定义**：只解释阵列、望远镜本地、镜片、遮挡、输出面和相机坐标，不绑定事例。
+2. **平行光**：望远镜固定 `az=0° / el=70°`，分别运行 `el=71°`、`el=69°`、`az=-1°`、`az=+1°` 四组真实输入；选择相机图时同步切换三维光路、镜面反射点和遮挡诊断点。
+3. **不同天顶角平行光**：按真实形变 CSV 切换镜片位置，用颜色表示相对理想镜片中心的位移，并显示同一次程序运行产生的光路与完整输出面 `u/v`。
+4. **CORSIKA 事例**：同一 event 的芯位、到达方向、阵列、望远镜指向、二维 photon bunch、`zem` 反演发射点和相机图一起显示。
 
-四部分现在都已接入真实数据。平行光基线与 0°–90°（每 10°）扫描来自当前工作树 C++ 源码的隔离编译和独立运行；四个天空角案例也由同一源码重新运行，并以 `mark_only` 诊断模式保留 incoming/reflected 遮挡标志。服务器运行源码的三个关键文件已与当前工作区逐文件 SHA-256 核对一致。每个选项的光路、输出面和相机像素保持同一次运行绑定，不借用其他案例的数据。
-
-每个包含地面的三维页都有两套互不混淆的方向指示：左侧固定地图始终“北上、东右”，不会随鼠标旋转；右侧“当前屏幕投影”才随观察视角旋转，并用 `⊗ 屏幕内 / ⊙ 屏幕外` 表示与视线接近重合的方向。CORSIKA 页严格使用 NWU（East=`-y`）；平行光/形变页的东南西北只作为通用全局 `+x/+y` 的显示参考，并在页面中明确标注。
-
-为避免文字遮挡三维结构，页首说明、左侧原值与校验、相机图说明以及形变图说明默认折叠，点击标题即可展开。平行光白板沿用程序式完整二维密度图，但背景、网格和边框改为与三维网页一致的深色视觉；四组密度图的红、蓝、黄、绿主色与对应三维光路共用同一颜色常量，色彩深浅只表示该组内部的 count/bin。这些改动只影响显示样式，不改变原始 `u/v`、分箱或统计量。
-
-“俯视”与可拖动三维观察使用同一套程序方位基底，不再在拖动时切换投影约定。俯视时屏幕上方为 North=`+x`，下方为 South=`-x`；通用页屏幕右方为方位角增加方向 `+y`，CORSIKA NWU 页屏幕右方为 East=`-y`。因此从天空向地面看，方位角从北向东增加就是顺时针，向西是逆时针。拖动只改变观察方位和仰角，不改变这套轴定义。
+每个含地面的页面都固定采用北、东、南、西与天空方向。俯视时北在上、东在右；拖动只改变观察相机，不改变程序坐标或方位角定义。
 
 ## 必须牢记的坐标边界
+
+```text
+EventIO NWU photon bunch
+  -> transformBunchToTelescopeLocal()
+  -> telescope-local mirror + obstruction + output plane
+  -> hit.u/v = dot(surface - plane_point, plane_u/v)
+  -> camera_x/y = u/v
+  -> ROOT: x_m/y_m = u/v
+  -> pyLAST: pix_x=-v, pix_y=+u
+```
 
 | 数据层 | x | y | z / 说明 |
 |---|---|---|---|
 | CORSIKA / EventIO 原始输入 | North | West | Up；NWU |
-| 地图显示 East/North | East = -West | North = x | 只用于地图显示 |
-| 望远镜本地光学 | local x | local y | local +z 从镜面指向相机 / 天空 |
-| 镜片与遮挡 CSV | local x | local y | local z；与本地光学几何一致 |
-| 输出面 / 相机 | u = local x | v = local y | 当前输出面 z = -8 m |
-| pyLAST `LactEventSource` | pix_x = -u | pix_y = -v | pyLAST 0.0.4 ROOT 读取边界 |
-| pyLAST `plot_camera_image` 画布 | 横轴 = pix_y = -v | 纵轴 = pix_x = -u | 函数内部交换两个绘图轴 |
+| 地图显示 East/North | East = `-West` | North = `x` | 只用于地图显示 |
+| 望远镜本地光学 | 水平横向 `local x` | 天空向上 `local y` | `local +z` 为光轴，指向天空 |
+| 镜片与遮挡 CSV | local x | local y | local z；直接进入本地光学几何 |
+| 输出面 / LACT 相机 | `u = local x` | `v = local y` | 当前输出面约为 local `z=-8 m` |
+| pyLAST `LactEventSource` | `pix_x=-v` | `pix_y=+u` | 与最新版 `main` 一致 |
+| pyLAST 当前画布 | 横轴 `pix_y=+u` | 纵轴 `pix_x=-v` | `plot_camera_image()` 的参数顺序 |
 
-这套定义看起来“很奇怪”，是因为它不是一次单纯的坐标旋转，而是两个代码边界叠加：`LactEventSource` 读取 ROOT 时先把 LACT 焦面传播落点的两轴都取反，形成 pyLAST 使用的源偏移字段；`plot_camera_image()` 随后把 `pix_y` 放到屏幕横轴、把 `pix_x` 放到屏幕纵轴。因此 pyLAST 最终画布向右是 `-v`，向上是 `-u`。这只改变坐标表达，不会再次旋转望远镜、镜片或原始光路。第一页已同时画出 LACT 与 pyLAST 的正轴，并逐项注明源码出处。
+`buildTelescopeFrame()` 用于通用全局显示；`buildCorsikaNwuTelescopeFrame()` 用于 NWU 输入适配。两者的全局轴名称不同，但进入镜片、遮挡、输出面和相机的规范光学本地语义必须一致：`+x` 为横向、`+y` 为天空向上、`+z` 为光轴。网页不得再用旧的“CORSIKA local x=仰角、local y=方位”基底展开望远镜结构。
 
-CORSIKA 输入适配器与通用追迹使用两套不同的望远镜基底。它们都在程序里真实存在，不能因为轴名同为 local x/y/z 就混为一套。两套公式和源代码位置见审计笔记第 1 节。
+## theta / phi 的两种定义
 
-相机面板提供两个互不混淆的视图：“物理相机范围”严格按 1616 像素 CSV 的实际边界显示，“输出光斑放大”以同一事例 raw `u/v` 的包围盒中心缩放。北向 CORSIKA 事例的光斑中心约在 `u=-2.976 m, v=0.204 m`，远在物理相机之外，所以程序真实结果是 1557 个输出面命中、0 个相机命中；这不是图像没有生成。对准事例则为 1351 个输出面命中、1149 个相机命中和 18 个非零像素。
+程序中有两套不能混用的 `theta/phi`：
+
+1. 合成平行光的 `source.beam_theta_deg / source.beam_phi_deg` 是望远镜本地角。实际代码计算 `d_local=(sinθ cosφ, sinθ sinφ, -cosθ)`，所以 `θ=0°` 沿 local `-z` 入射；`φ=0°/90°/180°/270°` 分别偏向 local `+x/+y/-x/-y`。
+2. CORSIKA event header 的原始 `theta_deg / phi_deg` 是 shower 头字段。`theta` 从天顶量，因此 `altitude=90°-theta`；原始 `phi` 不能直接画成北起地图方位。程序使用 `A=(array_rotation-phi+180°) mod 360°` 得到 `azimuth_north_to_east_deg`，其中 `A=0°/90°/180°/270°` 分别为北/东/南/西。
+
+四页左下角共用同一个固定地图：始终北上、南下、西左、东右，橙色箭头显示天空来向，方位 `A` 从 North 向 East 顺时针增加；地图下方同时给出 `A` 和从天顶量起的 `θz=90°-altitude`。第 2–4 页右上角的精简角度卡再显示当前事例的原始值、局部光束公式或 CORSIKA 换算公式。CORSIKA 页固定地图中的橙色箭头画的是程序换算后的 `A`，不是原始 `phi`。
+
+固定地图在 CORSIKA 页严格使用程序 CORSIKA NWU 坐标：`x=North、y=West、z=Up`，为了“北上东右”，画布右侧 East 对应 `-y`。第 1–3 页的固定地图只是通用全局坐标的方位显示参考，不是 CORSIKA 输入 `x/y`；网页已在地图标题下明确标出这一区别。
+
+固定地图旁边保留一个紧凑的“屏幕方向”框，它才随观察视角旋转；重合于视线的轴使用 `⊗屏幕内 / ⊙屏幕外`。三维投影恢复使用完整画布高度。望远镜角度、事例和观察视角控制合并在底部“视角 / 参数”面板中并默认收起，避免长操作提示和仰角滑块遮挡镜片、支架或遮挡点。
 
 ## CORSIKA 二维 bunch 的三维反演边界
 
-EventIO 二维 bunch 直接提供记录面上的 x/y、传播方向、time 和 zem；记录点 z=0 不是发射高度。页面沿原始传播直线，使用 zem 给出的高度反推一个三维发射点，并由路径长度与 time 反推发射时刻。两者都明确标记为“派生”，不是 EventIO 显式存储的三维光子坐标。芯位是主簇射轴与阵列 `z=0` 平面的交点，单个 photon anchor 是相对望远镜的切伦科夫光子到达点，两者本来就不应重合；页面同时画主轴、光子反演点以及二者在同一高度的横向残差。
+EventIO 二维 bunch 提供记录面上的 `x/y`、传播方向、时间和 `zem`，其中 `z=0` 是输入参考面，不是发射高度。页面沿原始传播直线，用 `zem` 高度反推三维发射点：
 
-该事例的观测高度直接读取 shower header 的 `440000 cm = 4400 m`，不由网页猜测。EventIO x/y/zem 统一换算为米，ROOT 阵列位置已经是米；三维画布对所有轴和四台望远镜使用一个等比例尺度。生成器对 960 个显示点逐点验证 `zem` 高度和直线共线关系。散点大小只是屏幕像素，不能拿它当物理尺度。
+```text
+h = zem - observation_altitude - telescope_z
+s = (h - anchor_z) / (-dir_z)
+emission = anchor - s * direction
+```
+
+反演点是派生量，不是 EventIO 显式存储的三维坐标。生成器必须验证方向模长、反演高度和直线共线残差，并保留原始单位和来源信息。
+
+## 输出面与相机
+
+默认页面直接显示 LACT_sim 原始 `u/v`：横轴 `u`、纵轴 `v`，不平移、不旋转、不取反。选择 pyLAST 显示时只改变坐标表达，复用同一批 output 点、像素 id 和信号值。
+
+物理相机范围严格按相机 CSV 的全部像素显示；光斑放大只改变取景范围。两种视图都不能移动物理零点或改变数值。
 
 ## 支架形变
 
-理想镜片来自 configs/mirror_1229_facets.csv，仰角系列来自 configs/mirror_1229_elevation_series.csv。页面直接计算：
+理想镜片来自镜片配置，仰角系列来自支架形变 CSV。页面使用：
 
-    delta_center_local = deformed_center_local - ideal_center_local
+```text
+delta_center_local = deformed_center_local - ideal_center_local
+```
 
-镜片颜色编码位移模长，箭头编码原始 local dx/dy/dz 方向。箭头倍率只服务于观察，不会改变镜片位置、统计值或坐标定义。程序在角度锚点之间对中心做线性插值、对法向做 SLERP。
+镜片颜色表示位移模长，箭头表示原始 local `dx/dy/dz`。箭头倍率只用于观察，不改变镜片位置和统计值。
 
-## 生成页面
+## 生成与验证
 
-    python python/build_coordinate_diagnostics_html.py --output docs/assets/lact-coordinate-system-3d.html
+```powershell
+python python/build_coordinate_diagnostics_html.py --output docs/assets/lact-coordinate-system-3d.html
+node python/test_coordinate_diagnostics_runtime.js docs/assets/lact-coordinate-system-3d.html
+```
 
-生成器会核验镜片 id、形变差值、CORSIKA raw-input 联接、surface 与 u/v、输出行数、相机像素 id、event/array/telescope 元数据。对每个平行光 case 还会把 raw global surface 用该 run 记录的基底投影回 `u/v`，验证 camera `x/y==u/v`、像素光子总数等于 C++ `hit_camera`；四方向案例还要求完整 output/hit-camera 数组行数分别等于 C++ 计数，并把 hits CSV 按 `pixel_id` 重计数后逐像素对比 camera CSV。
+生成器必须核验镜片 id、形变差值、CORSIKA raw input、surface 与 `u/v`、输出行数、相机像素 id、event/array/telescope 元数据和来源版本。真实输出重新生成后，审计笔记会记录 Git commit、源码树哈希、配置、输入文件哈希、运行命令和结果哈希。
 
-平行光白板图把 hits CSV 的完整 `u_m/v_m` 逐行计入二维直方图，只将每个 bin 的计数映射为颜色。完整 `camera_x_m/camera_y_m` 仍用于逐行与逐像素强校验，但不再叠成第二层散点遮挡光斑。右上角可在“LACT 原始 u/v”和“pyLAST 相机显示”之间切换：前者横轴 `u`、纵轴 `v`，不做转换；后者严格复现 pyLAST 0.0.4 源码，先取 `pix_x=-u、pix_y=-v`，再按 `plot_camera_image()` 的横轴 `pix_y`、纵轴 `pix_x` 排列。两种视图使用同一批数据，不改变点数、像素值或物理结果。
-
-平行光三维图的黄色小点是全部真实镜面反射点，包括随后在反射段被遮挡的光子。红叉是全部 incoming-blocked 记录的理论镜面端点，紫叉是全部 reflected-blocked 记录的理论输出端点。由于当前 C++ CSV 没有保存光线与遮挡 primitive 的精确相交位置，红叉和紫叉只能称为“遮挡诊断端点”，不能解释成精确遮挡交点；光路线段仍只抽样 48 条。
+平行光三维图可省略大部分光路线，但必须保留全部真实镜面反射点和全部遮挡记录的诊断端点。当前 CSV 没有保存与遮挡 primitive 的精确相交位置，因此这些点只能称为“遮挡诊断端点”，不能解释为精确遮挡交点。

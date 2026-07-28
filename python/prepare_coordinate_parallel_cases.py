@@ -423,8 +423,11 @@ def parse_args() -> argparse.Namespace:
         default="run_logs/coordinate_workbench/server_current_afd630ae/run_logs/coordinate_workbench",
     )
     parser.add_argument("--output", default="docs/assets/data/coordinate-parallel-cases.json")
-    parser.add_argument("--source-archive-sha256", default="afd630aedc69825f55eea3961a942ae7904c2b0bb6061f016775f3f10bc49afe")
-    parser.add_argument("--results-archive-sha256", default="47493ae480d4e5f00d38c656b39926f956c47da35415f7836c4802e6300cc77f")
+    parser.add_argument("--four-direction-root", default="run_logs/coordinate_workbench/server_sky_angle/sky-angle")
+    parser.add_argument("--source-base-commit", required=True)
+    parser.add_argument("--source-archive-sha256", required=True)
+    parser.add_argument("--results-archive-sha256", required=True)
+    parser.add_argument("--run-binary-sha256", required=True)
     parser.add_argument("--sample-rays", type=int, default=48)
     parser.add_argument("--sample-output", type=int, default=400)
     return parser.parse_args()
@@ -452,7 +455,7 @@ def main() -> None:
             Path("configs/examples/coordinate_parallel_deformation_camera.cfg"),
             args.sample_rays, args.sample_output,
         ))
-    four_root = Path("run_logs/coordinate_workbench/server_sky_angle/sky-angle")
+    four_root = Path(args.four_direction_root)
     four_direction_cases = []
     four_specs = (
         (
@@ -496,9 +499,20 @@ def main() -> None:
     ]
     output = {
         "status": "ready",
-        "source": "current C++ source compiled in an isolated server /tmp directory",
+        "source": "latest-main-based C++ source compiled and run in an isolated server directory",
+        "source_base_commit": args.source_base_commit,
         "source_archive_sha256": args.source_archive_sha256,
         "results_archive_sha256": args.results_archive_sha256,
+        "run_binary_sha256": args.run_binary_sha256,
+        "critical_source_sha256": {
+            path.as_posix(): sha256(path)
+            for path in (
+                Path("apps/run_optical_sim.cpp"),
+                Path("src/app/OpticalSimCommon.cpp"),
+                Path("include/io/SurfaceHitCsvWriter.hpp"),
+                Path("apps/test_coordinate_frames.cpp"),
+            )
+        },
         "four_direction_results_archive_sha256": combined_sha256(four_files),
         "baseline": baseline,
         "four_direction_cases": four_direction_cases,

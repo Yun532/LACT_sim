@@ -135,11 +135,22 @@ def main() -> None:
         "--output",
         default="docs/assets/data/corsika-event1909-coordinate-case.json",
     )
+    parser.add_argument("--source-base-commit", required=True)
+    parser.add_argument("--source-archive-sha256", required=True)
+    parser.add_argument("--run-binary-sha256", required=True)
+    parser.add_argument("--eventio-sha256", required=True)
+    parser.add_argument("--run-log")
     parser.add_argument("--sample-rays", type=int, default=240)
     args = parser.parse_args()
 
     root_path = Path(args.root)
     eventio_path = Path(args.eventio)
+    actual_eventio_sha256 = sha256(eventio_path)
+    if actual_eventio_sha256 != args.eventio_sha256.lower():
+        raise ValueError(
+            "EventIO SHA-256 mismatch: "
+            f"actual={actual_eventio_sha256}, declared={args.eventio_sha256}"
+        )
     root = uproot.open(root_path)
     event = root["corsika_events"].arrays(library="np")
     telescopes = root["telescopes"].arrays(library="np")
@@ -264,15 +275,27 @@ def main() -> None:
             "formula": "h=zem-observation_altitude-telescope_z; s=(h-anchor_z)/(-dir_z); emission=anchor-s*direction",
         },
         "provenance": {
-            "source_file_name": (
-                "lact_prod1_corsika_particle_gamma_energy_1000.0_10000.0_"
-                "zenith_20.0_azimuth_0.0_run_1_event_0.zst"
-            ),
-            "source_file_size_bytes": 4002090371,
+            "source_file_name": eventio_path.name,
+            "source_file_size_bytes": eventio_path.stat().st_size,
             "source_file_path": eventio_path.as_posix(),
+            "source_file_sha256": actual_eventio_sha256,
             "eventio_python_version": eventio_version,
             "root_path": root_path.as_posix(),
             "root_sha256": sha256(root_path),
+            "source_base_commit": args.source_base_commit,
+            "source_archive_sha256": args.source_archive_sha256,
+            "run_binary_sha256": args.run_binary_sha256,
+            "critical_source_sha256": {
+                path.as_posix(): sha256(path)
+                for path in (
+                    Path("apps/run_corsika_trace.cpp"),
+                    Path("src/app/OpticalSimCommon.cpp"),
+                    Path("apps/test_coordinate_frames.cpp"),
+                    Path("configs/examples/corsika_coordinate_event1909_array.cfg"),
+                )
+            },
+            "run_log": args.run_log,
+            "run_log_sha256": sha256(Path(args.run_log)) if args.run_log else None,
             "event_id_mode": "event_array100",
             "selection": {"event_id": 1909, "shower_event_id": 19, "array_id": 9},
             "ray_boundary": (
@@ -296,6 +319,7 @@ def main() -> None:
                 "observation altitude is read from the selected CORSIKA event header",
                 "every displayed emission point reproduces raw zem and the raw straight ray",
                 "all displayed CORSIKA positions use metres and one shared isotropic 3D scale",
+                "ROOT output records the latest-main base commit, exact source archive and binary hashes",
             ],
         },
     }

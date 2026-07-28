@@ -1,8 +1,10 @@
 # LACT_sim 坐标与转换审计笔记
 
-这份笔记是 `docs/assets/lact-coordinate-system-3d.html` 的唯一坐标定义来源。页面只能展示本笔记中已经找到代码出处的定义；没有程序原值的内容必须标记为“派生”或“仅用于坐标演示”。
+这份笔记是 `docs/assets/lact-coordinate-system-3d.html` 的坐标审计记录。页面只能展示已经由实际代码、数值测试或真实输出证明的定义；没有程序原值的内容必须标记为“派生”或“仅用于坐标演示”。注释只能帮助定位，不能单独作为结论。
 
-## 1. 三套不能混用的三维基底
+本轮审计基线是远端 `main` 提交 `f2b6617c67e799456d1e92ee7a25af038c8e63be`（`Align CORSIKA optical coordinates`）。判定顺序是：读取实际函数实现 → 独立计算已知角度的数值基向量 → 运行 C++ 回归测试 → 用最新版二进制重新生成输出 → 由网页运行时测试逐顶点比较结构。任何一项不一致都不得标记为通过。
+
+## 1. 三层必须明确边界的三维基底
 
 ### 1.1 CORSIKA / EventIO 原始坐标：NWU
 
@@ -32,16 +34,16 @@ emission_altitude_km = b.zem*1e-5
 设 CORSIKA 方位角 `A` 从磁北向东增加，仰角 `E` 从地平线向天空增加。程序构造：
 
 ```text
-e_x = (-sin(E)cos(A),  sin(E)sin(A), cos(E))
-e_y = (-sin(A),       -cos(A),       0)
+e_x = ( sin(A),         cos(A),        0)
+e_y = (-sin(E)cos(A),   sin(E)sin(A), cos(E))
 e_z = ( cos(E)cos(A), -cos(E)sin(A), sin(E))
 ```
 
 含义：
 
 ```text
-local +x = 仰角增加方向
-local +y = 方位角 North→East 增加方向
+local +x = 水平横向；A=0 时指向 West，与方位角增加方向相反
+local +y = 仰角增加方向 / sky-up
 local +z = boresight，镜面指向相机/天空
 ```
 
@@ -61,11 +63,11 @@ direction:             d_local = normalize(dot(d_nwu,e_x), dot(d_nwu,e_y), dot(d
 - `src/app/OpticalSimCommon.cpp:218`：`pointToLocal()` 先减 `origin`。
 - `src/app/OpticalSimCommon.cpp:584`：`buildCorsikaNwuTelescopeFrame()` 定义上面的三个基向量。
 - `src/app/OpticalSimCommon.cpp:690` 附近：`transformBunchToTelescopeLocal()`；`corsika_nwu_relative` 只旋转，`corsika_nwu_global` 先减望远镜位置再旋转。
-- `apps/test_coordinate_frames.cpp:31-70`：对 az=0、el=70° 的轴方向和 relative/global 往返做了数值断言。
+- `apps/test_coordinate_frames.cpp:31-83`：对 az=0、el=70° 的三轴数值、右手性、relative/global 往返以及 71° 光源映射做断言。
 
 ### 1.3 通用/合成光线追迹全局基底
 
-`run_optical_sim` 的平行光先在 `telescope_local` 中生成，然后使用另一套历史基底 `buildTelescopeFrame()` 把光子、镜片和输出面整体转到全局：
+`run_optical_sim` 的平行光先在 `telescope_local` 中生成，然后使用通用历史全局基底 `buildTelescopeFrame()` 把光子、镜片和输出面整体转到全局：
 
 ```text
 generic e_z = (cos(E)cos(A), cos(E)sin(A), sin(E))
@@ -81,7 +83,17 @@ generic e_y = e_z × e_x
 - `apps/run_optical_sim.cpp:26-45`：读取 telescope、先应用结构形变，再将镜片和输出面送入通用 frame。
 - `apps/run_optical_sim.cpp:410-430`：输入先转入本地，再由 `applyTelescopeFrame(photon, telescope_frame)` 转入通用全局追迹坐标。
 
-重要审计结论：`buildTelescopeFrame()` 和 `buildCorsikaNwuTelescopeFrame()` 不是同一横轴定义。页面第一部分必须同时画出并明确命名，不能把合成平行光的 generic frame 冒充 CORSIKA NWU input frame。
+重要审计结论：两者的全局坐标语义仍不同——通用全局只定义 `az: +x→+y`，不能自动把其 `+x/+y` 宣称为 CORSIKA 的 North/East；但最新版已经统一进入镜片、遮挡、输出面和相机后的规范光学本地语义：`local +x` 为水平横向、`local +y` 为 sky-up、`local +z` 为光轴。旧网页把 CORSIKA 的 `x/y` 按修正前定义交换后再展开整台望远镜，是绘图错误。
+
+对 `A=0°、E=70°`，最新版函数必须实际返回：
+
+```text
+CORSIKA NWU e_x = (0, 1, 0)
+CORSIKA NWU e_y = (-sin70°, 0, cos70°)
+CORSIKA NWU e_z = ( cos70°, 0, sin70°)
+```
+
+网页运行时测试不读取注释，而是调用页面公式计算上述数值；同时把平行光和 CORSIKA 的 54 块镜片逐顶点减去各自镜面顶点后比较，最大误差必须小于 `1e-9 m`。
 
 ## 2. EventIO 二维参考面的 z 平移
 
@@ -175,20 +187,48 @@ boresight / 天空方向 = +local z
 LACT_sim 到 pyLAST 的已实现约定：
 
 ```text
-pyLAST pix_x = -LACT_sim u
-pyLAST pix_y = -LACT_sim v
+pyLAST pix_x = -LACT_sim v
+pyLAST pix_y = +LACT_sim u
 ```
 
-pyLAST 当前绘图函数又把第二个坐标放在水平轴、第一个坐标放在垂直轴。诊断页面默认画 LACT_sim 原始 `u/v`；只有用户显式选择“pyLAST 相机显示”时才应用该变换，不得静默翻转。
+pyLAST 当前绘图函数把第二个坐标放在水平轴、第一个坐标放在垂直轴。诊断页面默认画 LACT_sim 原始 `u/v`；只有用户显式选择“pyLAST 相机显示”时才应用该变换，不得静默翻转。
 
-之所以视觉上反常，是因为这里连续发生了两件事：ROOT reader 为得到 pyLAST 的源偏移定义而对 LACT 焦面传播坐标双轴取负；visualizer 再交换字段在 Matplotlib 画布上的横纵顺序。最终画布是 `horizontal=-v、vertical=-u`，但三维望远镜和物理光路没有因此再旋转一次。
+最终画布是 `horizontal=pix_y=+u、vertical=pix_x=-v`。这是 LACT `u/v` 到 pyLAST 字段的边界映射加上绘图参数顺序，不会让三维望远镜或物理光路再旋转一次。
 
-诊断页面现在提供显式坐标选择器。`LACT 原始 u/v` 保持横轴 `u`、纵轴 `v`；`pyLAST 相机显示` 严格使用本机核对的 pyLAST 0.0.4 `root/LactEventSource.cpp:245-246` 与 `src/pylast/visualize/visualize.py:82-83`，即横轴 `pix_y=-v`、纵轴 `pix_x=-u`。选择器只改变坐标表达，必须复用同一 output 点、像素 id 和 `image_cherenkov_pe`，不得重新模拟或改变事件内容。
+诊断页面提供显式坐标选择器。`LACT 原始 u/v` 保持横轴 `u`、纵轴 `v`；`pyLAST 相机显示` 使用最新版 `main` 已核对的 `pix_x=-v、pix_y=+u`，即横轴 `+u`、纵轴 `-v`。选择器只改变坐标表达，必须复用同一 output 点、像素 id 和 `image_cherenkov_pe`，不得重新模拟或改变事件内容。
 
 代码出处：
 
-- `python/compare_minimal_csv_to_corsika_pylast.py:193-206`：用 `actual_x+config_x`、`actual_y+config_y` 验证双轴取负。
-- `python/plot_photon_csv_root_pylast.py:31-55`：记录 pyLAST 的绘图轴顺序并提供 LACT `u/v` 视图。
+- `python/compare_minimal_csv_to_corsika_pylast.py`：数值核对 LACT `u/v` 与 pyLAST `pix_x/pix_y`。
+- `python/plot_photon_csv_root_pylast.py:31-58`：明确 `pix_x=-v、pix_y=+u`，并记录绘图轴顺序。
+
+### 5.1 `theta/phi` 角度方向审计
+
+代码中同名角度存在两个作用域，网页必须明确标注，不能互相替代：
+
+```text
+合成平行光（望远镜本地）：
+d_local = (sin(theta) cos(phi), sin(theta) sin(phi), -cos(theta))
+theta=0° -> local -z
+phi=0°/90°/180°/270° -> 偏向 local +x/+y/-x/-y
+```
+
+代码出处为 `src/app/OpticalSimCommon.cpp:1936-1947`。`SyntheticPhotonSource` 最终直接使用归一化后的 `beam_direction`，见 `src/io/SyntheticPhotonSource.cpp:92-103`。因此这里的 `phi` 是望远镜本地 x/y 平面的角，不是北起地图方位。
+
+CORSIKA shower header 则按以下顺序保留原值并生成地图方位：
+
+```text
+theta_deg = MC_EVTH[10]                    # 从天顶量
+phi_deg = MC_EVTH[11]                      # CORSIKA 原始 phi
+altitude_deg = 90° - theta_deg
+A_north_to_east = (array_rotation - phi + 180°) mod 360°
+```
+
+代码出处为 `src/io/EventIOPhotonSource.cpp:300-312`；ROOT 同时保存 `theta_deg`、`phi_deg`、`azimuth_north_to_east_deg` 和 `altitude_deg`，见 `src/io/LactEventRootWriter.cpp:863-867`。固定角度参考的橙色箭头只画最终 `A_north_to_east`：`0°=North、90°=East、180°=South、270°=West`。原始 `phi` 只作为原值和换算输入显示，不能单独贴到北上东右地图上。
+
+event 1909 的实际原值为：`theta=19.3797875057°`、`phi=-179.1167112851°`、`array_rotation=-1.4299999943°`；代入公式得到 `A=357.6867155597°`，与 ROOT 的 `azimuth_north_to_east_deg` 相同，`altitude=70.6202124943°`。
+
+固定角度参考的视觉方向在四页完全相同：俯视始终北上东右，`A/φ_map` 从北向东顺时针；侧视始终天顶在上、地平在右，`θ_sky` 从天顶向地平量。坐标边界仍分页面：CORSIKA 页 `x=North、y=West、z=Up` 是代码输入/ROOT 输出的 NWU 原值，地图 East 因而是 `-y`；全局、平行光和仰角页的 `North=+x、East=+y` 仅为通用全局坐标的显示参考，不是 CORSIKA 输入 `x/y`。网页标题下必须显示当前属于哪一类。
 
 ## 6. CORSIKA 芯位、到达轴和 photon bunch 反演
 
@@ -261,24 +301,37 @@ time=89.006516 ns, zem=1600121 cm, photons=4.921779
 
 ## 7. 四个页面的数据边界
 
-1. **全局坐标定义**：只画一台完整理想望远镜，并在同一个原点叠加 NWU/CORSIKA 输入基底与 generic trace frame；不读取 event。完整镜片、遮挡、相机和 u/v 必须使用实际 `run_optical_sim` 的 `buildTelescopeFrame()` 展开，CORSIKA NWU 基底只画输入轴，不能驱动结构。程序角度默认 `az=0° / el=70°`，运行时测试要求其 54 块理想镜片的全部顶点与第 2 页同角度结构逐点一致。默认显示相机取 `view_el=0° / view_az=180°`，视线位于地平面内，因此地面严格投影为一条水平地平线；该显示视角不改变望远镜 pointing。
+1. **全局坐标定义**：只画一台完整理想望远镜，不读取 event。完整镜片、遮挡、相机和 `u/v` 使用实际 `run_optical_sim` 的 `buildTelescopeFrame()` 展开；CORSIKA NWU 轴只用于解释另一种输入坐标，不能把两个全局 `x/y` 的名字直接等同。程序角度默认 `az=0° / el=70°`，运行时测试要求其 54 块理想镜片的全部顶点与第 2 页同角度结构逐点一致。默认观察为地平侧视，因此地面投影为一条水平线；观察角不改变望远镜 pointing。
 2. **平行光**：望远镜固定 `pointing_az=0° / pointing_el=70°`，读取四个独立的真实 `run_optical_sim` 运行。天区上/下光源为 `az=0° / el=71°、69°`；天区左/右光源为 `az=-1°、+1° / el=70°`。全局天空方向先用 `buildTelescopeFrame()` 的点积转换为程序所需本地传播向量，再原值写入 `source.beam_direction`。右上角四张白板 `u/v` 图分别按各自原始包围盒自动放大，保留绝对 u/v 刻度、正方向和米单位，并作为统一 case 选择器；选择后，三维区只显示该 run 的光路、镜面反射点和遮挡段。热图逐行统计完整 CSV 的 output `u/v`，完整 hit-camera `u/v` 保留用于强校验但不重复覆盖在光斑上。
 3. **不同天顶角平行光**：每个角度有独立 `run_optical_sim` 输出，并与同角度的形变镜片绑定。默认显示相机同样取 `view_el=0° / view_az=180°`，所以地面只是一条地平线；显示相机角与望远镜仰角/天顶角是两个独立量。
 4. **CORSIKA 事例**：固定绑定 4 GB prod1 的 event 1909；画 32 台真实阵列位置，以及 tel19 / tel16 / tel21 / tel20 的原始 photon anchor、direction 和 `zem` 派生发射点；四台各从完整 bunch 列表均匀抽取 240 条并用不同颜色的大散点显示。同一 ROOT 中信号最大的四台相机同步显示。逐光子镜面反射折线未写入 ROOT，页面不得伪造。
 
-每个包含地面的页面都同时画地面三维轴和两套方向指示。固定地图始终“北上、东右”，不接受三维视角旋转；相邻的“当前屏幕投影”才随观察视角变化。CORSIKA 页面按 NWU 标为 `North=+x、West=+y、Sky=+z`，因此地图 East=`-y`；通用平行光页面按程序通用全局轴把 `North=+x、East=+y` 明确标成“显示参考”，避免把它误称为 CORSIKA 地理坐标。某方向与观察视线重合时，投影指示用 `⊗ 屏幕内 / ⊙ 屏幕外` 表示，因此即使默认地面侧视成一条地平线也不会丢失南北方向。页首说明、左侧原值与校验、相机图说明及形变图说明均默认折叠；平行光白板采用与页面一致的深色背景，这些仅是界面层变化，不修改数据或坐标。
+每个包含地面的页面都同时画地面三维轴和两套方向指示。左下固定地图始终“北上、南下、西左、东右”，不接受三维视角旋转；相邻的紧凑“屏幕方向”才随观察视角变化。CORSIKA 页面按 NWU 标为 `North=+x、West=+y、Sky=+z`，因此地图 East=`-y`；通用平行光页面按程序通用全局轴把 `North=+x、East=+y` 明确标成“显示参考”，避免把它误称为 CORSIKA 地理坐标。某方向与观察视线重合时，投影指示用 `⊗ 屏幕内 / ⊙ 屏幕外` 表示，因此即使默认地面侧视成一条地平线也不会丢失南北方向。`fit()` 仍以全部场景点的包围球半径确定统一 span，但三维投影恢复使用完整画布高度。望远镜角度、事例和观察视角控件合并到默认收起的“视角 / 参数”面板；展开后才显示简短的 `az/el`、`el/θz` 和拖动操作，避免原来的长提示与滑块覆盖镜片、支架和遮挡点。页首说明、左侧原值与校验、相机图说明及形变图说明也默认折叠；这些仅是界面层变化，不修改数据或坐标。
 
-三维观察相机也必须直接使用程序方位基底。通用页的屏幕右、屏幕上、深度轴分别等于 `buildTelescopeFrame()` 的 `x_axis/y_axis/z_axis`。CORSIKA 适配器的本地横轴定义不同：local `+x` 增加仰角、local `+y` 增加方位角，因此 CORSIKA 页的屏幕右、屏幕上、深度轴分别等于 `buildCorsikaNwuTelescopeFrame()` 的 `y_axis/x_axis/z_axis`。这样 `az=0°` 朝 North，`az=90°` 在通用显示参考中朝 `+y`、在 CORSIKA NWU 中朝 East=`-y`；从天空向地面看都表现为顺时针向东。鼠标拖动只连续修改观察 az/el，不允许更换叉乘符号或恢复另一套屏幕右轴。
+三维观察相机必须服从所显示的全局坐标。通用页按 `buildTelescopeFrame()` 的抽象全局基底观察；CORSIKA 页按 NWU 观察，其中 `North=+x、East=-y、Up=+z`。最新版 CORSIKA 光学轴为 `local x=水平横向、local y=sky-up、local z=boresight`；俯视屏幕为了保持北上东右，屏幕右方向在 NWU 中是 East=`-y`，因此它是 `-local x` 而不是把 `local x/y` 交换。鼠标拖动只修改观察相机，不修改程序基向量。
 
 页面不允许相机与三维区各自保留不同事例。平行光右上角图像可以被点击，但它修改的是唯一的 `selectedCase`，相机、三维光路、镜片统计和左侧说明必须同步切换。
 
-平行光数据来自当前工作树源码在隔离目录中的真实 C++ 编译与运行，源归档 SHA-256 为 `afd630aedc69825f55eea3961a942ae7904c2b0bb6061f016775f3f10bc49afe`，基线/仰角结果归档 SHA-256 为 `47493ae480d4e5f00d38c656b39926f956c47da35415f7836c4802e6300cc77f`，新四方向结果与配置的组合 SHA-256 为 `8e584fdc9036fd980b5370f1176e298a19199f990d7d4076c0300f5ffb5af955`。每个 case 都保存自己的 basis、天空光源角、程序本地传播向量、raw input、镜面反射点、遮挡段标志、global surface、原始 `u/v`、相机像素和 C++ summary。
+本轮平行光和 CORSIKA 数据都来自 `main@f2b6617c67e799456d1e92ee7a25af038c8e63be` 的同一份隔离源码编译。源码归档 SHA-256 为 `f1561ec9f123142e7a68faac64dabea4b2f120db2e31fdc8e17e3c3aba500d7f`；包含基线、10 个仰角、四方向、event 1909 ROOT/CSV 和运行日志的结果归档 SHA-256 为 `2f8147d43a19c291840b5775fefd64265bf4a8bf8297d36de97cfe62b868dd3e`；四方向输入/输出组合 SHA-256 为 `6164d0a869bab1275850424b26f68b4c087e6564fec0d8675f2491dea2ef3327`。结果包下载后再次计算得到相同 SHA-256。
 
-四方向结果所用服务器源码与当前工作区逐文件 SHA-256 再核对一致：`apps/run_optical_sim.cpp=13bb4068…`、`src/app/OpticalSimCommon.cpp=9984bfd5…`、`include/io/SurfaceHitCsvWriter.hpp=de7885de…`；运行二进制 SHA-256 为 `5c486b2e…`。当前分支后来只修改了 CORSIKA 输出代码，没有修改这三个平行光执行路径文件。
+实际执行文件 SHA-256：`test_coordinate_frames=ef3005b818a2fe16a5a45f22207463b8482fd25e8b5be416ce95a08d219cef78`、`run_optical_sim=608e4113548f52ebc93daaaa37ee0387be383bca409c10fe730c577d3739eee0`、`run_corsika_trace=05d2c13b0852f5dbc8b0eff1ebfe37fca0b78854b7b94211902c5081529af79c`。`test_coordinate_frames` 在该构建中返回 0。关键执行路径文件的 SHA-256 为：`apps/run_optical_sim.cpp=13bb4068…`、`apps/run_corsika_trace.cpp=ea301842…`、`src/app/OpticalSimCommon.cpp=dc1efe8d…`、`include/io/SurfaceHitCsvWriter.hpp=de7885de…`、`apps/test_coordinate_frames.cpp=bc895299…`。
 
-右上角相机核对不再使用 400 点抽样：四组分别嵌入全部 `14676 / 14619 / 14632 / 14674` 个物理 output-plane `u/v`，并严格仿照程序 `plot_whiteboard()`：每组按自身包围盒中心取最大边长构成正方形范围，四周留 8% 边距，以 `140×140` 分箱绘制二维 count/bin 热图；红、蓝、黄、绿主色与对应三维光路一致，白叉为全量质心，白圈为 R68。LACT 模式显示未平移的绝对 u/v 原值和正方向；pyLAST 模式对同一批点显示横轴 `-v`、纵轴 `-u`。取景中心不强制为 `(0,0)`，零点只有位于当前范围内才画零线。全部 `11243 / 11212 / 9100 / 9133` 个 `hit_camera` 的 `camera_x/y` 仍保留在事例数据和强校验中，但不再作为第二层散点遮住光斑密度。完整 hits CSV 按 `pixel_id` 重计数后，必须逐像素等于完整 camera CSV 的 `photon_count`。三维区也直接嵌入并绘制全部 `hit_mirror` 镜面反射点（包括后来在反射段被遮挡的行），以及全部 incoming/reflected 遮挡记录对应的诊断端点；只有光路线段为避免遮挡而分层抽取 48 条。
+4 GB EventIO 原文件大小为 `4,002,090,371` 字节，SHA-256 为 `3feee5b7f3a001858201eea2cf75ba3f5f0277283e29900b5f259bd2c9bc4220`；本轮 event 1909 ROOT 的 SHA-256 为 `bbdf4c2dbb391984421b15973c58c34acb23682c64402cd91575dac49182f5f7`，运行日志 SHA-256 为 `9a01327a6396ac4f28e513209f524e858e429f20d51d9c0cf2e4000ccd83c2db`。网页生成器会拒绝缺少这些哈希、来源提交不一致或平行光/CORSIKA 源归档不一致的数据。
 
-相机画布不从三维图重新投影落点。二维热图逐行读取每个 run 的完整 hits CSV `u_m/v_m` 并统计 count/bin；完整 `camera_x_m/camera_y_m` 与 camera CSV 像素计数继续参与生成期校验，但不作为第二层散点覆盖光斑。生成期逐行验证所有 camera hit 的 `camera_x_m==u_m、camera_y_m==v_m`，同时用该 run 保存的 `buildTelescopeFrame` 基底把 global surface 投影回局部面并复现同一 `u/v`。LACT 模式不做变换；pyLAST 模式只在画布入口按源码双轴取负并交换绘图轴，不回写或修改原始数组。
+四方向真实输出摘要如下；质心是 LACT 原始 `(u,v)`，不是网页重投影值：
+
+| 光源 | `hit_mirror` | incoming / reflected 遮挡 | `hit_output_plane` | `hit_camera` | 原始质心 `(u,v)` m |
+|---|---:|---:|---:|---:|---:|
+| 上 `az=0°, el=71°` | 14,803 | 2,973 / 127 | 14,676 | 11,243 | `(0.000023, -0.143107)` |
+| 下 `az=0°, el=69°` | 14,754 | 2,988 / 135 | 14,619 | 11,212 | `(0.000015, +0.143108)` |
+| 左 `az=-1°, el=70°` | 14,748 | 2,952 / 116 | 14,632 | 9,100 | `(+0.048908, -0.000399)` |
+| 右 `az=+1°, el=70°` | 14,795 | 2,904 / 121 | 14,674 | 9,133 | `(-0.048943, -0.000386)` |
+
+网页运行时测试直接比较三页结构，而不是比较标签文字：全局/平行光理想镜片最大顶点误差为 `4.681018003915913e-10 m`；平行光/CORSIKA 在各自镜面中心归一后的最大顶点误差为 `9.769163457519441e-11 m`；平行光/仰角页基底误差为 0；CORSIKA `az=0°/el=70°` 数值基底与最新版 C++ 公式误差为 0；三维 x/y/z 等比例缩放测试通过。
+
+右上角相机核对不使用抽样：四组分别嵌入全部物理 output-plane `u/v`，并按程序 `plot_whiteboard()` 的方式以原始包围盒取景、留 8% 边距、使用 `140×140` count/bin。LACT 模式显示未平移的绝对 `u/v`；pyLAST 模式对同一批点显示横轴 `+u`、纵轴 `-v`。具体行数必须从本轮最新版真实输出重新写入来源记录，不能沿用旧二进制结果。完整 camera-hit `x/y` 继续参与逐行和逐像素强校验。三维区绘制全部 `hit_mirror` 反射点以及全部 incoming/reflected 遮挡记录诊断端点；只有光路线允许抽样。
+
+相机画布不从三维图重新投影落点。二维热图逐行读取每个 run 的完整 hits CSV `u_m/v_m` 并统计 count/bin；完整 `camera_x_m/camera_y_m` 与 camera CSV 像素计数继续参与生成期校验。生成期逐行验证 `camera_x_m==u_m、camera_y_m==v_m`，并用该 run 保存的 `buildTelescopeFrame` 基底把 global surface 投影回局部面复现同一 `u/v`。LACT 模式不做变换；pyLAST 模式只在画布入口应用 `horizontal=+u、vertical=-v`，不回写原始数组。
 
 为保留遮挡诊断行，四方向配置显式设置 `obstruction.mark_only=true`。CSV 的 `obstruction_blocked_incoming/reflected` 是 C++ 原始标志；`mirror_point` 和 `surface_point` 也是 tracer 输出原值。程序没有输出光线与 obstruction primitive 的精确交点，因此页面将全部 incoming-blocked 行画成其理论镜面端点红叉，将全部 reflected-blocked 行画成其理论输出端点紫叉。它们是完整的遮挡记录诊断点集合，但不能冒充 primitive 的精确相交位置。
 
@@ -300,4 +353,6 @@ time=89.006516 ns, zem=1600121 cm, photons=4.921779
 - event 1909 必须包含 32 台望远镜；四台 EventIO raw bunch 数必须逐台等于 ROOT `input_bunches`，其中 tel19 为 27,159 条；相机图只读同一 ROOT 的 `image_cherenkov_pe`。
 - event 1909 的观测高度必须直接来自所选 EventIO event header；每个显示发射点必须同时复现原始 `zem` 高度并与原始 anchor/direction 共线。
 - CORSIKA 的 EventIO cm→m、ROOT m 和网页单一等比例 span 必须显式记录；仅标记半径允许使用屏幕像素。
-- 两套 telescope frame 都保持单位长度、正交、右手性；页面标签不得互换。
+- 两套 telescope frame 都保持单位长度、正交、右手性；CORSIKA 的实际数值必须与最新版 C++ 公式一致，页面不得再交换 `local x/y`。
+- 平行光与 CORSIKA 在 `az=0°/el=70°` 下的 54 块镜片必须在各自镜面顶点归一后逐顶点一致，最大误差 `<1e-9 m`。
+- pyLAST 选择器必须对同一批点实现 `horizontal=+u、vertical=-v`，且切换前后三维几何逐值不变。

@@ -318,8 +318,8 @@ The optical ray tracer works in a telescope-local frame:
 ```text
 local +z : telescope optical axis, from mirror toward sky
 local -z : on-axis incoming photon direction, from sky toward mirror
-local +x : local camera/image horizontal axis chosen from the pointing basis
-local +y : completes a right-handed frame
+local +x : transverse horizontal axis, opposite increasing azimuth
+local +y : increasing elevation / sky-up axis
 ```
 
 The figure below is a concrete visual check for the generic telescope frame at
@@ -519,13 +519,13 @@ At the LACT ROOT/pyLAST boundary, `LactEventSource` converts focal-plane image
 coordinates to source-offset coordinates:
 
 ```text
-pyLAST pix_x = -u
-pyLAST pix_y = -v
+pyLAST pix_x = -v
+pyLAST pix_y = +u
 ```
 
 The current `pylast.visualize.plot_camera_image()` then draws `pix_y` on the
 horizontal Matplotlib axis and `pix_x` on the vertical axis. Therefore its
-display axes are `horizontal=-v`, `vertical=-u`. Use
+display axes are `horizontal=+u`, `vertical=-v`. Use
 `python/plot_photon_csv_root_pylast.py --coordinate-view lact-uv` to draw the
 same pyLAST event with raw LACT_sim `u` horizontal and `v` vertical.
 

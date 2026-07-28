@@ -6,20 +6,33 @@ if (!html.includes('<details id="infoPanel" class="panel">') ||
     html.includes('<details id="infoPanel" class="panel" open>')) {
   throw new Error("left information panel must exist and be collapsed by default");
 }
+if (!html.includes('<details id="controlPanel" class="panel">') ||
+    html.includes('<details id="controlPanel" class="panel" open>')) {
+  throw new Error("view and parameter controls must exist and be collapsed by default");
+}
 for (const marker of [
   '<details class="textfold"><summary>页面说明</summary>',
   '<details class="textfold"><summary>图像说明</summary>',
   '<details class="textfold"><summary>图表说明</summary>',
   '固定地图：北上东右',
-  '当前屏幕投影（随视角旋转）',
+  '北 N',
+  '南 S',
+  '东 E',
+  '西 W',
+  '屏幕方向（随视角）',
+  'title="左拖旋转；Shift 或右拖平移；滚轮以光标为中心缩放">拖动 / 缩放',
   'cctx.fillStyle="#0b1925"',
   'const PARALLEL_COLORS=["#ff6d7a","#64c7ff","#ffd45e","#70e39c"]',
   'caseDensityColor(plotColor',
   'id="cameraCoords"',
-  'cameraCoordinateMode()==="pylast"?[-p[1],-p[0]]',
-  'pyLAST +pix_x = -u',
-  'pyLAST +pix_y = -v',
-  'pyLAST 画布：向右 = -v；向上 = -u',
+  'cameraCoordinateMode()==="pylast"?[p[0],-p[1]]',
+  'pyLAST +pix_x = -v',
+  'pyLAST +pix_y = +u',
+  'pyLAST 画布：向右 = +u；向上 = -v',
+  'NWU：x=N，y=W，E=−y',
+  '显示：+x=N，+y=E',
+  'function corsikaAngleDisplay()',
+  'function beamDirectionFromAngles(thetaDeg,phiDeg)',
 ]) {
   if (!html.includes(marker)) throw new Error(`generated page is missing UI marker: ${marker}`);
 }
@@ -102,13 +115,13 @@ for (const [query, expected] of checks) {
 
 const globalElements = run("?page=global");
 const globalAxisNames = globalElements.sandbox.globalScene().lines.map(line => line.name);
-for (const expected of ["pyLAST +pix_x = -u", "pyLAST +pix_y = -v"]) {
+for (const expected of ["pyLAST +pix_x = -v", "pyLAST +pix_y = +u"]) {
   if (!globalAxisNames.includes(expected)) {
     throw new Error(`global definition scene is missing ${expected}`);
   }
 }
 const globalInfo = globalElements.get("info").innerHTML;
-for (const expected of ["pix_x=-u", "横轴=pix_y=-v", "LactEventSource.cpp:245-246", "visualize.py:82-83"]) {
+for (const expected of ["pix_x=-v", "横轴=pix_y=+u", "plot_photon_csv_root_pylast.py"]) {
   if (!globalInfo.includes(expected)) {
     throw new Error(`global pyLAST definition is missing ${expected}`);
   }
@@ -152,11 +165,11 @@ const rawCentroid = parallelCase.camera_summary.output_uv_centroid_m;
 parallelElements.get("cameraCoords").value = "pylast";
 const pylastPoint = parallelElements.sandbox.cameraDisplayPoint([0.12, -0.34]);
 const pylastHistogram = parallelElements.sandbox.spotHistogram(parallelCase, 140);
-if (Math.abs(pylastPoint[0] - 0.34) > 1e-12 || Math.abs(pylastPoint[1] + 0.12) > 1e-12 ||
-    Math.abs(pylastHistogram.centroid[0] + rawCentroid[1]) > 1e-12 ||
-    Math.abs(pylastHistogram.centroid[1] + rawCentroid[0]) > 1e-12 ||
+if (Math.abs(pylastPoint[0] - 0.12) > 1e-12 || Math.abs(pylastPoint[1] - 0.34) > 1e-12 ||
+    Math.abs(pylastHistogram.centroid[0] - rawCentroid[0]) > 1e-12 ||
+    Math.abs(pylastHistogram.centroid[1] + rawCentroid[1]) > 1e-12 ||
     pylastHistogram.n !== parallelCase.full_output_uv_m.length) {
-  throw new Error("pyLAST camera view does not implement horizontal=-v, vertical=-u on the complete point set");
+  throw new Error("pyLAST camera view does not implement horizontal=+u, vertical=-v on the complete point set");
 }
 parallelElements.get("cameraCoords").value = "lact";
 parallelElements.get("camera").listeners.click({clientX: 300, clientY: 250});
@@ -172,14 +185,26 @@ console.log("runtime OK parallel whiteboard selection and auto-framed absolute a
 const completePointElements = run("?page=parallel");
 const upPointClouds = completePointElements.sandbox.buildScene().pointClouds;
 const upPointCounts = upPointClouds.map(cloud => cloud.points.length);
-if (upPointCounts.join(",") !== "14803,2973,127") {
-  throw new Error(`parallel up full mirror/obstruction points are incomplete: ${upPointCounts}`);
+const upSummary = completePointElements.sandbox.selectedParallelCase().summary;
+const upExpectedCounts = [
+  upSummary.hit_mirror,
+  upSummary.blocked_incoming,
+  upSummary.blocked_reflected,
+];
+if (upPointCounts.join(",") !== upExpectedCounts.join(",")) {
+  throw new Error(`parallel up full mirror/obstruction points are incomplete: actual=${upPointCounts}; expected=${upExpectedCounts}`);
 }
 completePointElements.get("camera").listeners.click({clientX: 300, clientY: 250});
 const rightPointCounts = completePointElements.sandbox.buildScene().pointClouds
   .map(cloud => cloud.points.length);
-if (rightPointCounts.join(",") !== "14795,2904,121") {
-  throw new Error(`parallel right full mirror/obstruction points are incomplete: ${rightPointCounts}`);
+const rightSummary = completePointElements.sandbox.selectedParallelCase().summary;
+const rightExpectedCounts = [
+  rightSummary.hit_mirror,
+  rightSummary.blocked_incoming,
+  rightSummary.blocked_reflected,
+];
+if (rightPointCounts.join(",") !== rightExpectedCounts.join(",")) {
+  throw new Error(`parallel right full mirror/obstruction points are incomplete: actual=${rightPointCounts}; expected=${rightExpectedCounts}`);
 }
 console.log("runtime OK complete parallel reflection and obstruction point clouds");
 
@@ -206,6 +231,37 @@ if (maxStructureVertexError > 1e-9) {
   throw new Error(`global and parallel ideal mirrors disagree: ${maxStructureVertexError}`);
 }
 console.log("runtime OK global/parallel ideal mirror orientation", maxStructureVertexError);
+
+const corsikaStructureElements = run("?page=corsika&case=event1909");
+const corsikaStructureScene = corsikaStructureElements.sandbox.buildScene();
+const corsikaFacets = corsikaStructureScene.polys
+  .filter(polygon => polygon.name.startsWith("tel19 镜片 "));
+const corsikaOrigin = corsikaStructureScene.marks.find(item => item.name === "tel19").point;
+const parallelMirrorVertex = parallelStructureElements.sandbox.genericPoint(
+  [0, 0, -16], parallelStructureElements.sandbox.currentParallelCase()
+);
+let maxParallelCorsikaStructureError = 0;
+if (corsikaFacets.length !== 54) {
+  throw new Error(`CORSIKA ideal mirror count mismatch: ${corsikaFacets.length}`);
+}
+for (let facet = 0; facet < 54; ++facet) {
+  for (let vertex = 0; vertex < parallelFacets[facet].points.length; ++vertex) {
+    const a = parallelFacets[facet].points[vertex].map((value, axis) =>
+      value - parallelMirrorVertex[axis]
+    );
+    const b = corsikaFacets[facet].points[vertex].map((value, axis) =>
+      value - corsikaOrigin[axis]
+    );
+    maxParallelCorsikaStructureError = Math.max(
+      maxParallelCorsikaStructureError,
+      Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
+    );
+  }
+}
+if (maxParallelCorsikaStructureError > 1e-9) {
+  throw new Error(`parallel/CORSIKA telescope-local geometry disagrees: ${maxParallelCorsikaStructureError}`);
+}
+console.log("runtime OK parallel/CORSIKA telescope-local mirror orientation", maxParallelCorsikaStructureError);
 
 const elevationStructureElements = run("?page=elevation");
 const parallelAxes = parallelStructureElements.sandbox.buildScene().lines
@@ -251,7 +307,28 @@ for (const query of ["?page=global", "?page=parallel", "?page=elevation", "?page
     throw new Error(`${query}: visible ground compass metadata is missing`);
   }
   console.log("runtime OK ground compass", query, compass.frame);
+
+  const sceneData = elements.sandbox.buildScene();
+  const layout = elements.sandbox.sceneLayout();
+  const projectedYs = sceneData.points.map(point => elements.sandbox.project(point)[1]);
+  if (Math.min(...projectedYs) < -1e-7 || Math.max(...projectedYs) > layout.usableHeight + 1e-7) {
+    throw new Error(`${query}: fitted 3D content exceeds the full canvas`);
+  }
 }
+console.log("runtime OK full-height 3D projection after compact compass restoration");
+
+const fixedGlobal = run("?page=global").sandbox.fixedSkyReference();
+const fixedParallel = run("?page=parallel").sandbox.fixedSkyReference();
+const fixedElevation = run("?page=elevation").sandbox.fixedSkyReference();
+const fixedCorsika = run("?page=corsika&case=event1909").sandbox.fixedSkyReference();
+if (fixedGlobal.az_deg !== 0 || fixedGlobal.alt_deg !== 70 ||
+    fixedParallel.az_deg !== 0 || fixedParallel.alt_deg !== 71 ||
+    fixedElevation.az_deg !== 0 || fixedElevation.alt_deg !== 70 ||
+    Math.abs(fixedCorsika.az_deg - 357.6867155597) > 1e-9 ||
+    Math.abs(fixedCorsika.alt_deg - 70.6202124943) > 1e-9) {
+  throw new Error("the unified fixed angle reference does not use each page's real sky direction");
+}
+console.log("runtime OK unified fixed sky-angle reference across pages");
 
 function topDirection(elements, direction) {
   elements.sandbox.setView("top");
@@ -310,7 +387,12 @@ const corsikaDisplayElements = run("?page=corsika&case=event1909");
 const corsikaDisplay = corsikaDisplayElements.sandbox.displayBasis();
 const corsikaProgram = corsikaDisplayElements.sandbox.corsikaBasis({az_deg: 220, el_deg: -22});
 const corsikaDisplayError = maxBasisError(
-  {x: corsikaDisplay.up, y: corsikaDisplay.right, z: corsikaDisplay.forward}, corsikaProgram
+  {
+    x: corsikaDisplay.right.map(value => -value),
+    y: corsikaDisplay.up,
+    z: corsikaDisplay.forward,
+  },
+  corsikaProgram
 );
 if (genericDisplayError > 1e-12 || corsikaDisplayError > 1e-12) {
   throw new Error(`display/program azimuth basis mismatch: generic=${genericDisplayError}, CORSIKA=${corsikaDisplayError}`);
@@ -322,6 +404,35 @@ if (Math.abs(genericAz90[0]) > 1e-12 || Math.abs(genericAz90[1] - 1) > 1e-12 ||
   throw new Error(`az=90 must point East: generic=${genericAz90}, CORSIKA=${corsikaAz90}`);
 }
 console.log("runtime OK display basis follows program North-to-East azimuth", genericDisplayError, corsikaDisplayError);
+
+const corsikaNorthFrame = corsikaDisplayElements.sandbox.corsikaBasis({az_deg: 0, el_deg: 70});
+const sin70 = Math.sin(70 * Math.PI / 180);
+const cos70 = Math.cos(70 * Math.PI / 180);
+const expectedCorsikaNorthFrame = {
+  x: [0, 1, 0],
+  y: [-sin70, 0, cos70],
+  z: [cos70, 0, sin70],
+};
+const corsikaNorthFrameError = maxBasisError(corsikaNorthFrame, expectedCorsikaNorthFrame);
+if (corsikaNorthFrameError > 1e-12) {
+  throw new Error(`CORSIKA HTML basis differs from latest C++ formula: ${corsikaNorthFrameError}`);
+}
+console.log("runtime OK CORSIKA HTML basis matches latest C++ numeric frame", corsikaNorthFrameError);
+
+const showerAngles = corsikaDisplayElements.sandbox.corsikaAngleDisplay();
+const expectedShowerAzimuth = ((showerAngles.array_rotation_deg - showerAngles.phi_deg + 180) % 360 + 360) % 360;
+if (Math.abs(showerAngles.altitude_deg - (90 - showerAngles.theta_deg)) > 1e-12 ||
+    Math.abs(showerAngles.derived_azimuth_deg - expectedShowerAzimuth) > 1e-12 ||
+    Math.abs(showerAngles.azimuth_north_to_east_deg - showerAngles.derived_azimuth_deg) > 1e-5) {
+  throw new Error(`CORSIKA theta/phi direction conversion mismatch: ${JSON.stringify(showerAngles)}`);
+}
+const beamPhi0 = corsikaDisplayElements.sandbox.beamDirectionFromAngles(1, 0);
+const beamPhi90 = corsikaDisplayElements.sandbox.beamDirectionFromAngles(1, 90);
+if (beamPhi0[0] <= 0 || Math.abs(beamPhi0[1]) > 1e-12 || beamPhi0[2] >= 0 ||
+    Math.abs(beamPhi90[0]) > 1e-12 || beamPhi90[1] <= 0 || beamPhi90[2] >= 0) {
+  throw new Error("synthetic beam theta/phi does not follow local -z, +x toward +y convention");
+}
+console.log("runtime OK CORSIKA shower and synthetic-beam theta/phi directions", showerAngles);
 
 const scaleElements = run("?page=corsika&case=event1909");
 const origin = scaleElements.sandbox.rot([0, 0, 0]);

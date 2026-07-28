@@ -11,6 +11,11 @@ from collections import defaultdict
 from pathlib import Path
 
 
+def is_sha256(value) -> bool:
+    text = str(value or "")
+    return len(text) == 64 and all(char in "0123456789abcdef" for char in text.lower())
+
+
 def read_csv(path: Path) -> list[dict[str, str]]:
     with path.open(newline="", encoding="utf-8-sig") as handle:
         return list(csv.DictReader(line for line in handle if not line.lstrip().startswith("#")))
@@ -474,8 +479,16 @@ def validate_parallel_cases(parallel_cases: dict) -> dict:
             raise ValueError("parallel global-surface projection does not reproduce raw u/v")
         if validation["max_camera_xy_to_uv_error_m"] >= 1e-10:
             raise ValueError("parallel camera x/y do not reproduce raw u/v")
-    if not parallel_cases.get("source_archive_sha256") or not parallel_cases.get("results_archive_sha256"):
-        raise ValueError("parallel output is missing source/results archive provenance hashes")
+    for key in ("source_archive_sha256", "results_archive_sha256", "run_binary_sha256"):
+        if not is_sha256(parallel_cases.get(key)):
+            raise ValueError(f"parallel output has no valid {key}")
+    if len(str(parallel_cases.get("source_base_commit", ""))) != 40:
+        raise ValueError("parallel output is missing its 40-character base commit")
+    if not parallel_cases.get("critical_source_sha256") or any(
+        not is_sha256(value)
+        for value in parallel_cases["critical_source_sha256"].values()
+    ):
+        raise ValueError("parallel output is missing critical source hashes")
     return {
         "status": "passed",
         "checks": [
@@ -570,6 +583,14 @@ def main() -> None:
     event1909 = json.loads((root / args.event1909_case).read_text(encoding="utf-8"))
     if event1909.get("validation", {}).get("status") != "passed":
         raise ValueError("event 1909 coordinate payload did not pass its source checks")
+    event_provenance = event1909.get("provenance", {})
+    for key in ("source_file_sha256", "root_sha256", "source_archive_sha256", "run_binary_sha256"):
+        if not is_sha256(event_provenance.get(key)):
+            raise ValueError(f"event 1909 output has no valid {key}")
+    if event_provenance.get("source_base_commit") != parallel_cases.get("source_base_commit"):
+        raise ValueError("parallel and event 1909 outputs were not produced from the same main commit")
+    if event_provenance.get("source_archive_sha256") != parallel_cases.get("source_archive_sha256"):
+        raise ValueError("parallel and event 1909 outputs were not produced from the same source archive")
     examples = {}
     example_specs = {
         "north": {
