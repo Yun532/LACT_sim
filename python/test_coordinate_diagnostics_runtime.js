@@ -26,7 +26,9 @@ for (const marker of [
   'caseDensityColor(plotColor',
   'id="cameraCoords"',
   'id="deformMetric"',
-  'cameraCoordinateMode()==="pylast"?[p[0],-p[1]]',
+  'id="pylastCamera"',
+  'pylastCamera.src=D.pylast_native.image',
+  'EventVisualizer.plot_event()',
   'pyLAST +pix_x = -v',
   'pyLAST +pix_y = +u',
   'pyLAST 画布：向右 = +u；向上 = -v',
@@ -67,7 +69,7 @@ function element(id, dataset = {}) {
 }
 
 function run(search) {
-  const ids = ["scene", "camera", "info", "cameraPanel", "cameraPanelTitle", "cameraScale", "cameraCoords", "cameraHead",
+  const ids = ["scene", "camera", "pylastCamera", "info", "cameraPanel", "cameraPanelTitle", "cameraScale", "cameraCoords", "cameraHead",
     "cameraCaption", "deformPanel", "deformChart", "deformTitle", "deformStat", "colorMetric", "colorMin", "colorMax",
     "globalToolbar", "parallelToolbar", "elevationToolbar", "corsikaToolbar", "globalAz",
     "globalAzValue", "globalEl", "globalElValue", "angleValue", "bunch", "photonTel",
@@ -122,7 +124,7 @@ for (const expected of ["pyLAST +pix_x = -v", "pyLAST +pix_y = +u"]) {
   }
 }
 const globalInfo = globalElements.get("info").innerHTML;
-for (const expected of ["pix_x=-v", "横轴=pix_y=+u", "plot_photon_csv_root_pylast.py"]) {
+for (const expected of ["pix_x=-v", "横轴=pix_y=+u", "root/LactEventSource.cpp:245-265"]) {
   if (!globalInfo.includes(expected)) {
     throw new Error(`global pyLAST definition is missing ${expected}`);
   }
@@ -184,16 +186,13 @@ if (fullDensityColors.join("|") !== "rgb(255,109,122)|rgb(100,199,255)|rgb(255,2
 }
 const parallelCase = parallelElements.sandbox.currentParallelCase();
 const rawCentroid = parallelCase.camera_summary.output_uv_centroid_m;
-parallelElements.get("cameraCoords").value = "pylast";
-const pylastPoint = parallelElements.sandbox.cameraDisplayPoint([0.12, -0.34]);
-const pylastHistogram = parallelElements.sandbox.spotHistogram(parallelCase, 140);
-if (Math.abs(pylastPoint[0] - 0.12) > 1e-12 || Math.abs(pylastPoint[1] - 0.34) > 1e-12 ||
-    Math.abs(pylastHistogram.centroid[0] - rawCentroid[0]) > 1e-12 ||
-    Math.abs(pylastHistogram.centroid[1] + rawCentroid[1]) > 1e-12 ||
-    pylastHistogram.n !== parallelCase.full_output_uv_m.length) {
-  throw new Error("pyLAST camera view does not implement horizontal=+u, vertical=-v on the complete point set");
+const repeatedHistogram = parallelElements.sandbox.spotHistogram(parallelCase, 140);
+if (Math.abs(repeatedHistogram.centroid[0] - rawCentroid[0]) > 1e-12 ||
+    Math.abs(repeatedHistogram.centroid[1] - rawCentroid[1]) > 1e-12 ||
+    repeatedHistogram.n !== parallelCase.full_output_uv_m.length ||
+    parallelElements.get("cameraCoords").style.display !== "none") {
+  throw new Error("parallel whiteboard must preserve raw u/v and must not expose a browser-side pyLAST transform");
 }
-parallelElements.get("cameraCoords").value = "lact";
 parallelElements.get("camera").listeners.click({clientX: 300, clientY: 250});
 if (!parallelElements.get("info").innerHTML.includes("az=+1°")) {
   throw new Error("parallel camera click did not select the bottom-right sky case");
@@ -392,10 +391,16 @@ for (let i = 0; i < corsikaGeometryBefore.length; i++) {
   );
 }
 if (maxPylastGeometryMutation > 0 ||
-    !pylastCorsikaElements.get("cameraHead").textContent.includes("pyLAST")) {
-  throw new Error(`pyLAST camera display mutated 3D geometry or failed to label itself: ${maxPylastGeometryMutation}`);
+    !pylastCorsikaElements.get("cameraHead").textContent.includes("pyLAST 原生") ||
+    pylastCorsikaElements.get("camera").style.display !== "none" ||
+    pylastCorsikaElements.get("pylastCamera").style.display !== "block" ||
+    !pylastCorsikaElements.get("pylastCamera").src.endsWith("event1909_pylast_native_top4.png") ||
+    !pylastCorsikaElements.get("cameraCaption").textContent.includes("网页不重画、不换轴、不改符号") ||
+    !pylastCorsikaElements.get("cameraCaption").textContent.includes("ROOT telescope_id 16/19/20/21") ||
+    !pylastCorsikaElements.get("cameraCaption").textContent.includes("Telescope 17/20/21/22")) {
+  throw new Error(`native pyLAST figure mutated 3D geometry or was not displayed directly: ${maxPylastGeometryMutation}`);
 }
-console.log("runtime OK pyLAST camera view preserves CORSIKA 3D geometry");
+console.log("runtime OK native pyLAST figure preserves CORSIKA 3D geometry and bypasses canvas transforms");
 
 function maxBasisError(a, b) {
   return Math.max(...["x", "y", "z"].flatMap(key =>

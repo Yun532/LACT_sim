@@ -1,0 +1,86 @@
+{
+  "status": "passed",
+  "root_path": "/home/hyy/LACT/tools/LACT_sim_coordinate_frame_fix_4fb44f8/run_logs/coordinate_refresh/event1909/event1909.root",
+  "root_sha256": "36876c1e586c3c6dcc1ff5d2f7a49cc66430a0cfce3db019454dde3684bf29bc",
+  "event_id": 1909,
+  "top_telescopes": [
+    19,
+    16,
+    21,
+    20
+  ],
+  "pylast_commit": "953d07392a542a3362a0ce35f14bcdbe4c347c9a",
+  "reader_coordinate_boundary": {
+    "root_camera_pixels": "x_m=u_m, y_m=v_m",
+    "pylast_geometry": "pix_x=-root y_m; pix_y=+root x_m",
+    "plot_axes": "EventVisualizer uses pix_y horizontally and pix_x vertically",
+    "maximum_coordinate_error_m": 0.0
+  },
+  "reader_image_boundary": {
+    "root_branch": "observations.image_cherenkov_pe",
+    "pylast_field": "event.simulation.tels[telescope_id].true_image",
+    "operation_in_reader": "nearest-integer rounding",
+    "telescope_checks": [
+      {
+        "telescope_id": 19,
+        "root_cherenkov_pe_sum": 51417.0,
+        "pylast_true_image_sum": 51417.0,
+        "nonzero_root_pixels": 407,
+        "nonzero_pylast_pixels": 407,
+        "pylast_equals_rounded_root": true,
+        "max_abs_reader_rounding_delta_pe": 0.0
+      },
+      {
+        "telescope_id": 16,
+        "root_cherenkov_pe_sum": 15166.0,
+        "pylast_true_image_sum": 15166.0,
+        "nonzero_root_pixels": 283,
+        "nonzero_pylast_pixels": 283,
+        "pylast_equals_rounded_root": true,
+        "max_abs_reader_rounding_delta_pe": 0.0
+      },
+      {
+        "telescope_id": 21,
+        "root_cherenkov_pe_sum": 9445.0,
+        "pylast_true_image_sum": 9445.0,
+        "nonzero_root_pixels": 165,
+        "nonzero_pylast_pixels": 165,
+        "pylast_equals_rounded_root": true,
+        "max_abs_reader_rounding_delta_pe": 0.0
+      },
+      {
+        "telescope_id": 20,
+        "root_cherenkov_pe_sum": 9334.0,
+        "pylast_true_image_sum": 9334.0,
+        "nonzero_root_pixels": 128,
+        "nonzero_pylast_pixels": 128,
+        "pylast_equals_rounded_root": true,
+        "max_abs_reader_rounding_delta_pe": 0.0
+      }
+    ]
+  },
+  "figure": {
+    "path": "/home/hyy/LACT/tools/pylast_coordinate_953d073/coordinate_results/event1909_pylast_native_top4.png",
+    "sha256": "dd4f061ac834d48d40407285b87f5097dc957678347e0852b9915dc17c9b627c",
+    "bytes": 753493,
+    "producer": "pylast.visualize.event_visualizer.EventVisualizer.plot_event",
+    "root_telescope_ids_in_plot_order": [
+      16,
+      19,
+      20,
+      21
+    ],
+    "displayed_telescope_labels": [
+      17,
+      20,
+      21,
+      22
+    ],
+    "label_expression": "event_visualizer.py uses f'Telescope {tel_id + 1}'",
+    "arguments": {
+      "image_level": "simulation",
+      "show_hillas": false,
+      "include_non_triggered": true
+    }
+  }
+}
