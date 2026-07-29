@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 from collections import defaultdict
@@ -14,6 +15,14 @@ from pathlib import Path
 def is_sha256(value) -> bool:
     text = str(value or "")
     return len(text) == 64 and all(char in "0123456789abcdef" for char in text.lower())
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def read_csv(path: Path) -> list[dict[str, str]]:
@@ -403,7 +412,7 @@ def validate_sources(ideal: list[dict], deformation: list[dict], examples: dict,
             "both real examples keep whiteboard surface x/y equal to u/v",
             "both examples join raw input exactly by source_bunch_index",
             "full output-plane row counts equal each C++ summary",
-            "camera output pixel ids exist in the 1616-pixel geometry",
+            "camera output pixel ids exist in the 1664-pixel geometry",
             "global shower core and EventIO telescope position match the selected event metadata",
             "every raw bunch direction is within 2 deg of the selected shower arrival axis",
         ],
@@ -535,7 +544,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ideal-mirror", default="configs/mirror_1229_facets.csv")
     parser.add_argument("--deformation-series", default="configs/mirror_1229_elevation_series.csv")
     parser.add_argument("--obstruction-primitives", default="configs/obstructions/raytrace_final_structure_primitives.csv")
-    parser.add_argument("--camera-geometry", default="configs/cameras/new_camera_pixels.csv")
+    parser.add_argument("--camera-geometry", default="configs/cameras/new_camera_pixels_1664.csv")
     parser.add_argument("--north-trace-csv", default="docs/assets/data/corsika-north-example-rays.csv")
     parser.add_argument("--north-raw-input-csv", default="docs/assets/data/corsika-north-example-raw-input.csv")
     parser.add_argument("--north-output-plane-csv", default="docs/assets/data/corsika-north-output-plane.csv")
@@ -571,10 +580,11 @@ def main() -> None:
     )
     north_provenance = json.loads((root / args.north_provenance).read_text(encoding="utf-8"))
     aligned_provenance = json.loads((root / args.aligned_provenance).read_text(encoding="utf-8"))
+    camera_geometry_path = root / args.camera_geometry
     camera_geometry = [{
         "id": int(row["id"]), "u": number(row, "x_m"), "v": number(row, "y_m"),
         "size": number(row, "size_m"), "shape": row.get("shape", "square"),
-    } for row in read_csv(root / args.camera_geometry)]
+    } for row in read_csv(camera_geometry_path)]
     camera_signal = [{
         "pixel_id": int(row["pixel_id"]), "photon_count": int(row["photon_count"]),
         "pe": number(row, "pe"), "time_mean_ns": number(row, "time_mean_ns"),
@@ -665,6 +675,11 @@ def main() -> None:
         "parallel": parallel_cases,
         "event1909": event1909,
         "camera_geometry": camera_geometry,
+        "camera_geometry_provenance": {
+            "path": args.camera_geometry,
+            "sha256": file_sha256(camera_geometry_path),
+            "pixel_count": len(camera_geometry),
+        },
         "camera_signal": camera_signal,
         "validation": validation,
         "provenance": north_provenance,

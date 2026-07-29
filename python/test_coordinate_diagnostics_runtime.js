@@ -254,10 +254,11 @@ if (corsikaFullCameraElements.get("cameraScale").value !== "full" ||
 }
 const previewIds = vm.runInNewContext("corsikaPreviewViews().map(function(v){return v.telescope_id})", corsikaFullCameraElements.sandbox);
 const previewColors = vm.runInNewContext("corsikaPreviewViews().map(function(v){return corsikaRayColor(v.telescope_id)})", corsikaFullCameraElements.sandbox);
-if (previewIds.join(",") !== "19,16,21,20" ||
+const expectedPreviewIds = vm.runInNewContext("D.event1909.camera_views.slice().filter(function(v){return v.cherenkov_pe_sum>0}).sort(function(a,b){return b.cherenkov_pe_sum-a.cherenkov_pe_sum||a.telescope_id-b.telescope_id}).slice(0,4).map(function(v){return v.telescope_id})", corsikaFullCameraElements.sandbox);
+if (previewIds.join(",") !== expectedPreviewIds.join(",") ||
     previewColors.join(",") !== "#ff6d7a,#64c7ff,#ffd45e,#70e39c" ||
     !corsikaFullCameraElements.get("cameraCaption").textContent.includes("triggered 标志均为 false")) {
-  throw new Error(`CORSIKA preview cameras/colors do not reproduce the four original highest-PE views: ${previewIds}; ${previewColors}`);
+  throw new Error(`CORSIKA preview cameras/colors do not reproduce the current four highest-PE ROOT views: ${previewIds}; ${previewColors}`);
 }
 const groundPointBeforeZoom = corsikaFullCameraElements.sandbox.project([0, 0, 0]);
 corsikaFullCameraElements.sandbox.zoomAt(120, groundPointBeforeZoom[0], groundPointBeforeZoom[1]);
@@ -306,7 +307,7 @@ const rootCameraCheck = vm.runInNewContext(`(() => {
   }
   return {count:root.length,maxError};
 })()`, corsikaFullCameraElements.sandbox);
-if (rootCameraCheck.count !== 1616 || rootCameraCheck.maxError > 1e-9 ||
+if (rootCameraCheck.count !== 1664 || rootCameraCheck.maxError > 1e-9 ||
     !corsikaFullCameraElements.get("info").innerHTML.includes("camera_pixels") ||
     !corsikaFullCameraElements.get("info").innerHTML.includes("x_m≡u") ||
     !corsikaFullCameraElements.get("info").innerHTML.includes("camera_x_m=hit.u_m") ||
@@ -315,7 +316,7 @@ if (rootCameraCheck.count !== 1616 || rootCameraCheck.maxError > 1e-9 ||
     !corsikaFullCameraElements.get("info").innerHTML.includes("pix_y=0.571054 m")) {
   throw new Error(`CORSIKA LACT u/v does not come directly from the ROOT camera geometry: ${JSON.stringify(rootCameraCheck)}`);
 }
-console.log("runtime OK CORSIKA LACT u/v uses all 1616 ROOT camera_pixels coordinates");
+console.log("runtime OK CORSIKA LACT u/v uses all 1664 ROOT camera_pixels coordinates");
 
 const corsikaArrayElements = run("?page=corsika&case=event1909");
 const corsikaArrayScene = corsikaArrayElements.sandbox.buildScene();
@@ -336,9 +337,12 @@ const focusedPreviewIds = vm.runInNewContext("corsikaPreviewViews().map(function
 const focusedPreviewSignals = vm.runInNewContext("corsikaPreviewViews().map(function(v){return [v.telescope_id,v.cherenkov_pe_sum,v.camera_signal.length]})", corsikaArrayElements.sandbox);
 const focusedCenter = vm.runInNewContext("center", corsikaArrayElements.sandbox);
 const tel0 = vm.runInNewContext("D.event1909.array.find(function(t){return t.telescope_id===0})", corsikaArrayElements.sandbox);
-if (focusedFacets.length !== 54 || otherFocusedFacets.length !== 31 * 54 || focusedPhotonPaths.length !== 32 * 120 ||
-    focusedPreviewIds.join(",") !== "19,16,21,0" ||
-    focusedPreviewSignals[3][1] !== 40 || focusedPreviewSignals[3][2] !== 7 ||
+const expectedFocusedPreviewIds = expectedPreviewIds.slice(0, 3).concat([0]);
+const expectedTel0Signal = vm.runInNewContext("(function(){var v=D.event1909.camera_views.find(function(x){return x.telescope_id===0});return [v.cherenkov_pe_sum,v.camera_signal.length]})()", corsikaArrayElements.sandbox);
+const expectedPhotonPathCount = vm.runInNewContext("D.event1909.ray_samples_by_telescope.reduce(function(total,g){return total+g.samples.length},0)", corsikaArrayElements.sandbox);
+if (focusedFacets.length !== 54 || otherFocusedFacets.length !== 31 * 54 || focusedPhotonPaths.length !== expectedPhotonPathCount ||
+    focusedPreviewIds.join(",") !== expectedFocusedPreviewIds.join(",") ||
+    focusedPreviewSignals[3][1] !== expectedTel0Signal[0] || focusedPreviewSignals[3][2] !== expectedTel0Signal[1] ||
     Math.hypot(focusedCenter[0] - tel0.position_nwu_m[0], focusedCenter[1] - tel0.position_nwu_m[1]) > 1e-6 ||
     !focusedAxisNames.includes("LACT +u = camera x_m = -mirror local x") ||
     !focusedAxisNames.includes("LACT +v = camera y_m = mirror local y") ||
@@ -350,7 +354,7 @@ if (focusedFacets.length !== 54 || otherFocusedFacets.length !== 31 * 54 || focu
     !corsikaArrayElements.get("info").innerHTML.includes("当前所选")) {
   throw new Error(`CORSIKA telescope selection filtered the complete scene or missed the tel0 rotation center: center=${focusedCenter}`);
 }
-console.log("runtime OK telescope focus preserves all 32 structures and 3840 real sampled photon paths");
+console.log(`runtime OK telescope focus preserves all 32 structures and ${expectedPhotonPathCount} real sampled photon paths`);
 
 const corsikaHierarchyElements = run("?page=corsika&case=event1909");
 corsikaHierarchyElements.get("camera").listeners.click({clientX: 300, clientY: 250});
@@ -358,11 +362,12 @@ const clickedScale = vm.runInNewContext("globalScale", corsikaHierarchyElements.
 const clickedTel = vm.runInNewContext("state.photonTel", corsikaHierarchyElements.sandbox);
 const clickedScene = corsikaHierarchyElements.sandbox.buildScene();
 const clickedCenter = vm.runInNewContext("center", corsikaHierarchyElements.sandbox);
-const tel20 = vm.runInNewContext("D.event1909.array.find(function(t){return t.telescope_id===20})", corsikaHierarchyElements.sandbox);
-if (clickedScale !== "telescope" || clickedTel !== 20 ||
+const expectedClickedTel = expectedPreviewIds[3];
+const clickedTelescope = vm.runInNewContext(`D.event1909.array.find(function(t){return t.telescope_id===${expectedClickedTel}})`, corsikaHierarchyElements.sandbox);
+if (clickedScale !== "telescope" || clickedTel !== expectedClickedTel ||
     clickedScene.polys.filter(polygon => /^tel\d+ 镜片 /.test(polygon.name)).length !== 32 * 54 ||
-    clickedScene.lines.filter(line => line.name.includes("raw zem ray")).length !== 32 * 120 ||
-    Math.hypot(clickedCenter[0] - tel20.position_nwu_m[0], clickedCenter[1] - tel20.position_nwu_m[1]) > 1e-6 ||
+    clickedScene.lines.filter(line => line.name.includes("raw zem ray")).length !== expectedPhotonPathCount ||
+    Math.hypot(clickedCenter[0] - clickedTelescope.position_nwu_m[0], clickedCenter[1] - clickedTelescope.position_nwu_m[1]) > 1e-6 ||
     corsikaHierarchyElements.get("returnShower").style.display !== "inline-block") {
   throw new Error(`CORSIKA preview click did not enter the selected telescope view: scale=${clickedScale}, tel=${clickedTel}`);
 }

@@ -122,9 +122,16 @@ screen vertical   = pix_x
 - 32 台望远镜；
 - `86550` photon bunch；
 - `197576` 个无遮挡输出面命中；
-- `116995` 个相机命中 / PE；
-- ROOT SHA-256：`546bdafd4d8ce31218cbc717c3c8b7463c4a48c80aebd044b6286a11f7ca174b`；
+- `118891` 个相机命中 / PE；
+- ROOT SHA-256：`f371463b8a91401724d8f4e9408a2f6f3886d639b8d3862e2b575f0d81e2df3e`；
 - EventIO SHA-256：`3feee5b7f3a001858201eea2cf75ba3f5f0277283e29900b5f259bd2c9bc4220`。
+
+该次运行显式使用 `new_camera_1664.cfg` / `new_camera_pixels_1664.csv`。新 CSV 的
+SHA-256 为 `550b64b1e166567bd1f29540516c19416537885b5991600d6d8a1af1135e3fbe`；
+前 1616 个像素与旧表逐行相同，只增加 ID 1617–1664 的 48 个边角像素。因此输出面命中数不变，
+相机命中相对旧 1616 像素运行的 `116995` 增加 `1896`。event 1909 中 21 台望远镜的新增像素收到非零 PE，
+说明网页展示的是新程序真实输出而不是只替换相机底图。平行光基准、四个 4° 偏置及 0°–90° 仰角序列共 15 个事例
+均没有光子落入新增边角像素，所以第 2/3 页的光斑数值不应因 1664 几何而变化；变化的是完整相机轮廓。
 
 二维 bunch 的三维“发射点”不是 EventIO 显式字段，只是诊断派生量：以原始接收平面 anchor、原始 direction 和原始 `zem` 求直线与高度面的交点。相机图始终读取 ROOT `camera_pixels` 与 `image_cherenkov_pe`，不使用派生发射点反算相机坐标。
 
@@ -138,7 +145,8 @@ screen vertical   = pix_x
 - pyLAST `test_lact_event_source` 通过；
 - `run_optical_sim` SHA-256：`20737903cdfeca7a7851ff32d31a07dbb664d758ad8339e1ce815f2d7025a914`；
 - `run_corsika_trace` SHA-256：`db3946f33a8bc4d198d63191fe09f43b9d850aaeed5f22772698af3161afb3c9`；
-- 同源审计归档 SHA-256：`e7335bba7e65863fbbeff6c17e06d753a954e213302a69557f698dfe43cfb2b3`；
-- 全部最新结果归档 SHA-256：`9778624e091498d5ec021e132e47b0f8cb88f354632cd9bed0bc19aa5c43f67d`。
+- GitHub `main` 基线：`890fdf2550baaffa6094e0c4b47a951b238f9497`；
+- 本次实际运行源码归档 SHA-256：`f98c9dd5ee81dd55d652d9001a581a5d245db7eb03cf123aa63192996ae64374`；
+- 1664 平行光结果归档 SHA-256：`5db0917fc4922e7cde0bc74e44e37895c227f0d006e4f54b7d844fbb81ee8338`。
 
 网页允许的变换只有观察相机旋转、缩放、平移以及 pyLAST reader/renderer 的明确边界映射；LACT 原始 `u/v`、ROOT PE、CORSIKA NWU 和镜片/遮挡原坐标不得在绘图脚本中另行改写。

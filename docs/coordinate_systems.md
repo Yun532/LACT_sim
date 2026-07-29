@@ -63,6 +63,15 @@ The [interactive coordinate-system explorer](assets/coordinate-system-explorer.h
 provides the complementary switchable view of file fields and the final pyLAST
 display orientation.
 
+The current diagnostic workbench explicitly opts into
+`configs/cameras/new_camera_1664.cfg`, backed by
+`configs/cameras/new_camera_pixels_1664.csv`. The first 1616 pixel records are
+byte-for-field identical to the previous geometry and the new layout adds 48
+corner pixels (IDs 1617--1664). This does not change the project-wide camera
+default for unrelated configurations. The workbench verifies that the
+event-1909 ROOT `camera_pixels` geometry matches this CSV before embedding any
+camera image.
+
 The 3D HTML is generated from the real configuration by repository Python code:
 
 ```bash

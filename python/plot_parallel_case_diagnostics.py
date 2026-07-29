@@ -269,7 +269,7 @@ def plot_camera(case: dict, camera_geometry: list[dict[str, str]], output: Path)
     colorbar_axis = fig.add_subplot(grid[0, 2])
     collection = draw_camera_panel(
         axes[0], camera_geometry, signal, output_uv, camera_uv,
-        physical_limits, "完整物理相机范围（1616像素）",
+        physical_limits, f"完整物理相机范围（{len(camera_geometry)}像素）",
     )
     draw_camera_panel(
         axes[1], camera_geometry, signal, output_uv, camera_uv,
@@ -299,7 +299,7 @@ def main() -> None:
     parser.add_argument("--ideal-mirror", default="configs/mirror_1229_facets.csv")
     parser.add_argument("--deformation-series", default="configs/mirror_1229_elevation_series.csv")
     parser.add_argument("--obstruction-primitives", default="configs/obstructions/raytrace_final_structure_primitives.csv")
-    parser.add_argument("--camera-geometry", default="configs/cameras/new_camera_pixels.csv")
+    parser.add_argument("--camera-geometry", default="configs/cameras/new_camera_pixels_1664.csv")
     parser.add_argument("--output-dir", default="docs/assets/plots")
     args = parser.parse_args()
 
