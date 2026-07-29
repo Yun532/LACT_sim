@@ -1313,7 +1313,7 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         writeStringAttribute(coordinates_group, "eventio_telpos_note",
                              "Telescope positions are hessio MC_TELPOS detector coordinates; array_z_up_m may include the detector sphere/radius convention used by the producer");
         writeStringAttribute(coordinates_group, "camera_plane_coordinates",
-                             "camera x/y are output-plane u/v coordinates, normally u=local +x and v=local +y");
+                             "camera x/y are output-plane u/v coordinates; for the LACT focal plane u=-mirror-local x (East at north pointing) and v=+mirror-local y (sky-up)");
         H5Gclose(coordinates_group);
 
         hid_t sipm_group = H5Gcreate2(metadata_group, "sipm",

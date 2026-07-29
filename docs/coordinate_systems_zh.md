@@ -39,7 +39,7 @@ EventIO NWU photon bunch
   -> hit.u/v = dot(surface - plane_point, plane_u/v)
   -> camera_x/y = u/v
   -> ROOT: x_m/y_m = u/v
-  -> pyLAST: pix_x=-v, pix_y=+u
+  -> pyLAST: pix_x=-v, pix_y=-u
 ```
 
 审计中修正了三处会造成误读或画图不一致的地方：
@@ -264,14 +264,14 @@ p_local = R^T (p_NWU - telescope_position_NWU)
 ```ini
 output.plane_point=0,0,-8
 output.plane_normal=0,0,-1
-output.plane_u_axis=1,0,0
+output.plane_u_axis=-1,0,0
 output.plane_v_axis=0,1,0
 ```
 
 因此：
 
 ```text
-camera_x = hit.u = local x
+camera_x = hit.u = -local x
 camera_y = hit.v = local y
 ```
 
@@ -285,8 +285,8 @@ camera_y = hit.v = local y
 ```text
 local +z : 从镜面指向天空的光轴
 local -z : 从天空射向镜面的正入射方向
-local +x : 焦平面/相机第一条横向轴
-local +y : 与 local x/z 组成右手系的第二条横向轴
+local +x : 镜片/遮挡横向轴；az=0 时指向 West
+local +y : 仰角增加方向，指向 sky-up
 ```
 
 最简单的轴上光子可以写成：
@@ -300,13 +300,13 @@ x_m,y_m,z_m,dir_x,dir_y,dir_z
 整套本地几何放进通用全局展示坐标，会使用：
 
 ```text
-e_z = ( cos(E) cos(A),  cos(E) sin(A), sin(E))
-e_x = (-sin(A),         cos(A),        0     )
-e_y = e_z cross e_x
+e_x = ( sin(A),          cos(A),        0     )
+e_y = (-sin(E) cos(A),   sin(E) sin(A), cos(E))
+e_z = ( cos(E) cos(A),  -cos(E) sin(A), sin(E))
 ```
 
-这里方位角只是从通用 `+X` 朝 `+Y` 增加；不要把这两个通用轴自动解释成
-CORSIKA 的 North/West。
+这里的全局坐标统一解释为 NWU：`+X=North`、`+Y=West`、`+Z=Up`；
+`A=0` 指北，正方位角顺时针向 East 增加。纯光学和 CORSIKA 适配现在调用同一组基底公式。
 
 ## 显式 ENU East-start 输入
 
@@ -373,7 +373,7 @@ LACT_sim ROOT 输出保存原始焦平面坐标。`LactEventSource` 在进入 py
 
 ```text
 pyLAST pix_x = -LACT_sim camera_y
-pyLAST pix_y = +LACT_sim camera_x
+pyLAST pix_y = -LACT_sim camera_x
 ```
 
 这只是完整相机图的显示约定，不是 CORSIKA NWU 输入转换，也不改变
@@ -383,7 +383,7 @@ pyLAST pix_y = +LACT_sim camera_x
 第一个坐标画在垂直轴”的显示方式：
 
 ```text
-Matplotlib horizontal = pyLAST pix_y = +LACT_sim u
+Matplotlib horizontal = pyLAST pix_y = -LACT_sim u
 Matplotlib vertical   = pyLAST pix_x = -LACT_sim v
 ```
 

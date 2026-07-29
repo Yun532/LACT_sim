@@ -47,6 +47,37 @@ int main()
     ok &= check(nearVec(frame.x_axis.cross(frame.y_axis), frame.z_axis),
                 "CORSIKA optical frame must be right-handed");
 
+    const TelescopeFrame synthetic_frame = buildTelescopeFrame(telescope);
+    ok &= check(nearVec(synthetic_frame.x_axis, frame.x_axis) &&
+                    nearVec(synthetic_frame.y_axis, frame.y_axis) &&
+                    nearVec(synthetic_frame.z_axis, frame.z_axis),
+                "synthetic and CORSIKA entries must use the same mirror-local NWU frame");
+
+    const OutputPlane camera_plane = buildOutputPlane({
+        {"output.plane_point", "0,0,-8"},
+        {"output.plane_normal", "0,0,-1"},
+        {"output.plane_u_axis", "-1,0,0"},
+        {"output.plane_v_axis", "0,1,0"},
+    });
+    ok &= check(nearVec(camera_plane.u_axis, {-1.0, 0.0, 0.0}),
+                "LACT output +u must oppose mirror-local +x");
+    ok &= check(nearVec(camera_plane.v_axis, {0.0, 1.0, 0.0}),
+                "LACT output +v must follow mirror-local +y");
+    ok &= check(nearVec(camera_plane.u_axis.cross(camera_plane.v_axis),
+                        camera_plane.normal),
+                "output u/v/normal must form a right-handed frame");
+    try {
+        (void)buildOutputPlane({
+            {"output.plane_point", "0,0,-8"},
+            {"output.plane_normal", "0,0,-1"},
+            {"output.plane_u_axis", "1,0,0"},
+            {"output.plane_v_axis", "0,1,0"},
+        });
+        ok = false;
+        std::cerr << "left-handed LACT output axes were accepted\n";
+    } catch (...) {
+    }
+
     // Cross-entry regression: a source one degree above an az=0, el=70
     // pointing must enter the shared optical tracer with the same local
     // direction as run_optical_sim's telescope_local ParallelBeam case.

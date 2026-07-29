@@ -239,7 +239,7 @@
         <path d="M455 190H545" stroke="var(--muted)" stroke-width="2" marker-end="url(#arrow3)"/>
         <text x="500" y="165" text-anchor="middle" class="small">LactEventSource</text>
         <text x="500" y="213" text-anchor="middle" class="small">pix_x=−v</text>
-        <text x="500" y="229" text-anchor="middle" class="small">pix_y=+u</text>
+        <text x="500" y="229" text-anchor="middle" class="small">pix_y=−u</text>
 
         <text x="750" y="28" text-anchor="middle" class="label">pyLAST 当前 plot_camera_image</text>
         <circle cx="750" cy="190" r="130" fill="none" stroke="var(--line)" stroke-width="1.5"/>
@@ -247,7 +247,7 @@
         <line x1="750" y1="45" x2="750" y2="335" class="gridline"/>
         <line x1="750" y1="190" x2="890" y2="190" stroke="var(--purple)" stroke-width="2.5" marker-end="url(#arrow3)"/>
         <line x1="750" y1="190" x2="750" y2="55" stroke="var(--green)" stroke-width="2.5" marker-end="url(#arrow3)"/>
-        <text x="897" y="195" class="label">水平 = pix_y = +u</text>
+        <text x="897" y="195" class="label">水平 = pix_y = −u</text>
         <text x="756" y="60" class="label">垂直 = pix_x = −v</text>
         <circle id="pylast-hit" cx="800.3" cy="164.9" r="9" fill="var(--red)"/>
         <path id="pylast-glyph" d="M800.3 164.9l0 -22l13 0" fill="none" stroke="var(--red)" stroke-width="4"/>
@@ -262,9 +262,9 @@
     <div class="pipeline">
       <div class="step"><strong>输入 Photon CSV / EventIO</strong><code>x_m, y_m, z_m</code><code>dir_x, dir_y, dir_z</code><code>source.coordinate_frame</code></div>
       <div class="step"><strong>望远镜局部光追</strong><code>local_pos = Rᵀ(pos − T)</code><code>relative 模式不减 T</code><code>dir 只旋转、不平移</code></div>
-      <div class="step"><strong>输出平面</strong><code>u_m = dot(hit−plane, u_axis)</code><code>v_m = dot(hit−plane, v_axis)</code><code>标准配置 u=local x, v=local y</code></div>
+      <div class="step"><strong>输出平面</strong><code>u_m = dot(hit−plane, u_axis)</code><code>v_m = dot(hit−plane, v_axis)</code><code>标准配置 u=−mirror local x, v=mirror local y</code></div>
       <div class="step"><strong>LACT 文件</strong><code>HDF5 /camera/pixels: x_m=u, y_m=v</code><code>ROOT camera_pixels: x_m=u, y_m=v</code><code>pixel_id 与 PE 不变</code></div>
-      <div class="step"><strong>pyLAST 与显示</strong><code>pix_x = −v</code><code>pix_y = +u</code><code>plot horizontal=pix_y</code><code>plot vertical=pix_x</code></div>
+      <div class="step"><strong>pyLAST 与显示</strong><code>pix_x = −v</code><code>pix_y = −u</code><code>plot horizontal=pix_y</code><code>plot vertical=pix_x</code></div>
     </div>
     <div class="numbers">
       <div>

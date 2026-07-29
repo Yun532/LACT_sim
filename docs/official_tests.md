@@ -224,7 +224,8 @@ cfg 逐项解释：
 - `source.config=../sources/parallel_1M_on_axis.cfg`: 平行光源，`n_bunches=1000000`，
   采样半径 `beam_radius_m=4`，方向 `beam_direction=0,0,-1`。
 - `output.config=../outputs/whiteboard_f8.cfg`: 白板在本地 `z=-8 m`，法向量
-  `0,0,-1`，图像坐标由 `plane_u_axis=1,0,0` 和 `plane_v_axis=0,1,0` 定义。
+  `0,0,-1`，图像坐标由 `plane_u_axis=-1,0,0` 和 `plane_v_axis=0,1,0` 定义，
+  即 `u=-mirror local x`、`v=mirror local y`。
 - `propagation.speed_of_light_m_per_ns=0.299792458`: 局部传播光速。
 - `output.csv=run_logs/official_tests/perfect_parallel/hits.csv`: 输出白板命中光子。
 - `output.whiteboard_input_photon=true`：在白板 CSV 末尾追加

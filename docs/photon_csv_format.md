@@ -72,7 +72,7 @@ source.coordinate_frame=lact_generic_global
   相对选定望远镜；方位角从 East 开始向 North 增加。
 - `enu_east_global`：相同的 ENU 轴定义，但位置是阵列绝对坐标；程序只减
   一次 `telescope.position_m`。
-- `lact_generic_global`：旧 LACT 通用全局坐标；方位角从 `+x` 指向 `+y`。
+- `lact_generic_global`：LACT 全局 NWU；`+x` 向北、`+y` 向西、`+z` 向上，方位角从北向东增加。
 
 这些输入坐标、CORSIKA 默认流程和画图层方向的区别见
 [中文坐标系说明](coordinate_systems_zh.md)。

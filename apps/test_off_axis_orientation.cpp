@@ -76,7 +76,10 @@ int main(int argc, char** argv)
     OutputPlane plane;
     plane.point = {0.0, 0.0, -8.0};
     plane.normal = {0.0, 0.0, -1.0};
-    plane.u_axis = {1.0, 0.0, 0.0};
+    // Mirror +x is viewed camera -> mirror (West at north pointing), while
+    // output +u is viewed mirror -> camera and points East.  The two axes are
+    // therefore opposites; +v remains mirror-local sky-up.
+    plane.u_axis = {-1.0, 0.0, 0.0};
     plane.v_axis = {0.0, 1.0, 0.0};
 
     const auto x_plus = centroidForBeam(mirrors, plane, beamDirection(1.0, 0.0));
@@ -86,8 +89,10 @@ int main(int argc, char** argv)
 
     bool ok = true;
     constexpr double min_shift_m = 0.05;
-    ok &= check(x_plus.first > min_shift_m, "photon +x should image at +u");
-    ok &= check(x_minus.first < -min_shift_m, "photon -x should image at -u");
+    ok &= check(x_plus.first < -min_shift_m,
+                "east-source propagation (+mirror x/West) should image at -u");
+    ok &= check(x_minus.first > min_shift_m,
+                "west-source propagation (-mirror x/East) should image at +u");
     ok &= check(y_plus.second > min_shift_m, "photon +y should image at +v");
     ok &= check(y_minus.second < -min_shift_m, "photon -y should image at -v");
     ok &= check(std::abs(x_plus.second) < 0.03, "x off-axis should not strongly shift v");

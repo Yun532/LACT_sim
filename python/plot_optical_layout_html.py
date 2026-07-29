@@ -797,10 +797,10 @@ def main():
         "local +z points to the sky, incoming photons travel along local -z.<br>"
         "<b>Geometry:</b> mirror and obstruction CSV x/y/z are telescope-local; "
         "the page embeds that local geometry into the input frame only for display.<br>"
-        f"<b>Camera/output:</b> {camera_pixel_count} CSV pixels; u=local +x, "
-        "v=local +y; stored <code>x_m=u</code>, <code>y_m=v</code>.<br>"
-        "<b>pyLAST:</b> <code>pix_x=-v</code>, <code>pix_y=+u</code>; current camera plot "
-        "uses horizontal=+u and vertical=-v.<br>"
+        f"<b>Camera/output:</b> {camera_pixel_count} CSV pixels; u=-mirror local x, "
+        "v=mirror local y; stored <code>x_m=u</code>, <code>y_m=v</code>.<br>"
+        "<b>pyLAST:</b> <code>pix_x=-v</code>, <code>pix_y=-u</code>; current camera plot "
+        "uses horizontal=-u and vertical=-v.<br>"
         "<b>Ground/base:</b> schematic orientation references, not engineering geometry."
     )
     if trace_metadata["count"]:
