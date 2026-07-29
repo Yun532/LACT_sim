@@ -73,8 +73,8 @@ def plot_camera(
     axis.add_collection(collection)
     axis.autoscale_view()
     axis.set(
-        xlabel="Camera x (cm)",
-        ylabel="Camera y (cm)",
+        xlabel="LACT focal-plane u (cm)",
+        ylabel="LACT focal-plane v (cm)",
         title=title,
         aspect="equal",
     )

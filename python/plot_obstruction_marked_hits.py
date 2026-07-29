@@ -14,7 +14,6 @@ from matplotlib.collections import LineCollection
 from matplotlib.colors import LogNorm
 
 from plot_mirror_hit_map import mirror_display_basis, project_points_3d, projected_facet_outlines
-from plot_orientation import basis_from_config, orient_xy
 
 
 def parse_args() -> argparse.Namespace:
@@ -30,7 +29,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--sky-up",
         action="store_true",
-        help="with --config, rotate the plot so display +y is global +z/up projected onto the plotted plane",
+        help="mirror-space diagnostic only: project global +z/up onto the mirror plane",
     )
     return parser.parse_args()
 
@@ -115,22 +114,19 @@ def main() -> None:
         raise SystemExit("no rows with hit_mirror=1 and hit_surface=1")
 
     blocked = df["obstruction_blocked"].to_numpy(dtype=int) != 0
-    output_display_basis = None
     mirror_basis = None
     oriented = False
     if args.sky_up:
         if not args.config:
             raise SystemExit("--sky-up requires --config")
+        if args.space == "spot":
+            raise SystemExit("whiteboard plots always use stored physical (u, v); --sky-up is mirror-only")
     if args.space == "spot":
         require_columns(df, {"u_m", "v_m"}, hits_path)
         x = df["u_m"].to_numpy(dtype=float) * 1000.0
         y = df["v_m"].to_numpy(dtype=float) * 1000.0
-        if args.sky_up:
-            display_x, display_y, oriented = basis_from_config(args.config)
-            output_display_basis = (display_x, display_y)
-            x, y = orient_xy(x, y, output_display_basis[0], output_display_basis[1])
-        xlabel = "Whiteboard display x [mm]" if oriented else "Whiteboard u [mm]"
-        ylabel = "Whiteboard display y [mm] (global +z/up)" if oriented else "Whiteboard v [mm]"
+        xlabel = "LACT focal-plane u [mm]"
+        ylabel = "LACT focal-plane v [mm]"
         default_title = "Outer-ring parallel spot with marked obstruction"
     else:
         required = {"mirror_x", "mirror_y"}

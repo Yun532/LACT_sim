@@ -69,16 +69,17 @@ output、camera、sipm、NSB、trigger 等模块 cfg。每个 official cfg 只�
 
 ## 绘图方向约定
 
-为了让不同 pointing 的图像更容易比较，官方二维图默认采用 sky-up 显示约定：
+白板和 HDF5 相机图直接显示文件中保存的物理焦平面坐标：
 
 ```text
-display +y = global +z/up 在当前镜面/相机平面上的投影
+horizontal = LACT focal-plane u
+vertical   = LACT focal-plane v
 ```
 
 因此白板、镜面命中图和相机图的画面上方都对应 3D layout 里的天空/竖直向上方向。
 CSV 图需要传入对应 `--config` 才能知道 pointing；镜面命中图还会使用
-`--sky-up`。HDF5 相机图会从文件里的 telescope pointing metadata 自动计算显示方向。
-如果需要检查原始相机坐标，可对 `plot_hdf5_camera.py` 加 `--raw-camera-xy`。
+绘图层不再根据 telescope pointing 旋转白板或 HDF5 相机图。pyLAST 天空偏移图
+由 `LactEventSource + EventVisualizer` 单独生成，避免把物理焦平面和天空视图混在一起。
 
 ## 一键脚本包含的测试
 

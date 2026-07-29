@@ -61,7 +61,7 @@ writes LACT ROOT, and is read back through `pylast.io.LactEventSource`:
 build/run_corsika_trace configs/examples/photon_csv_full_camera_root.cfg
 python3 python/plot_photon_csv_root_pylast.py \
   run_logs/examples/photon_csv_full_camera/lact_events.root \
-  --event-id 1909 --telescope-id 19 \
+  --event-id 1909 \
   --output run_logs/examples/photon_csv_full_camera/camera_pe.png
 ```
 
@@ -76,7 +76,7 @@ boundary, `LactEventSource` applies the normal source-offset display convention:
 
 ```text
 pyLAST pix_x = -LACT_sim camera_y
-pyLAST pix_y = +LACT_sim camera_x
+pyLAST pix_y = -LACT_sim camera_x
 ```
 
 ## Creating the six-column input

@@ -509,11 +509,12 @@ pyLAST pix_x = -v
 pyLAST pix_y = -u
 ```
 
-The current `pylast.visualize.plot_camera_image()` then draws `pix_y` on the
-horizontal Matplotlib axis and `pix_x` on the vertical axis. Therefore its
-display axes are `horizontal=-u`, `vertical=-v`. Use
-`python/plot_photon_csv_root_pylast.py --coordinate-view lact-uv` to draw the
-same pyLAST event with raw LACT_sim `u` horizontal and `v` vertical.
+The native pyLAST `EventVisualizer` draws `pix_y` on the horizontal axis and
+`pix_x` on the vertical axis, so its display axes are `horizontal=-u` and
+`vertical=-v`. `python/plot_photon_csv_root_pylast.py` calls that native API
+directly and performs no additional LACT-specific transform. Raw LACT focal-
+plane checks use the whiteboard or HDF5 plotters, which display the stored
+physical `(u, v)` coordinates directly.
 
 ### Camera Handedness
 

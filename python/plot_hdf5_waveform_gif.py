@@ -16,14 +16,12 @@ from plot_hdf5_camera import (
     draw_camera,
     find_images,
     resolve_event_id,
-    telescope_pointing_for_image,
 )
-from plot_orientation import basis_from_corsika_pointing
 
 
 def output_frame_path(output_dir, image, quantity, frame_index):
     return output_dir / (
-        f"event_{int(image['event_id'])}_tel_{int(image['telescope_id']) + 1:02d}_"
+        f"event_{int(image['event_id'])}_tel_id_{int(image['telescope_id']):02d}_"
         f"{quantity}_bin_{frame_index:04d}.png"
     )
 
@@ -37,7 +35,7 @@ def output_gif_path(gif_arg, output_dir, image, quantity, multiple):
     gif_dir = gif_path if gif_path.suffix == "" else gif_path.with_suffix("")
     gif_dir.mkdir(parents=True, exist_ok=True)
     return gif_dir / (
-        f"event_{int(image['event_id'])}_tel_{int(image['telescope_id']) + 1:02d}_{quantity}.gif"
+        f"event_{int(image['event_id'])}_tel_id_{int(image['telescope_id']):02d}_{quantity}.gif"
     )
 
 
@@ -202,7 +200,6 @@ def main():
         help="optional frame-center upper bound in the selected plotting time reference",
     )
     parser.add_argument("--dpi", type=int, default=180)
-    parser.add_argument("--raw-camera-xy", action="store_true")
     args = parser.parse_args()
 
     if args.stride < 1:
@@ -248,16 +245,8 @@ def main():
             if image_index < 0 or image_index >= waveform.shape[0]:
                 raise SystemExit(f"image_index={image_index} is outside waveform dataset shape.")
 
-            display_basis = None
-            if not args.raw_camera_xy:
-                pointing = telescope_pointing_for_image(h5, image)
-                if pointing is not None:
-                    display_x, display_y, oriented = basis_from_corsika_pointing(*pointing)
-                    if oriented:
-                        display_basis = (display_x, display_y)
-
             image_frame_dir = out_dir if not multiple else out_dir / (
-                f"event_{int(image['event_id'])}_tel_{int(image['telescope_id']) + 1:02d}_{args.quantity}"
+                f"event_{int(image['event_id'])}_tel_id_{int(image['telescope_id']):02d}_{args.quantity}"
             )
             image_frame_dir.mkdir(parents=True, exist_ok=True)
             saved = []
@@ -278,11 +267,10 @@ def main():
                     values_by_pixel,
                     args.quantity,
                     args.dpi,
-                    display_basis,
                 )
                 ax = fig.axes[0]
                 ax.set_title(
-                    f"event {int(image['event_id'])}, telescope {int(image['telescope_id']) + 1}, "
+                    f"event {int(image['event_id'])}, telescope_id={int(image['telescope_id'])}, "
                     f"{time_title(args, t0, t1, ref_ns, stored_reference)}"
                 )
                 out = output_frame_path(image_frame_dir, image, args.quantity, frame_index)

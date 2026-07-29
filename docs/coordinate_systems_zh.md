@@ -387,17 +387,10 @@ Matplotlib horizontal = pyLAST pix_y = -LACT_sim u
 Matplotlib vertical   = pyLAST pix_x = -LACT_sim v
 ```
 
-若需要用同一个 pyLAST event 检查 LACT_sim 原始焦平面 `u/v`，运行：
-
-```bash
-python3 python/plot_photon_csv_root_pylast.py \
-  run_logs/examples/photon_csv_full_camera/lact_events.root \
-  --event-id 1909 --telescope-id 19 \
-  --coordinate-view lact-uv \
-  --output run_logs/examples/photon_csv_full_camera/camera_uv.png
-```
-
-`lact-uv` 只改变绘图坐标与轴标签，不改变 pixel 顺序或 PE 数组。
+`python/plot_photon_csv_root_pylast.py` 直接调用 pyLAST 原生
+`EventVisualizer.plot_event()`，因此绘图层不再提供第二套 LACT 专用坐标转换。
+需要检查原始焦平面 `u/v` 时，应使用白板或 HDF5 诊断图；这些图直接读取文件中
+保存的物理 `(u, v)`，不会转换成 pyLAST 天空偏移坐标。
 
 ## Event 1909 示例
 
