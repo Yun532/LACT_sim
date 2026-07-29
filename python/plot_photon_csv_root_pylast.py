@@ -41,14 +41,14 @@ def coordinates_for_view(
     pix_x=-v and pix_y=-u.
     """
     if coordinate_view == "lact-uv":
-        lact_u_deg = pix_y_deg
+        lact_u_deg = -pix_y_deg
         lact_v_deg = -pix_x_deg
         return (
             lact_v_deg,
             lact_u_deg,
             "LACT_sim u [deg]",
             "LACT_sim v [deg]",
-            "LACT u=pyLAST pix_y, v=-pyLAST pix_x",
+            "LACT u=-pyLAST pix_y, v=-pyLAST pix_x",
         )
     return (
         pix_x_deg,
@@ -120,7 +120,7 @@ def main() -> None:
         vmin=0.0,
         vmax=float(image_pe.max()) if np.any(mask) else 1.0,
         title=(
-            f"PhotonCsv full camera: event {int(event.event_id)}, "
+            f"LACT ROOT full camera: event {int(event.event_id)}, "
             f"telescope {telescope_id}"
         ),
         pixel_shape="square",
