@@ -526,12 +526,12 @@ coordinates to source-offset coordinates:
 
 ```text
 pyLAST pix_x = -v
-pyLAST pix_y = +u
+pyLAST pix_y = -u
 ```
 
 The current `pylast.visualize.plot_camera_image()` then draws `pix_y` on the
 horizontal Matplotlib axis and `pix_x` on the vertical axis. Therefore its
-display axes are `horizontal=+u`, `vertical=-v`. Use
+display axes are `horizontal=-u`, `vertical=-v` for the LACT coordinate-fix branch. Use
 `python/plot_photon_csv_root_pylast.py --coordinate-view lact-uv` to draw the
 same pyLAST event with raw LACT_sim `u` horizontal and `v` vertical.
 

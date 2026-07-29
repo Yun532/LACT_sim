@@ -188,19 +188,19 @@ LACT_sim 到 pyLAST 的已实现约定：
 
 ```text
 pyLAST pix_x = -LACT_sim v
-pyLAST pix_y = +LACT_sim u
+pyLAST pix_y = -LACT_sim u
 ```
 
 pyLAST 当前绘图函数把第二个坐标放在水平轴、第一个坐标放在垂直轴。诊断页面默认画 LACT_sim 原始 `u/v`；只有用户显式选择“pyLAST 相机显示”时才应用该变换，不得静默翻转。
 
-最终画布是 `horizontal=pix_y=+u、vertical=pix_x=-v`。这是 LACT `u/v` 到 pyLAST 字段的边界映射加上绘图参数顺序，不会让三维望远镜或物理光路再旋转一次。
+最终画布是 `horizontal=pix_y=-u、vertical=pix_x=-v`。这是 LACT `u/v` 到 pyLAST 字段的边界映射加上绘图参数顺序，不会让三维望远镜或物理光路再旋转一次。
 
-诊断页面提供显式坐标选择器。`LACT 原始 u/v` 保持横轴 `u`、纵轴 `v`；`pyLAST 相机显示` 使用最新版 `main` 已核对的 `pix_x=-v、pix_y=+u`，即横轴 `+u`、纵轴 `-v`。选择器只改变坐标表达，必须复用同一 output 点、像素 id 和 `image_cherenkov_pe`，不得重新模拟或改变事件内容。
+诊断页面提供显式坐标选择器。`LACT 原始 u/v` 保持横轴 `u`、纵轴 `v`；`pyLAST 相机显示` 使用与 LACT 坐标修复 `4fb44f8` 配套并经 event 1909 重建核对的 `pix_x=-v、pix_y=-u`，即横轴 `-u`、纵轴 `-v`。选择器只改变坐标表达，必须复用同一 output 点、像素 id 和 `image_cherenkov_pe`，不得重新模拟或改变事件内容。
 
 代码出处：
 
 - `python/compare_minimal_csv_to_corsika_pylast.py`：数值核对 LACT `u/v` 与 pyLAST `pix_x/pix_y`。
-- `python/plot_photon_csv_root_pylast.py:31-58`：明确 `pix_x=-v、pix_y=+u`，并记录绘图轴顺序。
+- `python/plot_photon_csv_root_pylast.py:31-58`：明确 reader 与绘图轴顺序；当前配套映射为 `pix_x=-v、pix_y=-u`。
 
 ### 5.1 `theta/phi` 角度方向审计
 

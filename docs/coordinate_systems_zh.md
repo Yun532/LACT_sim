@@ -7,7 +7,7 @@
 1. **全局坐标定义**：只解释阵列、望远镜本地、镜片、遮挡、输出面和相机坐标，不绑定事例。
 2. **平行光**：望远镜固定 `az=0° / el=70°`，四组光源都与光轴精确相差 `4°`：上/下沿本地 `±v`，东/西沿本地 `±u`。东、西不是把天空方位角简单加减 `4°`；考虑 70° 仰角后，它们等效为 `az=±11.5550088° / el=69.6199950°`。四组均由最新程序独立运行；选择相机图时同步切换三维光路、镜面反射点和遮挡诊断点。
 3. **不同天顶角平行光**：按真实形变 CSV 切换镜片位置，用颜色表示相对理想镜片中心的位移，并显示同一次程序运行产生的光路与完整输出面 `u/v`。
-4. **CORSIKA 事例**：进入页面首先显示完整簇射总览，默认南朝屏幕外；同一 event 的芯位、到达方向、32 台阵列/指向、二维 photon bunch 与 `zem` 反演发射点一起显示。右上角始终保留 tel19/16/21/20 四幅 ROOT 相机图。点击任一幅只把完整场景自动缩放到该台并把旋转中心设为该台，不删除其他 31 台模型或其他 photon 路径；“返回完整簇射”只恢复初始尺度和视角。
+4. **CORSIKA 事例**：进入页面首先显示完整簇射总览，默认南朝屏幕外；同一 event 的芯位、到达方向、32 台阵列/指向、二维 photon bunch 与 `zem` 反演发射点一起显示。右上角可在 tel19/16/21/20 四幅 ROOT 相机图和 pyLAST 阵列/芯位图之间切换。点击相机或芯位图中的望远镜只把完整场景自动缩放到该台并把旋转中心设为该台，不删除其他 31 台模型或其他 photon 路径；“返回完整簇射”只恢复初始尺度和视角。
 
 每个含地面的页面都固定采用北、东、南、西与天空方向。俯视时北在上、东在右；拖动只改变观察相机，不改变程序坐标或方位角定义。
 
@@ -20,7 +20,7 @@ EventIO NWU photon bunch
   -> hit.u/v = dot(surface - plane_point, plane_u/v)
   -> camera_x/y = u/v
   -> ROOT: x_m/y_m = u/v
-  -> pyLAST: pix_x=-v, pix_y=+u
+  -> pyLAST: pix_x=-v, pix_y=-u
 ```
 
 | 数据层 | x | y | z / 说明 |
@@ -30,8 +30,9 @@ EventIO NWU photon bunch
 | 望远镜本地光学 | 水平横向 `local x`，朝方位角增加方向；`A=0°` 时为 East | 天空向上 `local y` | `local +z` 为光轴，指向天空 |
 | 镜片与遮挡 CSV | local x | local y | local z；直接进入本地光学几何 |
 | 输出面 / LACT 相机 | `u = local x` | `v = local y` | 当前输出面约为 local `z=-8 m` |
-| pyLAST `LactEventSource` | `pix_x=-v` | `pix_y=+u` | 与最新版 `main` 一致 |
-| pyLAST 当前画布 | 横轴 `pix_y=+u` | 纵轴 `pix_x=-v` | `plot_camera_image()` 的参数顺序 |
+| pyLAST `LactEventSource` | `pix_x=-v` | `pix_y=-u` | 与 LACT 坐标修复 `4fb44f8` 配套 |
+| pyLAST 当前画布 | 横轴 `pix_y=-u` | 纵轴 `pix_x=-v` | `plot_camera_image()` 的参数顺序 |
+| pyLAST 阵列/芯位图 | East=`-array_y_west` | North=`array_x_north` | `plot_event_cores()` 的地面轴 |
 
 `buildTelescopeFrame()` 用于通用全局显示；`buildCorsikaNwuTelescopeFrame()` 用于 NWU 输入适配。两者的全局轴名称不同，但进入镜片、遮挡、输出面和相机的规范光学本地语义必须一致：`+x/+u` 朝方位角增加方向，`+y/+v` 为天空向上，`+z` 为光轴。网页不得再用旧的“CORSIKA local x=West”基底展开望远镜结构。
 
@@ -57,6 +58,14 @@ NWU 的物理轴顺序 `North-West-Up` 是左手排列，所以这套物理右�
 固定地图在 CORSIKA 页严格使用程序 CORSIKA NWU 坐标：`x=North、y=West、z=Up`，为了“北上东右”，画布右侧 East 对应 `-y`。第 1–3 页的固定地图只是通用全局坐标的方位显示参考，不是 CORSIKA 输入 `x/y`；网页已在地图标题下明确标出这一区别。
 
 固定地图旁边保留一个紧凑的“屏幕方向”框，它才随观察视角旋转；重合于视线的轴使用 `⊗屏幕内 / ⊙屏幕外`。三维投影恢复使用完整画布高度。望远镜角度、事例和观察视角控制合并在底部“视角 / 参数”面板中并默认收起，避免长操作提示和仰角滑块遮挡镜片、支架或遮挡点。
+
+## CORSIKA 望远镜位置与 pyLAST 芯位图
+
+三维模型始终用 ROOT `telescopes` 表中的原始 NWU 位置 `(North, West, Up)`。地面视图在每台模型旁显示 `tel_id` 和 North/West 坐标；其他尺度至少在所选模型旁显示三位小数坐标，避免完整簇射尺度下 32 组长标签重叠。
+
+右上角的“pyLAST 芯位图”不是嵌入 PNG，而是逐条模仿 `EventVisualizer.plot_event_cores()` 重画同一 event：望远镜横轴坐标为 `East=-West`，纵轴为 `North`，红星为 ROOT 真芯位，红箭头为 event header 的真到达方向。pyLAST 原函数把望远镜标成 `T{tel_id+1}`，所以图中的 `T20` 对应网页和 ROOT 的 `tel19`；标题同时显示两种编号及所选台精确坐标。为提高可读性，网页采用纯黑背景和高对比线性色带，但不改变 PE 归一化、坐标或芯位数值。
+
+该 ROOT 的 32 个 `triggered` 标志均为 `false`，但 32 台都有真实 `signal_pe`。芯位图明确采用 `plot_event_cores(..., include_non_triggered=True)` 的显示语义，使颜色表示原始 PE 而不是把全部望远镜误画成零；没有补造触发状态。点击图中的任一望远镜会选择对应 ROOT `telescope_id`，并把三维视图聚焦到同一坐标。
 
 ## CORSIKA 二维 bunch 的三维反演边界
 
@@ -96,9 +105,11 @@ CORSIKA 页的 LACT u/v 也不是由网页根据 photon bunch 的方向反算。
 
 LACT 和 pyLAST 像素图现在统一使用同一套暗色背景、像素形状、强度色标与物理/光斑缩放方式。统一的是网页画法，不是坐标数值：LACT 仍直接画 `(u,v)`；pyLAST 仍严格画 reader 和 renderer 得到的 `(plot_x,plot_y)=(+u,-v)`。
 
-`pix_x=-v, pix_y=+u` 的作用是把 LACT 的物理焦平面基底适配到 pyLAST 的源偏移基底。LACT 中 `u` 是方位型、`v` 是仰角型；pyLAST reconstruction 中 `pix_x` 是仰角型、`pix_y` 是方位型，所以必须交换轴。pyLAST/sim_telarray 的方位基底使用 NWU（正向朝 West），而镜面上的 LACT `+u` 已对应正的 West 源偏移，因此 `pix_y=+u`；天空向上在焦平面 `v` 上经过镜面成像反向，因此 `pix_x=-v`。矩阵 `[[0,-1],[1,0]]` 是一个保持右手性的 90° 旋转；若交换后两个方向都取正，反而会成为镜像坐标。
+`pix_x=-v, pix_y=-u` 的作用是把 LACT 的物理焦平面基底适配到 pyLAST 的源偏移基底。LACT 中 `u` 是方位型、`v` 是仰角型；pyLAST reconstruction 中 `pix_x` 是仰角型、`pix_y` 是方位型，所以必须交换轴。坐标修复 `4fb44f8` 后，LACT 的 `+u` 随 North→East 方位增加，而 pyLAST TelescopeFrame 的正方位基底朝 West，因此 `pix_y=-u`；天空向上在焦平面 `v` 上经过镜面成像反向，因此 `pix_x=-v`。边界矩阵为 `[[0,-1],[-1,0]]`。这是两个程序坐标基底之间的适配，不是网页为了视觉一致而翻图。
 
-真实 4° 平行光给出同样的符号：上方光源的 LACT 质心 `v=-0.571319 m`，转成 pyLAST 后 `pix_x=+0.571319 m`；东侧光源的 LACT 质心 `u=-0.571243 m`，而 pyLAST 的正方位轴朝 West，所以 `pix_y=-0.571243 m`。这些值由页面直接读取程序输出，不是示意数值。
+真实 4° 平行光给出同样的符号：上方光源的 LACT 质心 `v=-0.571319 m`，转成 pyLAST 后 `pix_x=+0.571319 m`；东侧光源的 LACT 质心 `u=-0.571243 m`，转成 pyLAST 后 `pix_y=+0.571243 m`。这些值由页面直接读取程序输出，不是示意数值。
+
+event 1909 的端到端复算进一步锁定了第二个负号：在同一份固定版 LACT ROOT、同一批 10 台望远镜和同一重建流程下，`(-v,-u)` 得到方向误差 `0.05450°`、芯位误差 `13.04 m`；保留旧的 `(-v,+u)` 则变成 `1.57150°` 和 `165.06 m`。因此 LACT 的 `4fb44f8` 修复与 pyLAST reader 的 `pix_y=-u` 必须作为一组变更。
 
 ## 支架形变
 

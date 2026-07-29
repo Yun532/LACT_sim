@@ -25,11 +25,15 @@ for (const marker of [
   'const PARALLEL_COLORS=["#ff6d7a","#64c7ff","#ffd45e","#70e39c"]',
   'caseDensityColor(plotColor',
   'id="cameraCoords"',
+  'id="corsikaPanelMode"',
+  'function corePlotColor(t)',
+  'q.fillStyle="#000000"',
   'id="deformMetric"',
   'function pylastReaderCoordinates(u,v)',
   'function pylastPlotCoordinates(pix_x,pix_y)',
   'function drawPylastCameraPanel(',
   'function drawUnifiedPixelCamera(',
+  'function drawPylastCorePlot(',
   'function corsikaPrimaryViews()',
   'function corsikaPreviewViews()',
   'id="returnShower"',
@@ -42,11 +46,11 @@ for (const marker of [
   'camera_x_m=hit.u_m',
   'camera_y_m=hit.v_m',
   '不是 CORSIKA 阵列 NWU 的 x/y',
-  '矩阵是 <code>[[0,-1],[1,0]]</code>',
-  '正方向朝 West',
+  '矩阵是 <code>[[0,-1],[-1,0]]</code>',
+  '正方位基底朝 West',
   'pyLAST +pix_x = -v',
-  'pyLAST +pix_y = +u',
-  'pyLAST 画布：向右 = +u；向上 = -v',
+  'pyLAST +pix_y = -u',
+  'pyLAST 画布：向右 = -u；向上 = -v',
   'NWU：x=N，y=W，E=−y',
   '显示：+x=N，+y=E',
   'function corsikaAngleDisplay()',
@@ -72,7 +76,7 @@ function canvasContext() {
 
 function element(id, dataset = {}) {
   const context = canvasContext();
-  const initialValues = {cameraScale: "spot", cameraCoords: "lact", deformMetric: "normal", globalAz: "0", globalEl: "70", photonTel: "19"};
+  const initialValues = {cameraScale: "spot", cameraCoords: "lact", corsikaPanelMode: "camera", deformMetric: "normal", globalAz: "0", globalEl: "70", photonTel: "19"};
   return {
     id, dataset, style: {}, classList: {add() {}, remove() {}, toggle() {}},
     value: initialValues[id] || "0", hidden: false,
@@ -87,7 +91,7 @@ function element(id, dataset = {}) {
 }
 
 function run(search) {
-  const ids = ["scene", "camera", "info", "cameraPanel", "cameraPanelTitle", "cameraScale", "cameraCoords", "cameraHead",
+  const ids = ["scene", "camera", "info", "cameraPanel", "cameraPanelTitle", "cameraScale", "cameraCoords", "corsikaPanelMode", "cameraHead",
     "cameraCaption", "deformPanel", "deformChart", "deformTitle", "deformStat", "colorMetric", "colorMin", "colorMax",
     "globalToolbar", "parallelToolbar", "elevationToolbar", "corsikaToolbar", "globalAz",
     "globalAzValue", "globalEl", "globalElValue", "angleValue", "bunch", "photonTel",
@@ -137,13 +141,13 @@ for (const [query, expected] of checks) {
 
 const globalElements = run("?page=global");
 const globalAxisNames = globalElements.sandbox.globalScene().lines.map(line => line.name);
-for (const expected of ["pyLAST +pix_x = -v", "pyLAST +pix_y = +u"]) {
+for (const expected of ["pyLAST +pix_x = -v", "pyLAST +pix_y = -u"]) {
   if (!globalAxisNames.includes(expected)) {
     throw new Error(`global definition scene is missing ${expected}`);
   }
 }
 const globalInfo = globalElements.get("info").innerHTML;
-for (const expected of ["pix_x=-v", "横轴=pix_y=+u", "root/LactEventSource.cpp:245-265"]) {
+for (const expected of ["pix_x=-v", "横轴=pix_y=-u", "root/LactEventSource.cpp:245-265"]) {
   if (!globalInfo.includes(expected)) {
     throw new Error(`global pyLAST definition is missing ${expected}`);
   }
@@ -205,6 +209,34 @@ if (Math.hypot(groundPointAfterZoom[0] - groundPointBeforeZoom[0],
 }
 console.log("runtime OK CORSIKA defaults to full shower, four ROOT camera previews and cursor-centered zoom");
 
+const corsikaCoreElements = run("?page=corsika&case=event1909");
+corsikaCoreElements.get("corsikaPanelMode").value = "cores";
+corsikaCoreElements.get("corsikaPanelMode").listeners.change({target: {value: "cores"}});
+const coreLayout = vm.runInNewContext("corsikaCorePlotLayout", corsikaCoreElements.sandbox);
+const tel19Core = vm.runInNewContext("D.event1909.array.find(function(t){return t.telescope_id===19})", corsikaCoreElements.sandbox);
+const tel19Plot = coreLayout.points.find(point => point.telescope_id === 19);
+if (!coreLayout || coreLayout.points.length !== 32 || !tel19Plot ||
+    corsikaCoreElements.get("cameraCoords").style.display !== "none" ||
+    corsikaCoreElements.get("cameraScale").style.display !== "none" ||
+    !corsikaCoreElements.get("cameraHead").textContent.includes("pyLAST 阵列 / true core") ||
+    !corsikaCoreElements.get("cameraCaption").textContent.includes("East=−West") ||
+    !corsikaCoreElements.get("cameraCaption").textContent.includes("高对比蓝—青—绿—黄—红") ||
+    !corsikaCoreElements.get("cameraCaption").textContent.includes("include_non_triggered=True") ||
+    !corsikaCoreElements.get("info").innerHTML.includes("plot_x=East=−array_y_west")) {
+  throw new Error("pyLAST core plot does not expose all 32 ROOT telescope positions, high-contrast styling and the audited NWU-to-East/North rule");
+}
+corsikaCoreElements.get("camera").listeners.click({
+  clientX: tel19Plot.x / coreLayout.devicePixelRatio,
+  clientY: tel19Plot.y / coreLayout.devicePixelRatio,
+});
+const coreClickedTel = vm.runInNewContext("state.photonTel", corsikaCoreElements.sandbox);
+const coreClickedCenter = vm.runInNewContext("center", corsikaCoreElements.sandbox);
+if (coreClickedTel !== 19 || vm.runInNewContext("globalScale", corsikaCoreElements.sandbox) !== "telescope" ||
+    Math.hypot(coreClickedCenter[0] - tel19Core.position_nwu_m[0], coreClickedCenter[1] - tel19Core.position_nwu_m[1]) > 1e-6) {
+  throw new Error("clicking the pyLAST core plot did not focus the matching ROOT telescope model");
+}
+console.log("runtime OK high-contrast pyLAST core plot maps NWU to East/North and selects the matching 3D telescope");
+
 const rootCameraCheck = vm.runInNewContext(`(() => {
   const root = D.event1909.camera_geometry_lact_uv;
   const configured = new Map(D.camera_geometry.map(p => [p.id, p]));
@@ -221,7 +253,7 @@ if (rootCameraCheck.count !== 1616 || rootCameraCheck.maxError > 1e-9 ||
     !corsikaFullCameraElements.get("info").innerHTML.includes("camera_x_m=hit.u_m") ||
     !corsikaFullCameraElements.get("info").innerHTML.includes("不是 CORSIKA 阵列 NWU 的 x/y") ||
     !corsikaFullCameraElements.get("info").innerHTML.includes("v=-0.571319 m") ||
-    !corsikaFullCameraElements.get("info").innerHTML.includes("pix_y=-0.571243 m")) {
+    !corsikaFullCameraElements.get("info").innerHTML.includes("pix_y=0.571243 m")) {
   throw new Error(`CORSIKA LACT u/v does not come directly from the ROOT camera geometry: ${JSON.stringify(rootCameraCheck)}`);
 }
 console.log("runtime OK CORSIKA LACT u/v uses all 1616 ROOT camera_pixels coordinates");
@@ -538,8 +570,8 @@ if (maxPylastGeometryMutation > 0 ||
     !pylastCorsikaElements.get("cameraHead").textContent.includes("pyLAST 规则重画") ||
     !pylastCorsikaElements.get("cameraCaption").textContent.includes("同一 ROOT event 1909") ||
     pylastCorsikaElements.sandbox.pylastReaderCoordinates(0.2, -0.3).pix_x !== 0.3 ||
-    pylastCorsikaElements.sandbox.pylastReaderCoordinates(0.2, -0.3).pix_y !== 0.2 ||
-    pylastCorsikaElements.sandbox.pylastPointFromLact(0.2, -0.3).join(",") !== "0.2,0.3") {
+    pylastCorsikaElements.sandbox.pylastReaderCoordinates(0.2, -0.3).pix_y !== -0.2 ||
+    pylastCorsikaElements.sandbox.pylastPointFromLact(0.2, -0.3).join(",") !== "-0.2,0.3") {
   throw new Error(`pyLAST browser redraw mutated 3D geometry or broke the audited mapping: ${maxPylastGeometryMutation}`);
 }
 console.log("runtime OK pyLAST browser redraw preserves CORSIKA 3D geometry and exact reader/renderer mapping");
