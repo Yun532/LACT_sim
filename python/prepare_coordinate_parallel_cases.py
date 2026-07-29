@@ -51,13 +51,13 @@ def uniform_sample(rows: list[dict[str, str]], target: int) -> list[dict[str, st
 def generic_basis(az_deg: float, el_deg: float) -> dict[str, list[float]]:
     az = math.radians(az_deg)
     el = math.radians(el_deg)
-    z = [math.cos(el) * math.cos(az), math.cos(el) * math.sin(az), math.sin(el)]
-    x = [-math.sin(az), math.cos(az), 0.0]
-    y = [
-        z[1] * x[2] - z[2] * x[1],
-        z[2] * x[0] - z[0] * x[2],
-        z[0] * x[1] - z[1] * x[0],
-    ]
+    # Exact LACT main telescope structure basis in global NWU coordinates.
+    # Mirror/obstruction +x points West at az=0; +y is sky-up.
+    x = [math.sin(az), math.cos(az), 0.0]
+    y = [-math.sin(el) * math.cos(az),
+         math.sin(el) * math.sin(az), math.cos(el)]
+    z = [math.cos(el) * math.cos(az),
+         -math.cos(el) * math.sin(az), math.sin(el)]
     return {"x": x, "y": y, "z": z}
 
 
@@ -269,7 +269,8 @@ def load_case(case_id: str, title: str, elevation: float, hit_path: Path,
     for row in clear_rows:
         surface = vec(row, 'surface_')
         offset = [surface[i] - plane[i] for i in range(3)]
-        expected_u = sum(offset[i] * basis['x'][i] for i in range(3))
+        # Focal-plane +u is opposite mirror-local +x; +v follows local +y.
+        expected_u = -sum(offset[i] * basis['x'][i] for i in range(3))
         expected_v = sum(offset[i] * basis['y'][i] for i in range(3))
         max_output_coordinate_error = max(
             max_output_coordinate_error,
@@ -485,12 +486,12 @@ def main() -> None:
         (
             "west", "光轴西侧 offset=4°：等效 sky az=-11.555° / el=69.620°",
             -11.555008804184915, 69.61999503216495,
-            [0.0697564737441253, 0.0, -0.9975640502598242], 4.0, 0.0,
+            [-0.0697564737441253, 0.0, -0.9975640502598242], 4.0, 180.0,
         ),
         (
             "east", "光轴东侧 offset=4°：等效 sky az=+11.555° / el=69.620°",
             11.555008804184915, 69.61999503216495,
-            [-0.0697564737441253, 0.0, -0.9975640502598242], 4.0, 180.0,
+            [0.0697564737441253, 0.0, -0.9975640502598242], 4.0, 0.0,
         ),
     )
     for name, label, source_az, source_el, direction_local, theta, phi in four_specs:

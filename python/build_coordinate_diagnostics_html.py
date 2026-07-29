@@ -444,7 +444,7 @@ def validate_parallel_cases(parallel_cases: dict) -> dict:
         source_el = math.radians(source_el_deg)
         propagation_global = [
             -math.cos(source_el) * math.cos(source_az),
-            -math.cos(source_el) * math.sin(source_az),
+            math.cos(source_el) * math.sin(source_az),
             -math.sin(source_el),
         ]
         expected_local = [
@@ -510,7 +510,7 @@ def validate_parallel_cases(parallel_cases: dict) -> dict:
             "baseline and exact 0..90 deg elevation cases come from captured C++ runs",
             "four sky sources are exact az/el inputs transformed to the logged local beam vectors",
             "mark-only and clear rows reproduce the C++ pre/post-obstruction counts",
-            "camera centroids show upper/lower and left/right optical inversion",
+            "camera centroids show upper/lower and east/west optical inversion",
             "raw global output points project back to the logged u/v coordinates",
             "camera x/y equal raw u/v and pixel sums equal the C++ hit_camera count",
             "all baseline, sky-direction, and elevation cases embed every physical output u/v and every accepted camera-hit u/v",

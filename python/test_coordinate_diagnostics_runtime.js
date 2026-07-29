@@ -38,8 +38,8 @@ for (const marker of [
   'function corsikaPreviewViews()',
   'id="returnShower"',
   'camera_geometry_lact_uv',
-  'LACT +u = camera x_m = local +x',
-  'LACT +v = camera y_m = local +y',
+  'LACT +u = camera x_m = -mirror local x',
+  'LACT +v = camera y_m = mirror local y',
   '相机面：ROOT x_m≡LACT u；ROOT y_m≡LACT v',
   '+u (=x_m)',
   '+v (=y_m)',
@@ -50,9 +50,11 @@ for (const marker of [
   '正方位基底朝 West',
   'pyLAST +pix_x = -v',
   'pyLAST +pix_y = -u',
-  'pyLAST 画布：向右 = -u；向上 = -v',
+  '坐标层级（程序原值与方向）',
+  '注意：镜片 CSV x/y 不是 CORSIKA 阵列 x/y',
   'NWU：x=N，y=W，E=−y',
-  '显示：+x=N，+y=E',
+  '镜片/遮挡 local +x：az=0 时 West',
+  'CORSIKA input +y = West',
   'function corsikaAngleDisplay()',
   'function beamDirectionFromAngles(thetaDeg,phiDeg)',
 ]) {
@@ -140,19 +142,76 @@ for (const [query, expected] of checks) {
 }
 
 const globalElements = run("?page=global");
-const globalAxisNames = globalElements.sandbox.globalScene().lines.map(line => line.name);
-for (const expected of ["pyLAST +pix_x = -v", "pyLAST +pix_y = -u"]) {
+const globalDefinitionScene = globalElements.sandbox.globalScene();
+const globalAxisNames = globalDefinitionScene.lines.map(line => line.name);
+for (const expected of [
+  "pyLAST +pix_x = -v",
+  "pyLAST +pix_y = -u",
+  "CORSIKA input +x = North",
+  "CORSIKA input +y = West",
+  "镜片 CSV center +x = telescope local +x",
+  "镜片 CSV center +y = telescope local +y",
+  "镜片 0 aperture +u_f",
+  "镜片 0 aperture +v_f",
+]) {
   if (!globalAxisNames.includes(expected)) {
     throw new Error(`global definition scene is missing ${expected}`);
   }
 }
 const globalInfo = globalElements.get("info").innerHTML;
-for (const expected of ["pix_x=-v", "横轴=pix_y=-u", "root/LactEventSource.cpp:245-265"]) {
+for (const expected of [
+  "pix_x=-v",
+  "横轴=pix_y=-u",
+  "root/LactEventSource.cpp:245-265",
+  "CORSIKA 输入 x/y",
+  "镜片中心 CSV x/y",
+  "三种“x/y”不要混用",
+  "MirrorFacet.hpp:61-71",
+]) {
   if (!globalInfo.includes(expected)) {
     throw new Error(`global pyLAST definition is missing ${expected}`);
   }
 }
-console.log("runtime OK global page contains pyLAST field and canvas definitions");
+function normalizedLineDirection(scene, name) {
+  const item = scene.lines.find(line => line.name === name);
+  if (!item) throw new Error(`missing axis line ${name}`);
+  const a = item.points[0], b = item.points[item.points.length - 1];
+  const v = b.map((value, index) => value - a[index]);
+  const n = Math.hypot(...v);
+  return v.map(value => value / n);
+}
+function vectorError(a, b) {
+  return Math.hypot(...a.map((value, index) => value - b[index]));
+}
+const corsikaInputX = normalizedLineDirection(globalDefinitionScene, "CORSIKA input +x = North");
+const corsikaInputY = normalizedLineDirection(globalDefinitionScene, "CORSIKA input +y = West");
+if (vectorError(corsikaInputX, [1, 0, 0]) > 1e-12 ||
+    vectorError(corsikaInputY, [0, 1, 0]) > 1e-12) {
+  throw new Error(`CORSIKA raw NWU input axes are wrong: x=${corsikaInputX}, y=${corsikaInputY}`);
+}
+const westLabel = globalDefinitionScene.labels.find(label => label.t === "+y_C = West");
+const eastLabel = globalDefinitionScene.labels.find(label => label.t === "East = −y_C");
+if (!westLabel || !eastLabel || westLabel.p[1] <= eastLabel.p[1]) {
+  throw new Error("CORSIKA West/East text labels are placed on the wrong sides of the raw +Y axis");
+}
+const genericFrame = globalElements.sandbox.genericBasis({az_deg: 0, el_deg: 70});
+const mirrorCenterX = normalizedLineDirection(globalDefinitionScene, "镜片 CSV center +x = telescope local +x");
+const mirrorCenterY = normalizedLineDirection(globalDefinitionScene, "镜片 CSV center +y = telescope local +y");
+if (vectorError(mirrorCenterX, genericFrame.x) > 1e-12 ||
+    vectorError(mirrorCenterY, genericFrame.y) > 1e-12) {
+  throw new Error("mirror center CSV axes do not follow buildTelescopeFrame");
+}
+const facetU = normalizedLineDirection(globalDefinitionScene, "镜片 0 aperture +u_f");
+const facetV = normalizedLineDirection(globalDefinitionScene, "镜片 0 aperture +v_f");
+const facetNormalLocal = vm.runInNewContext("D.ideal.find(f => f.id === 0).normal", globalElements.sandbox);
+const facetNormalGlobal = globalElements.sandbox.basisVector(facetNormalLocal, genericFrame);
+const dot = (a, b) => a.reduce((sum, value, index) => sum + value * b[index], 0);
+if (Math.abs(dot(facetU, facetV)) > 1e-12 ||
+    Math.abs(dot(facetU, facetNormalGlobal)) > 1e-12 ||
+    Math.abs(dot(facetV, facetNormalGlobal)) > 1e-12) {
+  throw new Error("facet aperture u/v axes are not orthogonal to each other and the real facet normal");
+}
+console.log("runtime OK global page distinguishes CORSIKA NWU, mirror center x/y, facet aperture u/v and camera mappings");
 
 const elevationWhiteboardElements = run("?page=elevation");
 const elevationCase = elevationWhiteboardElements.sandbox.currentParallelCase();
@@ -253,7 +312,7 @@ if (rootCameraCheck.count !== 1616 || rootCameraCheck.maxError > 1e-9 ||
     !corsikaFullCameraElements.get("info").innerHTML.includes("camera_x_m=hit.u_m") ||
     !corsikaFullCameraElements.get("info").innerHTML.includes("不是 CORSIKA 阵列 NWU 的 x/y") ||
     !corsikaFullCameraElements.get("info").innerHTML.includes("v=-0.571319 m") ||
-    !corsikaFullCameraElements.get("info").innerHTML.includes("pix_y=0.571243 m")) {
+    !corsikaFullCameraElements.get("info").innerHTML.includes("pix_y=0.571054 m")) {
   throw new Error(`CORSIKA LACT u/v does not come directly from the ROOT camera geometry: ${JSON.stringify(rootCameraCheck)}`);
 }
 console.log("runtime OK CORSIKA LACT u/v uses all 1616 ROOT camera_pixels coordinates");
@@ -281,11 +340,11 @@ if (focusedFacets.length !== 54 || otherFocusedFacets.length !== 31 * 54 || focu
     focusedPreviewIds.join(",") !== "19,16,21,0" ||
     focusedPreviewSignals[3][1] !== 40 || focusedPreviewSignals[3][2] !== 7 ||
     Math.hypot(focusedCenter[0] - tel0.position_nwu_m[0], focusedCenter[1] - tel0.position_nwu_m[1]) > 1e-6 ||
-    !focusedAxisNames.includes("LACT +u = camera x_m = local +x") ||
-    !focusedAxisNames.includes("LACT +v = camera y_m = local +y") ||
+    !focusedAxisNames.includes("LACT +u = camera x_m = -mirror local x") ||
+    !focusedAxisNames.includes("LACT +v = camera y_m = mirror local y") ||
     !focusedScene.labels.some(label => label.t.includes("ROOT x_m≡LACT u")) ||
-    !focusedScene.labels.some(label => label.t === "+u (=x_m)") ||
-    !focusedScene.labels.some(label => label.t === "+v (=y_m)") ||
+    !focusedScene.labels.some(label => label.t === "+u (=x_m，East)") ||
+    !focusedScene.labels.some(label => label.t === "+v (=y_m，sky-up)") ||
     !corsikaArrayElements.get("cameraHead").textContent.includes("PE 前三 + 所选 tel0") ||
     !corsikaArrayElements.get("cameraCaption").textContent.includes("右下角立即替换为该台真实 image_cherenkov_pe") ||
     !corsikaArrayElements.get("info").innerHTML.includes("当前所选")) {
@@ -364,7 +423,7 @@ const westOffset = offsetCases.find(item => item.id === "parallel_sky_west");
 const eastOffset = offsetCases.find(item => item.id === "parallel_sky_east");
 if (Math.abs(westOffset.beam.direction_local[1]) > 1e-12 ||
     Math.abs(eastOffset.beam.direction_local[1]) > 1e-12 ||
-    westOffset.beam.direction_local[0] <= 0 || eastOffset.beam.direction_local[0] >= 0 ||
+    westOffset.beam.direction_local[0] >= 0 || eastOffset.beam.direction_local[0] <= 0 ||
     Math.abs(Math.abs(eastOffset.source_sky.az_deg) - 11.5550088042) > 1e-8) {
   throw new Error("East/West 4-degree offsets are not pure local ±u offsets with zenith-angle correction");
 }
@@ -440,9 +499,8 @@ for (let facet = 0; facet < 54; ++facet) {
     const bNwu = corsikaFacets[facet].points[vertex].map((value, axis) =>
       value - corsikaOrigin[axis]
     );
-    // Compare physical vectors, not raw component arrays: generic is North-East-Up,
-    // while the CORSIKA page preserves North-West-Up, so East = -West.
-    const b = [bNwu[0], -bNwu[1], bNwu[2]];
+    // Both paths now use the same NWU telescope basis; compare raw physical vectors.
+    const b = bNwu;
     maxParallelCorsikaStructureError = Math.max(
       maxParallelCorsikaStructureError,
       Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
@@ -455,22 +513,20 @@ if (maxParallelCorsikaStructureError > 1e-9) {
 console.log("runtime OK parallel/CORSIKA telescope-local mirror orientation", maxParallelCorsikaStructureError);
 
 const elevationStructureElements = run("?page=elevation");
-const parallelAxes = parallelStructureElements.sandbox.buildScene().lines
-  .filter(item => item.name.startsWith("通用 local +"));
-const elevationAxes = elevationStructureElements.sandbox.buildScene().lines
-  .filter(item => item.name.startsWith("通用 local +"));
+const parallelBasis = parallelStructureElements.sandbox.currentParallelCase().basis;
+const elevationBasis = elevationStructureElements.sandbox.currentParallelCase().basis;
 let maxParallelElevationAxisError = 0;
-for (let axis = 0; axis < 3; ++axis) {
-  for (let endpoint = 0; endpoint < 2; ++endpoint) {
-    const a = parallelAxes[axis].points[endpoint];
-    const b = elevationAxes[axis].points[endpoint];
+for (const axis of ["x", "y", "z"]) {
+  for (let component = 0; component < 3; ++component) {
+    const a = parallelBasis[axis][component];
+    const b = elevationBasis[axis][component];
     maxParallelElevationAxisError = Math.max(
       maxParallelElevationAxisError,
-      Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
+      Math.abs(a - b)
     );
   }
 }
-if (parallelAxes.length !== 3 || elevationAxes.length !== 3 || maxParallelElevationAxisError > 1e-9) {
+if (maxParallelElevationAxisError > 1e-9) {
   throw new Error(`parallel/elevation trace frame mismatch: ${maxParallelElevationAxisError}`);
 }
 console.log("runtime OK parallel/elevation trace frame", maxParallelElevationAxisError);
@@ -538,7 +594,7 @@ function topDirection(elements, direction) {
 }
 const genericTop = run("?page=parallel");
 const genericNorth = topDirection(genericTop, [1, 0, 0]);
-const genericEast = topDirection(genericTop, [0, 1, 0]);
+const genericEast = topDirection(genericTop, [0, -1, 0]);
 if (!(genericNorth[1] > 0 && Math.abs(genericNorth[0]) < 1e-12 &&
       genericEast[0] > 0 && Math.abs(genericEast[1]) < 1e-12)) {
   throw new Error(`generic map top is not north-up/east-right: N=${genericNorth}, E=${genericEast}`);
@@ -550,7 +606,7 @@ if (!(corsikaNorth[1] > 0 && Math.abs(corsikaNorth[0]) < 1e-12 &&
       corsikaEast[0] > 0 && Math.abs(corsikaEast[1]) < 1e-12)) {
   throw new Error(`CORSIKA map top is not north-up/east-right: N=${corsikaNorth}, E=${corsikaEast}`);
 }
-console.log("runtime OK map top north-up/east-right for generic and CORSIKA NWU");
+console.log("runtime OK map top north-up/east-right for all NWU pages");
 
 const pylastCorsikaElements = run("?page=corsika&case=event1909");
 const corsikaGeometryBefore = pylastCorsikaElements.sandbox.buildScene().polys
@@ -595,13 +651,13 @@ const genericDisplayElements = run("?page=parallel");
 const genericDisplay = genericDisplayElements.sandbox.displayBasis();
 const genericProgram = genericDisplayElements.sandbox.genericBasis({az_deg: 0, el_deg: -28});
 const genericDisplayError = maxBasisError(
-  {x: genericDisplay.right, y: genericDisplay.up, z: genericDisplay.forward}, genericProgram
+  {x: genericDisplay.right.map(value => -value), y: genericDisplay.up, z: genericDisplay.forward}, genericProgram
 );
 const corsikaDisplayElements = run("?page=corsika&case=event1909");
 const corsikaDisplay = corsikaDisplayElements.sandbox.displayBasis();
 const corsikaProgram = corsikaDisplayElements.sandbox.corsikaBasis({az_deg: 0, el_deg: -22});
 const corsikaDisplayError = maxBasisError(
-  {x: corsikaDisplay.right, y: corsikaDisplay.up, z: corsikaDisplay.forward},
+  {x: corsikaDisplay.right.map(value => -value), y: corsikaDisplay.up, z: corsikaDisplay.forward},
   corsikaProgram
 );
 if (genericDisplayError > 1e-12 || corsikaDisplayError > 1e-12) {
@@ -609,7 +665,7 @@ if (genericDisplayError > 1e-12 || corsikaDisplayError > 1e-12) {
 }
 const genericAz90 = genericDisplayElements.sandbox.genericBasis({az_deg: 90, el_deg: 0}).z;
 const corsikaAz90 = corsikaDisplayElements.sandbox.corsikaBasis({az_deg: 90, el_deg: 0}).z;
-if (Math.abs(genericAz90[0]) > 1e-12 || Math.abs(genericAz90[1] - 1) > 1e-12 ||
+if (Math.abs(genericAz90[0]) > 1e-12 || Math.abs(genericAz90[1] + 1) > 1e-12 ||
     Math.abs(corsikaAz90[0]) > 1e-12 || Math.abs(corsikaAz90[1] + 1) > 1e-12) {
   throw new Error(`az=90 must point East: generic=${genericAz90}, CORSIKA=${corsikaAz90}`);
 }
@@ -619,7 +675,7 @@ const corsikaNorthFrame = corsikaDisplayElements.sandbox.corsikaBasis({az_deg: 0
 const sin70 = Math.sin(70 * Math.PI / 180);
 const cos70 = Math.cos(70 * Math.PI / 180);
 const expectedCorsikaNorthFrame = {
-  x: [0, -1, 0],
+  x: [0, 1, 0],
   y: [-sin70, 0, cos70],
   z: [cos70, 0, sin70],
 };
@@ -636,13 +692,13 @@ const toLocal = (direction, basis) => [basis.x, basis.y, basis.z].map(axis =>
 );
 const el70 = 70 * Math.PI / 180;
 const az1 = Math.PI / 180;
-const genericEastSource = [Math.cos(el70) * Math.cos(az1), Math.cos(el70) * Math.sin(az1), Math.sin(el70)];
-const corsikaEastSource = [genericEastSource[0], -genericEastSource[1], genericEastSource[2]];
+const genericEastSource = [Math.cos(el70) * Math.cos(az1), -Math.cos(el70) * Math.sin(az1), Math.sin(el70)];
+const corsikaEastSource = genericEastSource;
 const genericNorthFrame = genericDisplayElements.sandbox.genericBasis({az_deg: 0, el_deg: 70});
 const genericEastLocal = toLocal(genericEastSource.map(value => -value), genericNorthFrame);
 const corsikaEastLocal = toLocal(corsikaEastSource.map(value => -value), corsikaNorthFrame);
 const horizontalEntryError = Math.max(...genericEastLocal.map((value, index) => Math.abs(value - corsikaEastLocal[index])));
-if (horizontalEntryError > 1e-12 || genericEastLocal[0] >= 0) {
+if (horizontalEntryError > 1e-12 || genericEastLocal[0] <= 0) {
   throw new Error(`generic/CORSIKA East-offset local u mismatch: generic=${genericEastLocal}, CORSIKA=${corsikaEastLocal}`);
 }
 console.log("runtime OK generic and CORSIKA East-offset sources share local u/v signs", horizontalEntryError);
