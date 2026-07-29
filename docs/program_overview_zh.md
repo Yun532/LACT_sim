@@ -191,7 +191,7 @@ local x/y: 相机和镜面横向坐标
 ```ini
 output.plane_point=0,0,-8
 output.plane_normal=0,0,-1
-output.plane_u_axis=1,0,0
+output.plane_u_axis=-1,0,0
 output.plane_v_axis=0,1,0
 ```
 

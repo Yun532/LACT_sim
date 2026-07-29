@@ -202,7 +202,7 @@ struct SourceRuntimeConfig {
     //   corsika_nwu_global   absolute CORSIKA NWU array positions
     //   enu_east_relative    ENU positions relative to the telescope; az=0 East
     //   enu_east_global      absolute ENU array positions; az=0 East
-    //   lact_generic_global  legacy +X-to-+Y azimuth global coordinates
+    //   lact_generic_global  LACT global NWU; azimuth North-to-East
     std::string coordinate_frame = "telescope_local";
     bool csv_local_telescope_frame = true;
     std::string csv_path;

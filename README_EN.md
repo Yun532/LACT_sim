@@ -149,7 +149,7 @@ fallback is used; this example sets it to one photon per row. The cfg also
 supplies a fixed `400 nm` wavelength and disables NSB, trigger, and waveform
 generation. The two optical diagnostics retain the LACT_sim focal-plane
 orientation. At the ROOT/pyLAST boundary, the reader converts canonical
-optical coordinates once with `pix_x=-y_m` and `pix_y=+x_m`; the native
+optical coordinates once with `pix_x=-y_m` and `pix_y=-x_m`; the native
 pyLAST camera view then places `pix_y` horizontally and `pix_x` vertically.
 See the
 [minimal Photon CSV example](docs/minimal_photon_csv.md) for details.

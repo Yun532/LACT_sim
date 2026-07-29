@@ -192,12 +192,12 @@ def main() -> None:
         raise RuntimeError("pyLAST and configuration camera sizes differ")
     # LactEventSource adapts canonical LACT_sim focal-plane coordinates
     # (u=x_m, v=y_m) to pyLAST source-offset coordinates once at the reader
-    # boundary: pix_x=-v (elevation-like), pix_y=+u (azimuth-like).
+    # boundary: pix_x=-v (elevation-like), pix_y=-u (azimuth-like).
     maximum_coordinate_error_m = float(
         np.max(
             np.hypot(
                 actual_x_m + config_y_m,
-                actual_y_m - config_x_m,
+                actual_y_m + config_x_m,
             )
         )
     )
@@ -252,7 +252,7 @@ def main() -> None:
                 np.corrcoef(pylast_actual, actual)[0, 1]
             ),
             "camera_coordinate_rule": (
-                "pyLAST pix_x=-LACT_sim y_m, pix_y=+LACT_sim x_m; pixel-id "
+                "pyLAST pix_x=-LACT_sim y_m, pix_y=-LACT_sim x_m; pixel-id "
                 "array order is unchanged"
             ),
         },

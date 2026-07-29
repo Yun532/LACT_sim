@@ -38,7 +38,7 @@ def coordinates_for_view(
     pyLAST's plot_camera_image places its second coordinate on the horizontal
     axis and its first coordinate on the vertical axis. LactEventSource has
     already converted canonical LACT_sim focal-plane coordinates with
-    pix_x=-v and pix_y=+u.
+    pix_x=-v and pix_y=-u.
     """
     if coordinate_view == "lact-uv":
         lact_u_deg = pix_y_deg

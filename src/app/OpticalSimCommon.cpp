@@ -554,30 +554,27 @@ std::string sourceModeName(SyntheticMode mode) {
 
 TelescopeFrame buildTelescopeFrame(const TelescopeConfig& telescope)
 {
-    // 约定本地望远镜坐标:
-    //   local +z : 望远镜指向 / 光轴方向
-    //   local +x : 水平横向
-    //   local +y : 与 x,z 构成右手系
-    // 再由 pointing_az/el 构造到全局阵列坐标的正交基。
+    // Canonical LACT telescope structure frame in global NWU coordinates:
+    //   global +X = North, +Y = West, +Z = Up
+    //   local  +z = boresight toward the sky
+    //   local  +x = mirror/obstruction CSV +x as seen camera -> mirror
+    //               (West for a telescope pointing North)
+    //   local  +y = increasing elevation / sky-up
+    // Pointing azimuth is zero at North and increases clockwise toward East.
+    // Keep this identical to the CORSIKA adapter so synthetic and EventIO
+    // photons enter one optical geometry with the same physical axes.
     const double az = telescope.pointing_az_deg * DEG_TO_RAD;
     const double el = telescope.pointing_el_deg * DEG_TO_RAD;
-
-    Vec3 z_axis{
-        std::cos(el) * std::cos(az),
-        std::cos(el) * std::sin(az),
-        std::sin(el)
-    };
-    z_axis = z_axis.normalized();
-
-    Vec3 x_axis{-std::sin(az), std::cos(az), 0.0};
-    x_axis = x_axis.normalized();
-    Vec3 y_axis = z_axis.cross(x_axis).normalized();
+    const double sin_el = std::sin(el);
+    const double cos_el = std::cos(el);
+    const double sin_az = std::sin(az);
+    const double cos_az = std::cos(az);
 
     TelescopeFrame frame;
     frame.origin = telescope.position_m;
-    frame.x_axis = x_axis;
-    frame.y_axis = y_axis;
-    frame.z_axis = z_axis;
+    frame.x_axis = Vec3{sin_az, cos_az, 0.0}.normalized();
+    frame.y_axis = Vec3{-sin_el * cos_az, sin_el * sin_az, cos_el}.normalized();
+    frame.z_axis = Vec3{cos_el * cos_az, -cos_el * sin_az, sin_el}.normalized();
     return frame;
 }
 
@@ -682,7 +679,7 @@ std::string sourceCoordinateFrameDescription(const std::string& frame_name)
                "telescope.position_m is subtracted; pointing azimuth starts at "
                "East and increases toward North";
     }
-    return "legacy LACT generic global XY; azimuth runs from +x toward +y";
+    return "LACT global NWU (+x North, +y West, +z Up); azimuth is 0 at North and increases toward East";
 }
 
 PhotonBunch transformBunchToTelescopeLocal(const PhotonBunch& input,
@@ -769,9 +766,9 @@ Vec3 sourceDirectionInWorld(const PhotonBunch& input,
             .rotateVector(input.photon.dir)
             .normalized();
     }
-    // Both CORSIKA frames already have physical NWU directions.  The legacy
-    // generic global frame has a different horizontal convention, but its z
-    // axis is still Up, which is the component used by the atmosphere model.
+    // CORSIKA and LACT global frames already carry physical NWU directions.
+    // ENU input has the same Up component, which is the component used by the
+    // horizontally symmetric atmosphere model.
     return input.photon.dir.normalized();
 }
 
@@ -2197,6 +2194,12 @@ OutputPlane buildOutputPlane(const std::map<std::string, std::string>& cfg) {
         if (uv_dot > 1e-6 || un_dot > 1e-6 || vn_dot > 1e-6) {
             throw std::runtime_error(
                 "output.plane_u_axis and output.plane_v_axis must be orthogonal to each other and to output.plane_normal");
+        }
+        const double handedness = u.cross(v).dot(plane.normal.normalized());
+        if (handedness < 1.0 - 1e-6) {
+            throw std::runtime_error(
+                "output plane axes must satisfy u cross v = plane_normal; "
+                "for the LACT focal plane normal (0,0,-1), use u=(-1,0,0), v=(0,1,0)");
         }
         plane.u_axis = u;
         plane.v_axis = v;

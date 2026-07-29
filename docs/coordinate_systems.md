@@ -219,30 +219,28 @@ declination correction is explicitly applied.
 
 ### 4. Generic LACT Telescope Frame
 
-`buildTelescopeFrame()` is the generic frame used by `run_optical_sim` for
-synthetic sources, PhotonCsv optical debugging, mirror geometry, output planes,
-and visualization helpers. It is not the CORSIKA NWU transform.
-
-In this generic frame, azimuth is measured from global `+x` toward global `+y`:
+`buildTelescopeFrame()` is used by `run_optical_sim` for synthetic sources,
+PhotonCsv optical debugging, mirror geometry, output planes, and visualization
+helpers. It now uses the same NWU convention as the CORSIKA adapter:
 
 ```text
-z_axis = ( cos(el) cos(az),
-           cos(el) sin(az),
-           sin(el) )
+x_axis = ( sin(az),          cos(az),        0       )
+y_axis = (-sin(el) cos(az),  sin(el) sin(az), cos(el))
+z_axis = ( cos(el) cos(az), -cos(el) sin(az), sin(el))
 ```
 
 Therefore:
 
 ```text
-az = 0 deg   -> +x
-az = 90 deg  -> +y
+global +X = North, global +Y = West, global +Z = Up
+az = 0 deg points North; positive az rotates clockwise toward East
+at az = 0 deg: local +x points West and local +y points sky-up
 ```
 
-This convention is useful for local optical tests where the global `x/y` axes
-are only a simulation frame. Do not interpret it as CORSIKA IACT coordinates.
-For raw CORSIKA/EventIO input, use `run_corsika_trace`, which applies the
-CORSIKA-specific NWU basis below. `run_optical_sim` intentionally rejects
-`source.mode=EventIO`.
+Pure-optical and CORSIKA entry paths therefore place the same telescope-local
+mirror geometry in the same physical direction. `run_optical_sim` still
+intentionally rejects `source.mode=EventIO`; that restriction concerns the
+input reader, not the coordinate convention.
 
 ### 4.1 Explicit ENU East-Start Input Frame
 
@@ -331,8 +329,8 @@ source.coordinate_frame=corsika_nwu_relative
 LACT_sim constructs this CORSIKA-NWU-to-local basis:
 
 ```text
-local x_axis = ( -sin(el) cos(az),  sin(el) sin(az), cos(el) )
-local y_axis = ( -sin(az),         -cos(az),         0       )
+local x_axis = (  sin(az),          cos(az),         0       )
+local y_axis = ( -sin(el) cos(az),  sin(el) sin(az), cos(el) )
 local z_axis = (  cos(el) cos(az), -cos(el) sin(az), sin(el) )
 ```
 
@@ -472,7 +470,7 @@ Recommended configuration:
 ```ini
 output.plane_point=0,0,-8
 output.plane_normal=0,0,-1
-output.plane_u_axis=1,0,0
+output.plane_u_axis=-1,0,0
 output.plane_v_axis=0,1,0
 ```
 
@@ -485,7 +483,10 @@ The normal defines the camera front-face direction. Ray-plane intersection is
 two-sided, and optical incidence uses `abs(dot(ray, normal))`, so changing only
 the normal sign does not by itself change whether photons hit the plane.
 
-The image coordinates are set by `u/v`:
+The image coordinates are set by `u/v`. In the standard configuration,
+`u=-mirror_local_x` and `v=mirror_local_y`; together with
+`normal=-local_z`, these axes form the right-handed output-plane frame used
+by the optical and camera code:
 
 ```text
 image x = hit.u_m = dot(hit_position - plane_point, plane_u_axis)
@@ -505,12 +506,12 @@ coordinates to source-offset coordinates:
 
 ```text
 pyLAST pix_x = -v
-pyLAST pix_y = +u
+pyLAST pix_y = -u
 ```
 
 The current `pylast.visualize.plot_camera_image()` then draws `pix_y` on the
 horizontal Matplotlib axis and `pix_x` on the vertical axis. Therefore its
-display axes are `horizontal=+u`, `vertical=-v`. Use
+display axes are `horizontal=-u`, `vertical=-v`. Use
 `python/plot_photon_csv_root_pylast.py --coordinate-view lact-uv` to draw the
 same pyLAST event with raw LACT_sim `u` horizontal and `v` vertical.
 
