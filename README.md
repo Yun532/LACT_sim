@@ -9,6 +9,8 @@
 
 四个 cfg 都直接写入必要设置；未改变语义的程序默认值不重复罗列。它们使用最新主线的稳定随机种子、随机 p.e. 响应、EventIO/Photon CSV 坐标处理、`-16 m` EventIO 参考平面、阵列时间修正、HDF5/ROOT 元数据和 LACT2 20260622 实测镜面参数。
 
+默认示例继续使用原 1616 像素相机。需要补齐角部像素的 1664 像素布局时，将 `camera.csv_path` 改为 `configs/cameras/new_camera_pixels_1664.csv`；配套说明见 `configs/cameras/new_camera_1664.cfg`。
+
 ## 编译
 
 Ubuntu/Debian 常用依赖：
@@ -66,7 +68,7 @@ python3 python/plot_photon_csv_root_pylast.py \
 
 该示例与 `main` 的 Photon CSV 用户流程一致：读取 event 1909、telescope 19 的 CORSIKA 二维 bunch 六列数据，通过正常相机链生成随机 p.e.，写入 `image_pe` LACT ROOT，再由 `pylast.io.LactEventSource` 和 `pylast.visualize` 绘图。
 
-坐标约定是：LACT_sim 白板和探测器直接输出物理焦平面 `(u, v)`；`LactEventSource` 在 pyLAST 输入边界统一映射为 `pix_x=-v`、`pix_y=+u`。原版 pyLAST 相机显示以 `pix_y` 为横轴、`pix_x` 为纵轴。脚本默认使用这一 pyLAST 视图；如需直接对照 LACT_sim 焦平面，可增加 `--coordinate-view lact-uv`。
+坐标约定是：LACT_sim 白板和探测器直接输出物理焦平面 `(u, v)`；`LactEventSource` 在 pyLAST 输入边界统一映射为 `pix_x=-v`、`pix_y=-u`。原版 pyLAST 相机显示以 `pix_y` 为横轴、`pix_x` 为纵轴。脚本默认使用这一 pyLAST 视图；如需直接对照 LACT_sim 焦平面，可增加 `--coordinate-view lact-uv`。
 
 从安装环境、拉取两个仓库到 CSV 字段说明和出图命令，见 [Photon CSV 从零运行指南](PHOTON_CSV_QUICKSTART.md)。
 
@@ -108,7 +110,7 @@ python3 python/plot_lact_root_pylast.py \
 
 这个配置默认处理全部 shower、加入光谱 NSB、只保留触发事件，并写入稀疏 p.e. waveform。绘图脚本按主线 notebook 的流程使用 `LactEventSource → Calibrator(LocalPeakExtractor) → plot_raw_images`，显示 pyLAST 从 R1 waveform 抽取的 DL0 相机图。首次小规模检查可暂时把 `source.max_shower_events` 改为 `10`。
 
-LACT ROOT 保留光学焦平面的原始 `u/v`。pyLAST `LactEventSource` 在输入边界统一映射为 `pix_x=-v`、`pix_y=+u`；用户绘图脚本和 notebook 不再增加 LACT 专用旋转。
+LACT ROOT 保留光学焦平面的原始 `u/v`。pyLAST `LactEventSource` 在输入边界统一映射为 `pix_x=-v`、`pix_y=-u`；用户绘图脚本和 notebook 不再增加 LACT 专用旋转。
 
 完整的事件读取、相机图像、触发时延与 p.e.、Hillas 和 SDP 重建流程见 [完整 pyLAST Jupyter notebook](notebooks/lact_root_to_pylast_visualize.ipynb)。
 
