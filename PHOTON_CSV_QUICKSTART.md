@@ -64,7 +64,6 @@ build/run_corsika_trace configs/examples/photon_csv_source.cfg
 python python/plot_photon_csv_root_pylast.py \
   run_logs/photon_csv_source/lact_events.root \
   --event-id 1909 \
-  --telescope-id 19 \
   --output run_logs/photon_csv_source/pylast_camera.png
 ```
 

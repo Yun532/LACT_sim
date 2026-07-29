@@ -62,13 +62,13 @@ build/run_corsika_trace configs/examples/photon_csv_source.cfg
 
 python3 python/plot_photon_csv_root_pylast.py \
   run_logs/photon_csv_source/lact_events.root \
-  --event-id 1909 --telescope-id 19 \
+  --event-id 1909 \
   --output run_logs/photon_csv_source/pylast_camera.png
 ```
 
 该示例与 `main` 的 Photon CSV 用户流程一致：读取 event 1909、telescope 19 的 CORSIKA 二维 bunch 六列数据，通过正常相机链生成随机 p.e.，写入 `image_pe` LACT ROOT，再由 `pylast.io.LactEventSource` 和 `pylast.visualize` 绘图。
 
-坐标约定是：LACT_sim 白板和探测器直接输出物理焦平面 `(u, v)`；`LactEventSource` 在 pyLAST 输入边界统一映射为 `pix_x=-v`、`pix_y=-u`。原版 pyLAST 相机显示以 `pix_y` 为横轴、`pix_x` 为纵轴。脚本默认使用这一 pyLAST 视图；如需直接对照 LACT_sim 焦平面，可增加 `--coordinate-view lact-uv`。
+坐标约定是：LACT_sim 白板和探测器直接输出物理焦平面 `(u, v)`；`LactEventSource` 在 pyLAST 输入边界统一映射为 `pix_x=-v`、`pix_y=-u`。该脚本直接调用 pyLAST 原生 `EventVisualizer.plot_event()`，不再自行交换、翻转或旋转相机坐标。白板/HDF5 诊断图则直接显示文件中保存的物理 `(u, v)`。
 
 从安装环境、拉取两个仓库到 CSV 字段说明和出图命令，见 [Photon CSV 从零运行指南](PHOTON_CSV_QUICKSTART.md)。
 

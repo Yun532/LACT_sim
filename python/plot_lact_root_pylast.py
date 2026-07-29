@@ -29,15 +29,27 @@ CALIBRATOR_CONFIG = """{
 """
 
 
+def select_event(source, event_id: int | None, event_index: int):
+    if event_id is None:
+        return source[event_index]
+    for index in range(len(source)):
+        event = source[index]
+        if int(event.event_id) == event_id:
+            return event
+    raise RuntimeError(f"event {event_id} is not present in the ROOT file")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root_file", type=Path)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--event-index", type=int, default=0)
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--event-id", type=int)
+    selection.add_argument("--event-index", type=int, default=0)
     args = parser.parse_args()
 
     source = LactEventSource(str(args.root_file), max_events=-1)
-    event = source[args.event_index]
+    event = select_event(source, args.event_id, args.event_index)
     calibrator = Calibrator(source.subarray, config_str=CALIBRATOR_CONFIG)
     calibrator(event)
 
