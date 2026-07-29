@@ -16,6 +16,8 @@
 
 网页把物理方向统一显示为：北、东、南、西、天空、地面。俯视时固定为上北、下南、左西、右东。
 
+四页默认观察相机统一取 `view_az=0°`：North 的观察深度为正（背离屏幕、屏幕内），South 的观察深度为负（朝向屏幕、屏幕外）。第 1、3 页同时取 `view_el=0°`，因此地面严格投影成一条水平地平线；第 2、4 页只增加负的观察仰角以保留结构深度，不改变南/北的前后关系。这里的 `view_az/view_el` 只控制网页观察相机，不是望远镜 pointing。
+
 CORSIKA 阵列使用 NWU 分量：
 
 - `+X = North`
@@ -95,6 +97,17 @@ z_local_in_NWU = ( cos(E) cos(A),-cos(E) sin(A), sin(E))
 
 所以网页第 2、3 页不能套用 CORSIKA NWU 基底去摆放光学结构；它们必须使用通用框架。
 
+第 2 页四组 3° 天区输入均由同一程序公式换到望远镜局部传播方向，随后运行最新 `run_optical_sim`，不是在网页中移动旧光斑：
+
+| 名称 | 天区输入 | `source.beam_direction` 原值 | 局部 `θ / φ` |
+|---|---|---|---|
+| 上 | `az=0°, el=73°` | `(0, -0.0523359562, -0.9986295348)` | `3°, 270°` |
+| 下 | `az=0°, el=67°` | `(0, +0.0523359562, -0.9986295348)` | `3°, 90°` |
+| 西 | `az=-3°, el=70°` | `(+0.0178999513, -0.0004404590, -0.9998396860)` | `1.0259569321°, 358.5904234021°` |
+| 东 | `az=+3°, el=70°` | `(-0.0178999513, -0.0004404590, -0.9998396860)` | `1.0259569321°, 181.4095765979°` |
+
+西/东的局部 `θ` 小于 3° 是球面几何的正常结果：在仰角 70° 处，方位角差投影到切平面会乘以约 `cos(70°)`；天区输入方位角本身仍是完整的 `±3°`。
+
 ### 5.2 `run_corsika_trace`
 
 入口在 `LACT_sim@4fb44f8:apps/run_corsika_trace.cpp`：
@@ -161,16 +174,27 @@ pix_y = +root_camera_pixels.x_m = +u
 
 `root/LactEventSource.cpp:696-697` 对 `image_cherenkov_pe` 做最近整数舍入后存入 `true_image`。`src/pylast/visualize/event_visualizer.py:393-401,2216-2218` 再把 `pix_y` 放到画布横轴、`pix_x` 放到画布纵轴。
 
-网页不再用 JavaScript 仿写这一步。第 4 页的“pyLAST 原生图”是 `EventVisualizer.plot_event()` 直接读取 event 1909 ROOT 后生成的 PNG。
+网页现在按这两个可执行边界在 Canvas 中逐点重画，而不嵌入原始 PNG：
 
-本次原生运行审计结果：
+```text
+reader:    (u, v) -> (pix_x, pix_y) = (-v, +u)
+renderer:  (pix_x, pix_y) -> (plot_x, plot_y) = (pix_y, pix_x)
+combined:  (plot_x, plot_y) = (+u, -v)
+```
+
+这里的 `(+u,-v)` 不是网页为“看起来一致”增加的翻转，而是严格依次执行 reader 与 `EventVisualizer._camera_to_plot_xy()` 的结果。实现中保留了 `pylastReaderCoordinates()` 和 `pylastPlotCoordinates()` 两个独立函数，运行时测试分别核对，避免把两层边界压成无出处的显示技巧。
+
+像素颜色也模仿最新版 `EventVisualizer._image_norm()`：零值像素为白色，非零像素使用 plasma 色带；输入 PE 先按 `LactEventSource.cpp:696-697` 的 `round()` 规则形成 `true_image`。网页只重画几何和着色，不更改用于绘制的原始 LACT/ROOT 输出值。
+
+本次数值审计结果：
 
 - ROOT SHA-256：`36876c1e586c3c6dcc1ff5d2f7a49cc66430a0cfce3db019454dde3684bf29bc`
 - pyLAST 坐标最大误差：`0.0 m`
 - tel 19/16/21/20 的 `true_image` 与 ROOT `image_cherenkov_pe` 的最近整数结果逐像素完全相等；该事例的值本来就是整数，所以最大舍入差也是 `0 PE`
-- 原生 PNG SHA-256：`dd4f061ac834d48d40407285b87f5097dc957678347e0852b9915dc17c9b627c`
+- 第 2 页四个平行光 pyLAST 面板读取各自 `run_optical_sim` 的真实像素 CSV；第 4 页读取同一 ROOT event 1909 的 `image_cherenkov_pe`。
+- 切换 LACT/pyLAST 只改变相机 Canvas 的坐标表达和配色，不修改三维望远镜、光路或 CORSIKA 发射点。
 
-视觉核查还发现，`event_visualizer.py:1950-1958` 对真实 `tel_id` 使用 `f"Telescope {tel_id + 1}"`。因此本图实际 ROOT `telescope_id=16/19/20/21` 会显示为 `Telescope 17/20/21/22`。网页保留 pyLAST 原生标题，不在图片上改号，并在图注中明确列出映射。这是 pyLAST 当前输出自身的编号表达，不是 LACT `u/v` 的坐标变换。
+由于网页自行重画，标题直接使用 ROOT/输出中的真实 `telescope_id`，不会继承 `event_visualizer.py:1950-1958` 的 `tel_id + 1` 显示偏移。
 
 ## 9. EventIO 光子、芯位和发射点
 
@@ -210,13 +234,13 @@ emission = anchor - s*direction
 | 页面 | 三维结构 | 光路/数据 | 相机图 |
 |---|---|---|---|
 | 1 全局定义 | 从镜片、遮挡、相机 CSV 原值按程序通用基底放置 | 不放事例 | 不放事例；只标 LACT 与 pyLAST 字段方向 |
-| 2 平行光 | 通用基底，az=0° / el=70° | 四组最新 C++ 输出；每次显示所选组的全量反射点、遮挡端点和抽样光路 | 完整 `output u/v` 原值分箱 |
+| 2 平行光 | 通用基底，az=0° / el=70° | 四组最新 C++ 输出：上 `el=73°`、下 `el=67°`、西 `az=-3°`、东 `az=+3°`；每次显示所选组的全量反射点、遮挡端点和抽样光路 | LACT：完整 `output u/v` 原值分箱；pyLAST：同组真实像素输出按 reader/renderer 规则重画 |
 | 3 天顶角 | 每个仰角的绝对形变镜片状态 | 对应仰角真实 C++ 平行光输出 | 对应仰角完整 `output u/v` 原值分箱 |
-| 4 CORSIKA | ROOT 阵列 NWU 原值；望远镜局部结构按 CORSIKA 基底物理放置 | event 1909 原始 anchor/direction/zem；发射点为注明公式的派生诊断 | LACT 视图直接用 ROOT `x_m/y_m` 和 `image_cherenkov_pe`；pyLAST 视图直接显示 pyLAST 原生 PNG |
+| 4 CORSIKA | ROOT 阵列 NWU 原值；望远镜局部结构按 CORSIKA 基底物理放置 | event 1909 原始 anchor/direction/zem；发射点为注明公式的派生诊断 | LACT 视图直接用 ROOT `x_m/y_m` 和 `image_cherenkov_pe`；pyLAST 视图按同一 ROOT 数据与最新版代码规则重画 |
 
 允许的网页显示操作：观察相机旋转/平移、等比例缩放、投影、抽样光路线、按原值窗口分箱。
 
-禁止的数据操作：为“看起来一致”交换 `u/v`、改变正负号、把光斑质心当成 `(0,0)`、用网页代码仿造 pyLAST reader、让切换相机坐标改变三维望远镜结构。
+禁止的数据操作：为“看起来一致”任意交换 `u/v`、改变正负号、把光斑质心当成 `(0,0)`、让切换相机坐标改变三维望远镜结构。pyLAST 模式唯一允许的换轴/符号变化是第 8 节逐行对应最新版 reader 与 renderer 的确定性映射。
 
 ## 12. 构建时自动拒绝的不一致
 
@@ -226,7 +250,7 @@ emission = anchor - s*direction
 - 每个平行光事例是否包含全部输出面 `u/v` 和全部相机命中 `u/v`；
 - `surface_point` 投影是否逐条复现输出 `u/v`；
 - `camera_x/y` 是否逐条等于 `u/v`，像素计数之和是否等于 C++ `hit_camera`；
-- pyLAST 原生图是否读取同一个 event 1909 ROOT；
-- pyLAST reader 坐标误差是否为零，PNG SHA-256 是否与原生运行审计一致。
+- 四方向平行光是否严格为 `el=73/67°` 和 `az=-3/+3°`，且配置方向向量与代码公式一致；
+- pyLAST reader/renderer 的两步映射是否对给定 `u/v` 产生精确的 `pix_x=-v, pix_y=+u, plot=(+u,-v)`。
 
-`python/test_coordinate_diagnostics_runtime.js` 还会数值比较第 1/2/3/4 页镜片顶点方向、固定地图、地平线投影、通用/CORSIKA 东向偏移符号、CORSIKA 角度换算、三维等比例 scale，并确认切换到 pyLAST 原生图不会修改三维结构。
+`python/test_coordinate_diagnostics_runtime.js` 还会数值比较第 1/2/3/4 页镜片顶点方向、固定地图、四页默认南朝屏幕外/北朝屏幕内、地平线投影、通用/CORSIKA 东向偏移符号、CORSIKA 角度换算、三维等比例 scale，并确认平行光和 CORSIKA 切换到 pyLAST 重画时不会修改三维结构。

@@ -26,9 +26,10 @@ for (const marker of [
   'caseDensityColor(plotColor',
   'id="cameraCoords"',
   'id="deformMetric"',
-  'id="pylastCamera"',
-  'pylastCamera.src=D.pylast_native.image',
-  'EventVisualizer.plot_event()',
+  'function pylastReaderCoordinates(u,v)',
+  'function pylastPlotCoordinates(pix_x,pix_y)',
+  'function drawPylastCameraPanel(',
+  '不使用 pyLAST 原图',
   'pyLAST +pix_x = -v',
   'pyLAST +pix_y = +u',
   'pyLAST 画布：向右 = +u；向上 = -v',
@@ -69,7 +70,7 @@ function element(id, dataset = {}) {
 }
 
 function run(search) {
-  const ids = ["scene", "camera", "pylastCamera", "info", "cameraPanel", "cameraPanelTitle", "cameraScale", "cameraCoords", "cameraHead",
+  const ids = ["scene", "camera", "info", "cameraPanel", "cameraPanelTitle", "cameraScale", "cameraCoords", "cameraHead",
     "cameraCaption", "deformPanel", "deformChart", "deformTitle", "deformStat", "colorMetric", "colorMin", "colorMax",
     "globalToolbar", "parallelToolbar", "elevationToolbar", "corsikaToolbar", "globalAz",
     "globalAzValue", "globalEl", "globalElValue", "angleValue", "bunch", "photonTel",
@@ -134,7 +135,7 @@ console.log("runtime OK global page contains pyLAST field and canvas definitions
 const elevationWhiteboardElements = run("?page=elevation");
 const elevationCase = elevationWhiteboardElements.sandbox.currentParallelCase();
 const elevationHistogram = elevationWhiteboardElements.sandbox.spotHistogram(elevationCase, 140);
-if (!elevationWhiteboardElements.get("cameraHead").textContent.includes("程序同风格完整光斑") ||
+if (!elevationWhiteboardElements.get("cameraHead").textContent.includes("完整 output u/v") ||
     elevationHistogram.n <= 0 ||
     elevationHistogram.n !== elevationCase.full_output_uv_m.length ||
     elevationHistogram.n !== elevationCase.validation.full_output_uv_rows ||
@@ -190,15 +191,15 @@ const repeatedHistogram = parallelElements.sandbox.spotHistogram(parallelCase, 1
 if (Math.abs(repeatedHistogram.centroid[0] - rawCentroid[0]) > 1e-12 ||
     Math.abs(repeatedHistogram.centroid[1] - rawCentroid[1]) > 1e-12 ||
     repeatedHistogram.n !== parallelCase.full_output_uv_m.length ||
-    parallelElements.get("cameraCoords").style.display !== "none") {
-  throw new Error("parallel whiteboard must preserve raw u/v and must not expose a browser-side pyLAST transform");
+    parallelElements.get("cameraCoords").style.display !== "inline-block") {
+  throw new Error("parallel whiteboard must preserve raw u/v and expose the audited pyLAST redraw selector");
 }
 parallelElements.get("camera").listeners.click({clientX: 300, clientY: 250});
-if (!parallelElements.get("info").innerHTML.includes("az=+1°")) {
+if (!parallelElements.get("info").innerHTML.includes("az=+3°")) {
   throw new Error("parallel camera click did not select the bottom-right sky case");
 }
-if (!parallelElements.get("cameraCaption").textContent.includes("中心不是 (0,0)") ||
-    !parallelElements.get("cameraCaption").textContent.includes("绝对 u/v 原值")) {
+if (!parallelElements.get("cameraCaption").textContent.includes("完整 output u/v") ||
+    !parallelElements.get("cameraCaption").textContent.includes("LACT 原值")) {
   throw new Error("parallel whiteboard plots do not preserve absolute u/v ticks while auto-framing");
 }
 console.log("runtime OK parallel whiteboard selection and auto-framed absolute axes");
@@ -346,13 +347,22 @@ const fixedParallel = run("?page=parallel").sandbox.fixedSkyReference();
 const fixedElevation = run("?page=elevation").sandbox.fixedSkyReference();
 const fixedCorsika = run("?page=corsika&case=event1909").sandbox.fixedSkyReference();
 if (fixedGlobal.az_deg !== 0 || fixedGlobal.alt_deg !== 70 ||
-    fixedParallel.az_deg !== 0 || fixedParallel.alt_deg !== 71 ||
+    fixedParallel.az_deg !== 0 || fixedParallel.alt_deg !== 73 ||
     fixedElevation.az_deg !== 0 || fixedElevation.alt_deg !== 70 ||
     Math.abs(fixedCorsika.az_deg - 357.6867155597) > 1e-9 ||
     Math.abs(fixedCorsika.alt_deg - 70.6202124943) > 1e-9) {
   throw new Error("the unified fixed angle reference does not use each page's real sky direction");
 }
 console.log("runtime OK unified fixed sky-angle reference across pages");
+
+for (const query of ["?page=global", "?page=parallel", "?page=elevation", "?page=corsika&case=event1909"]) {
+  const elements = run(query);
+  const forward = elements.sandbox.displayBasis().forward;
+  if (!(forward[0] > 0)) {
+    throw new Error(`${query}: default view must put North into the screen and South out of the screen`);
+  }
+}
+console.log("runtime OK all four default views place South screen-out and North screen-in");
 
 function topDirection(elements, direction) {
   elements.sandbox.setView("top");
@@ -391,16 +401,23 @@ for (let i = 0; i < corsikaGeometryBefore.length; i++) {
   );
 }
 if (maxPylastGeometryMutation > 0 ||
-    !pylastCorsikaElements.get("cameraHead").textContent.includes("pyLAST 原生") ||
-    pylastCorsikaElements.get("camera").style.display !== "none" ||
-    pylastCorsikaElements.get("pylastCamera").style.display !== "block" ||
-    !pylastCorsikaElements.get("pylastCamera").src.endsWith("event1909_pylast_native_top4.png") ||
-    !pylastCorsikaElements.get("cameraCaption").textContent.includes("网页不重画、不换轴、不改符号") ||
-    !pylastCorsikaElements.get("cameraCaption").textContent.includes("ROOT telescope_id 16/19/20/21") ||
-    !pylastCorsikaElements.get("cameraCaption").textContent.includes("Telescope 17/20/21/22")) {
-  throw new Error(`native pyLAST figure mutated 3D geometry or was not displayed directly: ${maxPylastGeometryMutation}`);
+    !pylastCorsikaElements.get("cameraHead").textContent.includes("pyLAST 规则重画") ||
+    !pylastCorsikaElements.get("cameraCaption").textContent.includes("不嵌入、不裁切 pyLAST 原图") ||
+    pylastCorsikaElements.sandbox.pylastReaderCoordinates(0.2, -0.3).pix_x !== 0.3 ||
+    pylastCorsikaElements.sandbox.pylastReaderCoordinates(0.2, -0.3).pix_y !== 0.2 ||
+    pylastCorsikaElements.sandbox.pylastPointFromLact(0.2, -0.3).join(",") !== "0.2,0.3") {
+  throw new Error(`pyLAST browser redraw mutated 3D geometry or broke the audited mapping: ${maxPylastGeometryMutation}`);
 }
-console.log("runtime OK native pyLAST figure preserves CORSIKA 3D geometry and bypasses canvas transforms");
+console.log("runtime OK pyLAST browser redraw preserves CORSIKA 3D geometry and exact reader/renderer mapping");
+
+const pylastParallelElements = run("?page=parallel");
+pylastParallelElements.get("cameraCoords").value = "pylast";
+pylastParallelElements.sandbox.cameraDraw();
+if (!pylastParallelElements.get("cameraHead").textContent.includes("pyLAST 规则重画") ||
+    !pylastParallelElements.get("cameraCaption").textContent.includes("同一批 3° run_optical_sim 像素输出")) {
+  throw new Error("parallel-light page does not redraw its real 3-degree output with pyLAST rules");
+}
+console.log("runtime OK parallel-light pyLAST redraw uses the real 3-degree cases");
 
 function maxBasisError(a, b) {
   return Math.max(...["x", "y", "z"].flatMap(key =>
@@ -409,13 +426,13 @@ function maxBasisError(a, b) {
 }
 const genericDisplayElements = run("?page=parallel");
 const genericDisplay = genericDisplayElements.sandbox.displayBasis();
-const genericProgram = genericDisplayElements.sandbox.genericBasis({az_deg: 225, el_deg: -28});
+const genericProgram = genericDisplayElements.sandbox.genericBasis({az_deg: 0, el_deg: -28});
 const genericDisplayError = maxBasisError(
   {x: genericDisplay.right, y: genericDisplay.up, z: genericDisplay.forward}, genericProgram
 );
 const corsikaDisplayElements = run("?page=corsika&case=event1909");
 const corsikaDisplay = corsikaDisplayElements.sandbox.displayBasis();
-const corsikaProgram = corsikaDisplayElements.sandbox.corsikaBasis({az_deg: 220, el_deg: -22});
+const corsikaProgram = corsikaDisplayElements.sandbox.corsikaBasis({az_deg: 0, el_deg: -22});
 const corsikaDisplayError = maxBasisError(
   {x: corsikaDisplay.right, y: corsikaDisplay.up, z: corsikaDisplay.forward},
   corsikaProgram

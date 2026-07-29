@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import json
 import math
 from collections import defaultdict
@@ -420,13 +419,13 @@ def validate_parallel_cases(parallel_cases: dict) -> dict:
     if actual_angles != expected_angles:
         raise ValueError("parallel elevation cases must contain the exact 0..90 deg scan")
     four_cases = parallel_cases.get("four_direction_cases", [])
-    expected_sky = [(0.0, 71.0), (0.0, 69.0), (-1.0, 70.0), (1.0, 70.0)]
+    expected_sky = [(0.0, 73.0), (0.0, 67.0), (-3.0, 70.0), (3.0, 70.0)]
     actual_sky = [
         (float(case["source_sky"]["az_deg"]), float(case["source_sky"]["el_deg"]))
         for case in four_cases
     ]
     if actual_sky != expected_sky:
-        raise ValueError("parallel sky cases must be el=71/69 and az=-1/+1 around az=0/el=70")
+        raise ValueError("parallel sky cases must be el=73/67 and az=-3/+3 around az=0/el=70")
     pointing_el = math.radians(70.0)
     basis_x = [0.0, 1.0, 0.0]
     basis_y = [-math.sin(pointing_el), 0.0, math.cos(pointing_el)]
@@ -549,16 +548,6 @@ def parse_args() -> argparse.Namespace:
         default="docs/assets/data/corsika-event1909-coordinate-case.json",
         help="compact real prod1 EventIO event 1909 array/camera/ray payload",
     )
-    parser.add_argument(
-        "--pylast-audit",
-        default="docs/assets/data/event1909_pylast_native_audit.json",
-        help="audit emitted while the latest pyLAST reads and plots event 1909",
-    )
-    parser.add_argument(
-        "--pylast-image",
-        default="docs/assets/data/event1909_pylast_native_top4.png",
-        help="native EventVisualizer output shown without browser-side coordinate conversion",
-    )
     return parser.parse_args()
 
 
@@ -606,26 +595,6 @@ def main() -> None:
         raise ValueError("parallel and event 1909 outputs were not produced from the same main commit")
     if event_provenance.get("source_archive_sha256") != parallel_cases.get("source_archive_sha256"):
         raise ValueError("parallel and event 1909 outputs were not produced from the same source archive")
-    pylast_audit = json.loads((root / args.pylast_audit).read_text(encoding="utf-8"))
-    pylast_image = root / args.pylast_image
-    if pylast_audit.get("status") != "passed" or int(pylast_audit.get("event_id", -1)) != 1909:
-        raise ValueError("latest pyLAST event 1909 audit did not pass")
-    boundary = pylast_audit.get("reader_coordinate_boundary", {})
-    if float(boundary.get("maximum_coordinate_error_m", math.inf)) != 0.0:
-        raise ValueError("pyLAST camera-coordinate audit is not exact")
-    if pylast_audit.get("root_sha256") != event_provenance.get("root_sha256"):
-        raise ValueError("pyLAST native figure and website CORSIKA payload do not use the same ROOT")
-    if not pylast_image.is_file():
-        raise ValueError(f"pyLAST native figure is missing: {pylast_image}")
-    image_sha256 = hashlib.sha256(pylast_image.read_bytes()).hexdigest()
-    if image_sha256 != pylast_audit.get("figure", {}).get("sha256"):
-        raise ValueError("pyLAST native figure SHA-256 does not match its audit")
-    expected_root_ids = sorted(int(value) for value in pylast_audit.get("top_telescopes", []))
-    figure_audit = pylast_audit.get("figure", {})
-    if figure_audit.get("root_telescope_ids_in_plot_order") != expected_root_ids:
-        raise ValueError("pyLAST native figure telescope order is not audited")
-    if figure_audit.get("displayed_telescope_labels") != [value + 1 for value in expected_root_ids]:
-        raise ValueError("pyLAST native figure label offset differs from the executable plotting code")
     examples = {}
     example_specs = {
         "north": {
@@ -673,10 +642,6 @@ def main() -> None:
         "examples": examples,
         "parallel": parallel_cases,
         "event1909": event1909,
-        "pylast_native": {
-            "audit": pylast_audit,
-            "image": "data/" + pylast_image.name,
-        },
         "camera_geometry": camera_geometry,
         "camera_signal": camera_signal,
         "validation": validation,
@@ -692,8 +657,6 @@ def main() -> None:
             "aligned_output_plane": args.aligned_output_plane_csv,
             "camera_signal": args.camera_pixel_csv,
             "event1909": args.event1909_case,
-            "pylast_audit": args.pylast_audit,
-            "pylast_image": args.pylast_image,
         },
     })
 
