@@ -59,6 +59,18 @@ OpticalSurfaceHit makeHit(double u, double v, const Vec3& out_dir)
 int main()
 {
     {
+        Cone::TrueReflectMaterial material;
+        const double grazing_reflectivity =
+            material.get_reflect_intensity(90.0);
+        if (!check(std::isfinite(grazing_reflectivity) &&
+                       grazing_reflectivity >= 0.0 &&
+                       grazing_reflectivity <= 1.0,
+                   "true-reflect grazing probability must stay in [0,1]")) {
+            return 1;
+        }
+    }
+
+    {
         const auto [delta, first, second] =
             MathUtils::quadratic_equation_root(0.0, 0.0, 1.0);
         if (!(delta < 0.0) || std::isfinite(first) ||

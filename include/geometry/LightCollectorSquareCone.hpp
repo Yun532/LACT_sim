@@ -453,7 +453,7 @@ namespace Cone {
             double f0 = 0.90565;
             double t1 = -11.0723;
             auto reflectivity = a1 * exp(-(((theta)) / t1)) + f0;
-            return reflectivity;
+            return std::clamp(reflectivity, 0.0, 1.0);
         }
 
         inline DirectionVecter
