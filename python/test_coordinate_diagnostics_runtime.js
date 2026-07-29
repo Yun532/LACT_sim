@@ -29,7 +29,8 @@ for (const marker of [
   'function pylastReaderCoordinates(u,v)',
   'function pylastPlotCoordinates(pix_x,pix_y)',
   'function drawPylastCameraPanel(',
-  '不使用 pyLAST 原图',
+  'function drawUnifiedPixelCamera(',
+  'camera_geometry_lact_uv',
   'pyLAST +pix_x = -v',
   'pyLAST +pix_y = +u',
   'pyLAST 画布：向右 = +u；向上 = -v',
@@ -179,6 +180,23 @@ if (Math.hypot(groundPointAfterZoom[0] - groundPointBeforeZoom[0],
 }
 console.log("runtime OK CORSIKA defaults to full cameras and can zoom into the ground anchor");
 
+const rootCameraCheck = vm.runInNewContext(`(() => {
+  const root = D.event1909.camera_geometry_lact_uv;
+  const configured = new Map(D.camera_geometry.map(p => [p.id, p]));
+  let maxError = 0;
+  for (const p of root) {
+    const q = configured.get(p.id);
+    maxError = Math.max(maxError, Math.abs(p.u-q.u), Math.abs(p.v-q.v), Math.abs(p.size-q.size));
+  }
+  return {count:root.length,maxError};
+})()`, corsikaFullCameraElements.sandbox);
+if (rootCameraCheck.count !== 1616 || rootCameraCheck.maxError > 1e-9 ||
+    !corsikaFullCameraElements.get("info").innerHTML.includes("camera_pixels") ||
+    !corsikaFullCameraElements.get("info").innerHTML.includes("x_m=u")) {
+  throw new Error(`CORSIKA LACT u/v does not come directly from the ROOT camera geometry: ${JSON.stringify(rootCameraCheck)}`);
+}
+console.log("runtime OK CORSIKA LACT u/v uses all 1616 ROOT camera_pixels coordinates");
+
 const corsikaArrayElements = run("?page=corsika&case=event1909");
 const corsikaArrayScene = corsikaArrayElements.sandbox.buildScene();
 const allTelescopeFacets = corsikaArrayScene.polys.filter(polygon => /^tel\d+ 镜片 /.test(polygon.name));
@@ -218,14 +236,40 @@ if (Math.abs(repeatedHistogram.centroid[0] - rawCentroid[0]) > 1e-12 ||
   throw new Error("parallel whiteboard must preserve raw u/v and expose the audited pyLAST redraw selector");
 }
 parallelElements.get("camera").listeners.click({clientX: 300, clientY: 250});
-if (!parallelElements.get("info").innerHTML.includes("az=+3°")) {
+if (!parallelElements.get("info").innerHTML.includes("offset=4°")) {
   throw new Error("parallel camera click did not select the bottom-right sky case");
 }
-if (!parallelElements.get("cameraCaption").textContent.includes("完整 output u/v") ||
-    !parallelElements.get("cameraCaption").textContent.includes("LACT 原值")) {
+if (!parallelElements.get("cameraCaption").textContent.includes("真实夹角都是 4°") ||
+    !parallelElements.get("cameraCaption").textContent.includes("不是简单的方位角 ±4°")) {
   throw new Error("parallel whiteboard plots do not preserve absolute u/v ticks while auto-framing");
 }
 console.log("runtime OK parallel whiteboard selection and auto-framed absolute axes");
+
+const offsetCases = vm.runInNewContext("D.parallel.four_direction_cases", parallelElements.sandbox);
+for (const item of offsetCases) {
+  const direction = item.beam.direction_local;
+  const localOffset = Math.acos(Math.max(-1, Math.min(1, -direction[2]))) * 180 / Math.PI;
+  const pointingAz = item.pointing.az_deg * Math.PI / 180;
+  const pointingEl = item.pointing.el_deg * Math.PI / 180;
+  const sourceAz = item.source_sky.az_deg * Math.PI / 180;
+  const sourceEl = item.source_sky.el_deg * Math.PI / 180;
+  const skyDot = Math.sin(pointingEl) * Math.sin(sourceEl) +
+    Math.cos(pointingEl) * Math.cos(sourceEl) * Math.cos(sourceAz - pointingAz);
+  const skyOffset = Math.acos(Math.max(-1, Math.min(1, skyDot))) * 180 / Math.PI;
+  if (Math.abs(localOffset - 4) > 1e-6 || Math.abs(skyOffset - 4) > 1e-6 ||
+      Math.abs(item.beam.theta_deg - 4) > 1e-9) {
+    throw new Error(`${item.id}: offset is not exactly 4 degrees: local=${localOffset}; sky=${skyOffset}`);
+  }
+}
+const westOffset = offsetCases.find(item => item.id === "parallel_sky_west");
+const eastOffset = offsetCases.find(item => item.id === "parallel_sky_east");
+if (Math.abs(westOffset.beam.direction_local[1]) > 1e-12 ||
+    Math.abs(eastOffset.beam.direction_local[1]) > 1e-12 ||
+    westOffset.beam.direction_local[0] <= 0 || eastOffset.beam.direction_local[0] >= 0 ||
+    Math.abs(Math.abs(eastOffset.source_sky.az_deg) - 11.5550088042) > 1e-8) {
+  throw new Error("East/West 4-degree offsets are not pure local ±u offsets with zenith-angle correction");
+}
+console.log("runtime OK all four parallel sources are exact 4-degree optical-axis offsets");
 
 const completePointElements = run("?page=parallel");
 const upPointClouds = completePointElements.sandbox.buildScene().pointClouds;
@@ -370,7 +414,7 @@ const fixedParallel = run("?page=parallel").sandbox.fixedSkyReference();
 const fixedElevation = run("?page=elevation").sandbox.fixedSkyReference();
 const fixedCorsika = run("?page=corsika&case=event1909").sandbox.fixedSkyReference();
 if (fixedGlobal.az_deg !== 0 || fixedGlobal.alt_deg !== 70 ||
-    fixedParallel.az_deg !== 0 || fixedParallel.alt_deg !== 73 ||
+    fixedParallel.az_deg !== 0 || fixedParallel.alt_deg !== 74 ||
     fixedElevation.az_deg !== 0 || fixedElevation.alt_deg !== 70 ||
     Math.abs(fixedCorsika.az_deg - 357.6867155597) > 1e-9 ||
     Math.abs(fixedCorsika.alt_deg - 70.6202124943) > 1e-9) {
@@ -436,11 +480,12 @@ console.log("runtime OK pyLAST browser redraw preserves CORSIKA 3D geometry and 
 const pylastParallelElements = run("?page=parallel");
 pylastParallelElements.get("cameraCoords").value = "pylast";
 pylastParallelElements.sandbox.cameraDraw();
-if (!pylastParallelElements.get("cameraHead").textContent.includes("pyLAST 规则重画") ||
-    !pylastParallelElements.get("cameraCaption").textContent.includes("同一批 3° run_optical_sim 像素输出")) {
-  throw new Error("parallel-light page does not redraw its real 3-degree output with pyLAST rules");
+if (!pylastParallelElements.get("cameraHead").textContent.includes("pyLAST 坐标") ||
+    !pylastParallelElements.get("cameraCaption").textContent.includes("精确 offset=4°") ||
+    !pylastParallelElements.get("cameraCaption").textContent.includes("绘图风格、暗色背景、强度和缩放与 LACT 像素图统一")) {
+  throw new Error("parallel-light page does not redraw its real 4-degree output with unified pyLAST styling");
 }
-console.log("runtime OK parallel-light pyLAST redraw uses the real 3-degree cases");
+console.log("runtime OK parallel-light pyLAST redraw uses the real 4-degree cases and unified styling");
 
 function maxBasisError(a, b) {
   return Math.max(...["x", "y", "z"].flatMap(key =>

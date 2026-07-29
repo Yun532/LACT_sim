@@ -419,13 +419,22 @@ def validate_parallel_cases(parallel_cases: dict) -> dict:
     if actual_angles != expected_angles:
         raise ValueError("parallel elevation cases must contain the exact 0..90 deg scan")
     four_cases = parallel_cases.get("four_direction_cases", [])
-    expected_sky = [(0.0, 73.0), (0.0, 67.0), (-3.0, 70.0), (3.0, 70.0)]
+    expected_sky = [
+        (0.0, 74.0),
+        (0.0, 66.0),
+        (-11.555008804184915, 69.61999503216495),
+        (11.555008804184915, 69.61999503216495),
+    ]
     actual_sky = [
         (float(case["source_sky"]["az_deg"]), float(case["source_sky"]["el_deg"]))
         for case in four_cases
     ]
-    if actual_sky != expected_sky:
-        raise ValueError("parallel sky cases must be el=73/67 and az=-3/+3 around az=0/el=70")
+    if len(actual_sky) != len(expected_sky) or any(
+        abs(actual - expected) > 1.0e-8
+        for actual_pair, expected_pair in zip(actual_sky, expected_sky)
+        for actual, expected in zip(actual_pair, expected_pair)
+    ):
+        raise ValueError("parallel sky cases must be exact local up/down/west/east offsets of 4 deg")
     pointing_el = math.radians(70.0)
     basis_x = [0.0, 1.0, 0.0]
     basis_y = [-math.sin(pointing_el), 0.0, math.cos(pointing_el)]
@@ -445,6 +454,8 @@ def validate_parallel_cases(parallel_cases: dict) -> dict:
         actual_local = case["beam"]["direction_local"]
         if any(abs(a - b) > 1e-9 for a, b in zip(actual_local, expected_local)):
             raise ValueError("parallel source sky angle does not reproduce source.beam_direction")
+        if abs(float(case["beam"]["theta_deg"]) - 4.0) > 1e-9:
+            raise ValueError("parallel source offset from the telescope optical axis is not 4 deg")
         summary = case["summary"]
         provenance = case["provenance"]
         if int(provenance["mark_only_rows"]) != int(summary["hit_output_before_obstruction"]):
@@ -595,6 +606,17 @@ def main() -> None:
         raise ValueError("parallel and event 1909 outputs were not produced from the same main commit")
     if event_provenance.get("source_archive_sha256") != parallel_cases.get("source_archive_sha256"):
         raise ValueError("parallel and event 1909 outputs were not produced from the same source archive")
+    event_camera_geometry = event1909.get("camera_geometry_lact_uv", [])
+    if len(event_camera_geometry) != len(camera_geometry):
+        raise ValueError("event ROOT camera geometry does not contain all configured pixels")
+    configured_by_id = {row["id"]: row for row in camera_geometry}
+    for row in event_camera_geometry:
+        configured = configured_by_id.get(row["id"])
+        if configured is None or any(
+            abs(float(row[key]) - float(configured[key])) > 1.0e-9
+            for key in ("u", "v", "size")
+        ):
+            raise ValueError("event ROOT camera u/v geometry differs from the configured camera")
     examples = {}
     example_specs = {
         "north": {

@@ -151,6 +151,9 @@ def load_case(case_id: str, title: str, elevation: float, hit_path: Path,
         if int(number(row, 'obstruction_blocked_reflected'))
         and not int(number(row, 'obstruction_blocked_incoming'))
     ]
+    all_reflected_blocked_rows = [
+        row for row in hit_rows if int(number(row, 'obstruction_blocked_reflected'))
+    ]
     reflection_rows = [
         row for row in hit_rows
         if not int(number(row, 'obstruction_blocked_incoming'))
@@ -213,7 +216,7 @@ def load_case(case_id: str, title: str, elevation: float, hit_path: Path,
         vec(row, "mirror_") for row in incoming_blocked_rows
     ] if include_blocked else []
     full_reflected_blocked_surface_endpoints_global_m = [
-        vec(row, "surface_") for row in reflected_blocked_rows
+        vec(row, "surface_") for row in all_reflected_blocked_rows
     ] if include_blocked else []
     camera_signal = [{
         "pixel_id": int(row["pixel_id"]),
@@ -382,7 +385,7 @@ def load_case(case_id: str, title: str, elevation: float, hit_path: Path,
                 "camera_x_m/y_m equal u_m/v_m",
                 "pixel photon sum equals hit_camera and row count equals unique_hit_pixels",
                 "per-pixel hit rows exactly equal the complete camera CSV photon_count",
-                "all clear mirror points and all blocked diagnostic endpoints are embedded",
+                "all clear mirror points and both complete obstruction-flag sets are embedded",
             ],
         },
         "provenance": {
@@ -436,7 +439,7 @@ def parse_args() -> argparse.Namespace:
         default="run_logs/coordinate_workbench/server_current_afd630ae/run_logs/coordinate_workbench",
     )
     parser.add_argument("--output", default="docs/assets/data/coordinate-parallel-cases.json")
-    parser.add_argument("--four-direction-root", default="run_logs/coordinate_workbench/server_sky_angle_3deg/sky-angle-3deg")
+    parser.add_argument("--four-direction-root", default="run_logs/coordinate_workbench/server_sky_offset_4deg/sky-offset-4deg")
     parser.add_argument("--source-base-commit", required=True)
     parser.add_argument("--source-archive-sha256", required=True)
     parser.add_argument("--results-archive-sha256", required=True)
@@ -472,22 +475,22 @@ def main() -> None:
     four_direction_cases = []
     four_specs = (
         (
-            "up", "天区上：光源 az=0° / el=73°", 0.0, 73.0,
-            [0.0, -0.05233595624294385, -0.9986295347545738], 3.0, 270.0,
+            "up", "光轴上方 offset=4°：光源 az=0° / el=74°", 0.0, 74.0,
+            [0.0, -0.0697564737441253, -0.9975640502598242], 4.0, 270.0,
         ),
         (
-            "down", "天区下：光源 az=0° / el=67°", 0.0, 67.0,
-            [0.0, 0.05233595624294368, -0.9986295347545739], 3.0, 90.0,
+            "down", "光轴下方 offset=4°：光源 az=0° / el=66°", 0.0, 66.0,
+            [0.0, 0.0697564737441253, -0.9975640502598242], 4.0, 90.0,
         ),
         (
-            "west", "天区西：光源 az=-3° / el=70°", -3.0, 70.0,
-            [0.017899951255297582, -0.00044045903963302324, -0.9998396860201599],
-            1.0259569321201485, 358.5904234021013,
+            "west", "光轴西侧 offset=4°：等效 sky az=-11.555° / el=69.620°",
+            -11.555008804184915, 69.61999503216495,
+            [0.0697564737441253, 0.0, -0.9975640502598242], 4.0, 0.0,
         ),
         (
-            "east", "天区东：光源 az=+3° / el=70°", 3.0, 70.0,
-            [-0.017899951255297582, -0.00044045903963302324, -0.9998396860201599],
-            1.0259569321201485, 181.40957659789868,
+            "east", "光轴东侧 offset=4°：等效 sky az=+11.555° / el=69.620°",
+            11.555008804184915, 69.61999503216495,
+            [-0.0697564737441253, 0.0, -0.9975640502598242], 4.0, 180.0,
         ),
     )
     for name, label, source_az, source_el, direction_local, theta, phi in four_specs:
@@ -496,7 +499,7 @@ def main() -> None:
             four_root / f"{name}_hits.csv",
             four_root / f"{name}_camera.csv",
             four_root / f"{name}.log",
-            Path(f"configs/examples/coordinate_parallel_sky_{name}_3deg.cfg"),
+            Path(f"configs/examples/coordinate_parallel_sky_{name}_4deg.cfg"),
             args.sample_rays, args.sample_output, theta, phi,
             source_sky={"az_deg": source_az, "el_deg": source_el},
             beam_direction_local=direction_local,
@@ -507,7 +510,7 @@ def main() -> None:
         for name, *_ in four_specs
         for suffix in ("_hits.csv", "_camera.csv", ".log")
     ] + [
-        Path(f"configs/examples/coordinate_parallel_sky_{name}_3deg.cfg")
+        Path(f"configs/examples/coordinate_parallel_sky_{name}_4deg.cfg")
         for name, *_ in four_specs
     ]
     output = {

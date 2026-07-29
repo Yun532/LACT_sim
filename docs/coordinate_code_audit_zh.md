@@ -97,16 +97,18 @@ z_local_in_NWU = ( cos(E) cos(A),-cos(E) sin(A), sin(E))
 
 所以网页第 2、3 页不能套用 CORSIKA NWU 基底去摆放光学结构；它们必须使用通用框架。
 
-第 2 页四组 3° 天区输入均由同一程序公式换到望远镜局部传播方向，随后运行最新 `run_optical_sim`，不是在网页中移动旧光斑：
+第 2 页四组输入现在都定义为相对望远镜光轴的真实夹角 `offset=4°`，随后重新运行同一个 `run_optical_sim`，不是在网页中移动旧光斑。上下沿本地 `±v`，东西沿本地 `±u`：
 
 | 名称 | 天区输入 | `source.beam_direction` 原值 | 局部 `θ / φ` |
 |---|---|---|---|
-| 上 | `az=0°, el=73°` | `(0, -0.0523359562, -0.9986295348)` | `3°, 270°` |
-| 下 | `az=0°, el=67°` | `(0, +0.0523359562, -0.9986295348)` | `3°, 90°` |
-| 西 | `az=-3°, el=70°` | `(+0.0178999513, -0.0004404590, -0.9998396860)` | `1.0259569321°, 358.5904234021°` |
-| 东 | `az=+3°, el=70°` | `(-0.0178999513, -0.0004404590, -0.9998396860)` | `1.0259569321°, 181.4095765979°` |
+| 上 | `az=0°, el=74°` | `(0, -0.0697564737, -0.9975640503)` | `4°, 270°` |
+| 下 | `az=0°, el=66°` | `(0, +0.0697564737, -0.9975640503)` | `4°, 90°` |
+| 西 | `az=-11.5550088°, el=69.6199950°` | `(+0.0697564737, 0, -0.9975640503)` | `4°, 0°` |
+| 东 | `az=+11.5550088°, el=69.6199950°` | `(-0.0697564737, 0, -0.9975640503)` | `4°, 180°` |
 
-西/东的局部 `θ` 小于 3° 是球面几何的正常结果：在仰角 70° 处，方位角差投影到切平面会乘以约 `cos(70°)`；天区输入方位角本身仍是完整的 `±3°`。
+为什么东西不能写成 `az=±4°, el=70°`：在仰角 70°处，方位角差的实际球面夹角会被约 `cos(70°)` 缩小；`Δaz=4°` 只产生约 `1.37°` 的光轴 offset。本页先在望远镜本地令传播方向为 `(∓sin4°,0,−cos4°)`，再仅为文字说明换算出等效天区坐标 `az=±11.5550088° / el=69.6199950°`。网页的三维光路和相机图直接读取这四次新运行的输出。
+
+遮挡 CSV 的 `obstruction_blocked_incoming` 与 `obstruction_blocked_reflected` 是两个独立标志，不能用 `else if` 当成互斥分类。新 4° 输出中 East 有 40 行、West 有 42 行同时置位。网页的“全量反射遮挡端点”因此按 reflected 标志独立收集，数量分别与 C++ summary 的 `blocked_reflected` 完全相等；只有为了避免抽样光路线重复时，才把显示抽样分层设为互斥。
 
 ### 5.2 `run_corsika_trace`
 
@@ -163,7 +165,16 @@ camera_pixels.x_m = pixel.center.x = u
 camera_pixels.y_m = pixel.center.y = v
 ```
 
-`observations.image_cherenkov_pe` 的填充与写入见 `LactEventRootWriter.cpp:301-496,893,1028`。
+`observations.image_cherenkov_pe` 的填充与写入见 `LactEventRootWriter.cpp:301-496,893,1028`。因此第 4 页 CORSIKA 的 LACT u/v 数据链是：
+
+```text
+ROOT camera_pixels: (pixel_id, x_m=u, y_m=v, size_m)   # 1616 个像素几何
+ROOT observations.image_cherenkov_pe[pixel_id]         # 当前 telescope_id 的信号
+                         ↓ 按 pixel_id 连接
+网页 LACT 图: plot_x=u, plot_y=v, color=PE
+```
+
+它不依赖 photon bunch 的方向、`zem` 发射点反演或网页三维投影。本次生成器还逐像素比较了 ROOT 的 1616 个 `id/u/v/size` 与同源相机配置，最大允许误差为 `1e-9 m`；任何缺失、重排错误或坐标差异都会阻止 HTML 生成。
 
 最新 pyLAST reader 在 `pyLAST@953d073:root/LactEventSource.cpp:245-265` 执行：
 
@@ -184,7 +195,7 @@ combined:  (plot_x, plot_y) = (+u, -v)
 
 这里的 `(+u,-v)` 不是网页为“看起来一致”增加的翻转，而是严格依次执行 reader 与 `EventVisualizer._camera_to_plot_xy()` 的结果。实现中保留了 `pylastReaderCoordinates()` 和 `pylastPlotCoordinates()` 两个独立函数，运行时测试分别核对，避免把两层边界压成无出处的显示技巧。
 
-像素颜色也模仿最新版 `EventVisualizer._image_norm()`：零值像素为白色，非零像素使用 plasma 色带；输入 PE 先按 `LactEventSource.cpp:696-697` 的 `round()` 规则形成 `true_image`。网页只重画几何和着色，不更改用于绘制的原始 LACT/ROOT 输出值。
+输入 PE 仍先按 `LactEventSource.cpp:696-697` 的 `round()` 规则形成 `true_image`。为了直接比较 LACT 与 pyLAST，网页现在让两者共用同一套暗色像素渲染、强度色标和物理/光斑取景逻辑；这只是显示样式统一，并非复刻原生 PNG。两种模式唯一的数据坐标差别仍是上面的确定性映射，PE、像素 id 和三维结构都不改变。
 
 本次数值审计结果：
 
@@ -192,7 +203,8 @@ combined:  (plot_x, plot_y) = (+u, -v)
 - pyLAST 坐标最大误差：`0.0 m`
 - 全部 32 台望远镜的 `true_image` 都直接读取同一 ROOT 的 `image_cherenkov_pe`；网页没有按信号排序后丢弃其余望远镜。该事例的值本来就是整数，所以 pyLAST 最近整数规则的最大舍入差是 `0 PE`。
 - 第 2 页四个平行光 pyLAST 面板读取各自 `run_optical_sim` 的真实像素 CSV；第 4 页读取同一 ROOT event 1909 的 `image_cherenkov_pe`。
-- 切换 LACT/pyLAST 只改变相机 Canvas 的坐标表达和配色，不修改三维望远镜、光路或 CORSIKA 发射点。
+- 第 4 页 LACT 几何直接读取 ROOT 的全部 1616 个 `camera_pixels`；不是用 photon direction 反推 u/v。
+- 切换 LACT/pyLAST 只改变相机 Canvas 的坐标表达，不修改 PE、三维望远镜、光路或 CORSIKA 发射点；两种模式现在使用相同显示样式。
 
 由于网页自行重画，标题直接使用 ROOT/输出中的真实 `telescope_id`，不会继承 `event_visualizer.py:1950-1958` 的 `tel_id + 1` 显示偏移。
 
@@ -234,7 +246,7 @@ emission = anchor - s*direction
 | 页面 | 三维结构 | 光路/数据 | 相机图 |
 |---|---|---|---|
 | 1 全局定义 | 从镜片、遮挡、相机 CSV 原值按程序通用基底放置 | 不放事例 | 不放事例；只标 LACT 与 pyLAST 字段方向 |
-| 2 平行光 | 通用基底，az=0° / el=70° | 四组最新 C++ 输出：上 `el=73°`、下 `el=67°`、西 `az=-3°`、东 `az=+3°`；每次显示所选组的全量反射点、遮挡端点和抽样光路 | LACT：完整 `output u/v` 原值分箱；pyLAST：同组真实像素输出按 reader/renderer 规则重画 |
+| 2 平行光 | 通用基底，az=0° / el=70° | 四组最新 C++ 输出都为光轴 `offset=4°`：上下沿本地 `±v`，东西沿本地 `±u`；每次显示所选组的全量反射点、遮挡端点和抽样光路 | LACT：完整 `output u/v` 原值分箱；pyLAST：同组真实像素输出按 reader/renderer 坐标重画，并与 LACT 像素图统一暗色样式 |
 | 3 天顶角 | 每个仰角的绝对形变镜片状态 | 对应仰角真实 C++ 平行光输出 | 对应仰角完整 `output u/v` 原值分箱 |
 | 4 CORSIKA | ROOT 阵列 NWU 原值；32 台均按各自 ROOT pointing 绘制镜片、支架/遮挡和相机外框；所选台另绘完整 1616 像素 | 32 台 event 1909 原始 anchor/direction/zem；发射点为注明公式的派生诊断 | 右上角选择 32 台中的任一台；LACT 直接用 ROOT `image_cherenkov_pe`，pyLAST 按同一数据与最新版代码规则重画 |
 
@@ -250,7 +262,7 @@ emission = anchor - s*direction
 - 每个平行光事例是否包含全部输出面 `u/v` 和全部相机命中 `u/v`；
 - `surface_point` 投影是否逐条复现输出 `u/v`；
 - `camera_x/y` 是否逐条等于 `u/v`，像素计数之和是否等于 C++ `hit_camera`；
-- 四方向平行光是否严格为 `el=73/67°` 和 `az=-3/+3°`，且配置方向向量与代码公式一致；
+- 四方向平行光的本地传播向量、等效天区坐标和光轴夹角是否同时复现精确 `offset=4°`；
 - pyLAST reader/renderer 的两步映射是否对给定 `u/v` 产生精确的 `pix_x=-v, pix_y=+u, plot=(+u,-v)`。
 
 `python/test_coordinate_diagnostics_runtime.js` 还会数值比较第 1/2/3/4 页镜片顶点方向、固定地图、四页默认南朝屏幕外/北朝屏幕内、地平线投影、通用/CORSIKA 东向偏移符号、CORSIKA 角度换算、三维等比例 scale，并确认平行光和 CORSIKA 切换到 pyLAST 重画时不会修改三维结构。
@@ -273,14 +285,14 @@ output.whiteboard_input_photon=true
 东西两例的关键 cfg 原值为：
 
 ```text
-East sky az=+3°, el=70°:
-source.beam_direction=-0.017899951255297582,-0.00044045903963302324,-0.9998396860201599
+East, exact local +u offset=4° (equivalent sky az=+11.5550088°, el=69.6199950°):
+source.beam_direction=-0.0697564737441253,0,-0.9975640502598242
 
-West sky az=-3°, el=70°:
-source.beam_direction=+0.017899951255297582,-0.00044045903963302324,-0.9998396860201599
+West, exact local -u offset=4° (equivalent sky az=-11.5550088°, el=69.6199950°):
+source.beam_direction=+0.0697564737441253,0,-0.9975640502598242
 ```
 
-这里的 East/West 名称来自 cfg 注释记录的天空方位和代码审核得到的物理方向；网页三维光线直接读取运行输出中的方向列，不重新用名称生成向量。
+这里的 East/West 名称来自望远镜本地 `±u` 的物理方向；网页三维光线直接读取运行输出中的方向列，不重新用名称生成向量。四组新结果的组合 SHA-256 为 `4a025f1d0f1005f42dc14e7a81c82a5eb2d67ce3426df36e0abf6ec3ebd70158`。
 
 CORSIKA 数据包现在包含 32 个 ROOT observation 相机和 32 个 EventIO photon group，每台均匀抽样 120 条，仅用于三维线段显示，共 3840 条。完整 photon bunch 数仍保留在逐台 `raw_bunch_count` 中；相机像素不抽样。完整簇射/地面视图绘制全部 32 台结构。右上角选择望远镜后：
 

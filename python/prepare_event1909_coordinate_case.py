@@ -168,6 +168,7 @@ def main() -> None:
     telescopes = root["telescopes"].arrays(library="np")
     trace = root["trace_summary"].arrays(library="np")
     observations = root["observations"].arrays(library="ak")
+    camera_pixels = root["camera_pixels"].arrays(library="np")
 
     trace_by_tel = {
         int(trace["telescope_id"][i]): {
@@ -268,6 +269,16 @@ def main() -> None:
         "array": array,
         "selected_telescope_id": 19,
         "camera_views": camera_views,
+        "camera_geometry_lact_uv": [
+            {
+                "id": int(camera_pixels["pixel_id"][i]),
+                "u": float(camera_pixels["x_m"][i]),
+                "v": float(camera_pixels["y_m"][i]),
+                "size": float(camera_pixels["size_m"][i]),
+                "shape_code": int(camera_pixels["shape_code"][i]),
+            }
+            for i in range(len(camera_pixels["pixel_id"]))
+        ],
         "ray_samples_by_telescope": [rays_by_telescope[telescope_id] for telescope_id in selected_telescopes],
         "raw_tel19_bunch_count": rays_by_telescope[19]["raw_bunch_count"],
         "pointing": {"az_deg": 0.0, "el_deg": 70.0},
@@ -331,6 +342,7 @@ def main() -> None:
                 "all 32 displayed telescopes use raw photon bunches from the same shower 19 / reuse 10",
                 "selected detailed telescope 19 has 27159 raw photon bunch rows",
                 "all selectable camera panels use image_cherenkov_pe from the same ROOT event",
+                "all displayed LACT u/v pixel centers and sizes come from the ROOT camera_pixels tree",
                 "array layout and core use the ROOT NWU branches without coordinate conversion",
                 "observation altitude is read from the selected CORSIKA event header",
                 "every displayed emission point reproduces raw zem and the raw straight ray",
