@@ -39,6 +39,18 @@ def compact(value):
     return value
 
 
+def parse_flat_config(path: Path) -> dict[str, str]:
+    """Keep exact effective key/value text from the cfg for page-side auditing."""
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if not line or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip()
+    return values
+
+
 def read_eventio_samples(path: Path, telescope_ids: list[int], target: int,
                          telescope_positions: dict[int, list[float]],
                          deps_path: Path) -> tuple[str, float, dict[int, dict]]:
@@ -183,9 +195,9 @@ def main() -> None:
             **trace_by_tel[telescope_id],
         })
 
-    selected_telescopes = sorted(
-        trace_by_tel, key=lambda telescope_id: trace_by_tel[telescope_id]["signal_pe"], reverse=True
-    )[:4]
+    # Every telescope is selectable in the diagnostic page.  Keep the same
+    # telescope ids and ROOT observation rows; do not rank or remap them here.
+    selected_telescopes = sorted(trace_by_tel)
     camera_views = []
     for i in range(len(observations)):
         telescope_id = int(observations["telescope_id"][i])
@@ -285,6 +297,10 @@ def main() -> None:
             "source_base_commit": args.source_base_commit,
             "source_archive_sha256": args.source_archive_sha256,
             "run_binary_sha256": args.run_binary_sha256,
+            "run_config": "configs/examples/corsika_coordinate_event1909_array.cfg",
+            "run_config_values": parse_flat_config(
+                Path("configs/examples/corsika_coordinate_event1909_array.cfg")
+            ),
             "critical_source_sha256": {
                 path.as_posix(): sha256(path)
                 for path in (
@@ -312,9 +328,9 @@ def main() -> None:
             "max_line_reconstruction_error_m": max_line_reconstruction_error_m,
             "checks": [
                 "ROOT contains exactly event 1909 and 32 telescope observations",
-                "the four displayed telescopes use raw photon bunches from the same shower 19 / reuse 10",
+                "all 32 displayed telescopes use raw photon bunches from the same shower 19 / reuse 10",
                 "selected detailed telescope 19 has 27159 raw photon bunch rows",
-                "camera panels use image_cherenkov_pe from the same ROOT event",
+                "all selectable camera panels use image_cherenkov_pe from the same ROOT event",
                 "array layout and core use the ROOT NWU branches without coordinate conversion",
                 "observation altitude is read from the selected CORSIKA event header",
                 "every displayed emission point reproduces raw zem and the raw straight ray",

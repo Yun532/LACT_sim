@@ -107,7 +107,7 @@ const checks = [
   ["?page=global", "当前程序角度"],
   ["?page=parallel", "完整输出绘图"],
   ["?page=elevation", "当前角度"],
-  ["?page=corsika&case=event1909", "zem 原值"],
+  ["?page=corsika&case=event1909", "zem 与发射点"],
 ];
 for (const [query, expected] of checks) {
   const elements = run(query);
@@ -178,6 +178,29 @@ if (Math.hypot(groundPointAfterZoom[0] - groundPointBeforeZoom[0],
   throw new Error("cursor-centered zoom failed to keep the selected ground point fixed");
 }
 console.log("runtime OK CORSIKA defaults to full cameras and can zoom into the ground anchor");
+
+const corsikaArrayElements = run("?page=corsika&case=event1909");
+const corsikaArrayScene = corsikaArrayElements.sandbox.buildScene();
+const allTelescopeFacets = corsikaArrayScene.polys.filter(polygon => /^tel\d+ 镜片 /.test(polygon.name));
+const telescopeOptions = corsikaArrayElements.get("photonTel").innerHTML.match(/<option /g) || [];
+if (allTelescopeFacets.length !== 32 * 54 || telescopeOptions.length !== 32 ||
+    !corsikaArrayElements.get("info").innerHTML.includes("source.coordinate_frame=corsika_nwu_relative") ||
+    !corsikaArrayElements.get("info").innerHTML.includes("32 台望远镜都可选择")) {
+  throw new Error(`CORSIKA full-array geometry/config audit is incomplete: facets=${allTelescopeFacets.length}; options=${telescopeOptions.length}`);
+}
+corsikaArrayElements.get("photonTel").listeners.change({target: {value: "0"}});
+const focusedScene = corsikaArrayElements.sandbox.buildScene();
+const focusedFacets = focusedScene.polys.filter(polygon => polygon.name.startsWith("tel0 镜片 "));
+const otherFocusedFacets = focusedScene.polys.filter(polygon => /^tel(?!0 )\d+ 镜片 /.test(polygon.name));
+const focusedCenter = vm.runInNewContext("center", corsikaArrayElements.sandbox);
+const tel0 = vm.runInNewContext("D.event1909.array.find(function(t){return t.telescope_id===0})", corsikaArrayElements.sandbox);
+if (focusedFacets.length !== 54 || otherFocusedFacets.length !== 0 ||
+    Math.hypot(focusedCenter[0] - tel0.position_nwu_m[0], focusedCenter[1] - tel0.position_nwu_m[1]) > 1e-6 ||
+    !corsikaArrayElements.get("cameraHead").textContent.includes("tel0") ||
+    !corsikaArrayElements.get("info").innerHTML.includes("当前所选")) {
+  throw new Error(`CORSIKA telescope selection did not create a telescope-centered tel0 view: center=${focusedCenter}`);
+}
+console.log("runtime OK all 32 telescope structures, cfg audit, selector and telescope-centered focus");
 
 const parallelElements = run("?page=parallel");
 const fullDensityColors = ["#ff6d7a", "#64c7ff", "#ffd45e", "#70e39c"]
@@ -402,7 +425,7 @@ for (let i = 0; i < corsikaGeometryBefore.length; i++) {
 }
 if (maxPylastGeometryMutation > 0 ||
     !pylastCorsikaElements.get("cameraHead").textContent.includes("pyLAST 规则重画") ||
-    !pylastCorsikaElements.get("cameraCaption").textContent.includes("不嵌入、不裁切 pyLAST 原图") ||
+    !pylastCorsikaElements.get("cameraCaption").textContent.includes("同一 ROOT event 1909") ||
     pylastCorsikaElements.sandbox.pylastReaderCoordinates(0.2, -0.3).pix_x !== 0.3 ||
     pylastCorsikaElements.sandbox.pylastReaderCoordinates(0.2, -0.3).pix_y !== 0.2 ||
     pylastCorsikaElements.sandbox.pylastPointFromLact(0.2, -0.3).join(",") !== "0.2,0.3") {

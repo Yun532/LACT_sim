@@ -190,7 +190,7 @@ combined:  (plot_x, plot_y) = (+u, -v)
 
 - ROOT SHA-256：`36876c1e586c3c6dcc1ff5d2f7a49cc66430a0cfce3db019454dde3684bf29bc`
 - pyLAST 坐标最大误差：`0.0 m`
-- tel 19/16/21/20 的 `true_image` 与 ROOT `image_cherenkov_pe` 的最近整数结果逐像素完全相等；该事例的值本来就是整数，所以最大舍入差也是 `0 PE`
+- 全部 32 台望远镜的 `true_image` 都直接读取同一 ROOT 的 `image_cherenkov_pe`；网页没有按信号排序后丢弃其余望远镜。该事例的值本来就是整数，所以 pyLAST 最近整数规则的最大舍入差是 `0 PE`。
 - 第 2 页四个平行光 pyLAST 面板读取各自 `run_optical_sim` 的真实像素 CSV；第 4 页读取同一 ROOT event 1909 的 `image_cherenkov_pe`。
 - 切换 LACT/pyLAST 只改变相机 Canvas 的坐标表达和配色，不修改三维望远镜、光路或 CORSIKA 发射点。
 
@@ -236,7 +236,7 @@ emission = anchor - s*direction
 | 1 全局定义 | 从镜片、遮挡、相机 CSV 原值按程序通用基底放置 | 不放事例 | 不放事例；只标 LACT 与 pyLAST 字段方向 |
 | 2 平行光 | 通用基底，az=0° / el=70° | 四组最新 C++ 输出：上 `el=73°`、下 `el=67°`、西 `az=-3°`、东 `az=+3°`；每次显示所选组的全量反射点、遮挡端点和抽样光路 | LACT：完整 `output u/v` 原值分箱；pyLAST：同组真实像素输出按 reader/renderer 规则重画 |
 | 3 天顶角 | 每个仰角的绝对形变镜片状态 | 对应仰角真实 C++ 平行光输出 | 对应仰角完整 `output u/v` 原值分箱 |
-| 4 CORSIKA | ROOT 阵列 NWU 原值；望远镜局部结构按 CORSIKA 基底物理放置 | event 1909 原始 anchor/direction/zem；发射点为注明公式的派生诊断 | LACT 视图直接用 ROOT `x_m/y_m` 和 `image_cherenkov_pe`；pyLAST 视图按同一 ROOT 数据与最新版代码规则重画 |
+| 4 CORSIKA | ROOT 阵列 NWU 原值；32 台均按各自 ROOT pointing 绘制镜片、支架/遮挡和相机外框；所选台另绘完整 1616 像素 | 32 台 event 1909 原始 anchor/direction/zem；发射点为注明公式的派生诊断 | 右上角选择 32 台中的任一台；LACT 直接用 ROOT `image_cherenkov_pe`，pyLAST 按同一数据与最新版代码规则重画 |
 
 允许的网页显示操作：观察相机旋转/平移、等比例缩放、投影、抽样光路线、按原值窗口分箱。
 
@@ -254,3 +254,39 @@ emission = anchor - s*direction
 - pyLAST reader/renderer 的两步映射是否对给定 `u/v` 产生精确的 `pix_x=-v, pix_y=+u, plot=(+u,-v)`。
 
 `python/test_coordinate_diagnostics_runtime.js` 还会数值比较第 1/2/3/4 页镜片顶点方向、固定地图、四页默认南朝屏幕外/北朝屏幕内、地平线投影、通用/CORSIKA 东向偏移符号、CORSIKA 角度换算、三维等比例 scale，并确认平行光和 CORSIKA 切换到 pyLAST 重画时不会修改三维结构。
+
+## 13. cfg 原值与 CORSIKA 望远镜选择
+
+数据准备脚本现在解析 cfg 中未注释的 `key=value`，将原始字符串作为 `provenance.run_config_values` 写入 JSON。网页“说明 / 原值 / 校验”直接读取这些字符串，不根据网页几何反推配置。
+
+平行光四方向的共同配置是：
+
+```text
+telescope.pointing_az_deg=0
+telescope.pointing_el_deg=70
+source.n_bunches=30000
+obstruction.mark_only=true
+output.mode=both
+output.whiteboard_input_photon=true
+```
+
+东西两例的关键 cfg 原值为：
+
+```text
+East sky az=+3°, el=70°:
+source.beam_direction=-0.017899951255297582,-0.00044045903963302324,-0.9998396860201599
+
+West sky az=-3°, el=70°:
+source.beam_direction=+0.017899951255297582,-0.00044045903963302324,-0.9998396860201599
+```
+
+这里的 East/West 名称来自 cfg 注释记录的天空方位和代码审核得到的物理方向；网页三维光线直接读取运行输出中的方向列，不重新用名称生成向量。
+
+CORSIKA 数据包现在包含 32 个 ROOT observation 相机和 32 个 EventIO photon group，每台均匀抽样 120 条，仅用于三维线段显示，共 3840 条。完整 photon bunch 数仍保留在逐台 `raw_bunch_count` 中；相机像素不抽样。完整簇射/地面视图绘制全部 32 台结构。右上角选择望远镜后：
+
+1. 三维场景只保留所选台的详细结构、完整相机像素和该台抽样入射线；
+2. `fit()` 只接收以所选 ROOT 位置为中心的局部点集，因此旋转中心随望远镜切换；
+3. 局部入射线是原始 `anchor_array_nwu_m` 和 `direction_nwu` 所定义直线在望远镜附近的截取，不是新增光学追迹；
+4. 右侧相机同时切到同一 `telescope_id` 的 ROOT `image_cherenkov_pe`。
+
+运行时测试显式检查：阵列场景含 `32 × 54 = 1728` 个镜片面、选择器含 32 项、选择 tel0 后场景只含 tel0 的 54 个详细镜片，并且三维拟合中心的 North/West 坐标等于 tel0 的 ROOT 位置。

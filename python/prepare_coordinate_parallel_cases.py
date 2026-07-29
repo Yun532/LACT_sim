@@ -110,6 +110,18 @@ def parse_runtime_config(path: Path) -> dict:
     return output
 
 
+def parse_flat_config(path: Path) -> dict[str, str]:
+    """Keep exact effective key/value text from the cfg for page-side auditing."""
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if not line or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip()
+    return values
+
+
 def compact(value):
     if isinstance(value, float):
         return round(value, 10)
@@ -377,6 +389,7 @@ def load_case(case_id: str, title: str, elevation: float, hit_path: Path,
             "run_binary": "build/run_optical_sim",
             "run_config": config_path.as_posix(),
             "run_config_sha256": sha256(config_path),
+            "run_config_values": parse_flat_config(config_path),
             "run_overrides": {
                 "telescope.pointing_el_deg": elevation,
                 "source.beam_direction": beam_direction_local,
