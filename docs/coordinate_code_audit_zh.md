@@ -154,7 +154,16 @@ camera_y_m = hit.v_m
 pixel = findContainingPixel(camera, camera_x_m, camera_y_m)
 ```
 
-结论：LACT 相机白板横轴直接画输出 `u_m`，纵轴直接画输出 `v_m`。网页允许按原始包围盒选择显示窗口、做等比例缩放和 count/bin 分箱，但不允许对数据换轴、翻符号、重设零点或旋转。
+因此“之前光学里有没有 `x_m/y_m`”需要分层回答：输出面命中本身的原始字段叫 `u_m/v_m`；到了 detector/camera 接口就已经有 `camera_x_m/camera_y_m`，且代码是直接赋值，没有任何旋转或符号变化；相机配置和 ROOT 几何中的简写字段再叫 `x_m/y_m`。它们的数值链为：
+
+```text
+hit.u_m  == camera_x_m == camera_pixels.x_m == LACT u
+hit.v_m  == camera_y_m == camera_pixels.y_m == LACT v
+```
+
+这里最后一层 `camera_pixels.x_m/y_m` 是相机平面像素中心字段，不是 CORSIKA 阵列坐标中的 North/West x/y。
+
+结论：LACT 相机白板横轴直接画输出 `u_m`（也标作相机 `x_m`），纵轴直接画输出 `v_m`（也标作相机 `y_m`）。网页允许按原始包围盒选择显示窗口、做等比例缩放和 count/bin 分箱，但不允许对数据换轴、翻符号、重设零点或旋转。
 
 ## 8. ROOT 到 pyLAST 的真实边界
 
@@ -182,6 +191,14 @@ ROOT observations.image_cherenkov_pe[pixel_id]         # 当前 telescope_id 的
 pix_x = -root_camera_pixels.y_m = -v
 pix_y = +root_camera_pixels.x_m = +u
 ```
+
+这个一负一正不是经验修图，而是两个相机基底的有向变换：
+
+1. `event_visualizer.py:393-401` 和 `helper.py:34-38` 所使用的 pyLAST/TelescopeFrame 语义中，`pix_x` 是仰角型源偏移，`pix_y` 是方位型源偏移；LACT 光学焦平面则是 `u` 方位型、`v` 仰角型，因此先交换轴。
+2. `include/CoordFrames.hh:72-80` 明确以 sim_telarray 的 `X=North, Y=West, Z=Up` 构造 TelescopeFrame，正方位方向从 North 转向 West。LACT 镜面成像后的 `+u` 正好对应这一正方位源偏移，所以 `pix_y=+u`。
+3. 天空仰角向上经过反射后落在焦平面 `-v`，而 pyLAST 的正 `pix_x` 表示正仰角源偏移，所以 `pix_x=-v`。
+
+从线性代数看，`(u,v)→(-v,+u)` 的矩阵是 `[[0,-1],[1,0]]`，行列式为 `+1`，即保持手性的 90° 旋转。交换轴却不带这个负号会得到行列式 `-1`，成为镜像；负号放在 `v` 上由上述仰角物理定义决定。
 
 `root/LactEventSource.cpp:696-697` 对 `image_cherenkov_pe` 做最近整数舍入后存入 `true_image`。`src/pylast/visualize/event_visualizer.py:393-401,2216-2218` 再把 `pix_y` 放到画布横轴、`pix_x` 放到画布纵轴。
 
@@ -248,7 +265,7 @@ emission = anchor - s*direction
 | 1 全局定义 | 从镜片、遮挡、相机 CSV 原值按程序通用基底放置 | 不放事例 | 不放事例；只标 LACT 与 pyLAST 字段方向 |
 | 2 平行光 | 通用基底，az=0° / el=70° | 四组最新 C++ 输出都为光轴 `offset=4°`：上下沿本地 `±v`，东西沿本地 `±u`；每次显示所选组的全量反射点、遮挡端点和抽样光路 | LACT：完整 `output u/v` 原值分箱；pyLAST：同组真实像素输出按 reader/renderer 坐标重画，并与 LACT 像素图统一暗色样式 |
 | 3 天顶角 | 每个仰角的绝对形变镜片状态 | 对应仰角真实 C++ 平行光输出 | 对应仰角完整 `output u/v` 原值分箱 |
-| 4 CORSIKA | ROOT 阵列 NWU 原值；32 台均按各自 ROOT pointing 绘制镜片、支架/遮挡和相机外框；所选台另绘完整 1616 像素 | 32 台 event 1909 原始 anchor/direction/zem；发射点为注明公式的派生诊断 | 右上角选择 32 台中的任一台；LACT 直接用 ROOT `image_cherenkov_pe`，pyLAST 按同一数据与最新版代码规则重画 |
+| 4 CORSIKA | 默认完整簇射总览：ROOT 阵列 NWU 原值，32 台均按各自 ROOT pointing 绘制镜片、支架/遮挡和相机外框；点击相机只改变拟合范围与旋转中心，完整场景仍保留，并为所选台叠加 1616 像素和局部轴 | 32 台 event 1909 原始 anchor/direction/zem 的可追溯均匀样本在总览与聚焦尺度始终保留；发射点为注明公式的派生诊断；不伪造未保存的镜面反射折线 | 右上角始终保留 ROOT `image_cherenkov_pe` 总和前四的 tel19/16/21/20；红/蓝/黄/绿与三维模型、pointing、photon 路径一致；按钮返回初始尺度 |
 
 允许的网页显示操作：观察相机旋转/平移、等比例缩放、投影、抽样光路线、按原值窗口分箱。
 
@@ -294,11 +311,15 @@ source.beam_direction=+0.0697564737441253,0,-0.9975640502598242
 
 这里的 East/West 名称来自望远镜本地 `±u` 的物理方向；网页三维光线直接读取运行输出中的方向列，不重新用名称生成向量。四组新结果的组合 SHA-256 为 `4a025f1d0f1005f42dc14e7a81c82a5eb2d67ce3426df36e0abf6ec3ebd70158`。
 
-CORSIKA 数据包现在包含 32 个 ROOT observation 相机和 32 个 EventIO photon group，每台均匀抽样 120 条，仅用于三维线段显示，共 3840 条。完整 photon bunch 数仍保留在逐台 `raw_bunch_count` 中；相机像素不抽样。完整簇射/地面视图绘制全部 32 台结构。右上角选择望远镜后：
+CORSIKA 数据包现在包含 32 个 ROOT observation 相机和 32 个 EventIO photon group，每台均匀抽样 120 条，仅用于三维线段显示，共 3840 条。完整 photon bunch 数仍保留在逐台 `raw_bunch_count` 中；相机像素不抽样。进入第 4 页时固定回到完整簇射、`view_az=0° / view_el=-22°`，保持南朝屏幕外。完整簇射/地面视图绘制全部 32 台结构。
 
-1. 三维场景只保留所选台的详细结构、完整相机像素和该台抽样入射线；
-2. `fit()` 只接收以所选 ROOT 位置为中心的局部点集，因此旋转中心随望远镜切换；
-3. 局部入射线是原始 `anchor_array_nwu_m` 和 `direction_nwu` 所定义直线在望远镜附近的截取，不是新增光学追迹；
-4. 右侧相机同时切到同一 `telescope_id` 的 ROOT `image_cherenkov_pe`。
+该 ROOT 的 32 个 `triggered` 字段均为 `false`，所以右上角四幅预览不冒充触发判定，而是按原始 `image_cherenkov_pe` 总和选择前四台，结果为 tel19/16/21/20，与早期页面四幅图一致。四幅图和 32 台下拉选择器都只读取 ROOT 原值。点击其中一幅或选择望远镜后：
 
-运行时测试显式检查：阵列场景含 `32 × 54 = 1728` 个镜片面、选择器含 32 项、选择 tel0 后场景只含 tel0 的 54 个详细镜片，并且三维拟合中心的 North/West 坐标等于 tel0 的 ROOT 位置。
+1. 三维场景继续保留全部 32 台结构和 32 组共 3840 条当前已载入的真实抽样 photon 路径，不按所选台过滤；
+2. `fit()` 只接收以所选 ROOT 位置为中心的局部点集，因此自动缩放范围和旋转中心随望远镜切换，但绘制对象集合不变；
+3. 所选台叠加完整 1616 像素、LACT/pyLAST 轴并提高其模型与 photon 路径不透明度；其他台仍在同一场景，可继续缩放或平移查看；
+4. 右上角四幅相机始终保留，可连续点击换台；前四台的红/蓝/黄/绿与三维模型、pointing 和 photon 路径严格对应。
+
+聚焦页右上角“返回完整簇射”与底部同名按钮只恢复初始拟合尺度和南北观察方向；四幅相机以及完整三维数据始终没有离开场景。重新进入第 4 页也执行同一复位。运行时测试模拟点击右下角 tel20，检查场景仍有 `32×54` 块镜片和全部 3840 条 photon 路径，同时旋转中心等于 tel20 的 ROOT 位置，再点击返回并检查完整簇射尺度。
+
+运行时测试显式检查：阵列场景含 `32 × 54 = 1728` 个镜片面、选择器含 32 项、选择 tel0 后场景仍含全部 1728 个镜片面和 3840 条路径，并且三维拟合/旋转中心的 North/West 坐标等于 tel0 的 ROOT 位置。

@@ -30,7 +30,20 @@ for (const marker of [
   'function pylastPlotCoordinates(pix_x,pix_y)',
   'function drawPylastCameraPanel(',
   'function drawUnifiedPixelCamera(',
+  'function corsikaPrimaryViews()',
+  'function corsikaPreviewViews()',
+  'id="returnShower"',
   'camera_geometry_lact_uv',
+  'LACT +u = camera x_m = local +x',
+  'LACT +v = camera y_m = local +y',
+  '相机面：ROOT x_m≡LACT u；ROOT y_m≡LACT v',
+  '+u (=x_m)',
+  '+v (=y_m)',
+  'camera_x_m=hit.u_m',
+  'camera_y_m=hit.v_m',
+  '不是 CORSIKA 阵列 NWU 的 x/y',
+  '矩阵是 <code>[[0,-1],[1,0]]</code>',
+  '正方向朝 West',
   'pyLAST +pix_x = -v',
   'pyLAST +pix_y = +u',
   'pyLAST 画布：向右 = +u；向上 = -v',
@@ -64,7 +77,10 @@ function element(id, dataset = {}) {
     id, dataset, style: {}, classList: {add() {}, remove() {}, toggle() {}},
     value: initialValues[id] || "0", hidden: false,
     width: 900, height: 700, innerHTML: "", textContent: "", max: 0,
-    listeners: {}, addEventListener(type, handler) { this.listeners[type] = handler; }, setPointerCapture() {},
+    listeners: {}, listenerLists: {}, addEventListener(type, handler) {
+      (this.listenerLists[type] ||= []).push(handler);
+      this.listeners[type] = event => this.listenerLists[type].forEach(fn => fn(event));
+    }, setPointerCapture() {},
     getBoundingClientRect() { return {left: 0, top: 0, width: id === "scene" ? 900 : 400, height: id === "scene" ? 700 : 336}; },
     getContext() { return context; },
   };
@@ -76,7 +92,7 @@ function run(search) {
     "globalToolbar", "parallelToolbar", "elevationToolbar", "corsikaToolbar", "globalAz",
     "globalAzValue", "globalEl", "globalElValue", "angleValue", "bunch", "photonTel",
     "bunchValue", "elevation", "deformMetric", "arrowScale", "corsikaCase", "groundView", "showerView",
-    "zoomOut", "zoomIn", "subtitle", "legend"];
+    "zoomOut", "zoomIn", "subtitle", "legend", "returnShower"];
   const elements = new Map(ids.map(id => [id, element(id)]));
   const pageButtons = ["global", "parallel", "elevation", "corsika"].map(p => element("page-" + p, {page: p}));
   const viewButtons = ["horizon", "iso", "top", "north", "east"].map(view => element("view-" + view, {view}));
@@ -84,6 +100,7 @@ function run(search) {
     documentElement: {},
     querySelector(selector) {
       if (selector.startsWith("#")) return elements.get(selector.slice(1));
+      if (selector === '[data-page="corsika"]') return pageButtons.find(button => button.dataset.page === "corsika");
       return null;
     },
     querySelectorAll(selector) {
@@ -168,8 +185,16 @@ console.log("runtime OK selectable deformation metrics", {normalScale, positionS
 
 const corsikaFullCameraElements = run("?page=corsika&case=event1909");
 if (corsikaFullCameraElements.get("cameraScale").value !== "full" ||
-    !corsikaFullCameraElements.get("cameraHead").textContent.includes("完整相机")) {
-  throw new Error("CORSIKA page must default to the complete physical camera view");
+    !corsikaFullCameraElements.get("cameraHead").textContent.includes("ROOT PE 前四") ||
+    vm.runInNewContext("globalScale", corsikaFullCameraElements.sandbox) !== "shower") {
+  throw new Error("CORSIKA page must default to the full shower and four ROOT camera previews");
+}
+const previewIds = vm.runInNewContext("corsikaPreviewViews().map(function(v){return v.telescope_id})", corsikaFullCameraElements.sandbox);
+const previewColors = vm.runInNewContext("corsikaPreviewViews().map(function(v){return corsikaRayColor(v.telescope_id)})", corsikaFullCameraElements.sandbox);
+if (previewIds.join(",") !== "19,16,21,20" ||
+    previewColors.join(",") !== "#ff6d7a,#64c7ff,#ffd45e,#70e39c" ||
+    !corsikaFullCameraElements.get("cameraCaption").textContent.includes("triggered 标志均为 false")) {
+  throw new Error(`CORSIKA preview cameras/colors do not reproduce the four original highest-PE views: ${previewIds}; ${previewColors}`);
 }
 const groundPointBeforeZoom = corsikaFullCameraElements.sandbox.project([0, 0, 0]);
 corsikaFullCameraElements.sandbox.zoomAt(120, groundPointBeforeZoom[0], groundPointBeforeZoom[1]);
@@ -178,7 +203,7 @@ if (Math.hypot(groundPointAfterZoom[0] - groundPointBeforeZoom[0],
                groundPointAfterZoom[1] - groundPointBeforeZoom[1]) > 1e-7) {
   throw new Error("cursor-centered zoom failed to keep the selected ground point fixed");
 }
-console.log("runtime OK CORSIKA defaults to full cameras and can zoom into the ground anchor");
+console.log("runtime OK CORSIKA defaults to full shower, four ROOT camera previews and cursor-centered zoom");
 
 const rootCameraCheck = vm.runInNewContext(`(() => {
   const root = D.event1909.camera_geometry_lact_uv;
@@ -192,7 +217,11 @@ const rootCameraCheck = vm.runInNewContext(`(() => {
 })()`, corsikaFullCameraElements.sandbox);
 if (rootCameraCheck.count !== 1616 || rootCameraCheck.maxError > 1e-9 ||
     !corsikaFullCameraElements.get("info").innerHTML.includes("camera_pixels") ||
-    !corsikaFullCameraElements.get("info").innerHTML.includes("x_m=u")) {
+    !corsikaFullCameraElements.get("info").innerHTML.includes("x_m≡u") ||
+    !corsikaFullCameraElements.get("info").innerHTML.includes("camera_x_m=hit.u_m") ||
+    !corsikaFullCameraElements.get("info").innerHTML.includes("不是 CORSIKA 阵列 NWU 的 x/y") ||
+    !corsikaFullCameraElements.get("info").innerHTML.includes("v=-0.571319 m") ||
+    !corsikaFullCameraElements.get("info").innerHTML.includes("pix_y=-0.571243 m")) {
   throw new Error(`CORSIKA LACT u/v does not come directly from the ROOT camera geometry: ${JSON.stringify(rootCameraCheck)}`);
 }
 console.log("runtime OK CORSIKA LACT u/v uses all 1616 ROOT camera_pixels coordinates");
@@ -210,15 +239,53 @@ corsikaArrayElements.get("photonTel").listeners.change({target: {value: "0"}});
 const focusedScene = corsikaArrayElements.sandbox.buildScene();
 const focusedFacets = focusedScene.polys.filter(polygon => polygon.name.startsWith("tel0 镜片 "));
 const otherFocusedFacets = focusedScene.polys.filter(polygon => /^tel(?!0 )\d+ 镜片 /.test(polygon.name));
+const focusedPhotonPaths = focusedScene.lines.filter(line => line.name.includes("raw zem ray"));
+const focusedAxisNames = focusedScene.lines.map(line => line.name);
+const focusedPreviewIds = vm.runInNewContext("corsikaPreviewViews().map(function(v){return v.telescope_id})", corsikaArrayElements.sandbox);
+const focusedPreviewSignals = vm.runInNewContext("corsikaPreviewViews().map(function(v){return [v.telescope_id,v.cherenkov_pe_sum,v.camera_signal.length]})", corsikaArrayElements.sandbox);
 const focusedCenter = vm.runInNewContext("center", corsikaArrayElements.sandbox);
 const tel0 = vm.runInNewContext("D.event1909.array.find(function(t){return t.telescope_id===0})", corsikaArrayElements.sandbox);
-if (focusedFacets.length !== 54 || otherFocusedFacets.length !== 0 ||
+if (focusedFacets.length !== 54 || otherFocusedFacets.length !== 31 * 54 || focusedPhotonPaths.length !== 32 * 120 ||
+    focusedPreviewIds.join(",") !== "19,16,21,0" ||
+    focusedPreviewSignals[3][1] !== 40 || focusedPreviewSignals[3][2] !== 7 ||
     Math.hypot(focusedCenter[0] - tel0.position_nwu_m[0], focusedCenter[1] - tel0.position_nwu_m[1]) > 1e-6 ||
-    !corsikaArrayElements.get("cameraHead").textContent.includes("tel0") ||
+    !focusedAxisNames.includes("LACT +u = camera x_m = local +x") ||
+    !focusedAxisNames.includes("LACT +v = camera y_m = local +y") ||
+    !focusedScene.labels.some(label => label.t.includes("ROOT x_m≡LACT u")) ||
+    !focusedScene.labels.some(label => label.t === "+u (=x_m)") ||
+    !focusedScene.labels.some(label => label.t === "+v (=y_m)") ||
+    !corsikaArrayElements.get("cameraHead").textContent.includes("PE 前三 + 所选 tel0") ||
+    !corsikaArrayElements.get("cameraCaption").textContent.includes("右下角立即替换为该台真实 image_cherenkov_pe") ||
     !corsikaArrayElements.get("info").innerHTML.includes("当前所选")) {
-  throw new Error(`CORSIKA telescope selection did not create a telescope-centered tel0 view: center=${focusedCenter}`);
+  throw new Error(`CORSIKA telescope selection filtered the complete scene or missed the tel0 rotation center: center=${focusedCenter}`);
 }
-console.log("runtime OK all 32 telescope structures, cfg audit, selector and telescope-centered focus");
+console.log("runtime OK telescope focus preserves all 32 structures and 3840 real sampled photon paths");
+
+const corsikaHierarchyElements = run("?page=corsika&case=event1909");
+corsikaHierarchyElements.get("camera").listeners.click({clientX: 300, clientY: 250});
+const clickedScale = vm.runInNewContext("globalScale", corsikaHierarchyElements.sandbox);
+const clickedTel = vm.runInNewContext("state.photonTel", corsikaHierarchyElements.sandbox);
+const clickedScene = corsikaHierarchyElements.sandbox.buildScene();
+const clickedCenter = vm.runInNewContext("center", corsikaHierarchyElements.sandbox);
+const tel20 = vm.runInNewContext("D.event1909.array.find(function(t){return t.telescope_id===20})", corsikaHierarchyElements.sandbox);
+if (clickedScale !== "telescope" || clickedTel !== 20 ||
+    clickedScene.polys.filter(polygon => /^tel\d+ 镜片 /.test(polygon.name)).length !== 32 * 54 ||
+    clickedScene.lines.filter(line => line.name.includes("raw zem ray")).length !== 32 * 120 ||
+    Math.hypot(clickedCenter[0] - tel20.position_nwu_m[0], clickedCenter[1] - tel20.position_nwu_m[1]) > 1e-6 ||
+    corsikaHierarchyElements.get("returnShower").style.display !== "inline-block") {
+  throw new Error(`CORSIKA preview click did not enter the selected telescope view: scale=${clickedScale}, tel=${clickedTel}`);
+}
+corsikaHierarchyElements.get("returnShower").listeners.click({});
+const returnedScene = corsikaHierarchyElements.sandbox.buildScene();
+if (vm.runInNewContext("globalScale", corsikaHierarchyElements.sandbox) !== "shower" ||
+    returnedScene.polys.filter(polygon => /^tel\d+ 镜片 /.test(polygon.name)).length !== 32 * 54 ||
+    vm.runInNewContext("viewAzDeg", corsikaHierarchyElements.sandbox) !== 0 ||
+    vm.runInNewContext("viewElDeg", corsikaHierarchyElements.sandbox) !== -22 ||
+    corsikaHierarchyElements.get("returnShower").style.display !== "none" ||
+    !corsikaHierarchyElements.get("cameraHead").textContent.includes("ROOT PE 前四")) {
+  throw new Error("CORSIKA return control did not restore the initial full-shower view");
+}
+console.log("runtime OK CORSIKA camera click only changes fit/rotation center and explicit return restores full-shower scale");
 
 const parallelElements = run("?page=parallel");
 const fullDensityColors = ["#ff6d7a", "#64c7ff", "#ffd45e", "#70e39c"]
