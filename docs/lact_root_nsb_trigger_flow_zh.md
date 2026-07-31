@@ -8,7 +8,8 @@
 当前 waveform 是 **pre-electronics p.e. proxy**，表示经过大气、镜面、光学
 效率、light collector 和 PDE 后的离散 p.e. 到达时间序列。它不是 ADC
 waveform，尚未包含 SPE 脉冲、增益涨落、transit-time jitter、afterpulse、
-crosstalk、基线噪声、饱和及高低增益通道。
+crosstalk、基线噪声、微单元恢复及高低增益通道。生产配置关闭 waveform，
+并在积分 `image_pe` 上独立施加 SiPM 微单元饱和。
 
 这个 p.e. 序列是未来真实电子学的输入边界，而不是需要被删除的临时格式。
 真实电子学接入后应形成：
@@ -57,12 +58,15 @@ waveforms / raw_waveform_hits
 
 1. 根据 `waveform.time_reference` 将 Cherenkov p.e. 放入时间 bin。
 2. 对配置的全部像素和全部时间 bin 生成同一份确定性 NSB realization。
-3. 将 Cherenkov 与 NSB 合并为最终 p.e. 时间序列和积分图像。
-4. 使用 `trigger.camera_coincidence_window_ns` 做滑动相机触发，当前默认窗口为 20 ns。
-5. 阵列默认设置 `trigger.array_coincidence_window_ns=0`，只检查局部触发望远镜数；
+3. 将 Cherenkov 与 NSB 合并为 primary p.e. 图像。
+4. 无 waveform 的生产模式对积分图像施加 `hard_no_recovery` SiPM 饱和，
+   再用饱和后的 `image_pe` 触发和写出。
+5. waveform proxy 测试模式仍使用 `trigger.camera_coincidence_window_ns`
+   做滑动相机触发，当前默认窗口为 20 ns。
+6. 阵列默认设置 `trigger.array_coincidence_window_ns=0`，只检查局部触发望远镜数；
    在尚未实现几何传播延迟校正前，不应使用正数窗口筛选生产数据。正数窗口仅用于原始时间诊断。
-6. 最后应用 `output.save_only_triggered`。
-7. 仅在 profile 要求时把稀疏 waveform 写入 ROOT。
+7. 最后应用 `output.save_only_triggered`。
+8. 仅在 profile 要求时把稀疏 waveform 写入 ROOT。
 
 NSB cell 由 `event_id + telescope_id + pixel + time_bin + seed` 决定，同一配置
 下重复调用得到相同结果。ROOT 和 HDF5 因而可以使用同一物理 realization，
@@ -84,7 +88,7 @@ accidental trigger，并让输出 profile 改变触发结果。
 ## 当前仍未包含的内容
 
 - 真实 SiPM/电子学脉冲响应与 ADC waveform。
-- 电子学噪声、增益涨落、饱和、高低增益和硬件 discriminator。
+- 电子学噪声、增益涨落、微单元恢复、高低增益和硬件 discriminator。
 - afterpulse、crosstalk 和 dark count。
 - 逐像素、星场和离轴相关的 NSB rate。
 

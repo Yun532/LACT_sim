@@ -49,7 +49,7 @@ output、camera、sipm、NSB、trigger 等模块 cfg。每个 official cfg 只�
 - `output.config`: 白板或相机焦平面位置。
 - `output.format=csv`: 输出光子命中 CSV。
 - `output.format=hdf5`: 输出 HDF5。
-- `output.hdf5_storage=dense`: 每个图像保存完整 1616 像素，便于后续加 NSB/trigger。
+- `output.hdf5_storage=dense`: 每个图像保存完整 1664 像素，便于后续加 NSB/trigger。
 - `output.hdf5_write_components=true`: 额外写出 `cherenkov_pe` 和 `nsb_pe`。
 - `output.save_only_triggered=true`: HDF5 只保留通过 telescope trigger 的图像。
 - `camera.config`: 相机像素和光收集器。`new_camera.cfg` 使用真实像素表、
@@ -513,7 +513,7 @@ cfg 逐项解释：
 - `trigger.config=../trigger/disabled.cfg`: trigger 关闭。
 - `output.format=hdf5`: 输出 HDF5。
 - `output.hdf5_path=run_logs/official_tests/corsika/camera_dense.h5`: 输出文件。
-- `output.hdf5_storage=dense`: 每个 image 保存完整 1616 像素。
+- `output.hdf5_storage=dense`: 每个 image 保存完整 1664 像素。
 - `output.hdf5_write_components=false`: 只写最终 `pe/signal/photon_count`，不额外写分量。
 
 单独运行：

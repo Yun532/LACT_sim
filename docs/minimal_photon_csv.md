@@ -50,7 +50,7 @@ python3 python/plot_minimal_photon_csv_outputs.py \
   --mode optics \
   --hits run_logs/examples/photon_csv_minimal/whiteboard_hits.csv \
   --photon-pixels run_logs/examples/photon_csv_minimal/camera_photon_counts.csv \
-  --camera configs/cameras/new_camera_pixels.csv \
+  --camera configs/cameras/new_camera_pixels_1664.csv \
   --output-dir run_logs/examples/photon_csv_minimal/plots
 ```
 

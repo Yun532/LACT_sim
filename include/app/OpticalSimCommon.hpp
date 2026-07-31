@@ -149,6 +149,12 @@ struct SipmConfig {
 };
 
 struct ElectronicsConfig {
+    // Integrated SiPM microcell saturation.  This operates directly on the
+    // detected p.e. image and therefore does not require waveform output.
+    int channels_per_pixel = 8;
+    int microcells_per_channel = 33792;
+    bool saturation_enabled = true;
+    std::string saturation_model = "hard_no_recovery";
 };
 
 struct NsbConfig {
@@ -188,6 +194,8 @@ public:
     ElectronicsResponse() = default;
     explicit ElectronicsResponse(const ElectronicsConfig& cfg);
     double peConversion(double wavelength_nm) const;
+    double saturatedPe(double primary_pe) const;
+    double totalMicrocellsPerPixel() const;
 
 private:
     ElectronicsConfig cfg_;

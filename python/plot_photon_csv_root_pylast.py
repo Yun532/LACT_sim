@@ -40,7 +40,7 @@ def main() -> None:
     figure, _axes = visualizer.plot_event(
         event,
         output_path=str(args.output),
-        image_level="simulation",
+        image_level="dl0",
         show_hillas=False,
         include_non_triggered=False,
         show=False,

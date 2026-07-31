@@ -218,6 +218,12 @@ add_executable(test_detector_response_config
 target_link_libraries(test_detector_response_config PRIVATE simlite_core)
 add_test(NAME test_detector_response_config COMMAND test_detector_response_config)
 
+add_executable(test_electronics_saturation
+    apps/test_electronics_saturation.cpp
+)
+target_link_libraries(test_electronics_saturation PRIVATE simlite_core)
+add_test(NAME test_electronics_saturation COMMAND test_electronics_saturation)
+
 add_executable(test_telescope_optics
     apps/test_telescope_optics.cpp
 )

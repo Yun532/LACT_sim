@@ -348,7 +348,7 @@ event/telescope 级摘要。绘图时用于按第几个 shower event 或 event_i
 
 ### camera_dense.h5
 
-普通相机输出。`/images/dense/pe` 是每个 event/telescope 的 1616 像素 integrated p.e. 图像。
+普通相机输出。`/images/dense/pe` 是每个 event/telescope 的 1664 像素 integrated p.e. 图像。
 
 ### camera_nsb_trigger_dense.h5
 
@@ -414,7 +414,7 @@ event/telescope 级摘要。绘图时用于按第几个 shower event 或 event_i
 标准/导入/变形镜片
 人工光源和 CORSIKA EventIO
 白板逐光子输出
-new_camera 1616 像素相机
+new_camera 1664 像素相机
 Bezier square-cone 光收集器
 mirror/filter/atmosphere/SiPM PDE 权重
 constant-rate NSB
@@ -427,7 +427,7 @@ HDF5 dense 相机输出
 
 ```text
 真实 waveform 电子学
-SiPM 饱和、串扰、afterpulse、dark count
+SiPM 恢复、串扰、afterpulse、dark count
 真实 trigger board 和邻接拓扑
 真实 NSB sky model 或测量数据
 大气传播重新模拟

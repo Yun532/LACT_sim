@@ -5,7 +5,7 @@ pyLAST 相机图分别使用什么坐标。英文参考版及更多输出字段�
 [coordinate_systems.md](coordinate_systems.md)。
 
 建议先打开[真实 LACT 三维坐标模型](assets/lact-coordinate-system-3d.html)：拖动可旋转、
-滚轮可缩放；它使用正式 `mirror_1229` 镜面、遮挡结构和 1616 个真实相机像素，
+滚轮可缩放；它使用正式 `mirror_1229` 镜面、遮挡结构和 1664 个真实相机像素，
 同时标出输入 NWU、望远镜局部 `x/y/z`、天空/入射光方向、相机 `u/v` 及
 pyLAST 符号关系。页面中的地面和底座仅用于辨认水平面与天空方向，不属于工程几何。
 
@@ -74,7 +74,7 @@ source.coordinate_frame=corsika_nwu_relative
 [`corsika-north-example-rays.csv`](assets/data/corsika-north-example-rays.csv)，对应汇总见
 [`corsika-north-example-summary.csv`](assets/data/corsika-north-example-summary.csv)。
 
-这里把真实白板 `u/v` 命中叠加在真实 1616 像素几何上；白板运行没有启用相机响应，
+这里把真实白板 `u/v` 命中叠加在真实 1664 像素几何上；白板运行没有启用相机响应，
 所以它展示的是“光学输出落在相机平面的哪里”，不是 PE、触发或电子学输出。
 
 ## 先区分五层坐标

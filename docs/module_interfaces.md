@@ -140,10 +140,11 @@ sipm.pde=0.35
 sipm.pde=configs/efficiency/sipm_pde.csv
 ```
 
-Detailed waveform, saturation, crosstalk, afterpulse, dark count, gain
-fluctuation, and trigger electronics should be implemented behind this boundary
-later. The HDF5 format already keeps integrated `pe`, `signal`, `photon_count`,
-and timing summaries per event/telescope image.
+Integrated SiPM microcell saturation is implemented at this boundary and does
+not require waveform output. Detailed analog/ADC waveform, crosstalk,
+afterpulse, dark count, gain fluctuation, and trigger electronics remain future
+work. The HDF5 format keeps integrated `pe`, `primary_pe`, `signal`,
+`photon_count`, and timing summaries per event/telescope image.
 
 For each collected Cherenkov photon or photon bunch, the integrated weight is
 handled multiplicatively:
@@ -158,8 +159,11 @@ p.e. contribution =
 ```
 
 `sipm.pde` can be disabled, a constant, or a wavelength table. The current
-output is an integrated p.e. image. It is not yet a waveform and it does not
-model SiPM saturation, crosstalk, afterpulse, dark count, or gain fluctuations.
+production output is an integrated p.e. image. With
+`electronics.sipm.saturation_enabled=true`, `pe` is the fired-cell-equivalent
+image after `hard_no_recovery` microcell saturation; `primary_pe` is retained
+for dense HDF5 diagnostics. It is not yet an analog/ADC waveform and it does
+not model crosstalk, afterpulse, dark count, or gain fluctuations.
 Legacy `electronics.pe_conversion` and `efficiency.sipm_pde` config keys are
 accepted only as compatibility aliases and are mapped to the same SiPM PDE path.
 
@@ -238,4 +242,4 @@ output.save_only_triggered=true
 then `/images/index` and `/images/dense/*` keep only telescope images that pass
 the camera trigger. The trigger decision tables still keep the evaluated
 telescope and array trigger rows, so excluded telescope images can be audited
-without storing their full 1616-pixel vectors.
+without storing their full 1664-pixel vectors.

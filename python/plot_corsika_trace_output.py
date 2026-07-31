@@ -246,7 +246,10 @@ def main():
         default=None,
         help="run_corsika_trace summary CSV; used to resolve --shower-event-number",
     )
-    parser.add_argument("--camera-csv", default="configs/cameras/new_camera_pixels.csv")
+    parser.add_argument(
+        "--camera-csv",
+        default="configs/cameras/new_camera_pixels_1664.csv",
+    )
     parser.add_argument(
         "--config",
         default=None,

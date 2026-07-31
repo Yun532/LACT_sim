@@ -35,7 +35,7 @@ both    stores both sparse and dense views
 
 The native C++ writer supports `sparse`, `dense`, and `both` for camera images.
 For production CORSIKA camera output, use `dense`: each image is a full
-event/telescope vector with one value per camera pixel, currently 1616 pixels
+event/telescope vector with one value per camera pixel, currently 1664 pixels
 for `new_camera`.
 
 ## Layout
@@ -52,7 +52,8 @@ for `new_camera`.
     ...
 
 /metadata/electronics
-  attrs: placeholder model
+  attrs: integrated_sipm, saturation_enabled, saturation_model,
+         channels_per_pixel, microcells_per_channel
 
 /metadata/waveform
   attrs: enabled, source, time bin/window settings
@@ -162,6 +163,8 @@ shower before selecting an array-offset stream.
 
 /images/dense/signal
 /images/dense/pe
+# present when integrated saturation is enabled
+/images/dense/primary_pe
 /images/dense/photon_count
 /images/dense/pixel_id_axis
 
@@ -281,8 +284,10 @@ This is the recommended production format. It is preferable after
 NSB/background/electronics noise is added, when every pixel has a baseline
 value, and it also avoids needing an external pixel CSV when reading images.
 
-`/images/dense/pe` is the final integrated p.e. image. If NSB is enabled, it
-already includes the Poisson NSB contribution. Set
+`/images/dense/pe` is the final fired-cell-equivalent integrated p.e. image.
+If NSB is enabled, it already includes the Poisson NSB contribution. When SiPM
+saturation is enabled, `/images/dense/primary_pe` retains the Cherenkov+NSB
+image before saturation. Set
 `output.hdf5_write_components=true` to also save the Cherenkov-only and NSB-only
 components for debugging.
 

@@ -41,7 +41,7 @@ before comparing to GPS/geographic coordinates.
 
 Open the [physical LACT 3D coordinate model](assets/lact-coordinate-system-3d.html)
 to rotate and zoom the telescope from the real `mirror_1229` configuration,
-camera plane, obstruction structure, all 1616 real camera pixels, input NWU
+camera plane, obstruction structure, all 1664 real camera pixels, input NWU
 axes, local optical axes, sky/photon directions, and camera `u/v` axes. The
 ground and pedestal are schematic orientation references, not engineering geometry.
 The [interactive coordinate-system explorer](assets/coordinate-system-explorer.html)

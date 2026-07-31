@@ -108,6 +108,14 @@ def expand_component_config(main_config_path):
         component_cfg = read_key_value_config(component_path)
         for key, value in component_cfg.items():
             scoped = _scoped_key(key, prefix)
+            if scoped in {
+                "mirror.series_csv_path",
+                "mirror.series_csv_pattern",
+                "efficiency.mirror_reflectivity_scale_csv",
+                "atmosphere.tau_table",
+                "nsb.spectrum_csv",
+            }:
+                value = str(_resolve_include_path(component_path, value))
             if scoped == "error.structural_deformation_config":
                 value = str(_resolve_include_path(component_path, value))
             if scoped in {"obstruction.mask_csv", "obstruction.primitives_csv"}:

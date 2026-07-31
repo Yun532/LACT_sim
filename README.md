@@ -161,7 +161,7 @@ python3 python/plot_minimal_photon_csv_outputs.py \
   --mode optics \
   --hits run_logs/examples/photon_csv_minimal/whiteboard_hits.csv \
   --photon-pixels run_logs/examples/photon_csv_minimal/camera_photon_counts.csv \
-  --camera configs/cameras/new_camera_pixels.csv \
+  --camera configs/cameras/new_camera_pixels_1664.csv \
   --output-dir run_logs/examples/photon_csv_minimal/plots
 
 # 完整相机链：输出 ROOT，再由 pyLAST 画一张 p.e. 相机图
@@ -172,7 +172,7 @@ python3 python/plot_photon_csv_root_pylast.py \
   --output run_logs/examples/photon_csv_full_camera/camera_pe.png
 ```
 
-完整示例与 EventIO 输入共用 `run_corsika_trace` 的相机处理和 ROOT 输出。
+两个 Photon CSV 示例默认使用 LACT2 20260622 实测镜面参数和补齐角部的 1664 像素相机；完整示例与 EventIO 输入共用 `run_corsika_trace` 的相机处理和 ROOT 输出。
 CSV 未提供 `multiplicity` 时使用 cfg 的 `source.multiplicity`，本例设为 1，
 即每行一个光子；示例还在 cfg 中统一设置 `400 nm`，并关闭 NSB、trigger
 和 waveform。纯光学的两张图保持 LACT_sim 物理焦平面 `(u, v)`。
@@ -236,7 +236,9 @@ build/run_corsika_trace \
 ```ini
 telescope.pointing_az_deg=0
 telescope.pointing_el_deg=70
-camera.config=../cameras/new_camera.cfg
+camera.config=../cameras/new_camera_1664.cfg
+electronics.config=../electronics/integrated_sipm_saturation.cfg
+waveform.enabled=false
 source.mode=EventIO
 source.coordinate_frame=corsika_nwu_relative
 output.format=hdf5

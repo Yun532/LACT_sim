@@ -221,6 +221,7 @@ struct LactRootPreparedData {
 LactRootPreparedData prepareLactRootObservations(
     const CorsikaTraceOutputConfig& output_cfg,
     const WaveformOutputConfig& waveform_cfg,
+    const ElectronicsConfig& electronics_cfg,
     const NsbConfig& nsb_cfg,
     const TriggerConfig& trigger_cfg,
     const SourceRuntimeConfig& source_runtime_cfg,
@@ -487,6 +488,11 @@ LactRootPreparedData prepareLactRootObservations(
                 });
         }
 
+        const ElectronicsResponse electronics(electronics_cfg);
+        for (double& pe : image_pe_by_col) {
+            pe = electronics.saturatedPe(pe);
+        }
+
         for (std::size_t col = 0; col < n_pixels; ++col) {
             const double pe = image_pe_by_col[col];
             if (pe <= 0.0) continue;
@@ -526,7 +532,10 @@ LactRootPreparedData prepareLactRootObservations(
         }
 
         obs.n_pixels_saved = static_cast<int>(obs.pixel_id.size());
-        obs.triggered = trigger_cfg.enabled &&
+        // With triggering disabled, every written observation is considered
+        // readable.  This lets pyLAST expose integrated image_pe through DL0
+        // without inventing a waveform or a fake trigger threshold.
+        obs.triggered = !trigger_cfg.enabled ||
             obs.n_pixels_above_threshold >= trigger_cfg.camera_multiplicity;
         if (obs.triggered) {
             obs.trigger_time_ns =
@@ -630,6 +639,7 @@ struct LactEventRootStreamWriter::Impl {
     TelescopeConfig telescope_cfg;
     EventIOMetadata metadata;
     CameraGeometry camera;
+    ElectronicsConfig electronics_cfg;
     NsbConfig nsb_cfg;
     TriggerConfig trigger_cfg;
     std::unique_ptr<TFile> file;
@@ -714,12 +724,15 @@ struct LactEventRootStreamWriter::Impl {
          const SourceRuntimeConfig &source_runtime_cfg_in,
          const TelescopeConfig &telescope_cfg_in,
          const EventIOMetadata &metadata_in, const CameraGeometry &camera_in,
-         const std::vector<MirrorFacet> &facets, const NsbConfig &nsb_cfg_in,
+         const std::vector<MirrorFacet> &facets,
+         const ElectronicsConfig &electronics_cfg_in,
+         const NsbConfig &nsb_cfg_in,
          const TriggerConfig &trigger_cfg_in)
         : output_cfg(output_cfg_in), waveform_cfg(waveform_cfg_in),
           source_runtime_cfg(source_runtime_cfg_in),
           telescope_cfg(telescope_cfg_in), metadata(metadata_in),
-          camera(camera_in), nsb_cfg(nsb_cfg_in), trigger_cfg(trigger_cfg_in) {
+          camera(camera_in), electronics_cfg(electronics_cfg_in),
+          nsb_cfg(nsb_cfg_in), trigger_cfg(trigger_cfg_in) {
       const std::filesystem::path out_path(output_cfg.lact_root_path);
       if (out_path.has_parent_path()) {
         std::filesystem::create_directories(out_path.parent_path());
@@ -1149,7 +1162,7 @@ struct LactEventRootStreamWriter::Impl {
                     const std::vector<RawWaveformHit>& raw_waveform_hits)
     {
         LactRootPreparedData prepared = prepareLactRootObservations(
-            output_cfg, waveform_cfg, nsb_cfg, trigger_cfg,
+            output_cfg, waveform_cfg, electronics_cfg, nsb_cfg, trigger_cfg,
             source_runtime_cfg, telescope_cfg, metadata, camera,
             summaries, pixels, waveforms, raw_waveform_hits);
         writeWaveformConfig(prepared);
@@ -1198,11 +1211,13 @@ LactEventRootStreamWriter::LactEventRootStreamWriter(
     const EventIOMetadata& metadata,
     const CameraGeometry& camera,
     const std::vector<MirrorFacet>& facets,
+    const ElectronicsConfig& electronics_cfg,
     const NsbConfig& nsb_cfg,
     const TriggerConfig& trigger_cfg)
     : impl_(std::make_unique<Impl>(output_cfg, waveform_cfg, main_config_path, cfg,
                                    source_runtime_cfg, telescope_cfg, metadata,
-                                   camera, facets, nsb_cfg, trigger_cfg))
+                                   camera, facets, electronics_cfg, nsb_cfg,
+                                   trigger_cfg))
 {
 }
 
@@ -1236,6 +1251,7 @@ void writeLactEventRoot(const CorsikaTraceOutputConfig& output_cfg,
                         const EventIOMetadata& metadata,
                         const CameraGeometry& camera,
                         const std::vector<MirrorFacet>& facets,
+                        const ElectronicsConfig& electronics_cfg,
                         const NsbConfig& nsb_cfg,
                         const TriggerConfig& trigger_cfg,
                         const std::map<SummaryKey, TraceSummary>& summaries,
@@ -1245,7 +1261,7 @@ void writeLactEventRoot(const CorsikaTraceOutputConfig& output_cfg,
 {
     LactEventRootStreamWriter writer(output_cfg, waveform_cfg, main_config_path, cfg,
                                      source_runtime_cfg, telescope_cfg, metadata, camera,
-                                     facets, nsb_cfg, trigger_cfg);
+                                     facets, electronics_cfg, nsb_cfg, trigger_cfg);
     writer.writeEvent(summaries, pixels, waveforms, raw_waveform_hits);
     writer.finish();
 }
