@@ -1338,9 +1338,18 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
 
         hid_t electronics_group = H5Gcreate2(metadata_group, "electronics",
                                              H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-        writeStringAttribute(electronics_group, "model", "integrated_pe_placeholder");
-        writeStringAttribute(electronics_group, "response",
-                             "reserved; SiPM PDE is handled by sipm.pde");
+        writeStringAttribute(electronics_group, "model", "integrated_sipm");
+        writeStringAttribute(
+            electronics_group, "saturation_enabled",
+            electronics_cfg.saturation_enabled ? "true" : "false");
+        writeStringAttribute(electronics_group, "saturation_model",
+                             electronics_cfg.saturation_model);
+        writeStringAttribute(
+            electronics_group, "channels_per_pixel",
+            intToString(electronics_cfg.channels_per_pixel));
+        writeStringAttribute(
+            electronics_group, "microcells_per_channel",
+            intToString(electronics_cfg.microcells_per_channel));
         H5Gclose(electronics_group);
 
         hid_t waveform_group_meta = H5Gcreate2(metadata_group, "waveform",
@@ -1683,6 +1692,7 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         std::map<std::int32_t, std::size_t> pixel_to_col;
         std::vector<float> dense_signal;
         std::vector<float> dense_pe;
+        std::vector<float> dense_primary_pe;
         std::vector<float> dense_cherenkov_pe;
         std::vector<float> dense_nsb_pe;
         std::vector<float> dense_time_mean_ns;
@@ -1770,6 +1780,13 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                             });
                     }
                 }
+            }
+
+            dense_primary_pe = dense_pe;
+            const ElectronicsResponse electronics(electronics_cfg);
+            for (float& pe : dense_pe) {
+                pe = static_cast<float>(
+                    electronics.saturatedPe(static_cast<double>(pe)));
             }
 
             for (auto& image : image_rows) {
@@ -2388,6 +2405,14 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                          dense_pe,
                          static_cast<hsize_t>(n_images),
                          static_cast<hsize_t>(n_pixels));
+            if (electronics_cfg.saturation_enabled) {
+                writePlain2D(dense_group,
+                             "primary_pe",
+                             H5T_NATIVE_FLOAT,
+                             dense_primary_pe,
+                             static_cast<hsize_t>(n_images),
+                             static_cast<hsize_t>(n_pixels));
+            }
             writePlain2D(dense_group,
                          "photon_count",
                          H5T_NATIVE_INT32,
@@ -3006,8 +3031,14 @@ void printCorsikaOpticalConfiguration(
     printField("pde", factorDescription(efficiency_cfg.sipm_pde));
 
     printSection("Electronics");
-    printField("response", "reserved; SiPM PDE is handled by sipm.pde");
-    printField("model", "integrated_pe_placeholder");
+    printField("model", "integrated_sipm");
+    printField("saturation_enabled",
+               electronics_cfg.saturation_enabled ? "true" : "false");
+    printField("saturation_model", electronics_cfg.saturation_model);
+    printField("channels_per_pixel",
+               intToString(electronics_cfg.channels_per_pixel));
+    printField("microcells_per_channel",
+               intToString(electronics_cfg.microcells_per_channel));
 
     printSection("Waveform");
     printField("enabled", waveform_cfg.enabled ? "true" : "false");
@@ -3129,8 +3160,11 @@ void printCorsikaOpticalConfiguration(
     printField("optics", "facet reflection with configured optical errors");
     printField("speed_of_light_m/ns",
                doubleToString(propagation_cfg.speed_of_light_m_per_ns, 9));
-    std::string missing = "real electronics waveform, SiPM saturation, crosstalk, "
-                          "afterpulse, dark count, hardware trigger board";
+    std::string missing = "real electronics waveform, crosstalk, afterpulse, "
+                          "dark count, hardware trigger board";
+    if (!electronics_cfg.saturation_enabled) {
+        missing = "SiPM saturation, " + missing;
+    }
     if (!light_collector) {
         missing = "collector, " + missing;
     }
@@ -3594,6 +3628,7 @@ int main(int argc, char** argv) {
                 metadata,
                 camera,
                 nominal_facets,
+                electronics_cfg,
                 nsb_cfg,
                 trigger_cfg);
         }

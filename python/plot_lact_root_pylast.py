@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read a timeseries_pe LACT ROOT file through pyLAST and plot DL0 cameras."""
+"""Read an image_pe LACT ROOT file and plot it with native pyLAST."""
 
 from __future__ import annotations
 
@@ -9,24 +9,8 @@ from pathlib import Path
 
 os.environ.setdefault("MPLBACKEND", "Agg")
 
-import numpy as np
-
-from pylast.calib import Calibrator
 from pylast.io import LactEventSource
-from pylast.visualize import EventVisualizer, plot_raw_images
-
-
-CALIBRATOR_CONFIG = """{
-  "Calibrator": {
-    "image_extractor_type": "LocalPeakExtractor",
-    "LocalPeakExtractor": {
-      "window_width": 7,
-      "window_shift": 3,
-      "apply_correction": false
-    }
-  }
-}
-"""
+from pylast.visualize import EventVisualizer
 
 
 def select_event(source, event_id: int | None, event_index: int):
@@ -50,24 +34,20 @@ def main() -> None:
 
     source = LactEventSource(str(args.root_file), max_events=-1)
     event = select_event(source, args.event_id, args.event_index)
-    calibrator = Calibrator(source.subarray, config_str=CALIBRATOR_CONFIG)
-    calibrator(event)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     visualizer = EventVisualizer(source)
-    plot_raw_images(
+    figure, _axes = visualizer.plot_event(
         event,
-        visualizer=visualizer,
         output_path=str(args.output),
+        image_level="dl0",
+        show_hillas=False,
         include_non_triggered=False,
         show=False,
     )
-
-    sums = ", ".join(
-        f"tel {tel_id}: {float(np.sum(tel.image)):.0f} p.e."
-        for tel_id, tel in sorted(event.dl0.tels.items())
-    )
-    print(f"event_id={int(event.event_id)}; {sums}")
+    if figure is None:
+        raise RuntimeError(f"event {int(event.event_id)} has no camera images to plot")
+    print(f"event_id={int(event.event_id)}; plotted with native pyLAST EventVisualizer")
     print(args.output)
 
 

@@ -1,15 +1,4 @@
-# LACT_sim 用户版 v2
-
-这是最新 `main` 的用户发行版：运行时源码和功能保持一致，只移除开发测试、扫描程序、内部验证结果和额外示例。仓库只保留一个面向用户的完整 pyLAST notebook，并提供四个可直接修改的 cfg：
-
-1. `configs/examples/parallel_light.cfg`：平行光白板
-2. `configs/examples/photon_csv_source.cfg`：Photon CSV 完整相机响应（ROOT/pyLAST）
-3. `configs/examples/full_response_corsika.cfg`：CORSIKA/EventIO 完整相机响应（HDF5）
-4. `configs/examples/lactroot_only.cfg`：完整响应并只输出 LACT ROOT
-
-四个 cfg 都直接写入必要设置；未改变语义的程序默认值不重复罗列。它们使用最新主线的稳定随机种子、随机 p.e. 响应、EventIO/Photon CSV 坐标处理、`-16 m` EventIO 参考平面、阵列时间修正、HDF5/ROOT 元数据和 LACT2 20260622 实测镜面参数。
-
-默认示例继续使用原 1616 像素相机。需要补齐角部像素的 1664 像素布局时，将 `camera.csv_path` 改为 `configs/cameras/new_camera_pixels_1664.csv`；配套说明见 `configs/cameras/new_camera_1664.cfg`。
+# LACT_sim 用户手册
 
 ## 编译
 
@@ -66,7 +55,7 @@ python3 python/plot_photon_csv_root_pylast.py \
   --output run_logs/photon_csv_source/pylast_camera.png
 ```
 
-该示例与 `main` 的 Photon CSV 用户流程一致：读取 event 1909、telescope 19 的 CORSIKA 二维 bunch 六列数据，通过正常相机链生成随机 p.e.，写入 `image_pe` LACT ROOT，再由 `pylast.io.LactEventSource` 和 `pylast.visualize` 绘图。
+该示例读取 event 1909、telescope 19 的 CORSIKA 二维 bunch 六列数据，通过 1664 像素相机链生成随机 p.e.，施加 SiPM 微单元饱和后写入 `image_pe` LACT ROOT，再由 `pylast.io.LactEventSource` 和 `pylast.visualize` 绘图。波形关闭。
 
 坐标约定是：LACT_sim 白板和探测器直接输出物理焦平面 `(u, v)`；`LactEventSource` 在 pyLAST 输入边界统一映射为 `pix_x=-v`、`pix_y=-u`。该脚本直接调用 pyLAST 原生 `EventVisualizer.plot_event()`，不再自行交换、翻转或旋转相机坐标。白板/HDF5 诊断图则直接显示文件中保存的物理 `(u, v)`。
 
@@ -93,7 +82,7 @@ python3 python/plot_hdf5_camera.py \
   --output run_logs/full_response_corsika/camera.png
 ```
 
-必须令 `telescope.pointing_el_deg = 90 - CORSIKA zenith_deg`。示例处理前 10 个 shower、关闭 NSB 并保存未触发事件，便于第一次核对输入。需要生产筛选时可设 `source.max_shower_events=-1`、`output.save_only_triggered=true`；需要夜天光时参考下一个 ROOT 示例中的 `nsb.*`。
+必须令 `telescope.pointing_el_deg = 90 - CORSIKA zenith_deg`。示例使用 2026-06-22 实测光学、1664 像素相机和积分 SiPM 饱和，波形关闭；处理前 10 个 shower、关闭 NSB 并保存未触发事件，便于第一次核对输入。需要生产筛选时可设 `source.max_shower_events=-1`、`output.save_only_triggered=true`；需要夜天光时参考下一个 ROOT 示例中的 `nsb.*`。
 
 ## 4. LACT ROOT / pyLAST
 
@@ -108,7 +97,7 @@ python3 python/plot_lact_root_pylast.py \
   --output run_logs/lactroot_only/pylast_cameras.png
 ```
 
-这个配置默认处理全部 shower、加入光谱 NSB、只保留触发事件，并写入稀疏 p.e. waveform。绘图脚本按主线 notebook 的流程使用 `LactEventSource → Calibrator(LocalPeakExtractor) → plot_raw_images`，显示 pyLAST 从 R1 waveform 抽取的 DL0 相机图。首次小规模检查可暂时把 `source.max_shower_events` 改为 `10`。
+这个配置默认处理全部 shower、加入光谱 NSB、只保留触发事件，使用 2026-06-22 实测光学、1664 像素相机和积分 SiPM 饱和，直接写 `image_pe`，不生成波形。绘图脚本使用 `LactEventSource → EventVisualizer.plot_event(image_level="dl0")`，显示饱和后的积分图像。首次小规模检查可暂时把 `source.max_shower_events` 改为 `10`。
 
 LACT ROOT 保留光学焦平面的原始 `u/v`。pyLAST `LactEventSource` 在输入边界统一映射为 `pix_x=-v`、`pix_y=-u`；用户绘图脚本和 notebook 不再增加 LACT 专用旋转。
 
