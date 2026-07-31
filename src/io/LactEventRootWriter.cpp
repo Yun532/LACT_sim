@@ -208,7 +208,6 @@ struct LactRootWaveform {
     std::vector<int> pixel_id;
     std::vector<unsigned short> time_bin;
     std::vector<float> pe;
-    std::vector<float> primary_pe;
 };
 
 struct LactRootPreparedData {
@@ -222,7 +221,6 @@ struct LactRootPreparedData {
 LactRootPreparedData prepareLactRootObservations(
     const CorsikaTraceOutputConfig& output_cfg,
     const WaveformOutputConfig& waveform_cfg,
-    const ElectronicsConfig& electronics_cfg,
     const NsbConfig& nsb_cfg,
     const TriggerConfig& trigger_cfg,
     const SourceRuntimeConfig& source_runtime_cfg,
@@ -305,7 +303,6 @@ LactRootPreparedData prepareLactRootObservations(
         std::vector<double> time_sum_by_col(n_pixels, 0.0);
         std::vector<double> time2_sum_by_col(n_pixels, 0.0);
         std::vector<double> time_weight_by_col(n_pixels, 0.0);
-        std::unordered_map<std::size_t, double> primary_waveform_pe;
         std::unordered_map<std::size_t, double> waveform_pe;
         std::vector<double> waveform_peak_by_col;
         std::vector<std::size_t> waveform_peak_bin_by_col;
@@ -355,18 +352,20 @@ LactRootPreparedData prepareLactRootObservations(
             }
 
             std::vector<double> camera_time_series(n_bins, 0.0);
-            auto add_primary_waveform_pe = [&](std::size_t col,
-                                               std::size_t bin,
-                                               double pe,
-                                               double cherenkov_pe,
-                                               double nsb_pe) {
+            auto add_waveform_pe = [&](std::size_t col,
+                                       std::size_t bin,
+                                       double pe,
+                                       double cherenkov_pe,
+                                       double nsb_pe) {
                 if (col >= n_pixels || bin >= n_bins || pe == 0.0) {
                     return;
                 }
                 const std::size_t index = col * n_bins + bin;
-                primary_waveform_pe[index] += pe;
+                waveform_pe[index] += pe;
+                image_pe_by_col[col] += pe;
                 image_cherenkov_pe_by_col[col] += cherenkov_pe;
                 image_nsb_pe_by_col[col] += nsb_pe;
+                camera_time_series[bin] += pe;
             };
 
             if (waveformUsesImageReference(waveform_cfg)) {
@@ -377,11 +376,11 @@ LactRootPreparedData prepareLactRootObservations(
                     const int bin = waveformBinForTime(
                         waveform_cfg, hit.time_ns - reference_time_ns);
                     if (bin < 0) continue;
-                    add_primary_waveform_pe(col_it->second,
-                                            static_cast<std::size_t>(bin),
-                                            hit.pe,
-                                            hit.pe,
-                                            0.0);
+                    add_waveform_pe(col_it->second,
+                                    static_cast<std::size_t>(bin),
+                                    hit.pe,
+                                    hit.pe,
+                                    0.0);
                 }
             } else {
                 const WaveformKey begin_key{
@@ -399,13 +398,18 @@ LactRootPreparedData prepareLactRootObservations(
                         static_cast<std::size_t>(w.time_bin) >= n_bins) {
                         continue;
                     }
-                    add_primary_waveform_pe(col_it->second,
-                                            static_cast<std::size_t>(w.time_bin),
-                                            w.pe,
-                                            w.pe,
-                                            0.0);
+                    add_waveform_pe(col_it->second,
+                                    static_cast<std::size_t>(w.time_bin),
+                                    w.pe,
+                                    w.pe,
+                                    0.0);
                 }
             }
+
+            const auto waveform_pe_at = [&](std::size_t col, std::size_t bin) {
+                const auto it = waveform_pe.find(col * n_bins + bin);
+                return it == waveform_pe.end() ? 0.0 : it->second;
+            };
 
             // Triggering, the integrated image and serialized waveforms must
             // all see exactly the same deterministic NSB realization.
@@ -417,39 +421,8 @@ LactRootPreparedData prepareLactRootObservations(
                 n_pixels,
                 n_bins,
                 [&](std::size_t col, std::size_t bin, float nsb_pe) {
-                    add_primary_waveform_pe(col, bin, nsb_pe, 0.0, nsb_pe);
+                    add_waveform_pe(col, bin, nsb_pe, 0.0, nsb_pe);
                 });
-
-            // Apply the configured SiPM response in time order.  For the
-            // hard-no-recovery model, each sample is the increment in fired
-            // microcells caused by that time bin after all earlier bins.
-            // Therefore sum_t waveform_pe is exactly image_pe.
-            const ElectronicsResponse electronics(electronics_cfg);
-            std::vector<double> primary_bins(n_bins, 0.0);
-            for (std::size_t col = 0; col < n_pixels; ++col) {
-                std::fill(primary_bins.begin(), primary_bins.end(), 0.0);
-                for (std::size_t bin = 0; bin < n_bins; ++bin) {
-                    const auto found =
-                        primary_waveform_pe.find(col * n_bins + bin);
-                    if (found != primary_waveform_pe.end()) {
-                        primary_bins[bin] = found->second;
-                    }
-                }
-                const auto fired_bins =
-                    electronics.saturatedWaveform(primary_bins);
-                for (std::size_t bin = 0; bin < n_bins; ++bin) {
-                    const double fired_pe = fired_bins[bin];
-                    if (fired_pe <= 0.0) continue;
-                    waveform_pe[col * n_bins + bin] = fired_pe;
-                    image_pe_by_col[col] += fired_pe;
-                    camera_time_series[bin] += fired_pe;
-                }
-            }
-
-            const auto waveform_pe_at = [&](std::size_t col, std::size_t bin) {
-                const auto it = waveform_pe.find(col * n_bins + bin);
-                return it == waveform_pe.end() ? 0.0 : it->second;
-            };
 
             waveform_peak_by_col.assign(n_pixels, -1.0);
             waveform_peak_bin_by_col.assign(n_pixels, 0);
@@ -512,13 +485,6 @@ LactRootPreparedData prepareLactRootObservations(
                     image_pe_by_col[col] += nsb_pe;
                     image_nsb_pe_by_col[col] += nsb_pe;
                 });
-        }
-
-        if (!evaluate_time_series) {
-            const ElectronicsResponse electronics(electronics_cfg);
-            for (double& pe : image_pe_by_col) {
-                pe = electronics.saturatedPe(pe);
-            }
         }
 
         for (std::size_t col = 0; col < n_pixels; ++col) {
@@ -601,13 +567,6 @@ LactRootPreparedData prepareLactRootObservations(
                 wf.pixel_id.push_back(prepared.pixel_axis[col]);
                 wf.time_bin.push_back(static_cast<unsigned short>(bin));
                 wf.pe.push_back(static_cast<float>(pe));
-                if (output_cfg.lact_root_write_components) {
-                    const auto primary = primary_waveform_pe.find(index);
-                    wf.primary_pe.push_back(static_cast<float>(
-                        primary == primary_waveform_pe.end()
-                            ? 0.0
-                            : primary->second));
-                }
             }
             candidate.waveform = std::move(wf);
             candidate.has_waveform = true;
@@ -674,7 +633,6 @@ struct LactEventRootStreamWriter::Impl {
     TelescopeConfig telescope_cfg;
     EventIOMetadata metadata;
     CameraGeometry camera;
-    ElectronicsConfig electronics_cfg;
     NsbConfig nsb_cfg;
     TriggerConfig trigger_cfg;
     std::unique_ptr<TFile> file;
@@ -741,7 +699,6 @@ struct LactEventRootStreamWriter::Impl {
     std::vector<int> wf_pixel_id;
     std::vector<unsigned short> wf_time_bin;
     std::vector<float> wf_pe;
-    std::vector<float> wf_primary_pe;
 
     long long trace_event_id = 0;
     int trace_telescope_id = 0;
@@ -760,15 +717,12 @@ struct LactEventRootStreamWriter::Impl {
          const SourceRuntimeConfig &source_runtime_cfg_in,
          const TelescopeConfig &telescope_cfg_in,
          const EventIOMetadata &metadata_in, const CameraGeometry &camera_in,
-         const std::vector<MirrorFacet> &facets,
-         const ElectronicsConfig &electronics_cfg_in,
-         const NsbConfig &nsb_cfg_in,
+         const std::vector<MirrorFacet> &facets, const NsbConfig &nsb_cfg_in,
          const TriggerConfig &trigger_cfg_in)
         : output_cfg(output_cfg_in), waveform_cfg(waveform_cfg_in),
           source_runtime_cfg(source_runtime_cfg_in),
           telescope_cfg(telescope_cfg_in), metadata(metadata_in),
-          camera(camera_in), electronics_cfg(electronics_cfg_in),
-          nsb_cfg(nsb_cfg_in), trigger_cfg(trigger_cfg_in) {
+          camera(camera_in), nsb_cfg(nsb_cfg_in), trigger_cfg(trigger_cfg_in) {
       const std::filesystem::path out_path(output_cfg.lact_root_path);
       if (out_path.has_parent_path()) {
         std::filesystem::create_directories(out_path.parent_path());
@@ -979,9 +933,6 @@ struct LactEventRootStreamWriter::Impl {
         waveform_tree->Branch("pixel_id", &wf_pixel_id);
         waveform_tree->Branch("time_bin", &wf_time_bin);
         waveform_tree->Branch("pe", &wf_pe);
-        if (output_cfg.lact_root_write_components) {
-            waveform_tree->Branch("primary_pe", &wf_primary_pe);
-        }
         configureRootTreeAutoFlush(waveform_tree.get(),
                                    output_cfg.lact_root_auto_flush_mb);
       }
@@ -1138,7 +1089,6 @@ struct LactEventRootStreamWriter::Impl {
         wf_pixel_id = wf.pixel_id;
         wf_time_bin = wf.time_bin;
         wf_pe = wf.pe;
-        wf_primary_pe = wf.primary_pe;
         if (waveform_tree->Fill() < 0) {
             throw std::runtime_error("failed to fill ROOT waveforms tree");
         }
@@ -1202,7 +1152,7 @@ struct LactEventRootStreamWriter::Impl {
                     const std::vector<RawWaveformHit>& raw_waveform_hits)
     {
         LactRootPreparedData prepared = prepareLactRootObservations(
-            output_cfg, waveform_cfg, electronics_cfg, nsb_cfg, trigger_cfg,
+            output_cfg, waveform_cfg, nsb_cfg, trigger_cfg,
             source_runtime_cfg, telescope_cfg, metadata, camera,
             summaries, pixels, waveforms, raw_waveform_hits);
         writeWaveformConfig(prepared);
@@ -1251,13 +1201,11 @@ LactEventRootStreamWriter::LactEventRootStreamWriter(
     const EventIOMetadata& metadata,
     const CameraGeometry& camera,
     const std::vector<MirrorFacet>& facets,
-    const ElectronicsConfig& electronics_cfg,
     const NsbConfig& nsb_cfg,
     const TriggerConfig& trigger_cfg)
     : impl_(std::make_unique<Impl>(output_cfg, waveform_cfg, main_config_path, cfg,
                                    source_runtime_cfg, telescope_cfg, metadata,
-                                   camera, facets, electronics_cfg, nsb_cfg,
-                                   trigger_cfg))
+                                   camera, facets, nsb_cfg, trigger_cfg))
 {
 }
 
@@ -1291,7 +1239,6 @@ void writeLactEventRoot(const CorsikaTraceOutputConfig& output_cfg,
                         const EventIOMetadata& metadata,
                         const CameraGeometry& camera,
                         const std::vector<MirrorFacet>& facets,
-                        const ElectronicsConfig& electronics_cfg,
                         const NsbConfig& nsb_cfg,
                         const TriggerConfig& trigger_cfg,
                         const std::map<SummaryKey, TraceSummary>& summaries,
@@ -1301,7 +1248,7 @@ void writeLactEventRoot(const CorsikaTraceOutputConfig& output_cfg,
 {
     LactEventRootStreamWriter writer(output_cfg, waveform_cfg, main_config_path, cfg,
                                      source_runtime_cfg, telescope_cfg, metadata, camera,
-                                     facets, electronics_cfg, nsb_cfg, trigger_cfg);
+                                     facets, nsb_cfg, trigger_cfg);
     writer.writeEvent(summaries, pixels, waveforms, raw_waveform_hits);
     writer.finish();
 }

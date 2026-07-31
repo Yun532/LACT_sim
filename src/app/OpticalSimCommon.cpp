@@ -2270,18 +2270,7 @@ SipmConfig buildSipmConfig(const std::map<std::string, std::string>& cfg) {
 ElectronicsResponse::ElectronicsResponse(const ElectronicsConfig& cfg)
     : cfg_(cfg)
 {
-    if (cfg_.channels_per_pixel <= 0) {
-        throw std::runtime_error(
-            "electronics.sipm.channels_per_pixel must be > 0");
-    }
-    if (cfg_.microcells_per_channel <= 0) {
-        throw std::runtime_error(
-            "electronics.sipm.microcells_per_channel must be > 0");
-    }
-    if (cfg_.saturation_model != "hard_no_recovery") {
-        throw std::runtime_error(
-            "electronics.sipm.saturation_model must be hard_no_recovery");
-    }
+    (void)cfg_;
 }
 
 double ElectronicsResponse::peConversion(double wavelength_nm) const
@@ -2290,68 +2279,9 @@ double ElectronicsResponse::peConversion(double wavelength_nm) const
     return 1.0;
 }
 
-double ElectronicsResponse::totalMicrocellsPerPixel() const
-{
-    return static_cast<double>(cfg_.channels_per_pixel) *
-           static_cast<double>(cfg_.microcells_per_channel);
-}
-
-double ElectronicsResponse::saturatedPe(double primary_pe) const
-{
-    if (!std::isfinite(primary_pe) || primary_pe < 0.0) {
-        throw std::runtime_error("integrated primary p.e. must be finite and >= 0");
-    }
-    if (!cfg_.saturation_enabled || primary_pe == 0.0) {
-        return primary_pe;
-    }
-    const double cells = totalMicrocellsPerPixel();
-    return -cells * std::expm1(-primary_pe / cells);
-}
-
-std::vector<double> ElectronicsResponse::saturatedWaveform(
-    const std::vector<double>& primary_pe_by_time_bin) const
-{
-    for (const double primary_pe : primary_pe_by_time_bin) {
-        if (!std::isfinite(primary_pe) || primary_pe < 0.0) {
-            throw std::runtime_error(
-                "primary p.e. waveform samples must be finite and >= 0");
-        }
-    }
-    if (!cfg_.saturation_enabled) {
-        return primary_pe_by_time_bin;
-    }
-    std::vector<double> fired_pe_by_time_bin;
-    fired_pe_by_time_bin.reserve(primary_pe_by_time_bin.size());
-    double cumulative_primary_pe = 0.0;
-    double cumulative_fired_pe = 0.0;
-    for (const double primary_pe : primary_pe_by_time_bin) {
-        cumulative_primary_pe += primary_pe;
-        const double next_cumulative_fired_pe =
-            saturatedPe(cumulative_primary_pe);
-        fired_pe_by_time_bin.push_back(std::max(
-            0.0, next_cumulative_fired_pe - cumulative_fired_pe));
-        cumulative_fired_pe = next_cumulative_fired_pe;
-    }
-    return fired_pe_by_time_bin;
-}
-
 ElectronicsConfig buildElectronicsConfig(const std::map<std::string, std::string>& cfg) {
+    (void)cfg;
     ElectronicsConfig electronics;
-    electronics.channels_per_pixel = getInt(
-        cfg, "electronics.sipm.channels_per_pixel",
-        electronics.channels_per_pixel);
-    electronics.microcells_per_channel = getInt(
-        cfg, "electronics.sipm.microcells_per_channel",
-        electronics.microcells_per_channel);
-    electronics.saturation_enabled = getBool(
-        cfg, "electronics.sipm.saturation_enabled",
-        electronics.saturation_enabled);
-    electronics.saturation_model = lowerCopy(trim(getString(
-        cfg, "electronics.sipm.saturation_model",
-        electronics.saturation_model)));
-    // Validate the parsed values even when only the configuration object is
-    // used later by an output writer.
-    (void)ElectronicsResponse(electronics);
     return electronics;
 }
 

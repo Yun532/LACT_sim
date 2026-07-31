@@ -15,7 +15,6 @@ struct SparseWaveformSample {
     std::int32_t time_bin = 0;
     std::int32_t photon_count = 0;
     float pe = 0.0f;
-    float primary_pe = 0.0f;
     float cherenkov_pe = 0.0f;
     float nsb_pe = 0.0f;
 };
@@ -95,8 +94,6 @@ void writeSparseSamples(hid_t group,
     H5Tinsert(type, "photon_count",
               HOFFSET(SparseWaveformSample, photon_count), H5T_NATIVE_INT32);
     H5Tinsert(type, "pe", HOFFSET(SparseWaveformSample, pe), H5T_NATIVE_FLOAT);
-    H5Tinsert(type, "primary_pe",
-              HOFFSET(SparseWaveformSample, primary_pe), H5T_NATIVE_FLOAT);
     H5Tinsert(type, "cherenkov_pe",
               HOFFSET(SparseWaveformSample, cherenkov_pe), H5T_NATIVE_FLOAT);
     H5Tinsert(type, "nsb_pe",
@@ -148,7 +145,6 @@ void writeHdf5Waveforms(
     hid_t file,
     const CorsikaTraceOutputConfig& output,
     const WaveformOutputConfig& waveform,
-    const ElectronicsConfig& electronics_config,
     const NsbConfig& nsb,
     const std::vector<std::int32_t>& pixel_id_axis,
     const std::vector<Hdf5WaveformImage>& images,
@@ -270,36 +266,6 @@ void writeHdf5Waveforms(
         }
     }
 
-    if (waveform.source == "pe") {
-        const ElectronicsResponse electronics(electronics_config);
-        std::vector<double> primary_bins(n_bins, 0.0);
-        for (std::size_t row = 0; row < n_images; ++row) {
-            for (std::size_t col = 0; col < n_pixels; ++col) {
-                std::fill(primary_bins.begin(), primary_bins.end(), 0.0);
-                for (std::size_t bin = 0; bin < n_bins; ++bin) {
-                    const std::size_t flat =
-                        (row * n_bins + bin) * n_pixels + col;
-                    const auto found = samples_by_index.find(flat);
-                    if (found != samples_by_index.end()) {
-                        primary_bins[bin] = found->second.pe;
-                    }
-                }
-                const auto fired_bins =
-                    electronics.saturatedWaveform(primary_bins);
-                for (std::size_t bin = 0; bin < n_bins; ++bin) {
-                    const std::size_t flat =
-                        (row * n_bins + bin) * n_pixels + col;
-                    const auto found = samples_by_index.find(flat);
-                    if (found == samples_by_index.end()) continue;
-                    found->second.primary_pe =
-                        static_cast<float>(primary_bins[bin]);
-                    found->second.pe =
-                        static_cast<float>(fired_bins[bin]);
-                }
-            }
-        }
-    }
-
     std::vector<SparseWaveformSample> samples;
     samples.reserve(samples_by_index.size());
     for (const auto& item : samples_by_index) {
@@ -318,8 +284,8 @@ void writeHdf5Waveforms(
     writeStringAttribute(
         group, "note",
         output.hdf5_waveform_storage == "sparse"
-            ? "sparse fired-p.e. proxy after SiPM microcell saturation; analog pulse and ADC electronics are not modeled"
-            : "fired-p.e. proxy after SiPM microcell saturation; analog pulse and ADC electronics are not modeled");
+            ? "sparse proxy waveform at camera/collector output; real electronics is not modeled"
+            : "proxy waveform accumulated at camera/collector output; real electronics waveform is not modeled");
     writePlain1D(group, "pixel_id_axis", H5T_NATIVE_INT32, pixel_id_axis);
     writePlain1D(group, "time_edges_ns", H5T_NATIVE_DOUBLE, time_edges);
     writePlain1D(group, "time_centers_ns", H5T_NATIVE_DOUBLE, time_centers);
@@ -331,14 +297,12 @@ void writeHdf5Waveforms(
         const std::size_t size = n_images * n_bins * n_pixels;
         std::vector<std::int32_t> photon_count;
         std::vector<float> pe;
-        std::vector<float> primary_pe;
         std::vector<float> cherenkov_pe;
         std::vector<float> nsb_pe;
         if (waveform.source == "photon_count") {
             photon_count.assign(size, 0);
         } else if (waveform.source == "pe") {
             pe.assign(size, 0.0f);
-            primary_pe.assign(size, 0.0f);
             if (output.hdf5_write_components) {
                 cherenkov_pe.assign(size, 0.0f);
                 nsb_pe.assign(size, 0.0f);
@@ -354,7 +318,6 @@ void writeHdf5Waveforms(
                 photon_count[flat] = sample.photon_count;
             } else if (waveform.source == "pe") {
                 pe[flat] = sample.pe;
-                primary_pe[flat] = sample.primary_pe;
                 if (output.hdf5_write_components) {
                     cherenkov_pe[flat] = sample.cherenkov_pe;
                     nsb_pe[flat] = sample.nsb_pe;
@@ -365,8 +328,6 @@ void writeHdf5Waveforms(
             writePlain3D(group, "photon_count", H5T_NATIVE_INT32, photon_count,
                          n_images, n_bins, n_pixels);
         } else if (waveform.source == "pe") {
-            writePlain3D(group, "primary_pe", H5T_NATIVE_FLOAT, primary_pe,
-                         n_images, n_bins, n_pixels);
             if (output.hdf5_write_components) {
                 writePlain3D(group, "cherenkov_pe", H5T_NATIVE_FLOAT,
                              cherenkov_pe, n_images, n_bins, n_pixels);

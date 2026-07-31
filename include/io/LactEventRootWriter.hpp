@@ -22,7 +22,6 @@ public:
                               const EventIOMetadata& metadata,
                               const CameraGeometry& camera,
                               const std::vector<MirrorFacet>& facets,
-                              const ElectronicsConfig& electronics_cfg,
                               const NsbConfig& nsb_cfg,
                               const TriggerConfig& trigger_cfg);
     ~LactEventRootStreamWriter();
@@ -50,7 +49,6 @@ void writeLactEventRoot(const CorsikaTraceOutputConfig& output_cfg,
                         const EventIOMetadata& metadata,
                         const CameraGeometry& camera,
                         const std::vector<MirrorFacet>& facets,
-                        const ElectronicsConfig& electronics_cfg,
                         const NsbConfig& nsb_cfg,
                         const TriggerConfig& trigger_cfg,
                         const std::map<SummaryKey, TraceSummary>& summaries,
