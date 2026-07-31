@@ -140,11 +140,14 @@ sipm.pde=0.35
 sipm.pde=configs/efficiency/sipm_pde.csv
 ```
 
-Integrated SiPM microcell saturation is implemented at this boundary and does
-not require waveform output. Detailed analog/ADC waveform, crosstalk,
-afterpulse, dark count, gain fluctuation, and trigger electronics remain future
-work. The HDF5 format keeps integrated `pe`, `primary_pe`, `signal`,
-`photon_count`, and timing summaries per event/telescope image.
+SiPM microcell saturation is implemented at this boundary. Without waveform
+output it is applied to the integrated primary p.e. image. With
+`waveform.source=pe`, it is applied cumulatively in time and each output sample
+is the fired-microcell increment for that bin; the trigger and integrated image
+both consume that fired-p.e. waveform. Detailed analog/ADC pulse shaping,
+crosstalk, afterpulse, dark count, gain fluctuation, microcell recovery, and
+hardware trigger electronics remain future work. The HDF5 format keeps
+integrated and time-binned `pe` and `primary_pe` together with truth components.
 
 For each collected Cherenkov photon or photon bunch, the integrated weight is
 handled multiplicatively:

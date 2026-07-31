@@ -182,7 +182,8 @@ shower before selecting an array-offset stream.
   time_edges_ns
   time_centers_ns
   reference_time_ns
-  photon_count or pe      # shape: image_index, time_bin, pixel_id_axis
+  photon_count or pe      # pe is fired p.e. after SiPM saturation
+  primary_pe              # pre-saturation Cherenkov+NSB p.e.
 
 /trigger/telescope
   event_id
@@ -304,9 +305,9 @@ signal weight before NSB. Pixels with no signal are stored as zero.
 
 ## Proxy Waveforms
 
-The current program does not simulate a real electronics waveform. For timing
-checks it can optionally save a proxy time series at the camera/collector
-output:
+The current program does not simulate an analog/ADC electronics waveform. For
+timing checks it can optionally save a fired-p.e. proxy time series after the
+configured SiPM microcell saturation:
 
 ```ini
 waveform.enabled=true
@@ -318,7 +319,8 @@ waveform.time_window_end_ns=20
 ```
 
 `waveform.source=photon_count` writes `/waveforms/photon_count`;
-`waveform.source=pe` writes `/waveforms/pe`. Both have shape:
+`waveform.source=pe` writes `/waveforms/pe` and
+`/waveforms/primary_pe`. These arrays have shape:
 
 ```text
 [image_index, time_bin, pixel]
@@ -335,12 +337,18 @@ absolute time coordinate plus optical propagation. If
 camera, as T0. In both relative modes, `/waveforms/reference_time_ns` records
 the subtracted absolute value for each image.
 
-This proxy waveform does not include a real SiPM/electronics response. If NSB is
-enabled together with `waveform.source=pe`, the constant-rate NSB model is
-sampled independently in every time bin, and the dense `/images/dense/nsb_pe`
-image is the time integral of `/waveforms/nsb_pe`. Cherenkov photons outside
-the configured waveform time window are not written to
-`/waveforms/cherenkov_pe`. For CORSIKA camera GIF checks, prefer
+For `waveform.source=pe`, Cherenkov and NSB p.e. are first accumulated into
+`primary_pe`; the time-ordered `hard_no_recovery` microcell model then produces
+the fired-p.e. `pe` samples. Consequently `/images/dense/pe` is the time
+integral of `/waveforms/pe` within floating-point precision. The proxy still
+does not include analog pulse shaping, ADC sampling, gain channels, crosstalk,
+afterpulsing, or microcell recovery.
+
+If NSB is enabled, the constant-rate model is sampled independently in every
+time bin. `/waveforms/cherenkov_pe` and `/waveforms/nsb_pe` retain
+pre-saturation truth components. Cherenkov photons outside the configured
+waveform time window are excluded from both the waveform and its integrated
+image. For CORSIKA camera GIF checks, prefer
 `waveform.time_reference=image_first` with a compact window such as
 `-5..20 ns`; the GIF time axis is then `T - T0`.
 

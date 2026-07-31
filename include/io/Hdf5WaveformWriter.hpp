@@ -23,6 +23,7 @@ void writeHdf5Waveforms(
     hid_t file,
     const CorsikaTraceOutputConfig& output,
     const WaveformOutputConfig& waveform,
+    const ElectronicsConfig& electronics,
     const NsbConfig& nsb,
     const std::vector<std::int32_t>& pixel_id_axis,
     const std::vector<Hdf5WaveformImage>& images,

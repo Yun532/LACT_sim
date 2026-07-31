@@ -28,8 +28,26 @@ that setting. Prefer the two explicit settings in new configurations.
 
 ROOT and HDF5 call the same camera and array trigger functions. When
 `waveform.enabled=true` and `waveform.source=pe`, both formats evaluate the
-camera trigger from the time-binned p.e. sequence. Without a p.e. time series,
-the integrated image is treated as one time bin.
+camera trigger from the time-binned fired-p.e. sequence after the configured
+SiPM microcell saturation. Without a p.e. time series, the saturated integrated
+image is treated as one time bin.
+
+The p.e. processing order is:
+
+```text
+Cherenkov p.e. + deterministic NSB p.e.
+-> time-ordered hard-no-recovery SiPM microcell occupancy
+-> fired-p.e. waveform
+-> camera trigger and waveform integration
+-> image_pe
+```
+
+For every saved pixel, the full fired waveform therefore obeys
+`image_pe == sum_t(waveforms.pe)` within floating-point precision.
+`primary_pe` retains the pre-saturation Cherenkov+NSB waveform when component
+output is requested. This remains a p.e.-domain proxy: analog pulse shaping,
+ADC sampling, gain channels, crosstalk, afterpulsing, and microcell recovery
+are not modeled.
 
 ROOT `output.lact_profile` controls serialization only. `image_pe` evaluates
 the same time-binned trigger as `timeseries_pe` and `debug_full`, but does not
@@ -55,7 +73,9 @@ time-binned total p.e. waveform; equal-height peaks select the earliest bin.
 
 HDF5 waveform output defaults to sparse COO storage. The `waveforms/samples`
 dataset stores `image_index`, `pixel_id`, `time_bin`, `photon_count`, `pe`,
-`cherenkov_pe`, and `nsb_pe`; axes and per-image reference times remain in the
-`waveforms` group. Set `output.hdf5_waveform_storage=dense` only when an
+`primary_pe`, `cherenkov_pe`, and `nsb_pe`; `pe` is after saturation while the
+other p.e. fields retain pre-saturation truth components. Axes and per-image
+reference times remain in the `waveforms` group. Set
+`output.hdf5_waveform_storage=dense` only when an
 explicit dense `(image, time, pixel)` cube is required. Dense storage can be
 orders of magnitude larger for mostly empty Cherenkov-camera data.

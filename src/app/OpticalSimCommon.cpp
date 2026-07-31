@@ -2308,6 +2308,33 @@ double ElectronicsResponse::saturatedPe(double primary_pe) const
     return -cells * std::expm1(-primary_pe / cells);
 }
 
+std::vector<double> ElectronicsResponse::saturatedWaveform(
+    const std::vector<double>& primary_pe_by_time_bin) const
+{
+    for (const double primary_pe : primary_pe_by_time_bin) {
+        if (!std::isfinite(primary_pe) || primary_pe < 0.0) {
+            throw std::runtime_error(
+                "primary p.e. waveform samples must be finite and >= 0");
+        }
+    }
+    if (!cfg_.saturation_enabled) {
+        return primary_pe_by_time_bin;
+    }
+    std::vector<double> fired_pe_by_time_bin;
+    fired_pe_by_time_bin.reserve(primary_pe_by_time_bin.size());
+    double cumulative_primary_pe = 0.0;
+    double cumulative_fired_pe = 0.0;
+    for (const double primary_pe : primary_pe_by_time_bin) {
+        cumulative_primary_pe += primary_pe;
+        const double next_cumulative_fired_pe =
+            saturatedPe(cumulative_primary_pe);
+        fired_pe_by_time_bin.push_back(std::max(
+            0.0, next_cumulative_fired_pe - cumulative_fired_pe));
+        cumulative_fired_pe = next_cumulative_fired_pe;
+    }
+    return fired_pe_by_time_bin;
+}
+
 ElectronicsConfig buildElectronicsConfig(const std::map<std::string, std::string>& cfg) {
     ElectronicsConfig electronics;
     electronics.channels_per_pixel = getInt(

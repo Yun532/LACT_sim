@@ -5,6 +5,7 @@
 #include <map>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 int main()
 {
@@ -27,12 +28,36 @@ int main()
         if (response.saturatedPe(0.0) != 0.0) {
             throw std::runtime_error("zero p.e. saturation mismatch");
         }
+        const std::vector<double> primary_waveform{
+            0.05 * cells, 0.15 * cells, 0.30 * cells, 0.50 * cells};
+        const auto fired_waveform =
+            response.saturatedWaveform(primary_waveform);
+        double primary_sum = 0.0;
+        double fired_sum = 0.0;
+        for (std::size_t i = 0; i < primary_waveform.size(); ++i) {
+            primary_sum += primary_waveform[i];
+            fired_sum += fired_waveform[i];
+            if (fired_waveform[i] < 0.0 ||
+                fired_waveform[i] > primary_waveform[i]) {
+                throw std::runtime_error(
+                    "time-binned saturation produced an invalid fired p.e. sample");
+            }
+        }
+        if (std::abs(fired_sum - response.saturatedPe(primary_sum)) >
+            1e-9 * cells) {
+            throw std::runtime_error(
+                "fired waveform integral must match integrated saturation");
+        }
 
         values["electronics.sipm.saturation_enabled"] = "false";
         const lact::ElectronicsResponse linear(
             lact::buildElectronicsConfig(values));
         if (linear.saturatedPe(primary) != primary) {
             throw std::runtime_error("disabled saturation must be linear");
+        }
+        if (linear.saturatedWaveform(primary_waveform) != primary_waveform) {
+            throw std::runtime_error(
+                "disabled saturation must preserve every waveform sample");
         }
         std::cout << "electronics saturation checks passed\n";
         return 0;
