@@ -112,6 +112,23 @@ ArrayTriggerDecision evaluateArrayTrigger(
         return out;
     }
 
+    if (!trigger.array_enabled) {
+        out.triggered = true;
+        out.coincidence_start_time_ns =
+            coincidenceTime(telescope_triggers.front());
+        out.coincidence_end_time_ns = out.coincidence_start_time_ns;
+        for (const auto& item : telescope_triggers) {
+            out.coincident_telescope_ids.push_back(item.telescope_id);
+            out.coincidence_start_time_ns = std::min(
+                out.coincidence_start_time_ns, coincidenceTime(item));
+            out.coincidence_end_time_ns = std::max(
+                out.coincidence_end_time_ns, coincidenceTime(item));
+        }
+        std::sort(out.coincident_telescope_ids.begin(),
+                  out.coincident_telescope_ids.end());
+        return out;
+    }
+
     std::sort(telescope_triggers.begin(), telescope_triggers.end(),
               [](const TelescopeTriggerTime& a, const TelescopeTriggerTime& b) {
                   const double a_time = coincidenceTime(a);

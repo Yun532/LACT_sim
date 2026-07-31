@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "core/Photon.hpp"
+#include "electronics/DetectorPipeline.hpp"
 #include "geometry/CameraGeometry.hpp"
 #include "geometry/FacetFactory.hpp"
 #include "geometry/FacetLayoutUtils.hpp"
@@ -168,6 +169,10 @@ struct NsbConfig {
 
 struct TriggerConfig {
     bool enabled = false;
+    // Camera triggering remains the default retained-event decision.  Array
+    // coincidence is an independent optional stage and is disabled by
+    // default for current LACT production.
+    bool array_enabled = false;
     double pixel_threshold_pe = 5.0;
     int camera_multiplicity = 3;
     int array_multiplicity = 2;
@@ -337,6 +342,8 @@ OutputPlane buildOutputPlane(const std::map<std::string, std::string>& cfg);
 CameraConfig buildCameraConfig(const std::map<std::string, std::string>& cfg);
 SipmConfig buildSipmConfig(const std::map<std::string, std::string>& cfg);
 ElectronicsConfig buildElectronicsConfig(const std::map<std::string, std::string>& cfg);
+electronics::DetectorPipelineConfig buildDetectorPipelineConfig(
+    const std::map<std::string, std::string>& cfg);
 NsbConfig buildNsbConfig(const std::map<std::string, std::string>& cfg);
 void resolveNsbSpectralRate(NsbConfig& nsb,
                             const OpticalEfficiencyConfig& efficiency_cfg,

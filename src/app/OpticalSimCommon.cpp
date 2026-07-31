@@ -289,6 +289,10 @@ void mergeComponentConfig(std::map<std::string, std::string>& dst,
         if (scoped == "nsb.spectrum_csv") {
             value = resolveRelativePath(path, value);
         }
+        if (scoped == "electronics.single_pe.csv" ||
+            scoped == "electronics.single_pe.csv_path") {
+            value = resolveRelativePath(path, value);
+        }
         dst[scoped] = value;
     }
 
@@ -2285,6 +2289,105 @@ ElectronicsConfig buildElectronicsConfig(const std::map<std::string, std::string
     return electronics;
 }
 
+electronics::DetectorPipelineConfig buildDetectorPipelineConfig(
+    const std::map<std::string, std::string>& cfg)
+{
+    electronics::DetectorPipelineConfig out;
+    out.enabled = getBool(
+        cfg, "electronics.pipeline.enabled", out.enabled);
+    out.microcell.enabled = getBool(
+        cfg, "electronics.microcell.enabled", out.microcell.enabled);
+    out.microcell.model = lowerCopy(trim(getString(
+        cfg, "electronics.microcell.model", out.microcell.model)));
+    out.microcell.layout = lowerCopy(trim(getString(
+        cfg, "electronics.microcell.layout", out.microcell.layout)));
+    out.microcell.sensor_size_x_m = getDouble(
+        cfg, "electronics.microcell.sensor_size_x_m",
+        getDouble(cfg, "sipm.size_m", out.microcell.sensor_size_x_m));
+    out.microcell.sensor_size_y_m = getDouble(
+        cfg, "electronics.microcell.sensor_size_y_m",
+        getDouble(cfg, "sipm.size_m", out.microcell.sensor_size_y_m));
+    out.microcell.grid_columns = getInt(
+        cfg, "electronics.microcell.grid_columns",
+        out.microcell.grid_columns);
+    out.microcell.grid_rows = getInt(
+        cfg, "electronics.microcell.grid_rows", out.microcell.grid_rows);
+    out.microcell.channels_per_pixel = getInt(
+        cfg, "electronics.microcell.channels_per_pixel",
+        out.microcell.channels_per_pixel);
+    out.microcell.microcells_per_channel = getInt(
+        cfg, "electronics.microcell.microcells_per_channel",
+        out.microcell.microcells_per_channel);
+
+    out.single_pe.enabled = getBool(
+        cfg, "electronics.single_pe.enabled", out.single_pe.enabled);
+    out.single_pe.model = lowerCopy(trim(getString(
+        cfg, "electronics.single_pe.model", out.single_pe.model)));
+    out.single_pe.csv_path = getString(
+        cfg, "electronics.single_pe.csv",
+        getString(cfg, "electronics.single_pe.csv_path",
+                  out.single_pe.csv_path));
+    out.single_pe.unit = lowerCopy(trim(getString(
+        cfg, "electronics.single_pe.unit", out.single_pe.unit)));
+    out.single_pe.rise_ns = getDouble(
+        cfg, "electronics.single_pe.rise_ns", out.single_pe.rise_ns);
+    out.single_pe.fall_ns = getDouble(
+        cfg, "electronics.single_pe.fall_ns", out.single_pe.fall_ns);
+    out.single_pe.support_ns = getDouble(
+        cfg, "electronics.single_pe.support_ns", out.single_pe.support_ns);
+    out.single_pe.amplitude_scale = getDouble(
+        cfg, "electronics.single_pe.amplitude_scale",
+        out.single_pe.amplitude_scale);
+
+    out.sampling.width_ns = getDouble(
+        cfg, "electronics.sampling.width_ns",
+        getDouble(cfg, "waveform.time_bin_width_ns",
+                  out.sampling.width_ns));
+    out.sampling.start_ns = getDouble(
+        cfg, "electronics.sampling.start_ns",
+        getDouble(cfg, "waveform.time_window_start_ns",
+                  out.sampling.start_ns));
+    out.sampling.end_ns = getDouble(
+        cfg, "electronics.sampling.end_ns",
+        getDouble(cfg, "waveform.time_window_end_ns",
+                  out.sampling.end_ns));
+
+    out.camera_trigger.enabled = getBool(
+        cfg, "trigger.camera.enabled",
+        getBool(cfg, "trigger.enabled", out.camera_trigger.enabled));
+    out.camera_trigger.mode = lowerCopy(trim(getString(
+        cfg, "trigger.camera.mode", out.camera_trigger.mode)));
+    out.camera_trigger.pixel_threshold_pe = getDouble(
+        cfg, "trigger.camera.pixel_threshold_pe",
+        getDouble(cfg, "trigger.pixel_threshold_pe",
+                  out.camera_trigger.pixel_threshold_pe));
+    out.camera_trigger.pixel_threshold_mv = getDouble(
+        cfg, "trigger.camera.pixel_threshold_mv",
+        out.camera_trigger.pixel_threshold_mv);
+    out.camera_trigger.multiplicity = getInt(
+        cfg, "trigger.camera.multiplicity",
+        getInt(cfg, "trigger.camera_multiplicity",
+               out.camera_trigger.multiplicity));
+    out.camera_trigger.coincidence_window_ns = getDouble(
+        cfg, "trigger.camera.coincidence_window_ns",
+        getDouble(cfg, "trigger.camera_coincidence_window_ns",
+                  out.camera_trigger.coincidence_window_ns));
+    out.save_primary_sequence = getBool(
+        cfg, "electronics.output.save_primary_sequence",
+        out.save_primary_sequence);
+    out.save_fired_sequence = getBool(
+        cfg, "electronics.output.save_fired_sequence",
+        out.save_fired_sequence);
+    out.save_microcell_decisions = getBool(
+        cfg, "electronics.output.save_microcell_decisions",
+        out.save_microcell_decisions);
+    out.save_channel_waveforms = getBool(
+        cfg, "electronics.output.save_channel_waveforms",
+        out.save_channel_waveforms);
+    electronics::validateDetectorPipelineConfig(out);
+    return out;
+}
+
 NsbConfig buildNsbConfig(const std::map<std::string, std::string>& cfg) {
     NsbConfig nsb;
     nsb.enabled = getBool(cfg, "nsb.enabled", nsb.enabled);
@@ -2486,23 +2589,35 @@ void generateTimeBinnedNsbPe(const NsbConfig& nsb,
 
 TriggerConfig buildTriggerConfig(const std::map<std::string, std::string>& cfg) {
     TriggerConfig trigger;
-    trigger.enabled = getBool(cfg, "trigger.enabled", trigger.enabled);
-    trigger.pixel_threshold_pe =
-        getDouble(cfg, "trigger.pixel_threshold_pe", trigger.pixel_threshold_pe);
-    trigger.camera_multiplicity =
-        getInt(cfg, "trigger.camera_multiplicity", trigger.camera_multiplicity);
-    trigger.array_multiplicity =
-        getInt(cfg, "trigger.array_multiplicity", trigger.array_multiplicity);
+    trigger.enabled = getBool(
+        cfg, "trigger.camera.enabled",
+        getBool(cfg, "trigger.enabled", trigger.enabled));
+    trigger.array_enabled = getBool(
+        cfg, "trigger.array.enabled", trigger.array_enabled);
+    trigger.pixel_threshold_pe = getDouble(
+        cfg, "trigger.camera.pixel_threshold_pe",
+        getDouble(cfg, "trigger.pixel_threshold_pe",
+                  trigger.pixel_threshold_pe));
+    trigger.camera_multiplicity = getInt(
+        cfg, "trigger.camera.multiplicity",
+        getInt(cfg, "trigger.camera_multiplicity",
+               trigger.camera_multiplicity));
+    trigger.array_multiplicity = getInt(
+        cfg, "trigger.array.multiplicity",
+        getInt(cfg, "trigger.array_multiplicity",
+               trigger.array_multiplicity));
     const bool has_legacy_coincidence_window =
         cfg.find("trigger.coincidence_window_ns") != cfg.end();
     trigger.coincidence_window_ns = getDouble(
         cfg, "trigger.coincidence_window_ns", trigger.coincidence_window_ns);
     trigger.camera_coincidence_window_ns = getDouble(
-        cfg,
-        "trigger.camera_coincidence_window_ns",
-        has_legacy_coincidence_window
-            ? trigger.coincidence_window_ns
-            : trigger.camera_coincidence_window_ns);
+        cfg, "trigger.camera.coincidence_window_ns",
+        getDouble(
+            cfg,
+            "trigger.camera_coincidence_window_ns",
+            has_legacy_coincidence_window
+                ? trigger.coincidence_window_ns
+                : trigger.camera_coincidence_window_ns));
     trigger.array_coincidence_window_ns = getDouble(
         cfg,
         "trigger.array_coincidence_window_ns",

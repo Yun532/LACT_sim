@@ -6,6 +6,8 @@
 #include <string>
 #include <tuple>
 
+#include "electronics/DetectorPipeline.hpp"
+
 namespace lact {
 
 struct CorsikaTraceOutputConfig {
@@ -80,6 +82,10 @@ struct RawWaveformHit {
     double time_ns = 0.0;
     std::uint64_t photon_count = 0;
     double pe = 0.0;
+    double sensor_x_m = 0.0;
+    double sensor_y_m = 0.0;
+    double wavelength_nm = 0.0;
+    electronics::HitOrigin origin = electronics::HitOrigin::Cherenkov;
 };
 
 } // namespace lact

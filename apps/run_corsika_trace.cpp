@@ -503,11 +503,6 @@ WaveformOutputConfig buildWaveformOutputConfig(
             throw std::runtime_error(
                 "waveform.source must be photon_count, pe, or electronics when waveform.enabled=true");
         }
-        if (out.source == "electronics") {
-            throw std::runtime_error(
-                "waveform.source=electronics is reserved for the future real electronics model; "
-                "use waveform.source=photon_count or pe for the current proxy waveform");
-        }
         if (out.time_bin_width_ns <= 0.0) {
             throw std::runtime_error("waveform.time_bin_width_ns must be > 0");
         }
@@ -701,15 +696,16 @@ bool waveformUsesImageReference(const WaveformOutputConfig& cfg)
 void accumulateWaveformHit(std::map<WaveformKey, WaveformPixelAccumulator>& waveform,
                            std::vector<RawWaveformHit>& raw_waveform_hits,
                            const WaveformOutputConfig& cfg,
+                           bool capture_detector_hit,
                            int event_id,
                            int telescope_id,
                            const OpticalSurfaceHit& hit)
 {
-    if (!cfg.enabled || !hit.hit_camera || hit.pixel_id < 0) {
+    if (!hit.hit_camera || hit.pixel_id < 0) {
         return;
     }
     const double pe = hit.weight * hit.relative_efficiency;
-    if (waveformUsesImageReference(cfg)) {
+    if (capture_detector_hit) {
         raw_waveform_hits.push_back(RawWaveformHit{
             event_id,
             telescope_id,
@@ -717,7 +713,30 @@ void accumulateWaveformHit(std::map<WaveformKey, WaveformPixelAccumulator>& wave
             hit.time_ns,
             1,
             pe,
+            hit.collector_exit_x_m,
+            hit.collector_exit_y_m,
+            hit.wavelength_nm,
+            electronics::HitOrigin::Cherenkov,
         });
+    }
+    if (!cfg.enabled) {
+        return;
+    }
+    if (waveformUsesImageReference(cfg)) {
+        if (!capture_detector_hit) {
+            raw_waveform_hits.push_back(RawWaveformHit{
+                event_id,
+                telescope_id,
+                hit.pixel_id,
+                hit.time_ns,
+                1,
+                pe,
+                hit.collector_exit_x_m,
+                hit.collector_exit_y_m,
+                hit.wavelength_nm,
+                electronics::HitOrigin::Cherenkov,
+            });
+        }
         return;
     }
     const int bin = waveformBinForTime(cfg, hit.time_ns);
@@ -2794,6 +2813,7 @@ void printCorsikaOpticalConfiguration(
     const std::unique_ptr<Cone::SquareCone>& light_collector,
     const SipmConfig& sipm_cfg,
     const ElectronicsConfig& electronics_cfg,
+    const electronics::DetectorPipelineConfig& detector_cfg,
     const WaveformOutputConfig& waveform_cfg,
     const CollectorDebugConfig& collector_debug_cfg,
     const NsbConfig& nsb_cfg,
@@ -3006,8 +3026,34 @@ void printCorsikaOpticalConfiguration(
     printField("pde", factorDescription(efficiency_cfg.sipm_pde));
 
     printSection("Electronics");
-    printField("response", "reserved; SiPM PDE is handled by sipm.pde");
-    printField("model", "integrated_pe_placeholder");
+    printField("pipeline_enabled", detector_cfg.enabled ? "true" : "false");
+    printField("pde_stage", "upstream sipm.pde, applied exactly once");
+    printField("microcell_enabled",
+               detector_cfg.microcell.enabled ? "true" : "false");
+    printField("microcell_model", detector_cfg.microcell.model);
+    printField(
+        "microcell_grid",
+        intToString(detector_cfg.microcell.grid_columns) + " x " +
+            intToString(detector_cfg.microcell.grid_rows));
+    printField("microcells_per_pixel",
+               intToString(
+                   static_cast<std::uint64_t>(
+                       detector_cfg.microcell.channels_per_pixel) *
+                   static_cast<std::uint64_t>(
+                       detector_cfg.microcell.microcells_per_channel)));
+    printField("channels_per_pixel",
+               intToString(detector_cfg.microcell.channels_per_pixel));
+    printField("channel_merge", "direct sum");
+    printField("single_pe_enabled",
+               detector_cfg.single_pe.enabled ? "true" : "false");
+    printField("single_pe_model", detector_cfg.single_pe.model);
+    printField("single_pe_unit", detector_cfg.single_pe.unit);
+    printField("sampling_width_ns",
+               doubleToString(detector_cfg.sampling.width_ns));
+    printField("save_primary_sequence",
+               detector_cfg.save_primary_sequence ? "true" : "false");
+    printField("save_fired_sequence",
+               detector_cfg.save_fired_sequence ? "true" : "false");
 
     printSection("Waveform");
     printField("enabled", waveform_cfg.enabled ? "true" : "false");
@@ -3018,7 +3064,7 @@ void printCorsikaOpticalConfiguration(
     printField("time_window_end_ns", doubleToString(waveform_cfg.time_window_end_ns));
     printField("model",
                waveform_cfg.source == "electronics"
-                   ? "reserved real electronics waveform"
+                   ? "single-p.e. superposition and configured sampling"
                    : "proxy time-binned camera output");
 
     printSection("Profile");
@@ -3047,9 +3093,23 @@ void printCorsikaOpticalConfiguration(
 
     printSection("Trigger");
     printField("enabled", trigger_cfg.enabled ? "true" : "false");
-    printField("model", "simple_multiplicity");
-    printField("pixel_threshold_pe", doubleToString(trigger_cfg.pixel_threshold_pe));
+    printField("mode",
+               detector_cfg.enabled
+                   ? detector_cfg.camera_trigger.mode
+                   : "pe_count");
+    if (detector_cfg.enabled &&
+        detector_cfg.camera_trigger.mode == "voltage") {
+        printField(
+            "pixel_threshold_mv",
+            doubleToString(
+                detector_cfg.camera_trigger.pixel_threshold_mv));
+    } else {
+        printField("pixel_threshold_pe",
+                   doubleToString(trigger_cfg.pixel_threshold_pe));
+    }
     printField("camera_multiplicity", intToString(trigger_cfg.camera_multiplicity));
+    printField("array_enabled",
+               trigger_cfg.array_enabled ? "true" : "false");
     printField("array_multiplicity", intToString(trigger_cfg.array_multiplicity));
     printField("camera_coincidence_window_ns",
                doubleToString(trigger_cfg.camera_coincidence_window_ns));
@@ -3129,8 +3189,11 @@ void printCorsikaOpticalConfiguration(
     printField("optics", "facet reflection with configured optical errors");
     printField("speed_of_light_m/ns",
                doubleToString(propagation_cfg.speed_of_light_m_per_ns, 9));
-    std::string missing = "real electronics waveform, SiPM saturation, crosstalk, "
-                          "afterpulse, dark count, hardware trigger board";
+    std::string missing = "crosstalk, afterpulse, dark count";
+    if (!detector_cfg.enabled) {
+        missing = "explicit microcell saturation, single-p.e. waveform, " +
+                  missing;
+    }
     if (!light_collector) {
         missing = "collector, " + missing;
     }
@@ -3374,6 +3437,7 @@ int main(int argc, char** argv) {
         SipmConfig sipm_cfg = buildSipmConfig(cfg);
         ElectronicsConfig electronics_cfg = buildElectronicsConfig(cfg);
         ElectronicsResponse electronics(electronics_cfg);
+        const auto detector_pipeline_cfg = buildDetectorPipelineConfig(cfg);
         NsbConfig nsb_cfg = buildNsbConfig(cfg);
         TriggerConfig trigger_cfg = buildTriggerConfig(cfg);
         CameraGeometry camera = buildCameraGeometry(camera_cfg);
@@ -3393,6 +3457,13 @@ int main(int argc, char** argv) {
             shouldBackprojectEventIO2d(source_runtime_cfg);
         CorsikaTraceOutputConfig output_cfg = buildCorsikaTraceOutputConfig(cfg);
         WaveformOutputConfig waveform_cfg = buildWaveformOutputConfig(cfg);
+        if (waveform_cfg.enabled &&
+            waveform_cfg.source == "electronics" &&
+            !detector_pipeline_cfg.enabled) {
+            throw std::runtime_error(
+                "waveform.source=electronics requires "
+                "electronics.pipeline.enabled=true");
+        }
         CollectorDebugConfig collector_debug_cfg = buildCollectorDebugConfig(cfg);
         ProfileConfig profile_cfg = buildProfileConfig(cfg);
         AtmosphereHistogramConfig atmosphere_histogram_cfg =
@@ -3411,6 +3482,14 @@ int main(int argc, char** argv) {
                 "output.format requests HDF5, but this build was configured without HDF5. "
                 "Install HDF5 and re-run CMake, or set output.format=csv.");
 #endif
+            if (waveform_cfg.enabled &&
+                waveform_cfg.source == "electronics" &&
+                output_cfg.hdf5_write_waveforms) {
+                throw std::runtime_error(
+                    "electronics waveform serialization is currently "
+                    "defined by the lact_event ROOT schema; set "
+                    "output.hdf5_write_waveforms=false or use ROOT output");
+            }
         }
         if (save_lact_root) {
 #ifndef LACT_HAS_ROOT
@@ -3506,6 +3585,7 @@ int main(int argc, char** argv) {
                                          light_collector,
                                          sipm_cfg,
                                          electronics_cfg,
+                                         detector_pipeline_cfg,
                                          waveform_cfg,
                                          collector_debug_cfg,
                                          nsb_cfg,
@@ -3982,6 +4062,7 @@ int main(int argc, char** argv) {
             accumulateWaveformHit(waveforms,
                                   raw_waveform_hits,
                                   waveform_cfg,
+                                  detector_pipeline_cfg.enabled,
                                   bunch.event_id,
                                   bunch.telescope_id,
                                   hit);

@@ -88,6 +88,7 @@ add_library(simlite_core
     src/app/PhotonResponseSampler.cpp
     src/app/TelescopeOpticsCache.cpp
     src/app/TriggerResponse.cpp
+    src/electronics/DetectorPipeline.cpp
     src/geometry/FacetFactory.cpp
     src/optics/AtmosphereTransmission.cpp
     src/optics/OpticalTracer.cpp
@@ -125,6 +126,11 @@ add_executable(compute_nsb_rate
     apps/compute_nsb_rate.cpp
 )
 target_link_libraries(compute_nsb_rate PRIVATE simlite_core)
+
+add_executable(run_camera_electronics
+    apps/run_camera_electronics.cpp
+)
+target_link_libraries(run_camera_electronics PRIVATE simlite_core)
 
 if(LACT_HAS_HESSIO)
     add_executable(run_corsika_trace
@@ -235,6 +241,12 @@ add_executable(test_trigger_response
 )
 target_link_libraries(test_trigger_response PRIVATE simlite_core)
 add_test(NAME test_trigger_response COMMAND test_trigger_response)
+
+add_executable(test_detector_pipeline
+    apps/test_detector_pipeline.cpp
+)
+target_link_libraries(test_detector_pipeline PRIVATE simlite_core)
+add_test(NAME test_detector_pipeline COMMAND test_detector_pipeline)
 
 add_executable(test_array_timing_correction
     apps/test_array_timing_correction.cpp
