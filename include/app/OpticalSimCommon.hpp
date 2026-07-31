@@ -195,6 +195,8 @@ public:
     explicit ElectronicsResponse(const ElectronicsConfig& cfg);
     double peConversion(double wavelength_nm) const;
     double saturatedPe(double primary_pe) const;
+    std::vector<double> saturatedWaveform(
+        const std::vector<double>& primary_pe_by_time_bin) const;
     double totalMicrocellsPerPixel() const;
 
 private:

@@ -1740,6 +1740,73 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             }
 
             dense_cherenkov_pe = dense_pe;
+            if (waveform_cfg.enabled && waveform_cfg.source == "pe") {
+                // A time-series image is the integral of the configured
+                // waveform window, not a second integration of every optical
+                // hit.  Build its primary Cherenkov charge from the same
+                // binned input that is serialized below.
+                std::fill(dense_pe.begin(), dense_pe.end(), 0.0f);
+                std::fill(
+                    dense_cherenkov_pe.begin(), dense_cherenkov_pe.end(), 0.0f);
+                std::map<SummaryKey, std::size_t> image_row_by_key;
+                std::vector<double> reference_time_ns(n_images, 0.0);
+                for (const auto& image : image_rows) {
+                    const std::size_t row =
+                        static_cast<std::size_t>(image.image_index);
+                    image_row_by_key[{
+                        static_cast<int>(image.event_id),
+                        static_cast<int>(image.telescope_id)}] = row;
+                    if (waveform_cfg.time_reference == "image_first" &&
+                        std::isfinite(image.time_first_ns)) {
+                        reference_time_ns[row] = image.time_first_ns;
+                    } else if (waveform_cfg.time_reference == "image_mean" &&
+                               std::isfinite(image.time_mean_ns)) {
+                        reference_time_ns[row] = image.time_mean_ns;
+                    }
+                }
+                auto add_cherenkov_pe = [&](std::size_t row,
+                                            int pixel_id,
+                                            int bin,
+                                            double pe) {
+                    const auto col = pixel_to_col.find(pixel_id);
+                    if (row >= n_images || col == pixel_to_col.end() ||
+                        bin < 0 ||
+                        static_cast<std::size_t>(bin) >=
+                            waveformBinCount(waveform_cfg)) {
+                        return;
+                    }
+                    const std::size_t index = row * n_pixels + col->second;
+                    dense_pe[index] += static_cast<float>(pe);
+                    dense_cherenkov_pe[index] += static_cast<float>(pe);
+                };
+                if (waveformUsesImageReference(waveform_cfg)) {
+                    for (const auto& hit : raw_waveform_hits) {
+                        const auto row = image_row_by_key.find(
+                            {hit.event_id, hit.telescope_id});
+                        if (row == image_row_by_key.end()) continue;
+                        add_cherenkov_pe(
+                            row->second,
+                            hit.pixel_id,
+                            waveformBinForTime(
+                                waveform_cfg,
+                                hit.time_ns -
+                                    reference_time_ns[row->second]),
+                            hit.pe);
+                    }
+                } else {
+                    for (const auto& item : waveforms) {
+                        const auto& sample = item.second;
+                        const auto row = image_row_by_key.find(
+                            {sample.event_id, sample.telescope_id});
+                        if (row == image_row_by_key.end()) continue;
+                        add_cherenkov_pe(
+                            row->second,
+                            sample.pixel_id,
+                            sample.time_bin,
+                            sample.pe);
+                    }
+                }
+            }
             dense_nsb_pe.assign(n_images * n_pixels, 0.0f);
             if (nsb_cfg.enabled && nsb_cfg.rate_pe_per_ns_per_pixel > 0.0 &&
                 nsb_cfg.window_ns > 0.0) {
@@ -1908,6 +1975,30 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                     [&](std::size_t col, std::size_t bin, float pe) {
                         trigger_waveform_pe[col * trigger_bins + bin] += pe;
                     });
+                const ElectronicsResponse electronics(electronics_cfg);
+                std::vector<double> primary_bins(trigger_bins, 0.0);
+                total_pe = 0.0;
+                for (std::size_t col = 0; col < trigger_pixels; ++col) {
+                    std::fill(primary_bins.begin(), primary_bins.end(), 0.0);
+                    for (std::size_t bin = 0; bin < trigger_bins; ++bin) {
+                        const auto found = trigger_waveform_pe.find(
+                            col * trigger_bins + bin);
+                        if (found != trigger_waveform_pe.end()) {
+                            primary_bins[bin] = found->second;
+                        }
+                    }
+                    const auto fired_bins =
+                        electronics.saturatedWaveform(primary_bins);
+                    for (std::size_t bin = 0; bin < trigger_bins; ++bin) {
+                        const std::size_t index = col * trigger_bins + bin;
+                        if (fired_bins[bin] > 0.0) {
+                            trigger_waveform_pe[index] = fired_bins[bin];
+                            total_pe += fired_bins[bin];
+                        } else {
+                            trigger_waveform_pe.erase(index);
+                        }
+                    }
+                }
                 pe_at = [&](std::size_t col, std::size_t bin) {
                     const auto found = trigger_waveform_pe.find(
                         col * trigger_bins + bin);
@@ -2467,6 +2558,7 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             writeHdf5Waveforms(file,
                                output_cfg,
                                waveform_cfg,
+                               electronics_cfg,
                                nsb_cfg,
                                pixel_id_axis,
                                waveform_images,
