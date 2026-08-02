@@ -145,10 +145,10 @@ def plot_waveform_sum(ak: Any, plt: Any, root_file: Any, event_id: int, tel_id: 
         return
 
     time_bin = as_numpy(ak, waveforms["time_bin"][row]).astype(int)
-    pe = as_numpy(ak, waveforms["pe"][row]).astype(float)
+    sample_value = as_numpy(ak, waveforms["sample_value"][row]).astype(float)
     pixel_id = as_numpy(ak, waveforms["pixel_id"][row]).astype(int)
     n_bins = int(waveforms["n_time_bins"][row])
-    summed = np.bincount(time_bin, weights=pe, minlength=n_bins)
+    summed = np.bincount(time_bin, weights=sample_value, minlength=n_bins)
     x = np.arange(n_bins, dtype=float)
     if "waveform_config" in root_file:
         cfg = root_file["waveform_config"].arrays(library="ak")
@@ -160,15 +160,18 @@ def plot_waveform_sum(ak: Any, plt: Any, root_file: Any, event_id: int, tel_id: 
     fig, ax = plt.subplots(figsize=(7.8, 4.8), constrained_layout=True)
     ax.step(x, summed, where="mid")
     ax.set_xlabel("time [ns]" if len(x) == n_bins else "time bin")
-    ax.set_ylabel("summed p.e.")
-    ax.set_title(f"Camera-summed p.e. waveform, event {event_id}, tel {tel_id}")
+    ax.set_ylabel("summed sample value")
+    ax.set_title(f"Camera-summed waveform, event {event_id}, tel {tel_id}")
     fig.savefig(path, dpi=160)
     plt.close(fig)
 
     wf_image_by_pixel: dict[int, float] = {}
-    for pix, value in zip(pixel_id, pe):
+    for pix, value in zip(pixel_id, sample_value):
         wf_image_by_pixel[int(pix)] = wf_image_by_pixel.get(int(pix), 0.0) + float(value)
-    summary_lines.append(f"waveforms: nonzero samples={len(pe)}, sum_pe={float(np.sum(pe)):.6g}")
+    summary_lines.append(
+        f"waveforms: nonzero samples={len(sample_value)}, "
+        f"sum_sample_value={float(np.sum(sample_value)):.6g}"
+    )
     summary_lines.append(f"selected image total_pe={float(np.sum(image_pe)):.6g}")
 
 

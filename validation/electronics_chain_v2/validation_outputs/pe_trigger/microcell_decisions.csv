@@ -1,0 +1,6 @@
+primary_index,event_id,telescope_id,pixel_id,time_ns,sensor_x_m,sensor_y_m,grid_column,grid_row,channel_id,microcell_id,fired,origin
+0,1,0,10,0,0,0,264,256,0,16929,1,cherenkov
+1,1,0,10,1,0,0,264,256,0,16929,0,cherenkov
+2,1,0,10,2,0.001,0,304,256,0,16934,1,cherenkov
+3,1,0,11,3,0,0,264,256,0,16929,1,cherenkov
+4,1,0,11,4,0.001,0,304,256,0,16934,1,nsb

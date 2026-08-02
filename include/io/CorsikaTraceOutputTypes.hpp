@@ -6,12 +6,18 @@
 #include <string>
 #include <tuple>
 
+#include "electronics/DetectorPipeline.hpp"
+
 namespace lact {
 
 struct CorsikaTraceOutputConfig {
     std::string hits_csv = "corsika_whiteboard_hits.csv";
     std::string pixel_csv = "corsika_pixel_image.csv";
     std::string summary_csv = "corsika_trace_summary.csv";
+    std::string waveform_csv = "corsika_waveforms.csv";
+    std::string trigger_csv = "corsika_triggers.csv";
+    std::string primary_pe_csv = "corsika_primary_pe.csv";
+    std::string fired_pe_csv = "corsika_fired_pe.csv";
     std::string mirror_diagnostic_csv;
     std::string hdf5_path = "corsika_trace.h5";
     std::string lact_root_path = "lact_events.root";
@@ -80,6 +86,10 @@ struct RawWaveformHit {
     double time_ns = 0.0;
     std::uint64_t photon_count = 0;
     double pe = 0.0;
+    double sensor_x_m = 0.0;
+    double sensor_y_m = 0.0;
+    double wavelength_nm = 0.0;
+    electronics::HitOrigin origin = electronics::HitOrigin::Cherenkov;
 };
 
 } // namespace lact

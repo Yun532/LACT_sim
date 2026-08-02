@@ -30,6 +30,7 @@ int main()
     trigger.camera_coincidence_window_ns = 2.0;
     trigger.array_multiplicity = 2;
     trigger.array_coincidence_window_ns = 10.0;
+    trigger.array_enabled = true;
 
     const std::vector<std::vector<double>> pe{
         {0.0, 2.0, 2.0, 0.0},
@@ -42,9 +43,9 @@ int main()
     ok &= check(camera.triggered, "camera trigger was missed");
     ok &= check(camera.n_pixels_above_threshold == 2,
                 "camera multiplicity is incorrect");
-    ok &= check(camera.window_start_bin == 1,
+    ok &= check(camera.window_start_bin == 2,
                 "camera trigger selected the wrong time window");
-    ok &= check(camera.first_trigger_window_start_bin == 1,
+    ok &= check(camera.first_trigger_window_start_bin == 2,
                 "camera trigger selected the wrong first threshold window");
     ok &= check(std::abs(camera.trigger_time_ns - 102.5) < 1.0e-12,
                 "camera trigger time is incorrect");
@@ -107,6 +108,15 @@ int main()
     ok &= check(no_window.triggered &&
                     no_window.coincident_telescope_ids.size() == 3,
                 "zero array window should retain legacy count-only behavior");
+
+    trigger.array_enabled = false;
+    trigger.array_multiplicity = 99;
+    const auto array_disabled = evaluateArrayTrigger(
+        {{1, 100.0}, {2, 130.0}}, trigger);
+    ok &= check(array_disabled.triggered &&
+                    array_disabled.coincident_telescope_ids ==
+                        std::vector<int>({1, 2}),
+                "disabled array trigger must pass through camera triggers");
 
     NsbConfig nsb;
     nsb.enabled = true;

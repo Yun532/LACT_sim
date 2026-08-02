@@ -1,0 +1,6 @@
+event_id,telescope_id,pixel_id,time_ns,sensor_x_m,sensor_y_m,primary_pe,wavelength_nm,origin
+1,0,10,0.0,-0.003000,-0.001700,1,420,cherenkov
+1,0,10,1.0,-0.003000,-0.001700,1,420,cherenkov
+1,0,10,2.0,-0.002000,-0.001700,1,420,cherenkov
+1,0,11,3.0,-0.003000,0.001700,1,430,cherenkov
+1,0,11,4.0,-0.002000,0.001700,1,430,nsb

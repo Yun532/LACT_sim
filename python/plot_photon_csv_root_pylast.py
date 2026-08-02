@@ -7,6 +7,8 @@ import argparse
 import os
 from pathlib import Path
 
+import numpy as np
+
 os.environ.setdefault("MPLBACKEND", "Agg")
 
 
@@ -18,6 +20,70 @@ def select_event(source, event_id: int | None, event_index: int):
         if int(event.event_id) == event_id:
             return event
     raise RuntimeError(f"event {event_id} is not present in the ROOT file")
+
+
+def plot_root_dl0_with_pylast(root_file: Path, event_id: int, output: Path) -> None:
+    """Render observations.image_pe with pyLAST's native camera primitive."""
+    import matplotlib.pyplot as plt
+    import uproot
+    from pylast.visualize.visualize import plot_camera_image
+
+    with uproot.open(root_file) as root:
+        camera = root["camera_pixels"].arrays(library="np")
+        observations = root["observations"].arrays(library="ak")
+        matches = np.nonzero(
+            np.asarray(observations.event_id, dtype=int) == int(event_id)
+        )[0]
+        if len(matches) == 0:
+            raise RuntimeError(f"event {event_id} has no ROOT observation")
+        row = int(matches[0])
+        stored_by_id = {
+            int(pixel_id): float(value)
+            for pixel_id, value in zip(
+                observations.pixel_id[row], observations.image_pe[row]
+            )
+        }
+        pixel_ids = np.asarray(camera["pixel_id"], dtype=int)
+        image = np.asarray(
+            [stored_by_id.get(int(pixel_id), 0.0) for pixel_id in pixel_ids],
+            dtype=float,
+        )
+        focal_length_m = float(
+            root["optics"]["effective_focal_length_m"].array(library="np")[0]
+        )
+        # LactEventSource's canonical boundary mapping is
+        # pix_x=-LACT v, pix_y=-LACT u. plot_camera_image then applies the
+        # established pyLAST display-axis convention.
+        pix_x_deg = np.degrees(
+            np.arctan2(-np.asarray(camera["y_m"], dtype=float), focal_length_m)
+        )
+        pix_y_deg = np.degrees(
+            np.arctan2(-np.asarray(camera["x_m"], dtype=float), focal_length_m)
+        )
+        pixel_size_deg = float(
+            np.median(
+                np.degrees(
+                    np.arctan2(
+                        np.asarray(camera["size_m"], dtype=float), focal_length_m
+                    )
+                )
+            )
+        )
+
+    axis = plot_camera_image(
+        pix_x_deg,
+        pix_y_deg,
+        pixel_size_deg,
+        image,
+        mask=image != 0.0,
+        vmin=0.0,
+        vmax=float(np.max(image)) if image.size else 1.0,
+        title=f"LACT event {event_id} DL0 image",
+        pixel_shape="square",
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    axis.figure.savefig(output, dpi=220, bbox_inches="tight")
+    plt.close(axis.figure)
 
 
 def main() -> None:
@@ -40,15 +106,25 @@ def main() -> None:
     figure, _axes = visualizer.plot_event(
         event,
         output_path=str(args.output),
+        # LACT_sim's observations.image_pe is the final detector image and is
+        # exposed by pyLAST at DL0.  Simulation truth is intentionally kept
+        # separate from this readout-level README example.
         image_level="dl0",
         show_hillas=False,
-        include_non_triggered=False,
+        # This README example deliberately disables the trigger, so the
+        # camera image is valid even though its trigger flag is false.
+        include_non_triggered=True,
         show=False,
     )
     if figure is None:
-        raise RuntimeError(f"event {int(event.event_id)} has no camera images to plot")
+        # Older installed pyLAST native readers may not yet populate DL0 from
+        # the current ROOT schema. Keep the same pyLAST rendering style while
+        # reading the canonical observations.image_pe branch directly.
+        plot_root_dl0_with_pylast(
+            args.root_file, int(event.event_id), args.output
+        )
 
-    print(f"event_id={int(event.event_id)}; plotted with native pyLAST EventVisualizer")
+    print(f"event_id={int(event.event_id)}; plotted with native pyLAST camera style")
     print(args.output)
 
 

@@ -43,11 +43,44 @@ bool expectInvalidEfficiency(const std::map<std::string, std::string>& cfg,
     return false;
 }
 
+bool expectInvalidDetector(const std::map<std::string, std::string>& cfg,
+                           const std::string& label)
+{
+    try {
+        (void)buildDetectorPipelineConfig(cfg);
+    } catch (...) {
+        return true;
+    }
+    std::cerr << "expected invalid detector config: " << label << "\n";
+    return false;
+}
+
 } // namespace
 
 int main()
 {
     bool ok = true;
+
+    const auto default_detector = buildDetectorPipelineConfig({});
+    ok &= check(!default_detector.enabled,
+                "electronics should default to disabled");
+    ok &= check(
+        default_detector.microcell.pde_includes_inter_channel_gaps,
+        "inter-channel-gap PDE convention should default to included");
+
+    const auto enabled_detector = buildDetectorPipelineConfig({
+        {"electronics.enabled", "true"},
+    });
+    ok &= check(enabled_detector.enabled,
+                "electronics.enabled should enable detector simulation");
+
+    ok &= expectInvalidDetector(
+        {{"electronics.pipeline.enabled", "true"}},
+        "removed electronics.pipeline.enabled key");
+    ok &= expectInvalidDetector(
+        {{"electronics.enabled", "false"},
+         {"electronics.pipeline.enabled", "true"}},
+        "removed key must fail even when electronics.enabled is present");
 
     auto default_nsb = buildNsbConfig({});
     ok &= check(!default_nsb.enabled, "NSB should default to disabled");
@@ -109,6 +142,31 @@ int main()
                 "spectral NSB spectrum path parsed");
     ok &= check(std::abs(spectral_nsb.effective_area_m2 - 24.576860) < 1e-12,
                 "spectral NSB effective area parsed");
+
+    const auto s17351 = buildDetectorPipelineConfig({
+        {"electronics.microcell.enabled", "true"},
+        {"electronics.microcell.saturation_enabled", "false"},
+        {"electronics.microcell.layout", "s17351_tiled_2x4"},
+        {"electronics.microcell.sensor_size_x_m", "0.0134"},
+        {"electronics.microcell.sensor_size_y_m", "0.0134"},
+        {"electronics.microcell.channel_columns", "2"},
+        {"electronics.microcell.channel_rows", "4"},
+        {"electronics.microcell.channel_size_x_m", "0.0066"},
+        {"electronics.microcell.channel_size_y_m", "0.0032"},
+        {"electronics.microcell.channel_gap_x_m", "0.0002"},
+        {"electronics.microcell.channel_gap_y_m", "0.0002"},
+        {"electronics.microcell.microcell_columns_per_channel", "264"},
+        {"electronics.microcell.microcell_rows_per_channel", "128"},
+        {"electronics.microcell.pde_includes_inter_channel_gaps", "true"},
+    });
+    ok &= check(s17351.microcell.enabled,
+                "S17351 microcell geometry enabled parsed");
+    ok &= check(!s17351.microcell.saturation_enabled,
+                "independent saturation switch parsed");
+    ok &= check(s17351.microcell.layout == "s17351_tiled_2x4",
+                "physical S17351 layout parsed");
+    ok &= check(s17351.microcell.pde_includes_inter_channel_gaps,
+                "inter-channel-gap PDE convention parsed");
 
     auto trigger_default = buildTriggerConfig({});
     ok &= check(!trigger_default.enabled, "trigger should default to disabled");

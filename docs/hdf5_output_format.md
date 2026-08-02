@@ -35,7 +35,7 @@ both    stores both sparse and dense views
 
 The native C++ writer supports `sparse`, `dense`, and `both` for camera images.
 For production CORSIKA camera output, use `dense`: each image is a full
-event/telescope vector with one value per camera pixel, currently 1664 pixels
+event/telescope vector with one value per camera pixel, currently 1616 pixels
 for `new_camera`.
 
 ## Layout
@@ -52,8 +52,7 @@ for `new_camera`.
     ...
 
 /metadata/electronics
-  attrs: integrated_sipm, saturation_enabled, saturation_model,
-         channels_per_pixel, microcells_per_channel
+  attrs: placeholder model
 
 /metadata/waveform
   attrs: enabled, source, time bin/window settings
@@ -163,14 +162,18 @@ shower before selecting an array-offset stream.
 
 /images/dense/signal
 /images/dense/pe
-# present when integrated saturation is enabled
-/images/dense/primary_pe
 /images/dense/photon_count
 /images/dense/pixel_id_axis
 
 # optional when output.hdf5_write_components=true
-/images/dense/cherenkov_pe
-/images/dense/nsb_pe
+/images/dense/primary_cherenkov_pe
+/images/dense/primary_nsb_pe
+/images/dense/primary_dark_pe
+/images/dense/fired_cherenkov_pe
+/images/dense/fired_nsb_pe
+/images/dense/fired_dark_pe
+/images/dense/gap_lost_pe
+/images/dense/saturation_lost_pe
 
 # optional when output.write_pixel_time_stats=true
 /images/dense/time_mean_ns
@@ -182,8 +185,8 @@ shower before selecting an array-offset stream.
   time_edges_ns
   time_centers_ns
   reference_time_ns
-  photon_count or pe      # pe is fired p.e. after SiPM saturation
-  primary_pe              # pre-saturation Cherenkov+NSB p.e.
+  samples                 # sparse storage
+  photon_count, pe, or sample_value  # dense storage
 
 /trigger/telescope
   event_id
@@ -285,12 +288,11 @@ This is the recommended production format. It is preferable after
 NSB/background/electronics noise is added, when every pixel has a baseline
 value, and it also avoids needing an external pixel CSV when reading images.
 
-`/images/dense/pe` is the final fired-cell-equivalent integrated p.e. image.
-If NSB is enabled, it already includes the Poisson NSB contribution. When SiPM
-saturation is enabled, `/images/dense/primary_pe` retains the Cherenkov+NSB
-image before saturation. Set
-`output.hdf5_write_components=true` to also save the Cherenkov-only and NSB-only
-components for debugging.
+`/images/dense/pe` is the final integrated fired-p.e. image. If NSB is enabled,
+it already includes the Poisson NSB contribution. Set
+`output.hdf5_write_components=true` to save Primary/Fired origin components and
+the gap/saturation losses separately. With the electronics pipeline disabled,
+Primary and Fired are identical because no microcell loss stage is applied.
 
 Dense pixel time maps are optional because they add two full camera arrays per
 image:
@@ -303,11 +305,10 @@ They are written as `/images/dense/time_mean_ns` and
 `/images/dense/time_rms_ns`. The values are weighted by the final per-photon
 signal weight before NSB. Pixels with no signal are stored as zero.
 
-## Proxy Waveforms
+## Waveforms
 
-The current program does not simulate an analog/ADC electronics waveform. For
-timing checks it can optionally save a fired-p.e. proxy time series after the
-configured SiPM microcell saturation:
+For timing-only checks the program can save a proxy time series at the
+camera/collector output:
 
 ```ini
 waveform.enabled=true
@@ -319,12 +320,24 @@ waveform.time_window_end_ns=20
 ```
 
 `waveform.source=photon_count` writes `/waveforms/photon_count`;
-`waveform.source=pe` writes `/waveforms/pe` and
-`/waveforms/primary_pe`. These arrays have shape:
+`waveform.source=pe` writes `/waveforms/pe`. Both have shape:
 
 ```text
 [image_index, time_bin, pixel]
 ```
+
+For the full electronics path use:
+
+```ini
+electronics.enabled=true
+waveform.enabled=true
+waveform.source=electronics
+```
+
+Dense storage then writes `/waveforms/sample_value`; sparse storage writes the
+same quantity in the `sample_value` field of `/waveforms/samples`. Its unit is
+the configured detector waveform unit (for example mV), and ROOT/HDF5/CSV all
+serialize the same already-computed detector samples.
 
 The pixel order is `/waveforms/pixel_id_axis`, and time bins are described by
 `/waveforms/time_edges_ns` and `/waveforms/time_centers_ns`. If
@@ -337,18 +350,13 @@ absolute time coordinate plus optical propagation. If
 camera, as T0. In both relative modes, `/waveforms/reference_time_ns` records
 the subtracted absolute value for each image.
 
-For `waveform.source=pe`, Cherenkov and NSB p.e. are first accumulated into
-`primary_pe`; the time-ordered `hard_no_recovery` microcell model then produces
-the fired-p.e. `pe` samples. Consequently `/images/dense/pe` is the time
-integral of `/waveforms/pe` within floating-point precision. The proxy still
-does not include analog pulse shaping, ADC sampling, gain channels, crosstalk,
-afterpulsing, or microcell recovery.
-
-If NSB is enabled, the constant-rate model is sampled independently in every
-time bin. `/waveforms/cherenkov_pe` and `/waveforms/nsb_pe` retain
-pre-saturation truth components. Cherenkov photons outside the configured
-waveform time window are excluded from both the waveform and its integrated
-image. For CORSIKA camera GIF checks, prefer
+The proxy waveform does not include a real SiPM/electronics response. If NSB is
+enabled together with `waveform.source=pe`, the constant-rate NSB model is
+sampled independently in every time bin, and the dense
+`/images/dense/primary_nsb_pe`
+image is the time integral of `/waveforms/nsb_pe`. Cherenkov photons outside
+the configured waveform time window are not written to
+`/waveforms/cherenkov_pe`. For CORSIKA camera GIF checks, prefer
 `waveform.time_reference=image_first` with a compact window such as
 `-5..20 ns`; the GIF time axis is then `T - T0`.
 

@@ -1,0 +1,2 @@
+event_id,telescope_id,enabled,mode,triggered,max_pixels_above_threshold,first_trigger_bin,trigger_time_ns
+1,0,1,voltage,1,2,2,-10

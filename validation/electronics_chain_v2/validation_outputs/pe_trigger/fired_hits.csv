@@ -1,0 +1,5 @@
+event_id,telescope_id,pixel_id,time_ns,channel_id,microcell_id,fired_pe,origin
+1,0,10,0,0,16929,1,cherenkov
+1,0,10,2,0,16934,1,cherenkov
+1,0,11,3,0,16929,1,cherenkov
+1,0,11,4,0,16934,1,nsb

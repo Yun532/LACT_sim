@@ -62,7 +62,12 @@ def main() -> None:
     total_eff = mirror_i * filter_i * sipm_i
     detected = lons * total_eff
 
-    red_integral = float(np.trapz(detected, wave))
+    # NumPy 2.x exposes the trapezoidal integrator as ``trapezoid``;
+    # older supported environments only provide the deprecated ``trapz``.
+    trapezoid = getattr(np, "trapezoid", None)
+    if trapezoid is None:
+        trapezoid = np.trapz
+    red_integral = float(trapezoid(detected, wave))
     omega = (args.pixel_size_m / args.focal_length_m) ** 2
     rate = 1.0e-9 * red_integral * args.effective_area_m2 * omega
     mean = rate * args.window_ns

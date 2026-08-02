@@ -11,6 +11,18 @@ from matplotlib.collections import PatchCollection
 from matplotlib.patches import Rectangle
 
 
+IMAGE_COMPONENT_QUANTITIES = (
+    "primary_cherenkov_pe",
+    "primary_nsb_pe",
+    "primary_dark_pe",
+    "fired_cherenkov_pe",
+    "fired_nsb_pe",
+    "fired_dark_pe",
+    "gap_lost_pe",
+    "saturation_lost_pe",
+)
+
+
 def event_table(h5):
     if "events/corsika" in h5:
         return h5["events/corsika"][:]
@@ -116,7 +128,7 @@ def values_for_image(h5, image, quantity):
         values = h5[f"images/dense/{quantity}"][int(image["image_index"]), :]
         return {int(pid): float(v) for pid, v in zip(pixel_axis, values)}
 
-    if quantity in ("cherenkov_pe", "nsb_pe"):
+    if quantity in IMAGE_COMPONENT_QUANTITIES:
         raise SystemExit(
             f"{quantity} is only available for dense HDF5 files written with "
             "output.hdf5_write_components=true."
@@ -240,8 +252,7 @@ def main():
             "signal",
             "pe",
             "photon_count",
-            "cherenkov_pe",
-            "nsb_pe",
+            *IMAGE_COMPONENT_QUANTITIES,
             "time_mean_ns",
             "time_rms_ns",
         ),

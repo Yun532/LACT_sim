@@ -318,6 +318,7 @@ LACT ROOT adapter 和这些可视化接口位于
 - [坐标系中文说明](docs/coordinate_systems_zh.md)
 - [坐标系英文参考](docs/coordinate_systems.md)
 - [HDF5 输出格式](docs/hdf5_output_format.md)
+- [电子学结果与 ROOT、HDF5、CSV 统一输出](docs/electronics_output_unification_zh.md)
 - [相机时间和波形](docs/camera_timing_waveform_zh.md)
 - [NSB 光谱模型](docs/nsb_spectral_model_zh.md)
 - [ROOT/pylast 数据层级](docs/pylast_event_data_levels_zh.md)

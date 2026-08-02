@@ -39,7 +39,7 @@ def read_root_observation(
     event_id: int,
     telescope_id: int,
     camera_rows: list[dict[str, str]],
-    value_branch: str = "image_cherenkov_pe",
+    value_branch: str = "image_primary_cherenkov_pe",
 ) -> np.ndarray:
     """Read the ROOT pixel-id/value pairs without assuming an array order."""
     import ROOT
@@ -241,7 +241,7 @@ def main() -> None:
             "not expected to match because the minimal CSV uses one photon per "
             "CORSIKA bunch row and one configured wavelength"
         ),
-        "corsika_root_signal_branch": "observations.image_cherenkov_pe",
+        "corsika_root_signal_branch": "observations.image_primary_cherenkov_pe",
         "pixel_alignment": {
             "pixels": int(actual.size),
             "maximum_coordinate_error_m": maximum_coordinate_error_m,
