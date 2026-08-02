@@ -304,12 +304,16 @@ build/run_corsika_trace \
 
 ```ini
 sipm.config=../sipm/new_camera_sipm.cfg
+electronics.config=../electronics/explicit_microcell_saturation_only.cfg
 efficiency.config=../efficiency/curves_all.cfg
 nsb.config=../nsb/spectral_skycalc_dark_no_obstruction.cfg
-trigger.config=../trigger/example_simple_multiplicity.cfg
+trigger.config=../trigger/camera_pe_count_array_off.cfg
 output.hdf5_write_components=true
-waveform.enabled=true
+waveform.enabled=false
 ```
+
+当前正式链路把 Cherenkov 和 NSB 的 primary p.e. 一起送入显式微单元饱和，
+然后用饱和后的 PE 做相机触发；不生成单 PE 或采样波形。
 
 ### 完整响应
 

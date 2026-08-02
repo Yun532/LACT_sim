@@ -549,20 +549,17 @@ cfg 逐项解释：
 - `nsb.config=../nsb/spectral_skycalc_dark_no_obstruction.cfg`: 启用无月 SkyCalc LoNS
   光谱 NSB。固定有效面积为 `29.623570 m^2`，程序自动用相机像素尺寸和焦距计算
   `pixel_solid_angle`，得到约 `0.09206 p.e./ns/pixel`。
-- `trigger.config=../trigger/example_simple_multiplicity.cfg`: 启用简单 trigger。
+- `electronics.config=../electronics/explicit_microcell_saturation_only.cfg`: 对 Cherenkov
+  和 NSB p.e. 使用相同的显式微单元、无恢复饱和，不生成单 PE 波形。
+- `trigger.config=../trigger/camera_pe_count_array_off.cfg`: 启用 PE 计数相机 trigger，
+  阵列 trigger 保持关闭。
 - `source.max_shower_events=10`: 这个 official 项默认跑 10 个 CORSIKA shower，
-  在覆盖多个事件的同时限制 waveform 输出体积。
+  在覆盖多个事件的同时限制输出体积。
 - `trigger.pixel_threshold_pe=10`: official smoke test 使用 10 p.e. 像素阈值。
 - `output.hdf5_write_components=true`: 写出 `cherenkov_pe`、`nsb_pe` 和最终 `pe`。
 - `output.save_only_triggered=true`: 只保存触发望远镜图像，减少输出体积。
 - `output.write_pixel_time_stats=true`: 写出逐像素时间均值和 RMS。
-- `waveform.enabled=true`、`waveform.source=pe`: 写出 p.e. proxy waveform。
-- `waveform.time_reference=image_first`: 保存 waveform 时先减去每台望远镜图像的
-  第一个 Cherenkov 光子到达时间 `time_first_ns`，并在
-  `/waveforms/reference_time_ns` 中记录该参考时间。这样 GIF 使用 `T - T0`
-  的相对时间窗。
-- `waveform.time_bin_width_ns=1`: HDF5 保存 1 ns 时间 bin，保留较细时间信息。
-- 官方 GIF 绘图命令直接显示 1 ns/bin，时间窗为 `T0-5 ns` 到 `T0+20 ns`。
+- `waveform.enabled=false`: 不卷积单 PE 脉冲，也不写采样波形。
 - 其它镜面、相机、EventIO 配置与完美相机测试相同。
 
 单独运行：
@@ -576,10 +573,9 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
   --output "run_logs/official_tests/corsika/plots/event_${LACT_SELECTED_EVENT_ID}/nsb_trigger/all_tel_final_pe"
 ```
 
-检查重点：HDF5 里应有 `/images/dense/primary_cherenkov_pe`、`/images/dense/primary_nsb_pe` 和
-`/trigger` 表，也应有 `/waveforms/cherenkov_pe`、`/waveforms/nsb_pe` 和
-`/waveforms/pe`。官方脚本只为 `nsb_trigger` 画三类 GIF：`nsb_pe` 只画一台
-代表性望远镜，`cherenkov_pe` 和最终 `pe` 画该事件下保存的所有触发望远镜。
+检查重点：HDF5 里应有 `/images/dense/primary_cherenkov_pe`、
+`/images/dense/primary_nsb_pe`、饱和后的最终 `pe` 和 `/trigger` 表；不应写
+`/waveforms`。官方脚本分别画 Cherenkov、NSB 和最终饱和 PE 相机图。
 
 ## 10. CORSIKA + 3D 遮挡 + NSB + trigger 测试
 
@@ -602,7 +598,10 @@ cfg 逐项解释：
 - `nsb.config=../nsb/spectral_skycalc_dark_with_obstruction.cfg`: 加无月 SkyCalc LoNS
   光谱 NSB。固定有效面积为 `24.576860 m^2`，对应遮挡后的 official 平行光面积，
   程序算得约 `0.07637 p.e./ns/pixel`。
-- `trigger.config=../trigger/example_simple_multiplicity.cfg`: 启用 trigger。
+- `electronics.config=../electronics/explicit_microcell_saturation_only.cfg`: 启用显式
+  微单元无恢复饱和，关闭单 PE 和采样波形。
+- `trigger.config=../trigger/camera_pe_count_array_off.cfg`: 启用 PE 计数相机 trigger，
+  阵列 trigger 保持关闭。
 - `trigger.pixel_threshold_pe=10`: 像素阈值 10 p.e.。
 - `output.hdf5_path=run_logs/official_tests/corsika/camera_obstruction_nsb_trigger_dense.h5`:
   独立输出文件，避免覆盖不带遮挡的 NSB+trigger 测试。

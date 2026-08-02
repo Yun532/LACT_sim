@@ -237,7 +237,7 @@ build/run_corsika_trace \
 telescope.pointing_az_deg=0
 telescope.pointing_el_deg=70
 camera.config=../cameras/new_camera_1664.cfg
-electronics.config=../electronics/integrated_sipm_saturation.cfg
+electronics.config=../electronics/explicit_microcell_saturation_only.cfg
 waveform.enabled=false
 source.mode=EventIO
 source.coordinate_frame=corsika_nwu_relative
@@ -255,7 +255,8 @@ MPLBACKEND=Agg python3 python/plot_hdf5_camera.py \
   --output run_logs/official_tests/corsika/camera_first.png
 ```
 
-NSB、trigger、结构遮挡、阵列图、波形和 ROOT/pylast 输出见[完整 CORSIKA 流程](docs/user_guide_zh.md#corsika-相机和完整响应)。
+NSB、PE 计数 trigger、结构遮挡、阵列图和 ROOT/pylast 输出见[完整 CORSIKA 流程](docs/user_guide_zh.md#corsika-相机和完整响应)。
+当前正式配置只做显式微单元饱和，不生成单 PE 或采样波形；波形配置仅保留在专用验证示例中。
 
 ## LACT ROOT / pylast
 
@@ -273,8 +274,8 @@ build/run_corsika_trace \
 run_logs/lactroot_only/lact_events.root
 ```
 
-配置默认写入积分 p.e. 图像、CORSIKA truth、望远镜/相机 metadata 和稀疏
-`timeseries_pe` waveform；默认处理输入文件中的全部 shower，并且只保存通过
+配置默认写入饱和后的积分 p.e. 图像、CORSIKA truth 和望远镜/相机 metadata，
+不写 waveform；默认处理输入文件中的全部 shower，并且只保存通过 PE 计数
 trigger 的望远镜事件。快速画图：
 
 ```bash
