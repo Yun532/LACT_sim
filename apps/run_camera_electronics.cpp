@@ -96,8 +96,7 @@ void appendNsb(std::map<EventKey, std::vector<PrimaryPeHit>>& events,
             rate,
             start_ns,
             end_ns,
-            detector.microcell.sensor_size_x_m,
-            detector.microcell.sensor_size_y_m,
+            detector.microcell,
             seed);
         event.second.insert(
             event.second.end(), nsb_hits.begin(), nsb_hits.end());
@@ -137,7 +136,8 @@ void writeResult(const std::filesystem::path& directory,
         auto output = openOutput(directory, "microcell_decisions.csv");
         output << "primary_index,event_id,telescope_id,pixel_id,time_ns,"
                   "sensor_x_m,sensor_y_m,grid_column,grid_row,channel_id,"
-                  "microcell_id,fired,origin\n";
+                  "microcell_id,fired,gap_rejected,saturation_rejected,"
+                  "origin\n";
         for (const auto& item : result.microcell_decisions) {
             output << item.primary_index << ',' << item.event_id << ','
                    << item.telescope_id << ','
@@ -146,6 +146,8 @@ void writeResult(const std::filesystem::path& directory,
                    << item.grid_column << ',' << item.grid_row << ','
                    << item.channel_id << ',' << item.microcell_id << ','
                    << (item.fired ? 1 : 0) << ','
+                   << (item.gap_rejected ? 1 : 0) << ','
+                   << (item.saturation_rejected ? 1 : 0) << ','
                    << lact::electronics::hitOriginName(item.origin) << '\n';
         }
     }
@@ -166,7 +168,7 @@ void writeResult(const std::filesystem::path& directory,
         output << "event_id,telescope_id,pixel_id,primary_cherenkov_pe,"
                   "primary_nsb_pe,primary_dark_pe,primary_total_pe,"
                   "fired_cherenkov_pe,fired_nsb_pe,fired_dark_pe,"
-                  "fired_total_pe,saturation_lost_pe\n";
+                  "fired_total_pe,gap_lost_pe,saturation_lost_pe\n";
         for (std::size_t pixel = 0; pixel < result.pixels.size(); ++pixel) {
             const auto& item = result.pixels[pixel];
             const double primary =
@@ -181,7 +183,8 @@ void writeResult(const std::filesystem::path& directory,
                    << item.primary_nsb_pe << ',' << item.primary_dark_pe << ','
                    << primary << ',' << item.fired_cherenkov_pe << ','
                    << item.fired_nsb_pe << ',' << item.fired_dark_pe << ','
-                   << fired << ',' << item.saturation_lost_pe << '\n';
+                   << fired << ',' << item.gap_lost_pe << ','
+                   << item.saturation_lost_pe << '\n';
         }
     }
     {
@@ -260,6 +263,22 @@ void writeResult(const std::filesystem::path& directory,
                << "  \"n_fired_hits\": " << result.fired_hits.size() << ",\n"
                << "  \"microcell_enabled\": "
                << (config.microcell.enabled ? "true" : "false") << ",\n"
+               << "  \"microcell_saturation_enabled\": "
+               << (config.microcell.saturation_enabled ? "true" : "false")
+               << ",\n"
+               << "  \"microcell_layout\": \""
+               << config.microcell.layout << "\",\n"
+               << "  \"inter_channel_gap_geometry\": "
+               << "\"part of tiled layout\",\n"
+               << "  \"pde_includes_inter_channel_gaps\": "
+               << (config.microcell.pde_includes_inter_channel_gaps
+                       ? "true"
+                       : "false")
+               << ",\n"
+               << "  \"inter_channel_active_fraction\": "
+               << ::lact::electronics::interChannelActiveFraction(
+                      config.microcell)
+               << ",\n"
                << "  \"single_pe_enabled\": "
                << (config.single_pe.enabled ? "true" : "false") << ",\n"
                << "  \"sample_unit\": \"" << result.sample_unit << "\",\n"

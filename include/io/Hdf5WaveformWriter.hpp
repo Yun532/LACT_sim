@@ -8,6 +8,7 @@
 
 #include "app/OpticalSimCommon.hpp"
 #include "io/CorsikaTraceOutputTypes.hpp"
+#include "io/CameraElectronicsEvent.hpp"
 
 namespace lact {
 
@@ -27,6 +28,7 @@ void writeHdf5Waveforms(
     const std::vector<std::int32_t>& pixel_id_axis,
     const std::vector<Hdf5WaveformImage>& images,
     const std::map<WaveformKey, WaveformPixelAccumulator>& waveforms,
-    const std::vector<RawWaveformHit>& raw_hits);
+    const std::vector<RawWaveformHit>& raw_hits,
+    const CameraElectronicsEventMap& electronics_events);
 
 } // namespace lact

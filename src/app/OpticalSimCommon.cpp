@@ -2293,10 +2293,17 @@ electronics::DetectorPipelineConfig buildDetectorPipelineConfig(
     const std::map<std::string, std::string>& cfg)
 {
     electronics::DetectorPipelineConfig out;
-    out.enabled = getBool(
-        cfg, "electronics.pipeline.enabled", out.enabled);
+    if (cfg.find("electronics.pipeline.enabled") != cfg.end()) {
+        throw std::runtime_error(
+            "electronics.pipeline.enabled has been removed; "
+            "use electronics.enabled instead");
+    }
+    out.enabled = getBool(cfg, "electronics.enabled", out.enabled);
     out.microcell.enabled = getBool(
         cfg, "electronics.microcell.enabled", out.microcell.enabled);
+    out.microcell.saturation_enabled = getBool(
+        cfg, "electronics.microcell.saturation_enabled",
+        out.microcell.saturation_enabled);
     out.microcell.model = lowerCopy(trim(getString(
         cfg, "electronics.microcell.model", out.microcell.model)));
     out.microcell.layout = lowerCopy(trim(getString(
@@ -2318,7 +2325,33 @@ electronics::DetectorPipelineConfig buildDetectorPipelineConfig(
     out.microcell.microcells_per_channel = getInt(
         cfg, "electronics.microcell.microcells_per_channel",
         out.microcell.microcells_per_channel);
-
+    out.microcell.channel_columns = getInt(
+        cfg, "electronics.microcell.channel_columns",
+        out.microcell.channel_columns);
+    out.microcell.channel_rows = getInt(
+        cfg, "electronics.microcell.channel_rows",
+        out.microcell.channel_rows);
+    out.microcell.channel_size_x_m = getDouble(
+        cfg, "electronics.microcell.channel_size_x_m",
+        out.microcell.channel_size_x_m);
+    out.microcell.channel_size_y_m = getDouble(
+        cfg, "electronics.microcell.channel_size_y_m",
+        out.microcell.channel_size_y_m);
+    out.microcell.channel_gap_x_m = getDouble(
+        cfg, "electronics.microcell.channel_gap_x_m",
+        out.microcell.channel_gap_x_m);
+    out.microcell.channel_gap_y_m = getDouble(
+        cfg, "electronics.microcell.channel_gap_y_m",
+        out.microcell.channel_gap_y_m);
+    out.microcell.microcell_columns_per_channel = getInt(
+        cfg, "electronics.microcell.microcell_columns_per_channel",
+        out.microcell.microcell_columns_per_channel);
+    out.microcell.microcell_rows_per_channel = getInt(
+        cfg, "electronics.microcell.microcell_rows_per_channel",
+        out.microcell.microcell_rows_per_channel);
+    out.microcell.pde_includes_inter_channel_gaps = getBool(
+        cfg, "electronics.microcell.pde_includes_inter_channel_gaps",
+        out.microcell.pde_includes_inter_channel_gaps);
     out.single_pe.enabled = getBool(
         cfg, "electronics.single_pe.enabled", out.single_pe.enabled);
     out.single_pe.model = lowerCopy(trim(getString(
@@ -2820,12 +2853,19 @@ void applyCameraResponse(const CameraGeometry& camera,
                          const SipmConfig& sipm,
                          const ElectronicsResponse& electronics,
                          OpticalSurfaceHit& hit,
-                         double speed_of_light_m_per_ns)
+                         double speed_of_light_m_per_ns,
+                         const ::lact::electronics::MicrocellConfig* microcell,
+                         double post_geometry_pde_scale)
 {
     if (!std::isfinite(speed_of_light_m_per_ns) ||
         speed_of_light_m_per_ns <= 0.0) {
         throw std::runtime_error(
             "collector propagation speed must be finite and > 0");
+    }
+    if (!std::isfinite(post_geometry_pde_scale) ||
+        post_geometry_pde_scale <= 0.0) {
+        throw std::runtime_error(
+            "post-geometry PDE scale must be finite and > 0");
     }
     hit.camera_enabled = true;
     const double front_face_cosine =
@@ -2866,8 +2906,32 @@ void applyCameraResponse(const CameraGeometry& camera,
         }
     }
 
+    double pde = electronics.peConversion(hit.wavelength_nm);
+    if (hit.hit_camera && microcell && microcell->enabled &&
+        microcell->layout == "s17351_tiled_2x4") {
+        hit.sipm_geometry_enabled = true;
+        const auto address = ::lact::electronics::mapMicrocellPosition(
+            *microcell, hit.collector_exit_x_m, hit.collector_exit_y_m);
+        hit.sipm_grid_column = address.grid_column;
+        hit.sipm_grid_row = address.grid_row;
+        hit.sipm_channel_id = address.channel_id;
+        hit.sipm_microcell_id = address.microcell_id;
+        if (!address.inside_channel) {
+            hit.sipm_gap_rejected = true;
+            hit.sipm_channel_gap_rejected = address.channel_gap;
+            hit.hit_camera = false;
+            hit.accepted = false;
+            hit.relative_efficiency = 0.0;
+            return;
+        }
+        // In expectation mode the datasheet PDE is still carried by the
+        // optical hit weight.  If that PDE was averaged over the full tiled
+        // package, condition it on being inside a real channel before the
+        // explicit channel-gap geometry is applied.
+        hit.relative_efficiency *= post_geometry_pde_scale;
+    }
     if (hit.hit_camera) {
-        hit.relative_efficiency *= electronics.peConversion(hit.wavelength_nm);
+        hit.relative_efficiency *= pde;
     }
     hit.accepted = hit.hit_camera && hit.relative_efficiency > 0.0;
 }

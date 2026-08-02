@@ -216,14 +216,15 @@ CameraTriggerDecision evaluatePeCountTrigger(
                config.camera_trigger.coincidence_window_ns /
                config.sampling.width_ns)));
     for (std::size_t pixel = 0; pixel < n_pixels; ++pixel) {
-        for (std::size_t start = 0; start < n_samples; ++start) {
+        for (std::size_t end = 0; end < n_samples; ++end) {
             double pe = 0.0;
-            const std::size_t end = std::min(n_samples, start + window_bins);
-            for (std::size_t bin = start; bin < end; ++bin) {
+            const std::size_t start =
+                end + 1 > window_bins ? end + 1 - window_bins : 0;
+            for (std::size_t bin = start; bin <= end; ++bin) {
                 pe += counts[pixel * n_samples + bin];
             }
             if (pe >= config.camera_trigger.pixel_threshold_pe) {
-                ++out.pixels_above_threshold[start];
+                ++out.pixels_above_threshold[end];
             }
         }
     }
@@ -261,17 +262,18 @@ CameraTriggerDecision evaluateVoltageTrigger(
                config.camera_trigger.coincidence_window_ns /
                config.sampling.width_ns)));
     for (std::size_t pixel = 0; pixel < n_pixels; ++pixel) {
-        for (std::size_t start = 0; start < n_samples; ++start) {
-            const std::size_t end = std::min(n_samples, start + window_bins);
+        for (std::size_t end = 0; end < n_samples; ++end) {
+            const std::size_t start =
+                end + 1 > window_bins ? end + 1 - window_bins : 0;
             bool crossed = false;
-            for (std::size_t bin = start; bin < end; ++bin) {
+            for (std::size_t bin = start; bin <= end; ++bin) {
                 if (waveform[pixel * n_samples + bin] >=
                     config.camera_trigger.pixel_threshold_mv) {
                     crossed = true;
                     break;
                 }
             }
-            if (crossed) ++out.pixels_above_threshold[start];
+            if (crossed) ++out.pixels_above_threshold[end];
         }
     }
     for (std::size_t bin = 0; bin < n_samples; ++bin) {
@@ -295,6 +297,126 @@ CameraTriggerDecision evaluateVoltageTrigger(
 }
 
 } // namespace
+
+double interChannelActiveFraction(const MicrocellConfig& config)
+{
+    if (config.layout != "s17351_tiled_2x4") {
+        return 1.0;
+    }
+    const double sensor_area =
+        config.sensor_size_x_m * config.sensor_size_y_m;
+    const double channel_area =
+        static_cast<double>(config.channel_columns * config.channel_rows) *
+        config.channel_size_x_m * config.channel_size_y_m;
+    if (!(sensor_area > 0.0) || !(channel_area > 0.0) ||
+        channel_area > sensor_area) {
+        throw std::runtime_error(
+            "invalid S17351 area for inter-channel gap fraction");
+    }
+    return channel_area / sensor_area;
+}
+
+MicrocellAddress mapMicrocellPosition(
+    const MicrocellConfig& config,
+    double sensor_x_m,
+    double sensor_y_m)
+{
+    MicrocellAddress out;
+    if (!std::isfinite(sensor_x_m) || !std::isfinite(sensor_y_m) ||
+        !(config.sensor_size_x_m > 0.0) ||
+        !(config.sensor_size_y_m > 0.0)) {
+        return out;
+    }
+    const double half_x = 0.5 * config.sensor_size_x_m;
+    const double half_y = 0.5 * config.sensor_size_y_m;
+    if (sensor_x_m < -half_x || sensor_x_m > half_x ||
+        sensor_y_m < -half_y || sensor_y_m > half_y) {
+        return out;
+    }
+    out.inside_sensor = true;
+
+    if (config.layout == "uniform_interleaved") {
+        const double x_fraction = std::clamp(
+            (sensor_x_m + half_x) / config.sensor_size_x_m,
+            0.0, std::nextafter(1.0, 0.0));
+        const double y_fraction = std::clamp(
+            (sensor_y_m + half_y) / config.sensor_size_y_m,
+            0.0, std::nextafter(1.0, 0.0));
+        out.grid_column = static_cast<int>(
+            x_fraction * config.grid_columns);
+        out.grid_row = static_cast<int>(
+            y_fraction * config.grid_rows);
+        const std::uint64_t global_cell =
+            static_cast<std::uint64_t>(out.grid_row) *
+                static_cast<std::uint64_t>(config.grid_columns) +
+            static_cast<std::uint64_t>(out.grid_column);
+        out.channel_id = static_cast<int>(
+            global_cell %
+            static_cast<std::uint64_t>(config.channels_per_pixel));
+        out.microcell_id = static_cast<int>(
+            global_cell /
+            static_cast<std::uint64_t>(config.channels_per_pixel));
+        out.inside_channel = true;
+        return out;
+    }
+
+    if (config.layout != "s17351_tiled_2x4") {
+        return out;
+    }
+
+    const double local_x = sensor_x_m + half_x;
+    const double local_y = sensor_y_m + half_y;
+    const double tile_pitch_x =
+        config.channel_size_x_m + config.channel_gap_x_m;
+    const double tile_pitch_y =
+        config.channel_size_y_m + config.channel_gap_y_m;
+    int channel_column = static_cast<int>(std::floor(local_x / tile_pitch_x));
+    int channel_row_from_bottom =
+        static_cast<int>(std::floor(local_y / tile_pitch_y));
+    channel_column = std::clamp(
+        channel_column, 0, config.channel_columns - 1);
+    channel_row_from_bottom = std::clamp(
+        channel_row_from_bottom, 0, config.channel_rows - 1);
+    const double channel_x =
+        local_x - static_cast<double>(channel_column) * tile_pitch_x;
+    const double channel_y =
+        local_y - static_cast<double>(channel_row_from_bottom) * tile_pitch_y;
+    if (channel_x < 0.0 || channel_x >= config.channel_size_x_m ||
+        channel_y < 0.0 || channel_y >= config.channel_size_y_m) {
+        out.channel_gap = true;
+        return out;
+    }
+    out.inside_channel = true;
+
+    const double pitch_x =
+        config.channel_size_x_m /
+        static_cast<double>(config.microcell_columns_per_channel);
+    const double pitch_y =
+        config.channel_size_y_m /
+        static_cast<double>(config.microcell_rows_per_channel);
+    const int cell_column = std::min(
+        config.microcell_columns_per_channel - 1,
+        static_cast<int>(std::floor(channel_x / pitch_x)));
+    const int cell_row = std::min(
+        config.microcell_rows_per_channel - 1,
+        static_cast<int>(std::floor(channel_y / pitch_y)));
+    out.grid_column =
+        channel_column * config.microcell_columns_per_channel + cell_column;
+    out.grid_row =
+        channel_row_from_bottom * config.microcell_rows_per_channel + cell_row;
+
+    // Front-side S17351 drawing: B-1..B-4 are the left column and
+    // A-1..A-4 are the right column, numbered from top to bottom.
+    const int row_from_top =
+        config.channel_rows - 1 - channel_row_from_bottom;
+    out.channel_id =
+        channel_column == 1 ? row_from_top
+                            : config.channel_rows + row_from_top;
+    out.microcell_id =
+        cell_row * config.microcell_columns_per_channel + cell_column;
+
+    return out;
+}
 
 const char* hitOriginName(HitOrigin origin)
 {
@@ -324,9 +446,11 @@ void validateDetectorPipelineConfig(const DetectorPipelineConfig& config)
         throw std::runtime_error(
             "only microcell.model=explicit_no_recovery is supported");
     }
-    if (config.microcell.layout != "uniform_interleaved") {
+    if (!(config.microcell.layout == "uniform_interleaved" ||
+          config.microcell.layout == "s17351_tiled_2x4")) {
         throw std::runtime_error(
-            "only microcell.layout=uniform_interleaved is currently supported");
+            "microcell.layout must be uniform_interleaved or "
+            "s17351_tiled_2x4");
     }
     if (!(config.microcell.sensor_size_x_m > 0.0) ||
         !(config.microcell.sensor_size_y_m > 0.0) ||
@@ -346,6 +470,49 @@ void validateDetectorPipelineConfig(const DetectorPipelineConfig& config)
         throw std::runtime_error(
             "microcell grid must equal channels_per_pixel * "
             "microcells_per_channel");
+    }
+    if (config.microcell.layout == "s17351_tiled_2x4") {
+        const auto& microcell = config.microcell;
+        if (microcell.channel_columns != 2 ||
+            microcell.channel_rows != 4 ||
+            microcell.channels_per_pixel !=
+                microcell.channel_columns * microcell.channel_rows ||
+            microcell.microcell_columns_per_channel <= 0 ||
+            microcell.microcell_rows_per_channel <= 0 ||
+            microcell.microcells_per_channel !=
+                microcell.microcell_columns_per_channel *
+                    microcell.microcell_rows_per_channel ||
+            microcell.grid_columns !=
+                microcell.channel_columns *
+                    microcell.microcell_columns_per_channel ||
+            microcell.grid_rows !=
+                microcell.channel_rows *
+                    microcell.microcell_rows_per_channel ||
+            !(microcell.channel_size_x_m > 0.0) ||
+            !(microcell.channel_size_y_m > 0.0) ||
+            microcell.channel_gap_x_m < 0.0 ||
+            microcell.channel_gap_y_m < 0.0) {
+            throw std::runtime_error("invalid S17351 tiled microcell geometry");
+        }
+        const double expected_x =
+            microcell.channel_columns * microcell.channel_size_x_m +
+            (microcell.channel_columns - 1) * microcell.channel_gap_x_m;
+        const double expected_y =
+            microcell.channel_rows * microcell.channel_size_y_m +
+            (microcell.channel_rows - 1) * microcell.channel_gap_y_m;
+        constexpr double geometry_tolerance_m = 1.0e-9;
+        if (std::abs(expected_x - microcell.sensor_size_x_m) >
+                geometry_tolerance_m ||
+            std::abs(expected_y - microcell.sensor_size_y_m) >
+                geometry_tolerance_m) {
+            throw std::runtime_error(
+                "S17351 sensor size must include channel tiles and gaps");
+        }
+        const double active_fraction = interChannelActiveFraction(microcell);
+        if (!(active_fraction > 0.0) || active_fraction > 1.0) {
+            throw std::runtime_error(
+                "invalid S17351 inter-channel active fraction");
+        }
     }
     if (!(config.single_pe.model == "analytic" ||
           config.single_pe.model == "measured_csv" ||
@@ -468,59 +635,73 @@ DetectorPipelineResult runDetectorPipeline(
                 "use stochastic_pe input");
         }
         const int repetitions = static_cast<int>(rounded);
-        const double half_x = 0.5 * config.microcell.sensor_size_x_m;
-        const double half_y = 0.5 * config.microcell.sensor_size_y_m;
-        if (hit.sensor_x_m < -half_x || hit.sensor_x_m > half_x ||
-            hit.sensor_y_m < -half_y || hit.sensor_y_m > half_y) {
+        const auto address = mapMicrocellPosition(
+            config.microcell, hit.sensor_x_m, hit.sensor_y_m);
+        if (!address.inside_sensor) {
             throw std::runtime_error(
                 "primary p.e. position lies outside configured SiPM area");
         }
-        const double x_fraction =
-            std::clamp((hit.sensor_x_m + half_x) /
-                           config.microcell.sensor_size_x_m,
-                       0.0, std::nextafter(1.0, 0.0));
-        const double y_fraction =
-            std::clamp((hit.sensor_y_m + half_y) /
-                           config.microcell.sensor_size_y_m,
-                       0.0, std::nextafter(1.0, 0.0));
-        const int column = static_cast<int>(
-            x_fraction * config.microcell.grid_columns);
-        const int row = static_cast<int>(
-            y_fraction * config.microcell.grid_rows);
-        const std::uint64_t global_cell =
-            static_cast<std::uint64_t>(row) *
-                static_cast<std::uint64_t>(config.microcell.grid_columns) +
-            static_cast<std::uint64_t>(column);
-        const int channel = static_cast<int>(
-            global_cell %
-            static_cast<std::uint64_t>(config.microcell.channels_per_pixel));
-        const int microcell = static_cast<int>(
-            global_cell /
-            static_cast<std::uint64_t>(config.microcell.channels_per_pixel));
+        if (!address.inside_channel) {
+            for (int repetition = 0; repetition < repetitions; ++repetition) {
+                if (config.save_microcell_decisions) {
+                    out.microcell_decisions.push_back({
+                        ordered_index,
+                        hit.event_id,
+                        hit.telescope_id,
+                        hit.pixel_id,
+                        hit.time_ns,
+                        hit.sensor_x_m,
+                        hit.sensor_y_m,
+                        address.grid_column,
+                        address.grid_row,
+                        address.channel_id,
+                        address.microcell_id,
+                        false,
+                        true,
+                        false,
+                        hit.origin,
+                    });
+                }
+                out.pixels[static_cast<std::size_t>(hit.pixel_id)]
+                    .gap_lost_pe += 1.0;
+            }
+            continue;
+        }
+        const std::uint64_t cell_in_pixel =
+            static_cast<std::uint64_t>(address.channel_id) *
+                static_cast<std::uint64_t>(
+                    config.microcell.microcells_per_channel) +
+            static_cast<std::uint64_t>(address.microcell_id);
         const std::uint64_t occupancy_key =
             static_cast<std::uint64_t>(hit.pixel_id) * cells_per_pixel +
-            global_cell;
+            cell_in_pixel;
         for (int repetition = 0; repetition < repetitions; ++repetition) {
-            const bool fired = occupied.insert(occupancy_key).second;
-            out.microcell_decisions.push_back({
-                ordered_index,
-                hit.event_id,
-                hit.telescope_id,
-                hit.pixel_id,
-                hit.time_ns,
-                hit.sensor_x_m,
-                hit.sensor_y_m,
-                column,
-                row,
-                channel,
-                microcell,
-                fired,
-                hit.origin,
-            });
+            const bool fired =
+                !config.microcell.saturation_enabled ||
+                occupied.insert(occupancy_key).second;
+            if (config.save_microcell_decisions) {
+                out.microcell_decisions.push_back({
+                    ordered_index,
+                    hit.event_id,
+                    hit.telescope_id,
+                    hit.pixel_id,
+                    hit.time_ns,
+                    hit.sensor_x_m,
+                    hit.sensor_y_m,
+                    address.grid_column,
+                    address.grid_row,
+                    address.channel_id,
+                    address.microcell_id,
+                    fired,
+                    false,
+                    !fired,
+                    hit.origin,
+                });
+            }
             if (fired) {
                 out.fired_hits.push_back({
                     hit.event_id, hit.telescope_id, hit.pixel_id, hit.time_ns,
-                    channel, microcell, 1.0, hit.origin});
+                    address.channel_id, address.microcell_id, 1.0, hit.origin});
                 addFired(out.pixels[static_cast<std::size_t>(hit.pixel_id)],
                          hit.origin, 1.0);
             } else {
@@ -603,14 +784,13 @@ std::vector<PrimaryPeHit> generateUniformNsbPrimaryHits(
     double rate_pe_per_ns_per_pixel,
     double start_ns,
     double end_ns,
-    double sensor_size_x_m,
-    double sensor_size_y_m,
+    const MicrocellConfig& microcell,
     std::uint64_t seed)
 {
     if (!(rate_pe_per_ns_per_pixel >= 0.0) ||
         !(end_ns > start_ns) ||
-        !(sensor_size_x_m > 0.0) ||
-        !(sensor_size_y_m > 0.0)) {
+        !(microcell.sensor_size_x_m > 0.0) ||
+        !(microcell.sensor_size_y_m > 0.0)) {
         throw std::runtime_error("invalid NSB primary-hit generation settings");
     }
     std::seed_seq sequence{
@@ -623,9 +803,56 @@ std::vector<PrimaryPeHit> generateUniformNsbPrimaryHits(
         rate_pe_per_ns_per_pixel * (end_ns - start_ns));
     std::uniform_real_distribution<double> time_distribution(start_ns, end_ns);
     std::uniform_real_distribution<double> x_distribution(
-        -0.5 * sensor_size_x_m, 0.5 * sensor_size_x_m);
+        -0.5 * microcell.sensor_size_x_m,
+        0.5 * microcell.sensor_size_x_m);
     std::uniform_real_distribution<double> y_distribution(
-        -0.5 * sensor_size_y_m, 0.5 * sensor_size_y_m);
+        -0.5 * microcell.sensor_size_y_m,
+        0.5 * microcell.sensor_size_y_m);
+    std::uniform_int_distribution<int> channel_distribution(
+        0, microcell.channels_per_pixel - 1);
+    std::uniform_int_distribution<int> microcell_distribution(
+        0, microcell.microcells_per_channel - 1);
+    std::uniform_real_distribution<double> centered_distribution(-0.5, 0.5);
+
+    auto active_position = [&]() {
+        if (microcell.layout != "s17351_tiled_2x4") {
+            return std::pair<double, double>{
+                x_distribution(rng), y_distribution(rng)};
+        }
+        const int channel = channel_distribution(rng);
+        const int row_from_top =
+            channel < microcell.channel_rows
+                ? channel
+                : channel - microcell.channel_rows;
+        const int channel_column =
+            channel < microcell.channel_rows ? 1 : 0;
+        const int channel_row_from_bottom =
+            microcell.channel_rows - 1 - row_from_top;
+        const int cell = microcell_distribution(rng);
+        const int cell_column =
+            cell % microcell.microcell_columns_per_channel;
+        const int cell_row =
+            cell / microcell.microcell_columns_per_channel;
+        const double pitch_x =
+            microcell.channel_size_x_m /
+            static_cast<double>(microcell.microcell_columns_per_channel);
+        const double pitch_y =
+            microcell.channel_size_y_m /
+            static_cast<double>(microcell.microcell_rows_per_channel);
+        const double x =
+            -0.5 * microcell.sensor_size_x_m +
+            channel_column *
+                (microcell.channel_size_x_m + microcell.channel_gap_x_m) +
+            (static_cast<double>(cell_column) + 0.5) * pitch_x +
+            centered_distribution(rng) * pitch_x;
+        const double y =
+            -0.5 * microcell.sensor_size_y_m +
+            channel_row_from_bottom *
+                (microcell.channel_size_y_m + microcell.channel_gap_y_m) +
+            (static_cast<double>(cell_row) + 0.5) * pitch_y +
+            centered_distribution(rng) * pitch_y;
+        return std::pair<double, double>{x, y};
+    };
     std::vector<PrimaryPeHit> hits;
     const double expected =
         static_cast<double>(n_pixels) *
@@ -634,13 +861,14 @@ std::vector<PrimaryPeHit> generateUniformNsbPrimaryHits(
     for (std::size_t pixel = 0; pixel < n_pixels; ++pixel) {
         const int count = count_distribution(rng);
         for (int i = 0; i < count; ++i) {
+            const auto position = active_position();
             hits.push_back({
                 event_id,
                 telescope_id,
                 static_cast<int>(pixel),
                 time_distribution(rng),
-                x_distribution(rng),
-                y_distribution(rng),
+                position.first,
+                position.second,
                 0.0,
                 1.0,
                 HitOrigin::Nsb,

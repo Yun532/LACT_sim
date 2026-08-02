@@ -26,7 +26,8 @@ CORSIKA/EventIO
 ## 输出开关
 
 ```ini
-electronics.pipeline.enabled=true
+electronics.enabled=true
+# 旧名称 electronics.pipeline.enabled 已删除；配置中出现时程序直接报错。
 electronics.microcell.enabled=true
 electronics.single_pe.enabled=true
 waveform.enabled=true
@@ -47,14 +48,17 @@ electronics.output.save_microcell_decisions=false
 
 ROOT 数据级别：
 
-- `observations.image_cherenkov_pe`：饱和前、纯切伦科夫真值；
+- `observations.image_primary_cherenkov_pe`：饱和前、纯切伦科夫真值；
+- `observations.image_primary_nsb_pe`：饱和前 NSB 真值；
 - `observations.image_fired_cherenkov_pe`：饱和后、纯切伦科夫真值；
-- `observations.image_fired_pe` / `image_pe`：饱和后的最终探测器图；
+- `observations.image_fired_nsb_pe`：饱和后 NSB；
+- `observations.image_pe`：饱和后的最终探测器图；
 - `primary_pe_hits`、`microcell_decisions`、`fired_pe_hits`：可选逐 hit 诊断；
 - `waveforms.sample_value`：4 ns 采样值，单位见 `waveform_config.sample_unit`。
 
-电子学波形的规范序列化目前使用 `lact_event` ROOT。若请求
-`waveform.source=electronics` 与 HDF5 波形同时输出，程序会明确报错，不会写出空波形。
+电子学结果在 writer 之前只计算一次。`waveform.source=electronics` 可同时写入
+ROOT、HDF5 和 CSV；三种格式共享同一 NSB realization、微单元结果、波形和触发判定。
+时间参考与字段对应关系见 `docs/electronics_output_unification_zh.md`。
 
 ## 运行
 

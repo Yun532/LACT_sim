@@ -29,6 +29,7 @@ int main()
     using namespace lact::electronics;
     DetectorPipelineConfig config;
     config.microcell.enabled = true;
+    config.save_microcell_decisions = true;
     config.single_pe.enabled = false;
     config.sampling.start_ns = 0.0;
     config.sampling.end_ns = 40.0;
@@ -66,6 +67,56 @@ int main()
             "different-position NSB hit must fire");
     require(result.camera_trigger.triggered,
             "two pixels in the coincidence window must trigger");
+    require(result.camera_trigger.first_trigger_bin == 1 &&
+                std::abs(result.camera_trigger.trigger_time_ns - 6.0) < 1.0e-12,
+            "camera trigger time must be the causal window-end sample");
+
+    MicrocellConfig s17351;
+    s17351.layout = "s17351_tiled_2x4";
+    s17351.sensor_size_x_m = 0.0134;
+    s17351.sensor_size_y_m = 0.0134;
+    const auto active_cell = mapMicrocellPosition(
+        s17351, -0.0066875, -0.0066875);
+    require(active_cell.inside_channel,
+            "S17351 cell center must map to a channel");
+    require(active_cell.channel_id == 7 && active_cell.microcell_id == 0,
+            "S17351 front-side B-4 lower-left mapping is incorrect");
+    const auto channel_gap = mapMicrocellPosition(
+        s17351, 0.0, -0.0060);
+    require(channel_gap.channel_gap && !channel_gap.inside_channel,
+            "S17351 0.2 mm inter-channel gap must be explicit");
+    const double expected_channel_fraction =
+        8.0 * 0.0066 * 0.0032 / (0.0134 * 0.0134);
+    require(std::abs(interChannelActiveFraction(s17351) -
+                     expected_channel_fraction) < 1.0e-12,
+            "S17351 channel active fraction must follow package geometry");
+    const auto cell_edge = mapMicrocellPosition(
+        s17351, -0.006699, -0.0066875);
+    require(cell_edge.inside_channel &&
+                cell_edge.microcell_id == active_cell.microcell_id,
+            "all positions inside a 25 um pitch must map to that microcell");
+
+    DetectorPipelineConfig gap_config;
+    gap_config.microcell = s17351;
+    gap_config.microcell.enabled = true;
+    gap_config.microcell.saturation_enabled = false;
+    gap_config.save_microcell_decisions = true;
+    gap_config.sampling.start_ns = 0.0;
+    gap_config.sampling.end_ns = 40.0;
+    gap_config.sampling.width_ns = 4.0;
+    std::vector<PrimaryPeHit> gap_hits = {
+        {1, 2, 0, 4.0, -0.0066875, -0.0066875, 420.0, 1.0,
+         HitOrigin::Cherenkov},
+        {1, 2, 0, 5.0, -0.006699, -0.0066875, 420.0, 1.0,
+         HitOrigin::Cherenkov},
+    };
+    const auto gap_result = runDetectorPipeline(gap_config, 1, gap_hits);
+    require(gap_result.fired_hits.size() == 2,
+            "datasheet-PDE p.e. must not be rejected inside a microcell");
+    require(gap_result.pixels[0].gap_lost_pe == 0.0,
+            "no sub-microcell fill-factor loss may be applied");
+    require(gap_result.pixels[0].saturation_lost_pe == 0.0,
+            "gap-only mode must not report saturation");
 
     config.single_pe.enabled = true;
     config.single_pe.model = "analytic";

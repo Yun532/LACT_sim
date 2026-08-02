@@ -14,6 +14,10 @@ struct CorsikaTraceOutputConfig {
     std::string hits_csv = "corsika_whiteboard_hits.csv";
     std::string pixel_csv = "corsika_pixel_image.csv";
     std::string summary_csv = "corsika_trace_summary.csv";
+    std::string waveform_csv = "corsika_waveforms.csv";
+    std::string trigger_csv = "corsika_triggers.csv";
+    std::string primary_pe_csv = "corsika_primary_pe.csv";
+    std::string fired_pe_csv = "corsika_fired_pe.csv";
     std::string mirror_diagnostic_csv;
     std::string hdf5_path = "corsika_trace.h5";
     std::string lact_root_path = "lact_events.root";

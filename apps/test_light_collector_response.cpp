@@ -116,6 +116,35 @@ int main()
     applyCameraResponse(camera, nullptr, plane, sipm, electronics, outside);
     ok &= check(!outside.hit_camera, "point outside square pixel should not hit camera");
 
+    ::lact::electronics::MicrocellConfig tiled;
+    tiled.enabled = true;
+    tiled.layout = "s17351_tiled_2x4";
+    tiled.sensor_size_x_m = 0.0134;
+    tiled.sensor_size_y_m = 0.0134;
+    const double channel_fraction =
+        ::lact::electronics::interChannelActiveFraction(tiled);
+    auto conditioned = makeHit(0.0, 0.0, {0.0, 0.0, 1.0});
+    conditioned.collector_exit_x_m = -0.0066875;
+    conditioned.collector_exit_y_m = -0.0066875;
+    applyCameraResponse(camera, nullptr, plane, sipm, electronics,
+                        conditioned, 0.299792458, &tiled,
+                        1.0 / channel_fraction);
+    ok &= check(conditioned.accepted,
+                "channel-area-conditioned hit should remain accepted");
+    ok &= check(std::abs(conditioned.relative_efficiency -
+                         1.0 / channel_fraction) < 1.0e-12,
+                "expectation-mode channel PDE correction is incorrect");
+
+    auto explicit_gap = makeHit(0.0, 0.0, {0.0, 0.0, 1.0});
+    explicit_gap.collector_exit_x_m = 0.0;
+    explicit_gap.collector_exit_y_m = 0.0;
+    applyCameraResponse(camera, nullptr, plane, sipm, electronics,
+                        explicit_gap, 0.299792458, &tiled,
+                        1.0 / channel_fraction);
+    ok &= check(!explicit_gap.accepted &&
+                    explicit_gap.sipm_channel_gap_rejected,
+                "explicit inter-channel gap must reject before PDE weighting");
+
     CameraConfig collector_cfg;
     collector_cfg.enabled = true;
     collector_cfg.mode = "csv";

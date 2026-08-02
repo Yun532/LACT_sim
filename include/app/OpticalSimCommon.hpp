@@ -379,7 +379,9 @@ void applyCameraResponse(const CameraGeometry& camera,
                          const SipmConfig& sipm,
                          const ElectronicsResponse& electronics,
                          OpticalSurfaceHit& hit,
-                         double speed_of_light_m_per_ns = 0.299792458);
+                         double speed_of_light_m_per_ns = 0.299792458,
+                         const ::lact::electronics::MicrocellConfig* microcell = nullptr,
+                         double post_geometry_pde_scale = 1.0);
 void accumulatePixelHit(std::map<PixelKey, PixelAccumulator>& pixels,
                         int event_id,
                         int telescope_id,

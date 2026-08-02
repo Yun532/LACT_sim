@@ -83,6 +83,7 @@ add_library(simlite_core
     src/io/EventIOPhotonSemantics.cpp
     src/io/EventIOArrayTiming.cpp
     src/io/Sha256.cpp
+    src/io/CameraElectronicsEvent.cpp
     src/app/OpticalSimCommon.cpp
     src/app/ArrayTimingCorrection.cpp
     src/app/PhotonResponseSampler.cpp

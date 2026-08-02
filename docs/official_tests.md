@@ -576,7 +576,7 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_hdf5_camera.py \
   --output "run_logs/official_tests/corsika/plots/event_${LACT_SELECTED_EVENT_ID}/nsb_trigger/all_tel_final_pe"
 ```
 
-检查重点：HDF5 里应有 `/images/dense/cherenkov_pe`、`/images/dense/nsb_pe` 和
+检查重点：HDF5 里应有 `/images/dense/primary_cherenkov_pe`、`/images/dense/primary_nsb_pe` 和
 `/trigger` 表，也应有 `/waveforms/cherenkov_pe`、`/waveforms/nsb_pe` 和
 `/waveforms/pe`。官方脚本只为 `nsb_trigger` 画三类 GIF：`nsb_pe` 只画一台
 代表性望远镜，`cherenkov_pe` 和最终 `pe` 画该事件下保存的所有触发望远镜。

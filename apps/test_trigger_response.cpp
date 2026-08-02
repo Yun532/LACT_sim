@@ -43,9 +43,9 @@ int main()
     ok &= check(camera.triggered, "camera trigger was missed");
     ok &= check(camera.n_pixels_above_threshold == 2,
                 "camera multiplicity is incorrect");
-    ok &= check(camera.window_start_bin == 1,
+    ok &= check(camera.window_start_bin == 2,
                 "camera trigger selected the wrong time window");
-    ok &= check(camera.first_trigger_window_start_bin == 1,
+    ok &= check(camera.first_trigger_window_start_bin == 2,
                 "camera trigger selected the wrong first threshold window");
     ok &= check(std::abs(camera.trigger_time_ns - 102.5) < 1.0e-12,
                 "camera trigger time is incorrect");

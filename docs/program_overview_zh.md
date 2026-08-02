@@ -355,8 +355,8 @@ event/telescope 级摘要。绘图时用于按第几个 shower event 或 event_i
 相机输出加 constant-rate NSB 和 simple trigger。若启用 `output.hdf5_write_components=true`，会额外保存：
 
 ```text
-/images/dense/cherenkov_pe
-/images/dense/nsb_pe
+/images/dense/primary_cherenkov_pe
+/images/dense/primary_nsb_pe
 /waveforms/cherenkov_pe
 /waveforms/nsb_pe
 /waveforms/pe

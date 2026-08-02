@@ -34,6 +34,7 @@ struct PrimaryPeHit {
 
 struct MicrocellConfig {
     bool enabled = false;
+    bool saturation_enabled = true;
     std::string model = "explicit_no_recovery";
     std::string layout = "uniform_interleaved";
     double sensor_size_x_m = 0.0130;
@@ -42,6 +43,32 @@ struct MicrocellConfig {
     int grid_rows = 512;
     int channels_per_pixel = 8;
     int microcells_per_channel = 33792;
+    // S17351 physical layout.  The 8 channels are 2 x 4 tiles, each with
+    // a 6.6 x 3.2 mm^2 active envelope and a 0.2 mm inter-channel gap.
+    int channel_columns = 2;
+    int channel_rows = 4;
+    double channel_size_x_m = 0.0066;
+    double channel_size_y_m = 0.0032;
+    double channel_gap_x_m = 0.0002;
+    double channel_gap_y_m = 0.0002;
+    int microcell_columns_per_channel = 264;
+    int microcell_rows_per_channel = 128;
+    // The tiled layout contains the specified 0.2 mm inter-channel gaps.
+    // Datasheet PDE is already effective, so no sub-microcell active region
+    // or fill-factor rejection is modelled.
+    // If true, the supplied PDE is also assumed to have been averaged over
+    // the full sensor envelope including the inter-channel gaps.
+    bool pde_includes_inter_channel_gaps = true;
+};
+
+struct MicrocellAddress {
+    bool inside_sensor = false;
+    bool inside_channel = false;
+    bool channel_gap = false;
+    int grid_column = -1;
+    int grid_row = -1;
+    int channel_id = -1;
+    int microcell_id = -1;
 };
 
 struct SinglePeConfig {
@@ -100,6 +127,8 @@ struct MicrocellDecision {
     int channel_id = -1;
     int microcell_id = -1;
     bool fired = false;
+    bool gap_rejected = false;
+    bool saturation_rejected = false;
     HitOrigin origin = HitOrigin::Cherenkov;
 };
 
@@ -121,6 +150,7 @@ struct PixelSummary {
     double fired_cherenkov_pe = 0.0;
     double fired_nsb_pe = 0.0;
     double fired_dark_pe = 0.0;
+    double gap_lost_pe = 0.0;
     double saturation_lost_pe = 0.0;
 };
 
@@ -153,6 +183,13 @@ struct DetectorPipelineResult {
 
 void validateDetectorPipelineConfig(const DetectorPipelineConfig& config);
 
+MicrocellAddress mapMicrocellPosition(
+    const MicrocellConfig& config,
+    double sensor_x_m,
+    double sensor_y_m);
+
+double interChannelActiveFraction(const MicrocellConfig& config);
+
 DetectorPipelineResult runDetectorPipeline(
     const DetectorPipelineConfig& config,
     std::size_t n_pixels,
@@ -165,8 +202,7 @@ std::vector<PrimaryPeHit> generateUniformNsbPrimaryHits(
     double rate_pe_per_ns_per_pixel,
     double start_ns,
     double end_ns,
-    double sensor_size_x_m,
-    double sensor_size_y_m,
+    const MicrocellConfig& microcell,
     std::uint64_t seed);
 
 } // namespace lact::electronics

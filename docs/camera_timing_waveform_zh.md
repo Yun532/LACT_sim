@@ -63,7 +63,7 @@ waveform.time_window_end_ns=20
 
 注意：waveform proxy 不做真实 SiPM/electronics 响应。如果同时开启 NSB 和
 `waveform.source=pe`，当前 constant-rate NSB 会在每个 time bin 里独立做
-Poisson 采样，并写入 `/waveforms/nsb_pe`；最终 `/images/dense/nsb_pe`
+Poisson 采样，并写入 `/waveforms/nsb_pe`；最终 `/images/dense/primary_nsb_pe`
 等于这些 time bins 的积分。Cherenkov 光子如果落在配置的 waveform 时间窗
 之外，不会进入 `/waveforms/cherenkov_pe`，因此需要精确检查 Cherenkov 时间
 积分时，要把时间窗设得足够宽。

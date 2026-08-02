@@ -329,14 +329,20 @@ def analyze(
 
         pe = np.asarray(handle["/images/dense/pe"][()], dtype=np.float64)
         cherenkov = np.asarray(
-            handle["/images/dense/cherenkov_pe"][()], dtype=np.float64
+            handle["/images/dense/fired_cherenkov_pe"][()], dtype=np.float64
         )
-        nsb = np.asarray(handle["/images/dense/nsb_pe"][()], dtype=np.float64)
-        decomposition = pe - cherenkov - nsb
+        nsb = np.asarray(
+            handle["/images/dense/fired_nsb_pe"][()], dtype=np.float64
+        )
+        dark = np.asarray(
+            handle["/images/dense/fired_dark_pe"][()], dtype=np.float64
+        )
+        decomposition = pe - cherenkov - nsb - dark
         report["images"] = {
             "pe": stats(pe),
             "cherenkov_pe": stats(cherenkov),
             "nsb_pe": stats(nsb),
+            "dark_pe": stats(dark),
             "per_image_total_pe": stats(np.sum(pe, axis=1, dtype=np.float64)),
             "per_image_cherenkov_pe": stats(
                 np.sum(cherenkov, axis=1, dtype=np.float64)

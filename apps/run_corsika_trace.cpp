@@ -4,6 +4,7 @@
 #include "app/TelescopeOpticsCache.hpp"
 #include "app/TriggerResponse.hpp"
 #include "core/Sha256.hpp"
+#include "io/CameraElectronicsEvent.hpp"
 #include "io/CorsikaTraceOutputTypes.hpp"
 
 #ifdef LACT_HAS_HDF5
@@ -115,6 +116,12 @@ struct CollectorDebugPhotonRow {
     double dir_u = 0.0;
     double dir_v = 0.0;
     double dir_w = 0.0;
+    int sipm_gap_rejected = 0;
+    int sipm_channel_gap_rejected = 0;
+    int sipm_grid_column = -1;
+    int sipm_grid_row = -1;
+    int sipm_channel_id = -1;
+    int sipm_microcell_id = -1;
 };
 
 struct WhiteboardHdf5Row {
@@ -380,6 +387,12 @@ CorsikaTraceOutputConfig buildCorsikaTraceOutputConfig(
                              getString(cfg, "output.whiteboard_csv", out.hits_csv));
     out.pixel_csv = getString(cfg, "output.pixel_csv", out.pixel_csv);
     out.summary_csv = getString(cfg, "output.summary_csv", out.summary_csv);
+    out.waveform_csv = getString(cfg, "output.waveform_csv", out.waveform_csv);
+    out.trigger_csv = getString(cfg, "output.trigger_csv", out.trigger_csv);
+    out.primary_pe_csv = getString(
+        cfg, "output.primary_pe_csv", out.primary_pe_csv);
+    out.fired_pe_csv = getString(
+        cfg, "output.fired_pe_csv", out.fired_pe_csv);
     out.mirror_diagnostic_csv =
         getString(cfg, "output.mirror_diagnostic_csv",
                   out.mirror_diagnostic_csv);
@@ -782,6 +795,12 @@ void appendCollectorDebugPhoton(std::vector<CollectorDebugPhotonRow>& rows,
         hit.collector_dir_u,
         hit.collector_dir_v,
         hit.collector_dir_w,
+        hit.sipm_gap_rejected ? 1 : 0,
+        hit.sipm_channel_gap_rejected ? 1 : 0,
+        hit.sipm_grid_column,
+        hit.sipm_grid_row,
+        hit.sipm_channel_id,
+        hit.sipm_microcell_id,
     });
 }
 
@@ -805,7 +824,10 @@ void writeCollectorDebugCsv(const CollectorDebugConfig& cfg,
         << "collector_path_length_m,collector_time_delay_ns,"
         << "wavelength_nm,photon_weight,"
         << "relative_efficiency,signal_weight,exit_x_m,exit_y_m,exit_z_m,"
-        << "dir_u,dir_v,dir_w\n";
+        << "dir_u,dir_v,dir_w,sipm_gap_rejected,"
+        << "sipm_channel_gap_rejected,"
+        << "sipm_grid_column,sipm_grid_row,sipm_channel_id,"
+        << "sipm_microcell_id\n";
     out << std::setprecision(10);
     for (const auto& row : rows) {
         out << row.event_id << ','
@@ -826,7 +848,13 @@ void writeCollectorDebugCsv(const CollectorDebugConfig& cfg,
             << row.exit_z_m << ','
             << row.dir_u << ','
             << row.dir_v << ','
-            << row.dir_w << '\n';
+            << row.dir_w << ','
+            << row.sipm_gap_rejected << ','
+            << row.sipm_channel_gap_rejected << ','
+            << row.sipm_grid_column << ','
+            << row.sipm_grid_row << ','
+            << row.sipm_channel_id << ','
+            << row.sipm_microcell_id << '\n';
     }
 }
 
@@ -950,7 +978,8 @@ WhiteboardHdf5Row makeWhiteboardHdf5Row(const PhotonBunch& bunch,
 }
 
 void writeSummaryCsv(const std::string& path,
-                     const std::map<SummaryKey, TraceSummary>& summaries)
+                     const std::map<SummaryKey, TraceSummary>& summaries,
+                     const CameraElectronicsEventMap& electronics_events)
 {
     const std::filesystem::path out_path(path);
     if (out_path.has_parent_path()) {
@@ -960,7 +989,7 @@ void writeSummaryCsv(const std::string& path,
     if (!ofs) {
         throw std::runtime_error("failed to write summary CSV: " + path);
     }
-    ofs << std::setprecision(10);
+    ofs << std::setprecision(17);
     ofs << "event_id,telescope_id,input_bunches,input_photons,"
         << "blocked_by_obstruction,blocked_incoming,blocked_reflected,"
         << "hit_mirror_before_obstruction,hit_output_before_obstruction,"
@@ -968,9 +997,18 @@ void writeSummaryCsv(const std::string& path,
         << "mirror_transmission_after_incoming_obstruction,"
         << "output_transmission_after_obstruction,"
         << "lost_between_pixels,unique_hit_pixels,pe,signal,"
-        << "time_mean_ns,time_rms_ns\n";
+        << "time_mean_ns,time_rms_ns,time_first_ns,reference_time_ns,"
+        << "primary_cherenkov_pe,primary_nsb_pe,fired_cherenkov_pe,"
+        << "fired_nsb_pe,fired_dark_pe,gap_lost_pe,saturation_lost_pe,"
+        << "triggered,n_pixels_above_threshold,trigger_time_ns,"
+        << "geometric_delay_ns,coincidence_time_ns,array_triggered\n";
     for (const auto& kv : summaries) {
         const auto& s = kv.second;
+        const auto canonical = electronics_events.find(kv.first);
+        if (canonical != electronics_events.end() &&
+            !canonical->second.selected_for_output) {
+            continue;
+        }
         const double mean = s.weighted_signal > 0.0
             ? s.weighted_time_sum / s.weighted_signal
             : 0.0;
@@ -985,6 +1023,27 @@ void writeSummaryCsv(const std::string& path,
             ? static_cast<double>(s.hit_output_plane) /
               static_cast<double>(s.hit_output_before_obstruction)
             : 0.0;
+        double primary_cherenkov_pe = 0.0;
+        double primary_nsb_pe = 0.0;
+        double fired_cherenkov_pe = 0.0;
+        double fired_nsb_pe = 0.0;
+        double fired_dark_pe = 0.0;
+        double gap_lost_pe = 0.0;
+        double saturation_lost_pe = 0.0;
+        if (canonical != electronics_events.end()) {
+            for (const auto& pixel : canonical->second.detector.pixels) {
+                primary_cherenkov_pe += pixel.primary_cherenkov_pe;
+                primary_nsb_pe += pixel.primary_nsb_pe;
+                fired_cherenkov_pe += pixel.fired_cherenkov_pe;
+                fired_nsb_pe += pixel.fired_nsb_pe;
+                fired_dark_pe += pixel.fired_dark_pe;
+                gap_lost_pe += pixel.gap_lost_pe;
+                saturation_lost_pe += pixel.saturation_lost_pe;
+            }
+        }
+        const bool triggered = canonical != electronics_events.end() &&
+            canonical->second.detector.camera_trigger.triggered;
+        const double nan = std::numeric_limits<double>::quiet_NaN();
         ofs << s.event_id << ","
             << s.telescope_id << ","
             << s.input_bunches << ","
@@ -1005,7 +1064,208 @@ void writeSummaryCsv(const std::string& path,
             << s.weighted_signal << ","
             << s.weighted_signal << ","
             << mean << ","
-            << std::sqrt(var) << "\n";
+            << std::sqrt(var) << ","
+            << (std::isfinite(s.first_cherenkov_time_ns)
+                    ? s.first_cherenkov_time_ns : nan) << ","
+            << (canonical != electronics_events.end()
+                    ? canonical->second.reference_time_ns : 0.0) << ","
+            << primary_cherenkov_pe << ","
+            << primary_nsb_pe << ","
+            << fired_cherenkov_pe << ","
+            << fired_nsb_pe << ","
+            << fired_dark_pe << ","
+            << gap_lost_pe << ","
+            << saturation_lost_pe << ","
+            << (triggered ? 1 : 0) << ","
+            << (canonical != electronics_events.end()
+                    ? canonical->second.detector.camera_trigger
+                          .max_pixels_above_threshold : 0) << ","
+            << (canonical != electronics_events.end()
+                    ? canonical->second.trigger_time_ns : nan) << ","
+            << (canonical != electronics_events.end()
+                    ? canonical->second.geometric_delay_ns : nan) << ","
+            << (canonical != electronics_events.end()
+                    ? canonical->second.coincidence_time_ns : nan) << ","
+            << (canonical != electronics_events.end() &&
+                    canonical->second.array_triggered ? 1 : 0) << "\n";
+    }
+}
+
+void ensureCsvParent(const std::string& path)
+{
+    const std::filesystem::path output_path(path);
+    if (output_path.has_parent_path()) {
+        std::filesystem::create_directories(output_path.parent_path());
+    }
+}
+
+void writeElectronicsPixelCsv(
+    const std::string& path,
+    const std::vector<int>& pixel_id_axis,
+    const CameraElectronicsEventMap& events,
+    const std::map<PixelKey, PixelAccumulator>& optical_pixels)
+{
+    ensureCsvParent(path);
+    std::ofstream output(path);
+    if (!output) {
+        throw std::runtime_error("failed to write electronics pixel CSV: " + path);
+    }
+    output << std::setprecision(17);
+    output << "event_id,telescope_id,pixel_id,reference_time_ns,"
+           << "primary_cherenkov_pe,primary_nsb_pe,primary_dark_pe,"
+           << "fired_cherenkov_pe,fired_nsb_pe,fired_dark_pe,fired_pe,"
+           << "gap_lost_pe,saturation_lost_pe,time_mean_ns,time_rms_ns\n";
+    for (const auto& item : events) {
+        const auto& event = item.second;
+        if (!event.selected_for_output) continue;
+        if (event.detector.pixels.size() != pixel_id_axis.size()) {
+            throw std::runtime_error("electronics CSV pixel axis mismatch");
+        }
+        for (std::size_t column = 0; column < pixel_id_axis.size(); ++column) {
+            const int pixel_id = pixel_id_axis[column];
+            const auto& pixel = event.detector.pixels[column];
+            const double fired_pe = pixel.fired_cherenkov_pe +
+                pixel.fired_nsb_pe + pixel.fired_dark_pe;
+            const double primary_pe = pixel.primary_cherenkov_pe +
+                pixel.primary_nsb_pe + pixel.primary_dark_pe;
+            if (fired_pe <= 0.0 && primary_pe <= 0.0) continue;
+            const auto optical = optical_pixels.find(
+                PixelKey{event.event_id, event.telescope_id, pixel_id});
+            double mean = std::numeric_limits<double>::quiet_NaN();
+            double rms = std::numeric_limits<double>::quiet_NaN();
+            if (optical != optical_pixels.end() && optical->second.signal > 0.0) {
+                const auto& source = optical->second;
+                mean = source.time_sum / source.signal;
+                const double variance = std::max(
+                    0.0, source.time2_sum / source.signal - mean * mean);
+                rms = std::sqrt(variance);
+            }
+            output << event.event_id << ',' << event.telescope_id << ','
+                   << pixel_id << ',' << event.reference_time_ns << ','
+                   << pixel.primary_cherenkov_pe << ','
+                   << pixel.primary_nsb_pe << ',' << pixel.primary_dark_pe << ','
+                   << pixel.fired_cherenkov_pe << ',' << pixel.fired_nsb_pe << ','
+                   << pixel.fired_dark_pe << ',' << fired_pe << ','
+                   << pixel.gap_lost_pe << ',' << pixel.saturation_lost_pe << ','
+                   << mean << ',' << rms << '\n';
+        }
+    }
+}
+
+void writeElectronicsWaveformCsv(
+    const std::string& path,
+    const std::vector<int>& pixel_id_axis,
+    const CameraElectronicsEventMap& events)
+{
+    ensureCsvParent(path);
+    std::ofstream output(path);
+    if (!output) {
+        throw std::runtime_error("failed to write electronics waveform CSV: " + path);
+    }
+    output << std::setprecision(17);
+    output << "event_id,telescope_id,reference_time_ns,pixel_id,time_bin,"
+           << "time_center_ns,global_time_ns,sample_value,sample_unit\n";
+    for (const auto& item : events) {
+        const auto& event = item.second;
+        if (!event.selected_for_output) continue;
+        const auto& result = event.detector;
+        for (std::size_t column = 0; column < result.n_pixels; ++column) {
+            for (std::size_t bin = 0; bin < result.n_samples; ++bin) {
+                const float value = static_cast<float>(
+                    result.waveform[column * result.n_samples + bin]);
+                if (value == 0.0) continue;
+                const double relative_time = result.time_centers_ns[bin];
+                output << event.event_id << ',' << event.telescope_id << ','
+                       << event.reference_time_ns << ','
+                       << pixel_id_axis.at(column) << ',' << bin << ','
+                       << relative_time << ','
+                       << event.reference_time_ns + relative_time << ','
+                       << value << ',' << result.sample_unit << '\n';
+            }
+        }
+    }
+}
+
+void writeElectronicsTriggerCsv(const std::string& path,
+                                const CameraElectronicsEventMap& events)
+{
+    ensureCsvParent(path);
+    std::ofstream output(path);
+    if (!output) {
+        throw std::runtime_error("failed to write electronics trigger CSV: " + path);
+    }
+    output << std::setprecision(17);
+    output << "event_id,telescope_id,reference_time_ns,triggered,"
+           << "n_pixels_above_threshold,trigger_time_ns,geometric_delay_ns,"
+           << "coincidence_time_ns,array_triggered\n";
+    for (const auto& item : events) {
+        const auto& event = item.second;
+        if (!event.selected_for_output) continue;
+        output << event.event_id << ',' << event.telescope_id << ','
+               << event.reference_time_ns << ','
+               << (event.detector.camera_trigger.triggered ? 1 : 0) << ','
+               << event.detector.camera_trigger.max_pixels_above_threshold << ','
+               << event.trigger_time_ns << ',' << event.geometric_delay_ns << ','
+               << event.coincidence_time_ns << ','
+               << (event.array_triggered ? 1 : 0) << '\n';
+    }
+}
+
+void writeElectronicsHitCsv(const std::string& primary_path,
+                            const std::string& fired_path,
+                            const std::vector<int>& pixel_id_axis,
+                            const CameraElectronicsEventMap& events,
+                            bool write_primary,
+                            bool write_fired)
+{
+    std::ofstream primary;
+    std::ofstream fired;
+    if (write_primary) {
+        ensureCsvParent(primary_path);
+        primary.open(primary_path);
+        if (!primary) throw std::runtime_error(
+            "failed to write primary p.e. CSV: " + primary_path);
+        primary << std::setprecision(17)
+                << "event_id,telescope_id,reference_time_ns,pixel_id,time_ns,"
+                << "global_time_ns,sensor_x_m,sensor_y_m,wavelength_nm,"
+                << "primary_pe,origin\n";
+    }
+    if (write_fired) {
+        ensureCsvParent(fired_path);
+        fired.open(fired_path);
+        if (!fired) throw std::runtime_error(
+            "failed to write fired p.e. CSV: " + fired_path);
+        fired << std::setprecision(17)
+              << "event_id,telescope_id,reference_time_ns,pixel_id,time_ns,"
+              << "global_time_ns,channel_id,microcell_id,fired_pe,origin\n";
+    }
+    for (const auto& item : events) {
+        const auto& event = item.second;
+        if (!event.selected_for_output) continue;
+        if (write_primary) {
+            for (const auto& hit : event.detector.primary_hits) {
+                primary << hit.event_id << ',' << hit.telescope_id << ','
+                        << event.reference_time_ns << ','
+                        << pixel_id_axis.at(static_cast<std::size_t>(hit.pixel_id))
+                        << ',' << hit.time_ns << ','
+                        << event.reference_time_ns + hit.time_ns << ','
+                        << hit.sensor_x_m << ',' << hit.sensor_y_m << ','
+                        << hit.wavelength_nm << ',' << hit.primary_pe << ','
+                        << static_cast<int>(hit.origin) << '\n';
+            }
+        }
+        if (write_fired) {
+            for (const auto& hit : event.detector.fired_hits) {
+                fired << hit.event_id << ',' << hit.telescope_id << ','
+                      << event.reference_time_ns << ','
+                      << pixel_id_axis.at(static_cast<std::size_t>(hit.pixel_id))
+                      << ',' << hit.time_ns << ','
+                      << event.reference_time_ns + hit.time_ns << ','
+                      << hit.channel_id << ',' << hit.microcell_id << ','
+                      << hit.fired_pe << ',' << static_cast<int>(hit.origin)
+                      << '\n';
+            }
+        }
     }
 }
 
@@ -1213,6 +1473,7 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                           const std::vector<MirrorFacet>& facets,
                           const SipmConfig& sipm_cfg,
                           const ElectronicsConfig& electronics_cfg,
+                          const electronics::DetectorPipelineConfig& detector_cfg,
                           const OpticalEfficiencyConfig& efficiency_cfg,
                           const NsbConfig& nsb_cfg,
                           const TriggerConfig& trigger_cfg,
@@ -1220,6 +1481,7 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                           const std::map<PixelKey, PixelAccumulator>& pixels,
                           const std::map<WaveformKey, WaveformPixelAccumulator>& waveforms,
                           const std::vector<RawWaveformHit>& raw_waveform_hits,
+                          const CameraElectronicsEventMap& electronics_events,
                           const std::vector<WhiteboardHdf5Row>& whiteboard_hits)
 {
     const bool write_sparse =
@@ -1608,6 +1870,14 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             std::int32_t photon_count;
             float pe;
             float signal;
+            float primary_cherenkov_pe;
+            float primary_nsb_pe;
+            float primary_dark_pe;
+            float fired_cherenkov_pe;
+            float fired_nsb_pe;
+            float fired_dark_pe;
+            float gap_lost_pe;
+            float saturation_lost_pe;
             float time_mean_ns;
             float time_rms_ns;
         };
@@ -1623,6 +1893,7 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             double time_mean_ns;
             double time_rms_ns;
             double time_first_ns;
+            double reference_time_ns;
         };
         std::vector<SparsePixelRow> sparse_rows;
         std::vector<ImageIndexRow> image_rows;
@@ -1636,30 +1907,90 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             double total_signal = 0.0;
             double total_pe = 0.0;
             double total_photons = 0.0;
-            const PixelKey pixel_begin{
-                event_id, telescope_id, std::numeric_limits<int>::min()};
-            const PixelKey pixel_end{
-                event_id, telescope_id, std::numeric_limits<int>::max()};
-            for (auto it = pixels.lower_bound(pixel_begin);
-                 it != pixels.end() && it->first <= pixel_end;
-                 ++it) {
-                const auto& kv = *it;
-                const auto& p = kv.second;
-                const double mean = p.signal > 0.0 ? p.time_sum / p.signal : 0.0;
-                const double var = p.signal > 0.0
-                    ? std::max(0.0, p.time2_sum / p.signal - mean * mean)
-                    : 0.0;
-                sparse_rows.push_back(SparsePixelRow{
-                    static_cast<std::int32_t>(p.pixel_id),
-                    static_cast<std::int32_t>(p.photon_count),
-                    static_cast<float>(p.pe),
-                    static_cast<float>(p.signal),
-                    static_cast<float>(mean),
-                    static_cast<float>(std::sqrt(var)),
-                });
-                total_signal += p.signal;
-                total_pe += p.pe;
-                total_photons += static_cast<double>(p.photon_count);
+            const auto canonical = electronics_events.find(key);
+            if (detector_cfg.enabled && canonical == electronics_events.end()) {
+                throw std::runtime_error(
+                    "HDF5 writer has no canonical electronics result for event " +
+                    std::to_string(event_id) + " telescope " +
+                    std::to_string(telescope_id));
+            }
+            if (detector_cfg.enabled) {
+                const auto& result = canonical->second.detector;
+                if (result.pixels.size() != camera_rows.size()) {
+                    throw std::runtime_error(
+                        "canonical electronics pixel axis does not match HDF5 camera");
+                }
+                for (std::size_t col = 0; col < result.pixels.size(); ++col) {
+                    const int pixel_id = camera_rows[col].pixel_id;
+                    const auto optical = pixels.find(
+                        PixelKey{event_id, telescope_id, pixel_id});
+                    const PixelAccumulator* p =
+                        optical == pixels.end() ? nullptr : &optical->second;
+                    const double mean = p && p->signal > 0.0
+                        ? p->time_sum / p->signal : 0.0;
+                    const double var = p && p->signal > 0.0
+                        ? std::max(0.0, p->time2_sum / p->signal - mean * mean)
+                        : 0.0;
+                    const auto& detector_pixel = result.pixels[col];
+                    const double fired_pe =
+                        detector_pixel.fired_cherenkov_pe +
+                        detector_pixel.fired_nsb_pe +
+                        detector_pixel.fired_dark_pe;
+                    const double primary_pe =
+                        detector_pixel.primary_cherenkov_pe +
+                        detector_pixel.primary_nsb_pe +
+                        detector_pixel.primary_dark_pe;
+                    if (fired_pe <= 0.0 && primary_pe <= 0.0) {
+                        continue;
+                    }
+                    sparse_rows.push_back(SparsePixelRow{
+                        static_cast<std::int32_t>(pixel_id),
+                        static_cast<std::int32_t>(p ? p->photon_count : 0),
+                        static_cast<float>(fired_pe),
+                        static_cast<float>(fired_pe),
+                        static_cast<float>(detector_pixel.primary_cherenkov_pe),
+                        static_cast<float>(detector_pixel.primary_nsb_pe),
+                        static_cast<float>(detector_pixel.primary_dark_pe),
+                        static_cast<float>(detector_pixel.fired_cherenkov_pe),
+                        static_cast<float>(detector_pixel.fired_nsb_pe),
+                        static_cast<float>(detector_pixel.fired_dark_pe),
+                        static_cast<float>(detector_pixel.gap_lost_pe),
+                        static_cast<float>(detector_pixel.saturation_lost_pe),
+                        static_cast<float>(mean),
+                        static_cast<float>(std::sqrt(var)),
+                    });
+                    total_signal += fired_pe;
+                    total_pe += fired_pe;
+                    total_photons += static_cast<double>(p ? p->photon_count : 0);
+                }
+            } else {
+                const PixelKey pixel_begin{
+                    event_id, telescope_id, std::numeric_limits<int>::min()};
+                const PixelKey pixel_end{
+                    event_id, telescope_id, std::numeric_limits<int>::max()};
+                for (auto it = pixels.lower_bound(pixel_begin);
+                     it != pixels.end() && it->first <= pixel_end;
+                     ++it) {
+                    const auto& p = it->second;
+                    const double mean = p.signal > 0.0
+                        ? p.time_sum / p.signal : 0.0;
+                    const double var = p.signal > 0.0
+                        ? std::max(0.0, p.time2_sum / p.signal - mean * mean)
+                        : 0.0;
+                    sparse_rows.push_back(SparsePixelRow{
+                        static_cast<std::int32_t>(p.pixel_id),
+                        static_cast<std::int32_t>(p.photon_count),
+                        static_cast<float>(p.pe),
+                        static_cast<float>(p.signal),
+                        static_cast<float>(p.pe), 0.0f, 0.0f,
+                        static_cast<float>(p.pe), 0.0f, 0.0f, 0.0f, 0.0f,
+                        static_cast<float>(mean),
+                        static_cast<float>(std::sqrt(var)),
+                    });
+                    total_signal += p.signal;
+                    total_pe += p.pe;
+                    total_photons += static_cast<double>(p.photon_count);
+                }
             }
 
             double mean = 0.0;
@@ -1668,8 +1999,10 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             auto summary_it = summaries.find(key);
             if (summary_it != summaries.end()) {
                 const auto& s = summary_it->second;
-                total_signal = s.weighted_signal;
-                total_pe = s.weighted_signal;
+                if (!detector_cfg.enabled) {
+                    total_signal = s.weighted_signal;
+                    total_pe = s.weighted_signal;
+                }
                 total_photons = static_cast<double>(s.hit_camera);
                 if (std::isfinite(s.first_cherenkov_time_ns)) {
                     first = s.first_cherenkov_time_ns;
@@ -1683,6 +2016,14 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             }
             const auto count = static_cast<std::int32_t>(
                 static_cast<std::int64_t>(sparse_rows.size()) - start);
+            double reference_time_ns = 0.0;
+            if (detector_cfg.enabled) {
+                reference_time_ns = electronics_events.at(key).reference_time_ns;
+            } else if (waveform_cfg.time_reference == "image_first") {
+                reference_time_ns = first;
+            } else if (waveform_cfg.time_reference == "image_mean") {
+                reference_time_ns = mean;
+            }
             image_rows.push_back(ImageIndexRow{
                 image_index++,
                 static_cast<std::int64_t>(event_id),
@@ -1695,6 +2036,7 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                 mean,
                 rms,
                 first,
+                reference_time_ns,
             });
         }
 
@@ -1704,6 +2046,12 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         std::vector<float> dense_pe;
         std::vector<float> dense_cherenkov_pe;
         std::vector<float> dense_nsb_pe;
+        std::vector<float> dense_primary_dark_pe;
+        std::vector<float> dense_fired_cherenkov_pe;
+        std::vector<float> dense_fired_nsb_pe;
+        std::vector<float> dense_fired_dark_pe;
+        std::vector<float> dense_gap_lost_pe;
+        std::vector<float> dense_saturation_lost_pe;
         std::vector<float> dense_time_mean_ns;
         std::vector<float> dense_time_rms_ns;
         std::vector<std::int32_t> dense_photon_count;
@@ -1723,6 +2071,16 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             dense_signal.assign(n_images * n_pixels, 0.0f);
             dense_pe.assign(n_images * n_pixels, 0.0f);
             dense_photon_count.assign(n_images * n_pixels, 0);
+            if (detector_cfg.enabled || output_cfg.hdf5_write_components) {
+                dense_cherenkov_pe.assign(n_images * n_pixels, 0.0f);
+                dense_nsb_pe.assign(n_images * n_pixels, 0.0f);
+                dense_primary_dark_pe.assign(n_images * n_pixels, 0.0f);
+                dense_fired_cherenkov_pe.assign(n_images * n_pixels, 0.0f);
+                dense_fired_nsb_pe.assign(n_images * n_pixels, 0.0f);
+                dense_fired_dark_pe.assign(n_images * n_pixels, 0.0f);
+                dense_gap_lost_pe.assign(n_images * n_pixels, 0.0f);
+                dense_saturation_lost_pe.assign(n_images * n_pixels, 0.0f);
+            }
             if (output_cfg.write_pixel_time_stats) {
                 dense_time_mean_ns.assign(n_images * n_pixels, 0.0f);
                 dense_time_rms_ns.assign(n_images * n_pixels, 0.0f);
@@ -1741,6 +2099,19 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                     dense_signal[index] = pixel.signal;
                     dense_pe[index] = pixel.pe;
                     dense_photon_count[index] = pixel.photon_count;
+                    if (!dense_cherenkov_pe.empty()) {
+                        dense_cherenkov_pe[index] =
+                            pixel.primary_cherenkov_pe;
+                        dense_nsb_pe[index] = pixel.primary_nsb_pe;
+                        dense_primary_dark_pe[index] = pixel.primary_dark_pe;
+                        dense_fired_cherenkov_pe[index] =
+                            pixel.fired_cherenkov_pe;
+                        dense_fired_nsb_pe[index] = pixel.fired_nsb_pe;
+                        dense_fired_dark_pe[index] = pixel.fired_dark_pe;
+                        dense_gap_lost_pe[index] = pixel.gap_lost_pe;
+                        dense_saturation_lost_pe[index] =
+                            pixel.saturation_lost_pe;
+                    }
                     if (output_cfg.write_pixel_time_stats) {
                         dense_time_mean_ns[index] = pixel.time_mean_ns;
                         dense_time_rms_ns[index] = pixel.time_rms_ns;
@@ -1748,9 +2119,18 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                 }
             }
 
-            dense_cherenkov_pe = dense_pe;
-            dense_nsb_pe.assign(n_images * n_pixels, 0.0f);
-            if (nsb_cfg.enabled && nsb_cfg.rate_pe_per_ns_per_pixel > 0.0 &&
+            if (!detector_cfg.enabled && output_cfg.hdf5_write_components) {
+                dense_cherenkov_pe = dense_pe;
+                dense_nsb_pe.assign(n_images * n_pixels, 0.0f);
+                dense_primary_dark_pe.assign(n_images * n_pixels, 0.0f);
+                dense_fired_cherenkov_pe = dense_pe;
+                dense_fired_nsb_pe.assign(n_images * n_pixels, 0.0f);
+                dense_fired_dark_pe.assign(n_images * n_pixels, 0.0f);
+                dense_gap_lost_pe.assign(n_images * n_pixels, 0.0f);
+                dense_saturation_lost_pe.assign(n_images * n_pixels, 0.0f);
+            }
+            if (!detector_cfg.enabled && nsb_cfg.enabled &&
+                nsb_cfg.rate_pe_per_ns_per_pixel > 0.0 &&
                 nsb_cfg.window_ns > 0.0) {
                 if (waveform_cfg.enabled && waveform_cfg.source == "pe") {
                     const std::size_t n_bins = waveformBinCount(waveform_cfg);
@@ -1766,7 +2146,10 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                             n_bins,
                             [&](std::size_t col, std::size_t, float nsb_pe) {
                                 const std::size_t index = row * n_pixels + col;
-                                dense_nsb_pe[index] += nsb_pe;
+                                if (!dense_nsb_pe.empty()) {
+                                    dense_nsb_pe[index] += nsb_pe;
+                                    dense_fired_nsb_pe[index] += nsb_pe;
+                                }
                                 dense_pe[index] += nsb_pe;
                                 dense_signal[index] += nsb_pe;
                             });
@@ -1783,7 +2166,10 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                             nsb_cfg.window_ns,
                             [&](std::size_t col, float nsb_pe) {
                                 const std::size_t i = row * n_pixels + col;
-                                dense_nsb_pe[i] = nsb_pe;
+                                if (!dense_nsb_pe.empty()) {
+                                    dense_nsb_pe[i] = nsb_pe;
+                                    dense_fired_nsb_pe[i] = nsb_pe;
+                                }
                                 dense_pe[i] += nsb_pe;
                                 dense_signal[i] += nsb_pe;
                             });
@@ -1828,6 +2214,45 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             telescope_trigger_times_by_event;
         telescope_trigger_rows.reserve(image_rows.size());
         for (const auto& image : image_rows) {
+            const SummaryKey image_key{
+                static_cast<int>(image.event_id),
+                static_cast<int>(image.telescope_id)};
+            if (detector_cfg.enabled) {
+                const auto canonical = electronics_events.find(image_key);
+                if (canonical == electronics_events.end()) {
+                    throw std::runtime_error(
+                        "HDF5 trigger writer has no canonical electronics event");
+                }
+                const auto& event = canonical->second;
+                const auto& camera_trigger = event.detector.camera_trigger;
+                if (camera_trigger.triggered) {
+                    telescope_trigger_times_by_event[
+                        static_cast<int>(image.event_id)].push_back(
+                            TelescopeTriggerTime{
+                                static_cast<int>(image.telescope_id),
+                                event.trigger_time_ns,
+                                event.coincidence_time_ns,
+                                std::isfinite(event.geometric_delay_ns)
+                                    ? event.geometric_delay_ns : 0.0,
+                            });
+                }
+                telescope_trigger_row_index[image_key] =
+                    telescope_trigger_rows.size();
+                telescope_trigger_rows.push_back(TelescopeTriggerRow{
+                    image.event_id,
+                    image.telescope_id,
+                    static_cast<std::int8_t>(camera_trigger.triggered ? 1 : 0),
+                    static_cast<std::int32_t>(
+                        camera_trigger.max_pixels_above_threshold),
+                    image.total_pe,
+                    event.trigger_time_ns,
+                    event.trigger_time_ns,
+                    event.trigger_time_ns,
+                    event.geometric_delay_ns,
+                    event.coincidence_time_ns,
+                });
+                continue;
+            }
             double total_pe = image.total_pe;
             std::size_t trigger_pixels = 0;
             std::size_t trigger_bins = 1;
@@ -2035,6 +2460,12 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             std::vector<float> filtered_dense_pe;
             std::vector<float> filtered_dense_cherenkov_pe;
             std::vector<float> filtered_dense_nsb_pe;
+            std::vector<float> filtered_dense_primary_dark_pe;
+            std::vector<float> filtered_dense_fired_cherenkov_pe;
+            std::vector<float> filtered_dense_fired_nsb_pe;
+            std::vector<float> filtered_dense_fired_dark_pe;
+            std::vector<float> filtered_dense_gap_lost_pe;
+            std::vector<float> filtered_dense_saturation_lost_pe;
             std::vector<float> filtered_dense_time_mean_ns;
             std::vector<float> filtered_dense_time_rms_ns;
             std::vector<std::int32_t> filtered_dense_photon_count;
@@ -2044,9 +2475,15 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                 filtered_dense_signal.reserve(triggered_image_keys.size() * n_pixels);
                 filtered_dense_pe.reserve(triggered_image_keys.size() * n_pixels);
                 filtered_dense_photon_count.reserve(triggered_image_keys.size() * n_pixels);
-                if (output_cfg.hdf5_write_components) {
+                if (!dense_cherenkov_pe.empty()) {
                     filtered_dense_cherenkov_pe.reserve(triggered_image_keys.size() * n_pixels);
                     filtered_dense_nsb_pe.reserve(triggered_image_keys.size() * n_pixels);
+                    filtered_dense_primary_dark_pe.reserve(triggered_image_keys.size() * n_pixels);
+                    filtered_dense_fired_cherenkov_pe.reserve(triggered_image_keys.size() * n_pixels);
+                    filtered_dense_fired_nsb_pe.reserve(triggered_image_keys.size() * n_pixels);
+                    filtered_dense_fired_dark_pe.reserve(triggered_image_keys.size() * n_pixels);
+                    filtered_dense_gap_lost_pe.reserve(triggered_image_keys.size() * n_pixels);
+                    filtered_dense_saturation_lost_pe.reserve(triggered_image_keys.size() * n_pixels);
                 }
                 if (output_cfg.write_pixel_time_stats) {
                     filtered_dense_time_mean_ns.reserve(triggered_image_keys.size() * n_pixels);
@@ -2088,13 +2525,37 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                     filtered_dense_photon_count.insert(filtered_dense_photon_count.end(),
                                                        dense_photon_count.begin() + old_begin,
                                                        dense_photon_count.begin() + old_end);
-                    if (output_cfg.hdf5_write_components) {
+                    if (!dense_cherenkov_pe.empty()) {
                         filtered_dense_cherenkov_pe.insert(filtered_dense_cherenkov_pe.end(),
                                                            dense_cherenkov_pe.begin() + old_begin,
                                                            dense_cherenkov_pe.begin() + old_end);
                         filtered_dense_nsb_pe.insert(filtered_dense_nsb_pe.end(),
                                                      dense_nsb_pe.begin() + old_begin,
                                                      dense_nsb_pe.begin() + old_end);
+                        filtered_dense_primary_dark_pe.insert(
+                            filtered_dense_primary_dark_pe.end(),
+                            dense_primary_dark_pe.begin() + old_begin,
+                            dense_primary_dark_pe.begin() + old_end);
+                        filtered_dense_fired_cherenkov_pe.insert(
+                            filtered_dense_fired_cherenkov_pe.end(),
+                            dense_fired_cherenkov_pe.begin() + old_begin,
+                            dense_fired_cherenkov_pe.begin() + old_end);
+                        filtered_dense_fired_nsb_pe.insert(
+                            filtered_dense_fired_nsb_pe.end(),
+                            dense_fired_nsb_pe.begin() + old_begin,
+                            dense_fired_nsb_pe.begin() + old_end);
+                        filtered_dense_fired_dark_pe.insert(
+                            filtered_dense_fired_dark_pe.end(),
+                            dense_fired_dark_pe.begin() + old_begin,
+                            dense_fired_dark_pe.begin() + old_end);
+                        filtered_dense_gap_lost_pe.insert(
+                            filtered_dense_gap_lost_pe.end(),
+                            dense_gap_lost_pe.begin() + old_begin,
+                            dense_gap_lost_pe.begin() + old_end);
+                        filtered_dense_saturation_lost_pe.insert(
+                            filtered_dense_saturation_lost_pe.end(),
+                            dense_saturation_lost_pe.begin() + old_begin,
+                            dense_saturation_lost_pe.begin() + old_end);
                     }
                     if (output_cfg.write_pixel_time_stats) {
                         filtered_dense_time_mean_ns.insert(filtered_dense_time_mean_ns.end(),
@@ -2115,14 +2576,36 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                 dense_signal.swap(filtered_dense_signal);
                 dense_pe.swap(filtered_dense_pe);
                 dense_photon_count.swap(filtered_dense_photon_count);
-                if (output_cfg.hdf5_write_components) {
+                if (!dense_cherenkov_pe.empty()) {
                     dense_cherenkov_pe.swap(filtered_dense_cherenkov_pe);
                     dense_nsb_pe.swap(filtered_dense_nsb_pe);
+                    dense_primary_dark_pe.swap(filtered_dense_primary_dark_pe);
+                    dense_fired_cherenkov_pe.swap(
+                        filtered_dense_fired_cherenkov_pe);
+                    dense_fired_nsb_pe.swap(filtered_dense_fired_nsb_pe);
+                    dense_fired_dark_pe.swap(filtered_dense_fired_dark_pe);
+                    dense_gap_lost_pe.swap(filtered_dense_gap_lost_pe);
+                    dense_saturation_lost_pe.swap(
+                        filtered_dense_saturation_lost_pe);
                 }
                 if (output_cfg.write_pixel_time_stats) {
                     dense_time_mean_ns.swap(filtered_dense_time_mean_ns);
                     dense_time_rms_ns.swap(filtered_dense_time_rms_ns);
                 }
+            }
+            if (detector_cfg.enabled) {
+                telescope_trigger_rows.erase(
+                    std::remove_if(
+                        telescope_trigger_rows.begin(),
+                        telescope_trigger_rows.end(),
+                        [&electronics_events](const TelescopeTriggerRow& row) {
+                            const auto event = electronics_events.find({
+                                static_cast<int>(row.event_id),
+                                static_cast<int>(row.telescope_id)});
+                            return event == electronics_events.end() ||
+                                   !event->second.selected_for_output;
+                        }),
+                    telescope_trigger_rows.end());
             }
         }
 
@@ -2367,6 +2850,8 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                   HOFFSET(ImageIndexRow, time_rms_ns), H5T_NATIVE_DOUBLE);
         H5Tinsert(image_type, "time_first_ns",
                   HOFFSET(ImageIndexRow, time_first_ns), H5T_NATIVE_DOUBLE);
+        H5Tinsert(image_type, "reference_time_ns",
+                  HOFFSET(ImageIndexRow, reference_time_ns), H5T_NATIVE_DOUBLE);
         writeCompound1D(images_group, "index", image_type, image_rows);
         H5Tclose(image_type);
 
@@ -2380,6 +2865,22 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                       HOFFSET(SparsePixelRow, photon_count), H5T_NATIVE_INT32);
             H5Tinsert(sparse_type, "pe", HOFFSET(SparsePixelRow, pe), H5T_NATIVE_FLOAT);
             H5Tinsert(sparse_type, "signal", HOFFSET(SparsePixelRow, signal), H5T_NATIVE_FLOAT);
+            H5Tinsert(sparse_type, "primary_cherenkov_pe",
+                      HOFFSET(SparsePixelRow, primary_cherenkov_pe), H5T_NATIVE_FLOAT);
+            H5Tinsert(sparse_type, "primary_nsb_pe",
+                      HOFFSET(SparsePixelRow, primary_nsb_pe), H5T_NATIVE_FLOAT);
+            H5Tinsert(sparse_type, "primary_dark_pe",
+                      HOFFSET(SparsePixelRow, primary_dark_pe), H5T_NATIVE_FLOAT);
+            H5Tinsert(sparse_type, "fired_cherenkov_pe",
+                      HOFFSET(SparsePixelRow, fired_cherenkov_pe), H5T_NATIVE_FLOAT);
+            H5Tinsert(sparse_type, "fired_nsb_pe",
+                      HOFFSET(SparsePixelRow, fired_nsb_pe), H5T_NATIVE_FLOAT);
+            H5Tinsert(sparse_type, "fired_dark_pe",
+                      HOFFSET(SparsePixelRow, fired_dark_pe), H5T_NATIVE_FLOAT);
+            H5Tinsert(sparse_type, "gap_lost_pe",
+                      HOFFSET(SparsePixelRow, gap_lost_pe), H5T_NATIVE_FLOAT);
+            H5Tinsert(sparse_type, "saturation_lost_pe",
+                      HOFFSET(SparsePixelRow, saturation_lost_pe), H5T_NATIVE_FLOAT);
             H5Tinsert(sparse_type, "time_mean_ns",
                       HOFFSET(SparsePixelRow, time_mean_ns), H5T_NATIVE_FLOAT);
             H5Tinsert(sparse_type, "time_rms_ns",
@@ -2413,17 +2914,41 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                          dense_photon_count,
                          static_cast<hsize_t>(n_images),
                          static_cast<hsize_t>(n_pixels));
-            if (output_cfg.hdf5_write_components) {
+            if (!dense_cherenkov_pe.empty()) {
                 writePlain2D(dense_group,
-                             "cherenkov_pe",
+                             "primary_cherenkov_pe",
                              H5T_NATIVE_FLOAT,
                              dense_cherenkov_pe,
                              static_cast<hsize_t>(n_images),
                              static_cast<hsize_t>(n_pixels));
                 writePlain2D(dense_group,
-                             "nsb_pe",
+                             "primary_nsb_pe",
                              H5T_NATIVE_FLOAT,
                              dense_nsb_pe,
+                             static_cast<hsize_t>(n_images),
+                             static_cast<hsize_t>(n_pixels));
+                writePlain2D(dense_group, "primary_dark_pe",
+                             H5T_NATIVE_FLOAT, dense_primary_dark_pe,
+                             static_cast<hsize_t>(n_images),
+                             static_cast<hsize_t>(n_pixels));
+                writePlain2D(dense_group, "fired_cherenkov_pe",
+                             H5T_NATIVE_FLOAT, dense_fired_cherenkov_pe,
+                             static_cast<hsize_t>(n_images),
+                             static_cast<hsize_t>(n_pixels));
+                writePlain2D(dense_group, "fired_nsb_pe",
+                             H5T_NATIVE_FLOAT, dense_fired_nsb_pe,
+                             static_cast<hsize_t>(n_images),
+                             static_cast<hsize_t>(n_pixels));
+                writePlain2D(dense_group, "fired_dark_pe",
+                             H5T_NATIVE_FLOAT, dense_fired_dark_pe,
+                             static_cast<hsize_t>(n_images),
+                             static_cast<hsize_t>(n_pixels));
+                writePlain2D(dense_group, "gap_lost_pe",
+                             H5T_NATIVE_FLOAT, dense_gap_lost_pe,
+                             static_cast<hsize_t>(n_images),
+                             static_cast<hsize_t>(n_pixels));
+                writePlain2D(dense_group, "saturation_lost_pe",
+                             H5T_NATIVE_FLOAT, dense_saturation_lost_pe,
                              static_cast<hsize_t>(n_images),
                              static_cast<hsize_t>(n_pixels));
             }
@@ -2465,7 +2990,102 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                                pixel_id_axis,
                                waveform_images,
                                waveforms,
-                               raw_waveform_hits);
+                               raw_waveform_hits,
+                               electronics_events);
+        }
+
+        if (detector_cfg.enabled) {
+            struct PrimaryPeRow {
+                std::int64_t event_id;
+                std::int32_t telescope_id;
+                double reference_time_ns;
+                std::int32_t pixel_id;
+                double time_ns;
+                double global_time_ns;
+                double sensor_x_m;
+                double sensor_y_m;
+                double wavelength_nm;
+                double primary_pe;
+                std::int32_t origin;
+            };
+            struct FiredPeRow {
+                std::int64_t event_id;
+                std::int32_t telescope_id;
+                double reference_time_ns;
+                std::int32_t pixel_id;
+                double time_ns;
+                double global_time_ns;
+                std::int32_t channel_id;
+                std::int32_t microcell_id;
+                double fired_pe;
+                std::int32_t origin;
+            };
+            std::vector<PrimaryPeRow> primary_rows;
+            std::vector<FiredPeRow> fired_rows;
+            for (const auto& item : electronics_events) {
+                const auto& event = item.second;
+                if (!event.selected_for_output) continue;
+                if (detector_cfg.save_primary_sequence) {
+                    for (const auto& hit : event.detector.primary_hits) {
+                        primary_rows.push_back(PrimaryPeRow{
+                            hit.event_id, hit.telescope_id,
+                            event.reference_time_ns,
+                            pixel_id_axis.at(static_cast<std::size_t>(hit.pixel_id)),
+                            hit.time_ns,
+                            event.reference_time_ns + hit.time_ns,
+                            hit.sensor_x_m, hit.sensor_y_m, hit.wavelength_nm,
+                            hit.primary_pe, static_cast<std::int32_t>(hit.origin),
+                        });
+                    }
+                }
+                if (detector_cfg.save_fired_sequence) {
+                    for (const auto& hit : event.detector.fired_hits) {
+                        fired_rows.push_back(FiredPeRow{
+                            hit.event_id, hit.telescope_id,
+                            event.reference_time_ns,
+                            pixel_id_axis.at(static_cast<std::size_t>(hit.pixel_id)),
+                            hit.time_ns,
+                            event.reference_time_ns + hit.time_ns,
+                            hit.channel_id, hit.microcell_id, hit.fired_pe,
+                            static_cast<std::int32_t>(hit.origin),
+                        });
+                    }
+                }
+            }
+            hid_t electronics_group = H5Gcreate2(
+                file, "electronics", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+            if (detector_cfg.save_primary_sequence) {
+                hid_t type = H5Tcreate(H5T_COMPOUND, sizeof(PrimaryPeRow));
+                H5Tinsert(type, "event_id", HOFFSET(PrimaryPeRow, event_id), H5T_NATIVE_INT64);
+                H5Tinsert(type, "telescope_id", HOFFSET(PrimaryPeRow, telescope_id), H5T_NATIVE_INT32);
+                H5Tinsert(type, "reference_time_ns", HOFFSET(PrimaryPeRow, reference_time_ns), H5T_NATIVE_DOUBLE);
+                H5Tinsert(type, "pixel_id", HOFFSET(PrimaryPeRow, pixel_id), H5T_NATIVE_INT32);
+                H5Tinsert(type, "time_ns", HOFFSET(PrimaryPeRow, time_ns), H5T_NATIVE_DOUBLE);
+                H5Tinsert(type, "global_time_ns", HOFFSET(PrimaryPeRow, global_time_ns), H5T_NATIVE_DOUBLE);
+                H5Tinsert(type, "sensor_x_m", HOFFSET(PrimaryPeRow, sensor_x_m), H5T_NATIVE_DOUBLE);
+                H5Tinsert(type, "sensor_y_m", HOFFSET(PrimaryPeRow, sensor_y_m), H5T_NATIVE_DOUBLE);
+                H5Tinsert(type, "wavelength_nm", HOFFSET(PrimaryPeRow, wavelength_nm), H5T_NATIVE_DOUBLE);
+                H5Tinsert(type, "primary_pe", HOFFSET(PrimaryPeRow, primary_pe), H5T_NATIVE_DOUBLE);
+                H5Tinsert(type, "origin", HOFFSET(PrimaryPeRow, origin), H5T_NATIVE_INT32);
+                writeCompound1D(electronics_group, "primary_pe_hits", type, primary_rows);
+                H5Tclose(type);
+            }
+            if (detector_cfg.save_fired_sequence) {
+                hid_t type = H5Tcreate(H5T_COMPOUND, sizeof(FiredPeRow));
+                H5Tinsert(type, "event_id", HOFFSET(FiredPeRow, event_id), H5T_NATIVE_INT64);
+                H5Tinsert(type, "telescope_id", HOFFSET(FiredPeRow, telescope_id), H5T_NATIVE_INT32);
+                H5Tinsert(type, "reference_time_ns", HOFFSET(FiredPeRow, reference_time_ns), H5T_NATIVE_DOUBLE);
+                H5Tinsert(type, "pixel_id", HOFFSET(FiredPeRow, pixel_id), H5T_NATIVE_INT32);
+                H5Tinsert(type, "time_ns", HOFFSET(FiredPeRow, time_ns), H5T_NATIVE_DOUBLE);
+                H5Tinsert(type, "global_time_ns", HOFFSET(FiredPeRow, global_time_ns), H5T_NATIVE_DOUBLE);
+                H5Tinsert(type, "channel_id", HOFFSET(FiredPeRow, channel_id), H5T_NATIVE_INT32);
+                H5Tinsert(type, "microcell_id", HOFFSET(FiredPeRow, microcell_id), H5T_NATIVE_INT32);
+                H5Tinsert(type, "fired_pe", HOFFSET(FiredPeRow, fired_pe), H5T_NATIVE_DOUBLE);
+                H5Tinsert(type, "origin", HOFFSET(FiredPeRow, origin), H5T_NATIVE_INT32);
+                writeCompound1D(electronics_group, "fired_pe_hits", type, fired_rows);
+                H5Tclose(type);
+            }
+            H5Gclose(electronics_group);
         }
 
         hid_t trigger_group = H5Gcreate2(file, "trigger",
@@ -3026,11 +3646,25 @@ void printCorsikaOpticalConfiguration(
     printField("pde", factorDescription(efficiency_cfg.sipm_pde));
 
     printSection("Electronics");
-    printField("pipeline_enabled", detector_cfg.enabled ? "true" : "false");
+    printField("electronics_enabled", detector_cfg.enabled ? "true" : "false");
     printField("pde_stage", "upstream sipm.pde, applied exactly once");
     printField("microcell_enabled",
                detector_cfg.microcell.enabled ? "true" : "false");
+    printField("microcell_saturation_enabled",
+               detector_cfg.microcell.saturation_enabled ? "true" : "false");
     printField("microcell_model", detector_cfg.microcell.model);
+    printField("microcell_layout", detector_cfg.microcell.layout);
+    printField("inter_channel_gap_geometry", "part of tiled layout");
+    printField(
+        "pde_includes_inter_channel_gaps",
+        detector_cfg.microcell.pde_includes_inter_channel_gaps ? "true"
+                                                               : "false");
+    printField(
+        "inter_channel_active_fraction",
+        doubleToString(
+            ::lact::electronics::interChannelActiveFraction(
+                detector_cfg.microcell),
+            9));
     printField(
         "microcell_grid",
         intToString(detector_cfg.microcell.grid_columns) + " x " +
@@ -3441,6 +4075,12 @@ int main(int argc, char** argv) {
         NsbConfig nsb_cfg = buildNsbConfig(cfg);
         TriggerConfig trigger_cfg = buildTriggerConfig(cfg);
         CameraGeometry camera = buildCameraGeometry(camera_cfg);
+        std::vector<int> camera_pixel_id_axis;
+        camera_pixel_id_axis.reserve(camera.size());
+        for (const auto& pixel : camera.pixels()) {
+            camera_pixel_id_axis.push_back(pixel.id);
+        }
+        std::sort(camera_pixel_id_axis.begin(), camera_pixel_id_axis.end());
         auto light_collector = buildLightCollector(camera_cfg, camera);
         TelescopeOpticsCache telescope_optics(nominal_facets, error_cfg);
         const MirrorLayout& mirrors = telescope_optics.layoutFor(telescope_cfg.id);
@@ -3462,7 +4102,7 @@ int main(int argc, char** argv) {
             !detector_pipeline_cfg.enabled) {
             throw std::runtime_error(
                 "waveform.source=electronics requires "
-                "electronics.pipeline.enabled=true");
+                "electronics.enabled=true");
         }
         CollectorDebugConfig collector_debug_cfg = buildCollectorDebugConfig(cfg);
         ProfileConfig profile_cfg = buildProfileConfig(cfg);
@@ -3482,14 +4122,6 @@ int main(int argc, char** argv) {
                 "output.format requests HDF5, but this build was configured without HDF5. "
                 "Install HDF5 and re-run CMake, or set output.format=csv.");
 #endif
-            if (waveform_cfg.enabled &&
-                waveform_cfg.source == "electronics" &&
-                output_cfg.hdf5_write_waveforms) {
-                throw std::runtime_error(
-                    "electronics waveform serialization is currently "
-                    "defined by the lact_event ROOT schema; set "
-                    "output.hdf5_write_waveforms=false or use ROOT output");
-            }
         }
         if (save_lact_root) {
 #ifndef LACT_HAS_ROOT
@@ -3654,6 +4286,7 @@ int main(int argc, char** argv) {
         std::map<PixelKey, PixelAccumulator> pixels;
         std::map<WaveformKey, WaveformPixelAccumulator> waveforms;
         std::vector<RawWaveformHit> raw_waveform_hits;
+        CameraElectronicsEventMap electronics_events;
         std::vector<CollectorDebugPhotonRow> collector_debug_rows;
         std::vector<WhiteboardHdf5Row> whiteboard_hits;
 
@@ -3684,12 +4317,8 @@ int main(int argc, char** argv) {
         int active_output_event = -1;
         const auto t_trace_start = std::chrono::steady_clock::now();
 
-        auto writeRootEventIfReady = [&](int event_id) {
+        auto prepareOutputEvent = [&](int event_id) {
             if (event_id < 0) {
-                return;
-            }
-#ifdef LACT_HAS_ROOT
-            if (!lact_root_stream_writer) {
                 return;
             }
             std::map<SummaryKey, TraceSummary> event_summaries;
@@ -3719,11 +4348,73 @@ int main(int argc, char** argv) {
                     event_raw_waveform_hits.push_back(hit);
                 }
             }
+
+            auto event_electronics = buildCameraElectronicsEvents(
+                detector_pipeline_cfg,
+                waveform_cfg,
+                nsb_cfg,
+                camera_pixel_id_axis,
+                event_summaries,
+                event_raw_waveform_hits);
+            if (detector_pipeline_cfg.enabled) {
+                std::vector<TelescopeTriggerTime> telescope_times;
+                for (const auto& item : event_electronics) {
+                    if (item.second.detector.camera_trigger.triggered) {
+                        telescope_times.push_back(TelescopeTriggerTime{
+                            item.second.telescope_id,
+                            item.second.trigger_time_ns,
+                        });
+                    }
+                }
+                applyEventIOArrayTimingCorrection(
+                    telescope_times,
+                    event_id,
+                    source_runtime_cfg.event_id_mode,
+                    trigger_cfg,
+                    telescope_cfg,
+                    metadata);
+                const auto array_decision =
+                    evaluateArrayTrigger(telescope_times, trigger_cfg);
+                for (auto& item : event_electronics) {
+                    auto& event = item.second;
+                    const auto corrected = std::find_if(
+                        telescope_times.begin(), telescope_times.end(),
+                        [&event](const TelescopeTriggerTime& value) {
+                            return value.telescope_id == event.telescope_id;
+                        });
+                    if (corrected != telescope_times.end()) {
+                        event.geometric_delay_ns = corrected->geometric_delay_ns;
+                        event.coincidence_time_ns =
+                            std::isfinite(corrected->coincidence_time_ns)
+                                ? corrected->coincidence_time_ns
+                                : corrected->trigger_time_ns;
+                    }
+                    event.array_triggered = array_decision.triggered;
+                    const bool telescope_is_coincident = std::binary_search(
+                        array_decision.coincident_telescope_ids.begin(),
+                        array_decision.coincident_telescope_ids.end(),
+                        event.telescope_id);
+                    event.selected_for_output =
+                        !output_cfg.save_only_triggered || !trigger_cfg.enabled ||
+                        (event.detector.camera_trigger.triggered &&
+                         array_decision.triggered && telescope_is_coincident);
+                }
+            }
+#ifdef LACT_HAS_ROOT
+            if (lact_root_stream_writer) {
             lact_root_stream_writer->writeEvent(event_summaries,
                                                 event_pixels,
                                                 event_waveforms,
-                                                event_raw_waveform_hits);
+                                                event_raw_waveform_hits,
+                                                event_electronics);
+            }
 #endif
+            if (save_hdf5 || save_csv) {
+                for (auto& item : event_electronics) {
+                    electronics_events.emplace(item.first,
+                                               std::move(item.second));
+                }
+            }
         };
 
         const bool can_release_streamed_event_data =
@@ -3755,7 +4446,7 @@ int main(int argc, char** argv) {
         };
 
         auto flushOutputEvent = [&](int event_id) {
-            writeRootEventIfReady(event_id);
+            prepareOutputEvent(event_id);
             releaseStreamedEventData(event_id);
         };
 
@@ -3900,10 +4591,37 @@ int main(int argc, char** argv) {
                         bunch.emission_altitude_km,
                         global_dir);
                 }
+                double pre_geometry_detection_probability =
+                    eff.preGeometryDetectionProbability(photon.wavelength_nm);
+                const bool condition_pde_on_channel_area =
+                    !photon.optical_efficiency_preapplied &&
+                    detector_pipeline_cfg.enabled &&
+                    detector_pipeline_cfg.microcell.enabled &&
+                    detector_pipeline_cfg.microcell.layout ==
+                        "s17351_tiled_2x4" &&
+                    detector_pipeline_cfg.microcell
+                        .pde_includes_inter_channel_gaps;
+                const double channel_active_fraction =
+                    condition_pde_on_channel_area
+                        ? ::lact::electronics::interChannelActiveFraction(
+                              detector_pipeline_cfg.microcell)
+                        : 1.0;
+                if (condition_pde_on_channel_area && candidate.stochastic) {
+                    pre_geometry_detection_probability /=
+                        channel_active_fraction;
+                    if (pre_geometry_detection_probability >
+                        1.0 + 1.0e-12) {
+                        throw std::runtime_error(
+                            "channel-gap-conditioned pre-geometry "
+                            "detection probability exceeds one");
+                    }
+                    pre_geometry_detection_probability = std::min(
+                        1.0, pre_geometry_detection_probability);
+                }
                 const auto pre_geometry = response_sampler.applyPreGeometry(
                     candidate,
                     atmosphere_t,
-                    eff.preGeometryDetectionProbability(photon.wavelength_nm));
+                    pre_geometry_detection_probability);
                 accumulateAtmosphereHistogram(
                     atmosphere_histogram,
                     atmosphere_histogram_cfg,
@@ -4025,7 +4743,14 @@ int main(int argc, char** argv) {
             }
             applyCameraResponse(camera, light_collector.get(), plane, sipm_cfg,
                                 electronics, hit,
-                                propagation_cfg.speed_of_light_m_per_ns);
+                                propagation_cfg.speed_of_light_m_per_ns,
+                                detector_pipeline_cfg.enabled
+                                    ? &detector_pipeline_cfg.microcell
+                                    : nullptr,
+                                condition_pde_on_channel_area &&
+                                        !candidate.stochastic
+                                    ? 1.0 / channel_active_fraction
+                                    : 1.0);
             if (profile_cfg.enabled) {
                 addElapsed(profile_stats, &ProfileStats::camera_response_s, t_step);
             }
@@ -4124,7 +4849,28 @@ int main(int argc, char** argv) {
         const auto t_trace_done = std::chrono::steady_clock::now();
 
         if (camera_cfg.enabled && save_csv) {
-            writePixelCsv(output_cfg.pixel_csv, pixels);
+            if (detector_pipeline_cfg.enabled) {
+                writeElectronicsPixelCsv(output_cfg.pixel_csv,
+                                         camera_pixel_id_axis,
+                                         electronics_events,
+                                         pixels);
+                writeElectronicsTriggerCsv(output_cfg.trigger_csv,
+                                           electronics_events);
+                if (waveform_cfg.enabled) {
+                    writeElectronicsWaveformCsv(output_cfg.waveform_csv,
+                                                camera_pixel_id_axis,
+                                                electronics_events);
+                }
+                writeElectronicsHitCsv(
+                    output_cfg.primary_pe_csv,
+                    output_cfg.fired_pe_csv,
+                    camera_pixel_id_axis,
+                    electronics_events,
+                    detector_pipeline_cfg.save_primary_sequence,
+                    detector_pipeline_cfg.save_fired_sequence);
+            } else {
+                writePixelCsv(output_cfg.pixel_csv, pixels);
+            }
         }
         if (collector_debug_cfg.photon_output) {
             printSection("Collector debug output");
@@ -4158,6 +4904,7 @@ int main(int argc, char** argv) {
                                  nominal_facets,
                                  sipm_cfg,
                                  electronics_cfg,
+                                 detector_pipeline_cfg,
                                  efficiency_cfg,
                                  nsb_cfg,
                                  trigger_cfg,
@@ -4165,6 +4912,7 @@ int main(int argc, char** argv) {
                                  pixels,
                                  waveforms,
                                  raw_waveform_hits,
+                                 electronics_events,
                                  whiteboard_hits);
             if (profile_cfg.enabled) {
                 addElapsed(profile_stats, &ProfileStats::hdf5_write_s, t_hdf5_start);
@@ -4180,7 +4928,8 @@ int main(int argc, char** argv) {
         }
 #endif
         if (save_csv) {
-            writeSummaryCsv(output_cfg.summary_csv, summaries);
+            writeSummaryCsv(output_cfg.summary_csv, summaries,
+                            electronics_events);
         }
         const auto t_done = std::chrono::steady_clock::now();
 
