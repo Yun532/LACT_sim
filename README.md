@@ -241,6 +241,17 @@ python3 scripts/validate_measured_electronics.py \
 `LocalPeakExtractor` 读取；完整数据层级和 notebook 用法见
 [实测单 PE 电子学说明](docs/measured_spe_electronics_zh.md)。
 
+正式 CORSIKA 批量模拟可使用实测波形配置：
+
+```bash
+build/run_corsika_trace \
+  configs/examples/corsika_lact_pylast_root_only_measured_waveform.cfg \
+  /path/to/input.zst \
+  -C output.lact_root_path=/path/to/lact_events.root
+```
+
+该配置开启暗夜 NSB、微单元饱和和实测单 PE 波形，只写 ROOT，并只保存通过相机触发的望远镜。触发条件是 20 ns 内至少 3 个像素的 4 ns 波形采样值达到 `19.267713 mV`；这个电压是实测模板经 4 ns 采样后的平均 8 PE 等效阈值。阵列触发保持关闭。
+
 ## CORSIKA 白板测试
 
 白板测试适合在接入相机前检查 CORSIKA 光子是否正确读入：

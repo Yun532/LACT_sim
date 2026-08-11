@@ -219,6 +219,21 @@ tail-corrected `LocalPeakExtractor`. See the
 [measured single-PE electronics guide](docs/measured_spe_electronics_zh.md) for
 the complete data-level and notebook workflow.
 
+For production CORSIKA runs with the measured waveform electronics, use:
+
+```bash
+build/run_corsika_trace \
+  configs/examples/corsika_lact_pylast_root_only_measured_waveform.cfg \
+  /path/to/input.zst \
+  -C output.lact_root_path=/path/to/lact_events.root
+```
+
+This configuration enables dark-sky NSB, explicit microcell saturation, and
+the measured single-PE waveform; it writes ROOT only and keeps only telescopes
+passing the camera trigger. The trigger requires at least three pixels in a
+20 ns window to reach `19.267713 mV`, the mean 8-PE-equivalent threshold after
+4 ns sampling of the measured template. The array trigger remains disabled.
+
 ## CORSIKA whiteboard
 
 ```bash
