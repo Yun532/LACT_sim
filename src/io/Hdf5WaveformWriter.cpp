@@ -44,6 +44,20 @@ void writeStringAttribute(hid_t object,
 }
 
 template <typename T>
+void writeScalarAttribute(hid_t object,
+                          const std::string& name,
+                          hid_t type,
+                          const T& value)
+{
+    hid_t space = H5Screate(H5S_SCALAR);
+    hid_t attribute = H5Acreate2(
+        object, name.c_str(), type, space, H5P_DEFAULT, H5P_DEFAULT);
+    check(H5Awrite(attribute, type, &value), "attribute " + name);
+    H5Aclose(attribute);
+    H5Sclose(space);
+}
+
+template <typename T>
 void writePlain1D(hid_t group,
                   const std::string& name,
                   hid_t type,
@@ -328,6 +342,26 @@ void writeHdf5Waveforms(
                              ? "sparse_coo"
                              : "dense");
     writeStringAttribute(group, "shape", "image_index,time_bin,pixel_id_axis");
+    if (electronics_source && !electronics_events.empty()) {
+        const auto& detector = electronics_events.begin()->second.detector;
+        writeStringAttribute(group, "sample_unit", detector.sample_unit);
+        writeStringAttribute(group, "template_time_reference",
+                             detector.template_time_reference);
+        writeScalarAttribute(group, "single_pe_area_mv_ns", H5T_NATIVE_DOUBLE,
+                             detector.single_pe_area_mv_ns);
+        const std::uint8_t charge_enabled =
+            detector.charge_fluctuation_enabled ? 1U : 0U;
+        const std::uint8_t jitter_enabled =
+            detector.time_jitter_enabled ? 1U : 0U;
+        writeScalarAttribute(group, "charge_fluctuation_enabled",
+                             H5T_NATIVE_UINT8, charge_enabled);
+        writeScalarAttribute(group, "time_jitter_enabled",
+                             H5T_NATIVE_UINT8, jitter_enabled);
+        writePlain1D(group, "reference_pulse_time_ns", H5T_NATIVE_DOUBLE,
+                     detector.reference_pulse_time_ns);
+        writePlain1D(group, "reference_pulse_amplitude", H5T_NATIVE_DOUBLE,
+                     detector.reference_pulse_amplitude);
+    }
     writeStringAttribute(
         group, "note",
         electronics_source

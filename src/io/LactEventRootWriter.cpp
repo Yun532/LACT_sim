@@ -241,6 +241,8 @@ struct LactRootFiredHit {
     int microcell_id = -1;
     double fired_pe = 0.0;
     int origin = 0;
+    double charge_factor = 1.0;
+    double time_jitter_ns = 0.0;
 };
 
 struct LactRootMicrocellDecision {
@@ -270,6 +272,9 @@ struct LactRootPreparedData {
     std::vector<LactRootPrimaryHit> primary_hits;
     std::vector<LactRootFiredHit> fired_hits;
     std::vector<LactRootMicrocellDecision> microcell_decisions;
+    double single_pe_area_mv_ns = 0.0;
+    std::vector<double> reference_pulse_time_ns;
+    std::vector<double> reference_pulse_amplitude;
 };
 
 LactRootPreparedData prepareLactRootObservations(
@@ -433,6 +438,41 @@ LactRootPreparedData prepareLactRootObservations(
             }
             reference_time_ns = canonical->second.reference_time_ns;
             const auto& detector_result = canonical->second.detector;
+            if (detector_result.single_pe_area_mv_ns > 0.0) {
+                if (prepared.single_pe_area_mv_ns == 0.0) {
+                    prepared.single_pe_area_mv_ns =
+                        detector_result.single_pe_area_mv_ns;
+                } else if (std::abs(prepared.single_pe_area_mv_ns -
+                                    detector_result.single_pe_area_mv_ns) >
+                           1.0e-9) {
+                    throw std::runtime_error(
+                        "single-p.e. calibration changed within one ROOT output");
+                }
+            }
+            if (!detector_result.reference_pulse_time_ns.empty()) {
+                if (prepared.reference_pulse_time_ns.empty()) {
+                    prepared.reference_pulse_time_ns =
+                        detector_result.reference_pulse_time_ns;
+                    prepared.reference_pulse_amplitude =
+                        detector_result.reference_pulse_amplitude;
+                } else {
+                    const auto vectors_match = [](const std::vector<double>& lhs,
+                                                  const std::vector<double>& rhs) {
+                        if (lhs.size() != rhs.size()) return false;
+                        for (std::size_t i = 0; i < lhs.size(); ++i) {
+                            if (std::abs(lhs[i] - rhs[i]) > 1.0e-12) return false;
+                        }
+                        return true;
+                    };
+                    if (!vectors_match(prepared.reference_pulse_time_ns,
+                                       detector_result.reference_pulse_time_ns) ||
+                        !vectors_match(prepared.reference_pulse_amplitude,
+                                       detector_result.reference_pulse_amplitude)) {
+                        throw std::runtime_error(
+                            "single-p.e. reference pulse changed within one ROOT output");
+                    }
+                }
+            }
             if (detector_result.n_pixels != n_pixels) {
                 throw std::runtime_error(
                     "canonical electronics pixel axis does not match ROOT camera");
@@ -489,6 +529,8 @@ LactRootPreparedData prepareLactRootObservations(
                         hit.microcell_id,
                         hit.fired_pe,
                         static_cast<int>(hit.origin),
+                        hit.charge_factor,
+                        hit.time_jitter_ns,
                     });
                 }
             }
@@ -959,9 +1001,15 @@ struct LactEventRootStreamWriter::Impl {
     double time_bin_width_ns = 0.0;
     double time_window_start_ns = 0.0;
     double time_window_end_ns = 0.0;
+    double single_pe_area_mv_ns = 0.0;
+    bool charge_fluctuation_enabled = false;
+    bool time_jitter_enabled = false;
+    std::string template_time_reference;
     int n_time_bins = 0;
     std::vector<double> time_edges_ns;
     std::vector<double> time_centers_ns;
+    std::vector<double> reference_pulse_time_ns;
+    std::vector<double> reference_pulse_amplitude;
 
     long long wf_event_id = 0;
     int wf_telescope_id = 0, wf_n_pixels_camera = 0, wf_n_time_bins = 0;
@@ -1268,6 +1316,10 @@ struct LactEventRootStreamWriter::Impl {
                                &fired_hit_row.microcell_id);
         fired_hit_tree->Branch("fired_pe", &fired_hit_row.fired_pe);
         fired_hit_tree->Branch("origin", &fired_hit_row.origin);
+        fired_hit_tree->Branch("charge_factor",
+                               &fired_hit_row.charge_factor);
+        fired_hit_tree->Branch("time_jitter_ns",
+                               &fired_hit_row.time_jitter_ns);
       }
       if (detector_cfg.enabled &&
           detector_cfg.save_microcell_decisions) {
@@ -1433,7 +1485,7 @@ struct LactEventRootStreamWriter::Impl {
     void writeWaveformConfig(const LactRootPreparedData& prepared)
     {
         if (waveform_config_written || prepared.time_centers_ns.empty()) return;
-        waveform_config_tree = std::make_unique<TTree>("waveform_config", "p.e. waveform metadata");
+        waveform_config_tree = std::make_unique<TTree>("waveform_config", "waveform metadata");
         waveform_config_tree->SetDirectory(nullptr);
         waveform_enabled = true;
         waveform_source = waveform_cfg.source;
@@ -1455,9 +1507,17 @@ struct LactEventRootStreamWriter::Impl {
         time_window_end_ns = detector_cfg.enabled
             ? detector_cfg.sampling.end_ns
             : waveform_cfg.time_window_end_ns;
+        single_pe_area_mv_ns = prepared.single_pe_area_mv_ns;
+        charge_fluctuation_enabled =
+            detector_cfg.single_pe.charge_fluctuation.enabled;
+        time_jitter_enabled = detector_cfg.single_pe.time_jitter.enabled;
+        template_time_reference =
+            detector_cfg.single_pe.template_time_reference;
         n_time_bins = static_cast<int>(prepared.time_centers_ns.size());
         time_edges_ns = prepared.time_edges_ns;
         time_centers_ns = prepared.time_centers_ns;
+        reference_pulse_time_ns = prepared.reference_pulse_time_ns;
+        reference_pulse_amplitude = prepared.reference_pulse_amplitude;
         waveform_config_tree->Branch("waveform_enabled", &waveform_enabled);
         waveform_config_tree->Branch("waveform_source", &waveform_source);
         waveform_config_tree->Branch("sample_unit", &waveform_sample_unit);
@@ -1465,9 +1525,21 @@ struct LactEventRootStreamWriter::Impl {
         waveform_config_tree->Branch("time_bin_width_ns", &time_bin_width_ns);
         waveform_config_tree->Branch("time_window_start_ns", &time_window_start_ns);
         waveform_config_tree->Branch("time_window_end_ns", &time_window_end_ns);
+        waveform_config_tree->Branch("single_pe_area_mv_ns",
+                                     &single_pe_area_mv_ns);
+        waveform_config_tree->Branch("charge_fluctuation_enabled",
+                                     &charge_fluctuation_enabled);
+        waveform_config_tree->Branch("time_jitter_enabled",
+                                     &time_jitter_enabled);
+        waveform_config_tree->Branch("template_time_reference",
+                                     &template_time_reference);
         waveform_config_tree->Branch("n_time_bins", &n_time_bins);
         waveform_config_tree->Branch("time_edges_ns", &time_edges_ns);
         waveform_config_tree->Branch("time_centers_ns", &time_centers_ns);
+        waveform_config_tree->Branch("reference_pulse_time_ns",
+                                     &reference_pulse_time_ns);
+        waveform_config_tree->Branch("reference_pulse_amplitude",
+                                     &reference_pulse_amplitude);
         waveform_config_tree->Fill();
         waveform_config_tree->Write();
         waveform_config_written = true;

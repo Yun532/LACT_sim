@@ -1237,7 +1237,9 @@ void writeElectronicsHitCsv(const std::string& primary_path,
             "failed to write fired p.e. CSV: " + fired_path);
         fired << std::setprecision(17)
               << "event_id,telescope_id,reference_time_ns,pixel_id,time_ns,"
-              << "global_time_ns,channel_id,microcell_id,fired_pe,origin\n";
+              << "global_time_ns,channel_id,microcell_id,fired_pe,"
+              << "charge_factor,time_jitter_ns,waveform_time_ns,"
+              << "global_waveform_time_ns,origin\n";
     }
     for (const auto& item : events) {
         const auto& event = item.second;
@@ -1262,7 +1264,12 @@ void writeElectronicsHitCsv(const std::string& primary_path,
                       << ',' << hit.time_ns << ','
                       << event.reference_time_ns + hit.time_ns << ','
                       << hit.channel_id << ',' << hit.microcell_id << ','
-                      << hit.fired_pe << ',' << static_cast<int>(hit.origin)
+                      << hit.fired_pe << ',' << hit.charge_factor << ','
+                      << hit.time_jitter_ns << ','
+                      << hit.time_ns + hit.time_jitter_ns << ','
+                      << event.reference_time_ns + hit.time_ns +
+                             hit.time_jitter_ns
+                      << ',' << static_cast<int>(hit.origin)
                       << '\n';
             }
         }
@@ -1619,9 +1626,35 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
 
         hid_t electronics_group = H5Gcreate2(metadata_group, "electronics",
                                              H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-        writeStringAttribute(electronics_group, "model", "integrated_pe_placeholder");
+        writeStringAttribute(electronics_group, "enabled",
+                             detector_cfg.enabled ? "true" : "false");
+        writeStringAttribute(
+            electronics_group, "model",
+            detector_cfg.enabled ? "explicit_microcell_and_single_pe"
+                                 : "disabled");
+        writeStringAttribute(electronics_group, "microcell_saturation_enabled",
+                             detector_cfg.microcell.saturation_enabled
+                                 ? "true"
+                                 : "false");
+        writeStringAttribute(electronics_group, "single_pe_enabled",
+                             detector_cfg.single_pe.enabled ? "true" : "false");
+        writeStringAttribute(electronics_group, "single_pe_model",
+                             detector_cfg.single_pe.model);
+        writeStringAttribute(electronics_group, "single_pe_unit",
+                             detector_cfg.single_pe.unit);
+        writeStringAttribute(electronics_group, "template_time_reference",
+                             detector_cfg.single_pe.template_time_reference);
+        writeStringAttribute(
+            electronics_group, "charge_fluctuation_enabled",
+            detector_cfg.single_pe.charge_fluctuation.enabled ? "true" : "false");
+        writeStringAttribute(electronics_group, "charge_fluctuation_model",
+                             detector_cfg.single_pe.charge_fluctuation.model);
+        writeStringAttribute(electronics_group, "time_jitter_enabled",
+                             detector_cfg.single_pe.time_jitter.enabled
+                                 ? "true"
+                                 : "false");
         writeStringAttribute(electronics_group, "response",
-                             "reserved; SiPM PDE is handled by sipm.pde");
+                             "SiPM PDE is applied before this detector pipeline");
         H5Gclose(electronics_group);
 
         hid_t waveform_group_meta = H5Gcreate2(metadata_group, "waveform",
@@ -1637,8 +1670,11 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                              doubleToString(waveform_cfg.time_window_start_ns));
         writeStringAttribute(waveform_group_meta, "time_window_end_ns",
                              doubleToString(waveform_cfg.time_window_end_ns));
-        writeStringAttribute(waveform_group_meta, "note",
-                             "proxy waveform before real electronics; when NSB is enabled it is sampled per time bin");
+        writeStringAttribute(
+            waveform_group_meta, "note",
+            waveform_cfg.source == "electronics"
+                ? "measured single-p.e. pulses are superposed after microcell saturation and sampled at the configured interval"
+                : "time-binned camera p.e. output; when NSB is enabled it is sampled per time bin");
         H5Gclose(waveform_group_meta);
 
         hid_t nsb_group = H5Gcreate2(metadata_group, "nsb",
@@ -3018,6 +3054,8 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                 std::int32_t channel_id;
                 std::int32_t microcell_id;
                 double fired_pe;
+                double charge_factor;
+                double time_jitter_ns;
                 std::int32_t origin;
             };
             std::vector<PrimaryPeRow> primary_rows;
@@ -3047,6 +3085,7 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                             hit.time_ns,
                             event.reference_time_ns + hit.time_ns,
                             hit.channel_id, hit.microcell_id, hit.fired_pe,
+                            hit.charge_factor, hit.time_jitter_ns,
                             static_cast<std::int32_t>(hit.origin),
                         });
                     }
@@ -3081,6 +3120,8 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                 H5Tinsert(type, "channel_id", HOFFSET(FiredPeRow, channel_id), H5T_NATIVE_INT32);
                 H5Tinsert(type, "microcell_id", HOFFSET(FiredPeRow, microcell_id), H5T_NATIVE_INT32);
                 H5Tinsert(type, "fired_pe", HOFFSET(FiredPeRow, fired_pe), H5T_NATIVE_DOUBLE);
+                H5Tinsert(type, "charge_factor", HOFFSET(FiredPeRow, charge_factor), H5T_NATIVE_DOUBLE);
+                H5Tinsert(type, "time_jitter_ns", HOFFSET(FiredPeRow, time_jitter_ns), H5T_NATIVE_DOUBLE);
                 H5Tinsert(type, "origin", HOFFSET(FiredPeRow, origin), H5T_NATIVE_INT32);
                 writeCompound1D(electronics_group, "fired_pe_hits", type, fired_rows);
                 H5Tclose(type);
@@ -3682,6 +3723,20 @@ void printCorsikaOpticalConfiguration(
                detector_cfg.single_pe.enabled ? "true" : "false");
     printField("single_pe_model", detector_cfg.single_pe.model);
     printField("single_pe_unit", detector_cfg.single_pe.unit);
+    printField("template_time_reference",
+               detector_cfg.single_pe.template_time_reference);
+    printField("charge_fluctuation_enabled",
+               detector_cfg.single_pe.charge_fluctuation.enabled ? "true"
+                                                                 : "false");
+    printField("charge_fluctuation_model",
+               detector_cfg.single_pe.charge_fluctuation.model);
+    printField("charge_sample_count",
+               intToString(detector_cfg.single_pe.charge_fluctuation
+                               .empirical_samples.size()));
+    printField("time_jitter_enabled",
+               detector_cfg.single_pe.time_jitter.enabled ? "true" : "false");
+    printField("time_jitter_sigma_ns",
+               doubleToString(detector_cfg.single_pe.time_jitter.sigma_ns));
     printField("sampling_width_ns",
                doubleToString(detector_cfg.sampling.width_ns));
     printField("save_primary_sequence",
@@ -3832,7 +3887,7 @@ void printCorsikaOpticalConfiguration(
         missing = "collector, " + missing;
     }
     if (!waveform_cfg.enabled) {
-        missing = "proxy waveform output, " + missing;
+        missing = "waveform output, " + missing;
     }
     printField("not included", missing);
 }

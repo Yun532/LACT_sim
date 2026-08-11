@@ -289,8 +289,12 @@ void mergeComponentConfig(std::map<std::string, std::string>& dst,
         if (scoped == "nsb.spectrum_csv") {
             value = resolveRelativePath(path, value);
         }
-        if (scoped == "electronics.single_pe.csv" ||
-            scoped == "electronics.single_pe.csv_path") {
+        if (scoped == "electronics.microcell.device" ||
+            scoped == "electronics.single_pe.csv" ||
+            scoped == "electronics.single_pe.csv_path" ||
+            scoped == "electronics.single_pe.template" ||
+            scoped == "electronics.single_pe.charge_fluctuation.csv_path" ||
+            scoped == "electronics.single_pe.charge_fluctuation.samples") {
             value = resolveRelativePath(path, value);
         }
         dst[scoped] = value;
@@ -2359,6 +2363,118 @@ ElectronicsConfig buildElectronicsConfig(const std::map<std::string, std::string
     return electronics;
 }
 
+std::vector<double> readNormalizedPositiveCsvColumn(
+    const std::string& path,
+    const std::string& requested_column)
+{
+    std::ifstream input(path);
+    if (!input) {
+        throw std::runtime_error(
+            "failed to open empirical single-p.e. charge CSV: " + path);
+    }
+    std::string line;
+    if (!std::getline(input, line)) {
+        throw std::runtime_error(
+            "empty empirical single-p.e. charge CSV: " + path);
+    }
+    const auto header = splitCsvCells(line);
+    const auto column_it = std::find(
+        header.begin(), header.end(), requested_column);
+    if (column_it == header.end()) {
+        throw std::runtime_error(
+            "missing column '" + requested_column +
+            "' in empirical single-p.e. charge CSV: " + path);
+    }
+    const std::size_t column = static_cast<std::size_t>(
+        std::distance(header.begin(), column_it));
+    std::vector<double> values;
+    while (std::getline(input, line)) {
+        if (trim(line).empty() || trim(line).front() == '#') continue;
+        const auto cells = splitCsvCells(line);
+        if (column >= cells.size()) continue;
+        try {
+            const double value = std::stod(cells[column]);
+            if (std::isfinite(value) && value > 0.0) {
+                values.push_back(value);
+            }
+        } catch (const std::exception&) {
+            // Ignore non-numeric rows; the final empty check remains strict.
+        }
+    }
+    if (values.empty()) {
+        throw std::runtime_error(
+            "no positive numeric values in empirical single-p.e. charge CSV: " +
+            path);
+    }
+    double mean = 0.0;
+    for (const double value : values) mean += value;
+    mean /= static_cast<double>(values.size());
+    for (double& value : values) value /= mean;
+    return values;
+}
+
+void applyMicrocellDeviceConfig(
+    electronics::MicrocellConfig& microcell,
+    const std::string& path)
+{
+    if (trim(path).empty()) return;
+    const auto device = readKeyValueConfig(path);
+    const auto int_value = [&](const std::string& key, int fallback) {
+        return getInt(
+            device, key,
+            getInt(device, "microcell." + key, fallback));
+    };
+    const auto double_value = [&](const std::string& key, double fallback) {
+        return getDouble(
+            device, key,
+            getDouble(device, "microcell." + key, fallback));
+    };
+    const auto string_value = [&](const std::string& key,
+                                  const std::string& fallback) {
+        return getString(
+            device, key,
+            getString(device, "microcell." + key, fallback));
+    };
+
+    microcell.layout = lowerCopy(trim(string_value("layout", microcell.layout)));
+    microcell.channel_columns = int_value(
+        "channel_columns", microcell.channel_columns);
+    microcell.channel_rows = int_value("channel_rows", microcell.channel_rows);
+    microcell.channel_size_x_m = double_value(
+        "channel_size_x_m", microcell.channel_size_x_m);
+    microcell.channel_size_y_m = double_value(
+        "channel_size_y_m", microcell.channel_size_y_m);
+    microcell.channel_gap_x_m = double_value(
+        "channel_gap_x_m", microcell.channel_gap_x_m);
+    microcell.channel_gap_y_m = double_value(
+        "channel_gap_y_m", microcell.channel_gap_y_m);
+    microcell.microcell_columns_per_channel = int_value(
+        "microcell_columns_per_channel",
+        microcell.microcell_columns_per_channel);
+    microcell.microcell_rows_per_channel = int_value(
+        "microcell_rows_per_channel",
+        microcell.microcell_rows_per_channel);
+
+    // All redundant totals are derived from the independent device inputs.
+    microcell.channels_per_pixel =
+        microcell.channel_columns * microcell.channel_rows;
+    microcell.microcells_per_channel =
+        microcell.microcell_columns_per_channel *
+        microcell.microcell_rows_per_channel;
+    microcell.grid_columns =
+        microcell.channel_columns *
+        microcell.microcell_columns_per_channel;
+    microcell.grid_rows =
+        microcell.channel_rows *
+        microcell.microcell_rows_per_channel;
+    microcell.sensor_size_x_m =
+        microcell.channel_columns * microcell.channel_size_x_m +
+        (microcell.channel_columns - 1) * microcell.channel_gap_x_m;
+    microcell.sensor_size_y_m =
+        microcell.channel_rows * microcell.channel_size_y_m +
+        (microcell.channel_rows - 1) * microcell.channel_gap_y_m;
+}
+
 electronics::DetectorPipelineConfig buildDetectorPipelineConfig(
     const std::map<std::string, std::string>& cfg)
 {
@@ -2369,6 +2485,12 @@ electronics::DetectorPipelineConfig buildDetectorPipelineConfig(
             "use electronics.enabled instead");
     }
     out.enabled = getBool(cfg, "electronics.enabled", out.enabled);
+    out.random_seed = getUInt64(
+        cfg, "electronics.random_seed", out.random_seed);
+
+    const std::string microcell_device = getString(
+        cfg, "electronics.microcell.device", "");
+    applyMicrocellDeviceConfig(out.microcell, microcell_device);
     out.microcell.enabled = getBool(
         cfg, "electronics.microcell.enabled", out.microcell.enabled);
     out.microcell.saturation_enabled = getBool(
@@ -2422,14 +2544,23 @@ electronics::DetectorPipelineConfig buildDetectorPipelineConfig(
     out.microcell.pde_includes_inter_channel_gaps = getBool(
         cfg, "electronics.microcell.pde_includes_inter_channel_gaps",
         out.microcell.pde_includes_inter_channel_gaps);
+    if (getBool(cfg, "electronics.microcell.recovery_enabled", false)) {
+        throw std::runtime_error(
+            "microcell recovery is not available; use "
+            "electronics.microcell.recovery_enabled=false");
+    }
     out.single_pe.enabled = getBool(
         cfg, "electronics.single_pe.enabled", out.single_pe.enabled);
     out.single_pe.model = lowerCopy(trim(getString(
         cfg, "electronics.single_pe.model", out.single_pe.model)));
     out.single_pe.csv_path = getString(
-        cfg, "electronics.single_pe.csv",
-        getString(cfg, "electronics.single_pe.csv_path",
-                  out.single_pe.csv_path));
+        cfg, "electronics.single_pe.template",
+        getString(cfg, "electronics.single_pe.csv",
+            getString(cfg, "electronics.single_pe.csv_path",
+                      out.single_pe.csv_path)));
+    out.single_pe.template_time_reference = lowerCopy(trim(getString(
+        cfg, "electronics.single_pe.template_time_reference",
+        out.single_pe.template_time_reference)));
     out.single_pe.unit = lowerCopy(trim(getString(
         cfg, "electronics.single_pe.unit", out.single_pe.unit)));
     out.single_pe.rise_ns = getDouble(
@@ -2441,6 +2572,35 @@ electronics::DetectorPipelineConfig buildDetectorPipelineConfig(
     out.single_pe.amplitude_scale = getDouble(
         cfg, "electronics.single_pe.amplitude_scale",
         out.single_pe.amplitude_scale);
+
+    auto& charge = out.single_pe.charge_fluctuation;
+    charge.enabled = getBool(
+        cfg, "electronics.single_pe.charge_fluctuation.enabled",
+        charge.enabled);
+    charge.model = lowerCopy(trim(getString(
+        cfg, "electronics.single_pe.charge_fluctuation.model",
+        charge.model)));
+    charge.csv_path = getString(
+        cfg, "electronics.single_pe.charge_fluctuation.samples",
+        getString(cfg,
+            "electronics.single_pe.charge_fluctuation.csv_path",
+            charge.csv_path));
+    charge.csv_column = getString(
+        cfg, "electronics.single_pe.charge_fluctuation.csv_column",
+        charge.csv_column);
+    if (charge.enabled && !charge.csv_path.empty()) {
+        charge.empirical_samples = readNormalizedPositiveCsvColumn(
+            charge.csv_path, charge.csv_column);
+    }
+
+    auto& jitter = out.single_pe.time_jitter;
+    jitter.enabled = getBool(
+        cfg, "electronics.single_pe.time_jitter.enabled", jitter.enabled);
+    jitter.model = lowerCopy(trim(getString(
+        cfg, "electronics.single_pe.time_jitter.model", jitter.model)));
+    jitter.sigma_ns = getDouble(
+        cfg, "electronics.single_pe.time_jitter.sigma_ns",
+        jitter.sigma_ns);
 
     out.sampling.width_ns = getDouble(
         cfg, "electronics.sampling.width_ns",

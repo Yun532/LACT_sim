@@ -154,13 +154,15 @@ void writeResult(const std::filesystem::path& directory,
     {
         auto output = openOutput(directory, "fired_hits.csv");
         output << "event_id,telescope_id,pixel_id,time_ns,channel_id,"
-                  "microcell_id,fired_pe,origin\n";
+                  "microcell_id,fired_pe,origin,charge_factor,"
+                  "time_jitter_ns\n";
         for (const auto& hit : result.fired_hits) {
             output << hit.event_id << ',' << hit.telescope_id << ','
                    << hit.pixel_id + pixel_id_base << ',' << hit.time_ns << ','
                    << hit.channel_id << ',' << hit.microcell_id << ','
                    << hit.fired_pe << ','
-                   << lact::electronics::hitOriginName(hit.origin) << '\n';
+                   << lact::electronics::hitOriginName(hit.origin) << ','
+                   << hit.charge_factor << ',' << hit.time_jitter_ns << '\n';
         }
     }
     {
@@ -281,6 +283,16 @@ void writeResult(const std::filesystem::path& directory,
                << ",\n"
                << "  \"single_pe_enabled\": "
                << (config.single_pe.enabled ? "true" : "false") << ",\n"
+               << "  \"single_pe_area_mv_ns\": "
+               << result.single_pe_area_mv_ns << ",\n"
+               << "  \"single_pe_template_time_reference\": \""
+               << result.template_time_reference << "\",\n"
+               << "  \"single_pe_charge_fluctuation_enabled\": "
+               << (result.charge_fluctuation_enabled ? "true" : "false")
+               << ",\n"
+               << "  \"single_pe_time_jitter_enabled\": "
+               << (result.time_jitter_enabled ? "true" : "false")
+               << ",\n"
                << "  \"sample_unit\": \"" << result.sample_unit << "\",\n"
                << "  \"sample_width_ns\": " << config.sampling.width_ns
                << ",\n"

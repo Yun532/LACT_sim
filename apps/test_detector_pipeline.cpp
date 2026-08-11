@@ -139,8 +139,48 @@ int main()
     result = runDetectorPipeline(config, 2, hits);
     require(result.sample_unit == "mV",
             "absolute waveform mode must expose mV units");
+    require(result.reference_pulse_time_ns.size() ==
+                result.reference_pulse_amplitude.size() &&
+                result.reference_pulse_time_ns.size() > 2,
+            "single-p.e. reference pulse must be exposed as file metadata");
+    double reference_area = 0.0;
+    for (std::size_t i = 1; i < result.reference_pulse_time_ns.size(); ++i) {
+        reference_area +=
+            0.5 * (result.reference_pulse_amplitude[i - 1] +
+                   result.reference_pulse_amplitude[i]) *
+            (result.reference_pulse_time_ns[i] -
+             result.reference_pulse_time_ns[i - 1]);
+    }
+    require(std::abs(reference_area - result.single_pe_area_mv_ns) < 1.0e-9,
+            "serialized reference pulse must reproduce single-p.e. area");
     require(result.camera_trigger.triggered,
             "voltage threshold must operate on sampled waveform");
+
+    config.camera_trigger.enabled = false;
+    config.single_pe.charge_fluctuation.enabled = true;
+    config.single_pe.charge_fluctuation.empirical_samples = {0.5, 1.5};
+    const auto fluctuated = runDetectorPipeline(config, 2, hits);
+    const auto repeated_fluctuated = runDetectorPipeline(config, 2, hits);
+    require(fluctuated.charge_fluctuation_enabled,
+            "result metadata must expose enabled charge fluctuation");
+    require(fluctuated.fired_hits.size() == repeated_fluctuated.fired_hits.size(),
+            "fixed random seed must preserve avalanche count");
+    std::vector<double> charge_factor_sum(2, 0.0);
+    for (std::size_t i = 0; i < fluctuated.fired_hits.size(); ++i) {
+        const auto& hit = fluctuated.fired_hits[i];
+        require(hit.charge_factor == repeated_fluctuated.fired_hits[i].charge_factor,
+                "fixed random seed must reproduce empirical charge draws");
+        charge_factor_sum[static_cast<std::size_t>(hit.pixel_id)] +=
+            hit.charge_factor * hit.fired_pe;
+    }
+    for (std::size_t pixel = 0; pixel < charge_factor_sum.size(); ++pixel) {
+        const double waveform_area =
+            waveformSum(fluctuated, pixel) * config.sampling.width_ns;
+        const double expected_area =
+            charge_factor_sum[pixel] * fluctuated.single_pe_area_mv_ns;
+        require(std::abs(waveform_area - expected_area) < 1.0e-6,
+                "mV waveform area must follow empirical avalanche charge");
+    }
 
     std::cout << "detector pipeline tests passed\n";
     return 0;

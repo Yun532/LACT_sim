@@ -102,8 +102,6 @@ std::vector<PulsePoint> loadPulseCsv(const std::string& path)
     if (peak != pulse.end() && peak->amplitude < 0.0) {
         for (auto& point : pulse) point.amplitude = -point.amplitude;
     }
-    const double onset = pulse.front().time_ns;
-    for (auto& point : pulse) point.time_ns -= onset;
     return pulse;
 }
 
@@ -113,6 +111,10 @@ std::vector<PulsePoint> makePulse(const SinglePeConfig& config,
     std::vector<PulsePoint> pulse;
     if (config.model == "measured_csv") {
         pulse = loadPulseCsv(config.csv_path);
+        if (config.template_time_reference == "onset") {
+            const double onset = pulse.front().time_ns;
+            for (auto& point : pulse) point.time_ns -= onset;
+        }
     } else if (config.model == "analytic") {
         const double step_ns = std::min(0.05, sample_width_ns / 32.0);
         const std::size_t count = static_cast<std::size_t>(
@@ -131,17 +133,20 @@ std::vector<PulsePoint> makePulse(const SinglePeConfig& config,
                  {0.5 * sample_width_ns, 2.0 / sample_width_ns},
                  {sample_width_ns, 0.0}};
     }
-    pulse.erase(
-        std::remove_if(pulse.begin(), pulse.end(),
-                       [&](const PulsePoint& point) {
-                           return point.time_ns > config.support_ns;
-                       }),
-        pulse.end());
+    if (config.model != "measured_csv") {
+        pulse.erase(
+            std::remove_if(pulse.begin(), pulse.end(),
+                           [&](const PulsePoint& point) {
+                               return point.time_ns > config.support_ns;
+                           }),
+            pulse.end());
+    }
     if (pulse.size() < 2) {
         throw std::runtime_error(
             "single-p.e. pulse has fewer than two points inside support");
     }
-    if (pulse.back().time_ns < config.support_ns) {
+    if (config.model != "measured_csv" &&
+        pulse.back().time_ns < config.support_ns) {
         pulse.push_back({config.support_ns, 0.0});
     }
     for (auto& point : pulse) point.amplitude *= config.amplitude_scale;
@@ -529,6 +534,47 @@ void validateDetectorPipelineConfig(const DetectorPipelineConfig& config)
         throw std::runtime_error(
             "single_pe.csv_path is required for measured_csv");
     }
+    if (!(config.single_pe.template_time_reference == "onset" ||
+          config.single_pe.template_time_reference == "peak")) {
+        throw std::runtime_error(
+            "single_pe.template_time_reference must be onset or peak");
+    }
+    const auto& charge = config.single_pe.charge_fluctuation;
+    if (charge.enabled) {
+        if (!config.single_pe.enabled) {
+            throw std::runtime_error(
+                "single-p.e. charge fluctuation requires single_pe.enabled=true");
+        }
+        if (charge.model != "empirical") {
+            throw std::runtime_error(
+                "single_pe.charge_fluctuation.model must be empirical");
+        }
+        if (charge.empirical_samples.empty()) {
+            throw std::runtime_error(
+                "single-p.e. empirical charge samples are empty");
+        }
+        for (const double value : charge.empirical_samples) {
+            if (!std::isfinite(value) || value <= 0.0) {
+                throw std::runtime_error(
+                    "single-p.e. empirical charge samples must be finite and > 0");
+            }
+        }
+    }
+    const auto& jitter = config.single_pe.time_jitter;
+    if (jitter.enabled) {
+        if (!config.single_pe.enabled) {
+            throw std::runtime_error(
+                "single-p.e. time jitter requires single_pe.enabled=true");
+        }
+        if (jitter.model != "gaussian") {
+            throw std::runtime_error(
+                "single_pe.time_jitter.model must be gaussian");
+        }
+        if (!std::isfinite(jitter.sigma_ns) || jitter.sigma_ns < 0.0) {
+            throw std::runtime_error(
+                "single_pe.time_jitter.sigma_ns must be finite and >= 0");
+        }
+    }
     if (!(config.single_pe.rise_ns > 0.0) ||
         !(config.single_pe.fall_ns > config.single_pe.rise_ns) ||
         !(config.single_pe.support_ns > 0.0)) {
@@ -712,6 +758,36 @@ DetectorPipelineResult runDetectorPipeline(
     }
 
     if (config.single_pe.enabled) {
+        out.charge_fluctuation_enabled =
+            config.single_pe.charge_fluctuation.enabled;
+        out.time_jitter_enabled = config.single_pe.time_jitter.enabled;
+        out.template_time_reference =
+            config.single_pe.template_time_reference;
+        std::seed_seq seed{
+            static_cast<std::uint32_t>(config.random_seed),
+            static_cast<std::uint32_t>(config.random_seed >> 32U),
+            static_cast<std::uint32_t>(out.event_id),
+            static_cast<std::uint32_t>(out.telescope_id),
+            0x5349504dU,
+        };
+        std::mt19937_64 rng(seed);
+        if (config.single_pe.charge_fluctuation.enabled) {
+            const auto& samples =
+                config.single_pe.charge_fluctuation.empirical_samples;
+            std::uniform_int_distribution<std::size_t> choose(
+                0, samples.size() - 1);
+            for (auto& hit : out.fired_hits) {
+                hit.charge_factor = samples[choose(rng)];
+            }
+        }
+        if (config.single_pe.time_jitter.enabled &&
+            config.single_pe.time_jitter.sigma_ns > 0.0) {
+            std::normal_distribution<double> jitter(
+                0.0, config.single_pe.time_jitter.sigma_ns);
+            for (auto& hit : out.fired_hits) {
+                hit.time_jitter_ns = jitter(rng);
+            }
+        }
         out.sample_unit =
             config.single_pe.unit == "mv" ? "mV" : "pe_charge_per_sample";
         out.waveform.assign(n_pixels * out.n_samples, 0.0);
@@ -725,18 +801,29 @@ DetectorPipelineResult runDetectorPipeline(
         }
         const auto pulse = makePulse(config.single_pe,
                                      config.sampling.width_ns);
+        out.reference_pulse_time_ns.reserve(pulse.size());
+        out.reference_pulse_amplitude.reserve(pulse.size());
+        for (const auto& point : pulse) {
+            out.reference_pulse_time_ns.push_back(point.time_ns);
+            out.reference_pulse_amplitude.push_back(point.amplitude);
+        }
         const auto cumulative = cumulativePulse(pulse);
         const double raw_area = trapezoidArea(pulse);
         if (!(raw_area > 0.0)) {
             throw std::runtime_error(
                 "single-p.e. pulse must have positive area");
         }
+        if (config.single_pe.unit == "mv") {
+            out.single_pe_area_mv_ns = raw_area;
+        }
         for (const auto& hit : out.fired_hits) {
+            const double waveform_time_ns =
+                hit.time_ns + hit.time_jitter_ns;
             for (std::size_t bin = 0; bin < out.n_samples; ++bin) {
                 const double elapsed_start =
-                    out.time_edges_ns[bin] - hit.time_ns;
+                    out.time_edges_ns[bin] - waveform_time_ns;
                 const double elapsed_end =
-                    out.time_edges_ns[bin + 1] - hit.time_ns;
+                    out.time_edges_ns[bin + 1] - waveform_time_ns;
                 double sample =
                     cumulativeAt(pulse, cumulative, elapsed_end) -
                     cumulativeAt(pulse, cumulative, elapsed_start);
@@ -745,7 +832,7 @@ DetectorPipelineResult runDetectorPipeline(
                 } else {
                     sample /= config.sampling.width_ns;
                 }
-                sample *= hit.fired_pe;
+                sample *= hit.fired_pe * hit.charge_factor;
                 if (sample == 0.0) continue;
                 const std::size_t pixel =
                     static_cast<std::size_t>(hit.pixel_id);

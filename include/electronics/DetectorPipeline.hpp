@@ -72,9 +72,26 @@ struct MicrocellAddress {
 };
 
 struct SinglePeConfig {
+    struct ChargeFluctuationConfig {
+        bool enabled = false;
+        std::string model = "empirical";
+        std::string csv_path;
+        std::string csv_column = "charge_factor_mean_one";
+        std::vector<double> empirical_samples;
+    };
+
+    struct TimeJitterConfig {
+        bool enabled = false;
+        std::string model = "gaussian";
+        double sigma_ns = 0.0;
+    };
+
     bool enabled = false;
     std::string model = "analytic";
     std::string csv_path;
+    // measured_csv only: preserve the CSV time coordinate when peak is used;
+    // shift the first CSV point to zero when onset is used.
+    std::string template_time_reference = "onset";
     // pe_charge: template area is normalized to one p.e.; samples contain
     // integrated p.e. charge.  mV: template amplitudes are preserved and
     // samples contain the average voltage over each sample.
@@ -83,6 +100,8 @@ struct SinglePeConfig {
     double fall_ns = 6.0;
     double support_ns = 60.0;
     double amplitude_scale = 1.0;
+    ChargeFluctuationConfig charge_fluctuation;
+    TimeJitterConfig time_jitter;
 };
 
 struct SamplingConfig {
@@ -102,6 +121,7 @@ struct CameraTriggerConfig {
 
 struct DetectorPipelineConfig {
     bool enabled = false;
+    std::uint64_t random_seed = 20260810ULL;
     MicrocellConfig microcell;
     SinglePeConfig single_pe;
     SamplingConfig sampling;
@@ -141,6 +161,10 @@ struct FiredCellHit {
     int microcell_id = -1;
     double fired_pe = 1.0;
     HitOrigin origin = HitOrigin::Cherenkov;
+    // These stochastic electronics quantities affect the waveform only.
+    // fired_pe remains the integer avalanche truth used by saturation studies.
+    double charge_factor = 1.0;
+    double time_jitter_ns = 0.0;
 };
 
 struct PixelSummary {
@@ -168,6 +192,14 @@ struct DetectorPipelineResult {
     std::size_t n_pixels = 0;
     std::size_t n_samples = 0;
     std::string sample_unit = "none";
+    double single_pe_area_mv_ns = 0.0;
+    bool charge_fluctuation_enabled = false;
+    bool time_jitter_enabled = false;
+    std::string template_time_reference = "none";
+    // The common high-resolution single-p.e. pulse is file-level calibration
+    // metadata. Writers serialize it once, never once per event or pixel.
+    std::vector<double> reference_pulse_time_ns;
+    std::vector<double> reference_pulse_amplitude;
     std::vector<double> time_edges_ns;
     std::vector<double> time_centers_ns;
     std::vector<PrimaryPeHit> primary_hits;
