@@ -129,7 +129,7 @@ LoNS 光谱积分得到每像素 p.e. rate：
 
 ```text
 rate_pe_per_ns_per_pixel =
-    1e-9 * A_eff * Omega_pixel *
+    1e-9 * A_eff * Omega_pixel * T_collector_mean *
     ∫ LoNS(lambda)
       * mirror_reflectivity(lambda)
       * filter_transmission(lambda)
@@ -143,6 +143,7 @@ rate_pe_per_ns_per_pixel =
 - `LoNS(lambda)` 单位为 `ph / (s nm sr m^2)`。
 - `A_eff` 单位为 `m^2`。
 - `Omega_pixel` 单位为 `sr`。
+- `T_collector_mean` 是对LACT镜面光锥和收集器入口面积加权的平均透过率。
 - 各效率曲线为无量纲。
 - 积分结果先是 `pe / s / pixel`，乘 `1e-9` 后为 `pe / ns / pixel`。
 
@@ -174,29 +175,30 @@ Integral of red curve         = 1.2325963209e12 pe s^-1 sr^-1 m^-2
 Detected p.e. in 30 ns        = 9.1239285550
 ```
 
-把 notebook 的红线积分换到 LACT `new_camera` 的像素视场 `9.3025e-6 sr`，并使用上面的
-两个固定面积，可得到第一版 NSB rate 量级：
+把 notebook 的红线积分换到 LACT `new_camera` 的像素视场 `9.3025e-6 sr`，使用上面的
+两个固定面积，并乘Bezier/`true_reflect`光收集器的LACT光锥平均透过率
+`0.923436437`，可得到NSB rate量级：
 
 ```text
 无月，无遮挡:
-  rate = 0.097462 pe/ns/pixel
-  mean = 2.437 pe / 25 ns / pixel
-  mean = 2.924 pe / 30 ns / pixel
+  rate = 0.085010 pe/ns/pixel
+  mean = 2.125 pe / 25 ns / pixel
+  mean = 2.550 pe / 30 ns / pixel
 
 无月，考虑遮挡:
-  rate = 0.080858 pe/ns/pixel
-  mean = 2.021 pe / 25 ns / pixel
-  mean = 2.426 pe / 30 ns / pixel
+  rate = 0.070527 pe/ns/pixel
+  mean = 1.763 pe / 25 ns / pixel
+  mean = 2.116 pe / 30 ns / pixel
 
 有月示例，无遮挡:
-  rate = 0.339671 pe/ns/pixel
-  mean = 8.492 pe / 25 ns / pixel
-  mean = 10.190 pe / 30 ns / pixel
+  rate = 0.296845 pe/ns/pixel
+  mean = 7.421 pe / 25 ns / pixel
+  mean = 8.905 pe / 30 ns / pixel
 
 有月示例，考虑遮挡:
-  rate = 0.281804 pe/ns/pixel
-  mean = 7.045 pe / 25 ns / pixel
-  mean = 8.454 pe / 30 ns / pixel
+  rate = 0.246274 pe/ns/pixel
+  mean = 6.157 pe / 25 ns / pixel
+  mean = 7.388 pe / 30 ns / pixel
 ```
 
 这些数值比当前 smoke test 的：
@@ -221,9 +223,17 @@ nsb.spectrum_unit=ph_s_nm_sr_m2
 nsb.effective_area_m2=29.623570
 # nsb.effective_area_m2=24.576860
 
+# scan_light_collector_angular_response按f=8 m、镜面半径3 m光锥面积加权的结果。
+nsb.collector_mean_transmission=0.923436437
+
 nsb.pixel_solid_angle=auto
 nsb.seed=12345
 ```
+
+`collector_mean_transmission`只用于把`spectral_flux`换算成探测PE率。
+`constant_rate`的单位已经是`pe/ns/pixel`，不会再次乘这个系数。
+默认PDE约定已经包含channel gap，因此NSB primary PE条件采样在有效微单元内是正确的；
+不能再额外乘channel有效面积比例，否则会重复扣除gap。
 
 主程序启动时先把光谱积分成：
 

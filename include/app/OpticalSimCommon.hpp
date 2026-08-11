@@ -8,6 +8,7 @@
 #include <set>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "core/Photon.hpp"
@@ -49,6 +50,12 @@ struct ComponentConfigPaths {
     std::string trigger;
     std::string error;
     std::string obstruction;
+};
+
+struct ConfigCommandLine {
+    std::vector<std::string> positional;
+    std::vector<std::pair<std::string, std::string>> overrides;
+    bool help = false;
 };
 
 struct PropagationConfig {
@@ -167,6 +174,12 @@ struct NsbConfig {
     std::string spectrum_csv;
     std::string spectrum_unit = "ph_s_nm_sr_m2";
     double effective_area_m2 = 0.0;
+    // Angular/spectral average probability for a photon at the collector
+    // entrance to reach the SiPM exit. Applied only when spectral_flux is
+    // converted into a detected-p.e. rate; constant_rate is already in p.e.
+    double collector_mean_transmission = 1.0;
+    bool collector_mean_transmission_configured = false;
+    double microcell_geometric_acceptance = 1.0;
     std::string pixel_solid_angle = "auto";
     double pixel_solid_angle_sr = 0.0;
     bool computed_from_spectrum = false;
@@ -269,6 +282,10 @@ std::string lowerCopy(std::string s);
 bool startsWith(const std::string& text, const std::string& prefix);
 std::string resolveRelativePath(const std::string& base_config_path, const std::string& path);
 std::map<std::string, std::string> readKeyValueConfig(const std::string& path);
+ConfigCommandLine parseConfigCommandLine(int argc, char** argv);
+void applyConfigOverrides(
+    std::map<std::string, std::string>& cfg,
+    const std::vector<std::pair<std::string, std::string>>& overrides);
 std::string scopedComponentKey(const std::string& key, const std::string& prefix);
 std::map<std::string, std::string> expandConfig(const std::map<std::string, std::string>& main_cfg,
                                                 const std::string& main_config_path,
@@ -354,11 +371,15 @@ SipmConfig buildSipmConfig(const std::map<std::string, std::string>& cfg);
 ElectronicsConfig buildElectronicsConfig(const std::map<std::string, std::string>& cfg);
 electronics::DetectorPipelineConfig buildDetectorPipelineConfig(
     const std::map<std::string, std::string>& cfg);
+void validateCameraDetectorCompatibility(
+    const CameraConfig& camera,
+    const electronics::DetectorPipelineConfig& detector);
 NsbConfig buildNsbConfig(const std::map<std::string, std::string>& cfg);
 void resolveNsbSpectralRate(NsbConfig& nsb,
                             const OpticalEfficiencyConfig& efficiency_cfg,
                             const CameraGeometry& camera,
-                            const TelescopeConfig& telescope);
+                            const TelescopeConfig& telescope,
+                            const electronics::DetectorPipelineConfig* detector = nullptr);
 void generateIntegratedNsbPe(const NsbConfig& nsb,
                              int event_id,
                              int telescope_id,

@@ -1689,6 +1689,12 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
         writeStringAttribute(nsb_group, "spectrum_unit", nsb_cfg.spectrum_unit);
         writeStringAttribute(nsb_group, "effective_area_m2",
                              doubleToString(nsb_cfg.effective_area_m2));
+        writeStringAttribute(nsb_group, "collector_mean_transmission",
+                             doubleToString(
+                                 nsb_cfg.collector_mean_transmission));
+        writeStringAttribute(nsb_group, "microcell_geometric_acceptance",
+                             doubleToString(
+                                 nsb_cfg.microcell_geometric_acceptance));
         writeStringAttribute(nsb_group, "pixel_solid_angle_sr",
                              doubleToString(nsb_cfg.pixel_solid_angle_sr));
         writeStringAttribute(nsb_group, "computed_from_spectrum",
@@ -3773,6 +3779,10 @@ void printCorsikaOpticalConfiguration(
         printField("spectrum_csv", nsb_cfg.spectrum_csv);
         printField("spectrum_unit", nsb_cfg.spectrum_unit);
         printField("effective_area_m2", doubleToString(nsb_cfg.effective_area_m2));
+        printField("collector_mean_transmission",
+                   doubleToString(nsb_cfg.collector_mean_transmission));
+        printField("microcell_geometric_acceptance",
+                   doubleToString(nsb_cfg.microcell_geometric_acceptance));
         printField("pixel_solid_angle_sr", doubleToString(nsb_cfg.pixel_solid_angle_sr));
         printField("computed_from_spectrum",
                    nsb_cfg.computed_from_spectrum ? "true" : "false");
@@ -4048,12 +4058,16 @@ void printPureNsbTriggerEstimate(const NsbConfig& nsb_cfg,
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc < 2 || argc > 3) {
-        std::cerr << "usage: run_corsika_trace <config.txt> [corsika_eventio_file]\n";
-        return 2;
-    }
-
     try {
+        const auto command = parseConfigCommandLine(argc, argv);
+        if (command.help || command.positional.empty() ||
+            command.positional.size() > 2) {
+            std::cerr
+                << "usage: run_corsika_trace <config.txt> "
+                   "[corsika_eventio_file] [-C key=value ...]\n";
+            return command.help ? 0 : 2;
+        }
+        const std::string config_path = command.positional[0];
 #ifndef LACT_HAS_HESSIO
         throw std::runtime_error(
             "run_corsika_trace requires libhessio. Build external/hessioxxx/source "
@@ -4062,9 +4076,11 @@ int main(int argc, char** argv) {
         std::cout.setf(std::ios::unitbuf);
         std::cout << std::fixed << std::setprecision(6);
         const auto t_start = std::chrono::steady_clock::now();
-        auto main_cfg = readKeyValueConfig(argv[1]);
+        auto main_cfg = readKeyValueConfig(config_path);
+        applyConfigOverrides(main_cfg, command.overrides);
         ComponentConfigPaths component_paths;
-        auto cfg = expandConfig(main_cfg, argv[1], component_paths);
+        auto cfg = expandConfig(main_cfg, config_path, component_paths);
+        applyConfigOverrides(cfg, command.overrides);
 
         cfg["source.mode"] = getString(cfg, "source.mode", "EventIO");
         const bool photon_csv_mode =
@@ -4082,9 +4098,9 @@ int main(int argc, char** argv) {
             std::cerr << "warning: source.eventio_coordinate_frame is deprecated; "
                          "use source.coordinate_frame instead\n";
         }
-        if (argc == 3 && !photon_csv_mode) {
-            source_runtime_cfg.eventio_path = argv[2];
-            cfg["source.eventio_path"] = argv[2];
+        if (command.positional.size() == 2 && !photon_csv_mode) {
+            source_runtime_cfg.eventio_path = command.positional[1];
+            cfg["source.eventio_path"] = command.positional[1];
         }
         if (photon_csv_mode && source_runtime_cfg.csv_path.empty()) {
             throw std::runtime_error(
@@ -4127,6 +4143,7 @@ int main(int argc, char** argv) {
         ElectronicsConfig electronics_cfg = buildElectronicsConfig(cfg);
         ElectronicsResponse electronics(electronics_cfg);
         const auto detector_pipeline_cfg = buildDetectorPipelineConfig(cfg);
+        validateCameraDetectorCompatibility(camera_cfg, detector_pipeline_cfg);
         NsbConfig nsb_cfg = buildNsbConfig(cfg);
         TriggerConfig trigger_cfg = buildTriggerConfig(cfg);
         CameraGeometry camera = buildCameraGeometry(camera_cfg);
@@ -4140,7 +4157,8 @@ int main(int argc, char** argv) {
         TelescopeOpticsCache telescope_optics(nominal_facets, error_cfg);
         const MirrorLayout& mirrors = telescope_optics.layoutFor(telescope_cfg.id);
         OpticalEfficiencyConfig efficiency_cfg = buildEfficiencyConfig(cfg);
-        resolveNsbSpectralRate(nsb_cfg, efficiency_cfg, camera, telescope_cfg);
+        resolveNsbSpectralRate(nsb_cfg, efficiency_cfg, camera, telescope_cfg,
+                               &detector_pipeline_cfg);
         AtmosphereTransmissionConfig atmosphere_cfg = buildAtmosphereTransmissionConfig(cfg);
         PropagationConfig propagation_cfg = buildPropagationConfig(cfg);
         OpticalEfficiency eff(efficiency_cfg);
@@ -4204,7 +4222,10 @@ int main(int argc, char** argv) {
         printSection("Configuration files");
         printField("producer_version",
                    getString(cfg, "provenance.producer_version", "source-tree"));
-        printField("main", argv[1]);
+        printField("main", config_path);
+        for (const auto& [key, value] : command.overrides) {
+            printField("override", key + "=" + value);
+        }
         if (!component_paths.telescope.empty()) printField("telescope", component_paths.telescope);
         if (!component_paths.mirror.empty()) printField("mirror", component_paths.mirror);
         if (!component_paths.source.empty()) printField("source", component_paths.source);
@@ -4355,7 +4376,7 @@ int main(int argc, char** argv) {
             lact_root_stream_writer = std::make_unique<LactEventRootStreamWriter>(
                 output_cfg,
                 waveform_cfg,
-                argv[1],
+                config_path,
                 cfg,
                 source_runtime_cfg,
                 telescope_cfg,
@@ -4949,7 +4970,7 @@ int main(int argc, char** argv) {
             const auto t_hdf5_start = std::chrono::steady_clock::now();
             writeNativeTraceHdf5(output_cfg,
                                  waveform_cfg,
-                                 argv[1],
+                                 config_path,
                                  cfg,
                                  component_paths,
                                  source_runtime_cfg,
@@ -4989,7 +5010,7 @@ int main(int argc, char** argv) {
         const auto t_done = std::chrono::steady_clock::now();
 
         printSection("Input");
-        printField("config", argv[1]);
+        printField("config", config_path);
         if (photon_csv_mode) {
             printField("csv_path", source_runtime_cfg.csv_path);
             if (!source_runtime_cfg.eventio_path.empty()) {

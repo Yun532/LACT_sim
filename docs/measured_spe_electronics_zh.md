@@ -69,6 +69,29 @@ build/run_camera_electronics \
   run_logs/electronics_measured_spe_4ns
 ```
 
+## 命令行批量覆盖
+
+生产程序支持与 sim_telarray 相同习惯的可重复 `-C key=value`。命令行值在主cfg和
+所有组件cfg展开后再次应用，因此优先级最高；同一个键重复出现时最后一个值生效。
+
+```bash
+build/run_corsika_trace configs/examples/photon_csv_measured_spe_4ns_validation.cfg \
+  -C electronics.microcell.saturation_enabled=true \
+  -C electronics.single_pe.enabled=false \
+  -C waveform.enabled=false \
+  -C nsb.enabled=false \
+  -C response.seed=1909 \
+  -C output.lact_root_path=run_logs/batch/event1909_tel19.root
+```
+
+`-Ckey=value`、`--set key=value`和`--set=key=value`也是等价写法。组件入口也能覆盖；
+组件路径与cfg内路径一样相对主cfg解析，例如此处主cfg位于`configs/examples`时使用
+`-C electronics.config=../electronics/measured_spe_4ns.cfg`。这样批量脚本只需
+保留一个基准cfg，不需要为每个随机种子、物理开关和输出路径复制文件。
+
+显式S17351微单元几何依赖光收集器出口坐标。如果同时关闭`camera.collector`，程序现在
+会在启动阶段报错，而不是把默认坐标`(0,0)`静默映射到中央channel gap。
+
 ## Notebook验证
 
 LACT_sim三种格式一致性验证：

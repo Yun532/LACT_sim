@@ -184,6 +184,60 @@ std::map<std::string, std::string> readKeyValueConfig(const std::string& path) {
     return values;
 }
 
+ConfigCommandLine parseConfigCommandLine(int argc, char** argv)
+{
+    ConfigCommandLine out;
+    bool parse_options = true;
+    auto append_override = [&](const std::string& text) {
+        const auto equal = text.find('=');
+        if (equal == std::string::npos) {
+            throw std::runtime_error(
+                "configuration override must be key=value: " + text);
+        }
+        const std::string key = lowerCopy(trim(text.substr(0, equal)));
+        if (key.empty()) {
+            throw std::runtime_error(
+                "configuration override has an empty key: " + text);
+        }
+        out.overrides.emplace_back(key, trim(text.substr(equal + 1)));
+    };
+
+    for (int i = 1; i < argc; ++i) {
+        const std::string argument = argv[i];
+        if (parse_options && argument == "--") {
+            parse_options = false;
+        } else if (parse_options &&
+                   (argument == "--help" || argument == "-h")) {
+            out.help = true;
+        } else if (parse_options &&
+                   (argument == "-C" || argument == "--set")) {
+            if (i + 1 >= argc) {
+                throw std::runtime_error(argument + " requires key=value");
+            }
+            append_override(argv[++i]);
+        } else if (parse_options && startsWith(argument, "-C") &&
+                   argument.size() > 2) {
+            append_override(argument.substr(2));
+        } else if (parse_options && startsWith(argument, "--set=")) {
+            append_override(argument.substr(6));
+        } else if (parse_options && !argument.empty() && argument[0] == '-') {
+            throw std::runtime_error("unknown command-line option: " + argument);
+        } else {
+            out.positional.push_back(argument);
+        }
+    }
+    return out;
+}
+
+void applyConfigOverrides(
+    std::map<std::string, std::string>& cfg,
+    const std::vector<std::pair<std::string, std::string>>& overrides)
+{
+    for (const auto& [key, value] : overrides) {
+        cfg[key] = value;
+    }
+}
+
 std::string scopedComponentKey(const std::string& key, const std::string& prefix) {
     if (startsWith(key, "telescope.") ||
         startsWith(key, "mirror.") || startsWith(key, "source.") ||
@@ -2651,6 +2705,26 @@ electronics::DetectorPipelineConfig buildDetectorPipelineConfig(
     return out;
 }
 
+void validateCameraDetectorCompatibility(
+    const CameraConfig& camera,
+    const electronics::DetectorPipelineConfig& detector)
+{
+    if (!detector.enabled || !detector.microcell.enabled ||
+        detector.microcell.layout != "s17351_tiled_2x4") {
+        return;
+    }
+    if (!camera.enabled) {
+        throw std::runtime_error(
+            "explicit S17351 microcell geometry requires camera.enabled=true");
+    }
+    if (isDisabledText(camera.collector)) {
+        throw std::runtime_error(
+            "explicit S17351 microcell geometry requires an enabled light "
+            "collector because microcell positions use collector-exit "
+            "coordinates; refusing the previous silent (0,0) gap rejection");
+    }
+}
+
 NsbConfig buildNsbConfig(const std::map<std::string, std::string>& cfg) {
     NsbConfig nsb;
     nsb.enabled = getBool(cfg, "nsb.enabled", nsb.enabled);
@@ -2664,6 +2738,11 @@ NsbConfig buildNsbConfig(const std::map<std::string, std::string>& cfg) {
         lowerCopy(trim(getString(cfg, "nsb.spectrum_unit", nsb.spectrum_unit)));
     nsb.effective_area_m2 =
         getDouble(cfg, "nsb.effective_area_m2", nsb.effective_area_m2);
+    nsb.collector_mean_transmission = getDouble(
+        cfg, "nsb.collector_mean_transmission",
+        nsb.collector_mean_transmission);
+    nsb.collector_mean_transmission_configured =
+        cfg.find("nsb.collector_mean_transmission") != cfg.end();
     nsb.pixel_solid_angle =
         lowerCopy(trim(getString(cfg, "nsb.pixel_solid_angle", nsb.pixel_solid_angle)));
     nsb.pixel_solid_angle_sr =
@@ -2682,6 +2761,12 @@ NsbConfig buildNsbConfig(const std::map<std::string, std::string>& cfg) {
     }
     if (!std::isfinite(nsb.effective_area_m2) || nsb.effective_area_m2 < 0.0) {
         throw std::runtime_error("nsb.effective_area_m2 must be finite and >= 0");
+    }
+    if (!std::isfinite(nsb.collector_mean_transmission) ||
+        nsb.collector_mean_transmission <= 0.0 ||
+        nsb.collector_mean_transmission > 1.0) {
+        throw std::runtime_error(
+            "nsb.collector_mean_transmission must be finite and in (0, 1]");
     }
     if (!std::isfinite(nsb.pixel_solid_angle_sr) || nsb.pixel_solid_angle_sr < 0.0) {
         throw std::runtime_error("nsb.pixel_solid_angle_sr must be finite and >= 0");
@@ -2702,6 +2787,13 @@ NsbConfig buildNsbConfig(const std::map<std::string, std::string>& cfg) {
         if (nsb.effective_area_m2 <= 0.0) {
             throw std::runtime_error(
                 "nsb.effective_area_m2 must be > 0 for nsb.model=spectral_flux");
+        }
+        if (!nsb.collector_mean_transmission_configured) {
+            throw std::runtime_error(
+                "nsb.collector_mean_transmission must be explicitly set for "
+                "nsb.model=spectral_flux; use a measured/simulated collector "
+                "average, or set 1 only when effective_area_m2 already "
+                "includes the collector");
         }
     }
     if (isDisabledText(nsb.model)) {
@@ -2749,7 +2841,8 @@ std::vector<std::pair<double, double>> readNsbSpectrumCsv(const std::string& pat
 void resolveNsbSpectralRate(NsbConfig& nsb,
                             const OpticalEfficiencyConfig& efficiency_cfg,
                             const CameraGeometry& camera,
-                            const TelescopeConfig& telescope)
+                            const TelescopeConfig& telescope,
+                            const electronics::DetectorPipelineConfig* detector)
 {
     nsb.computed_from_spectrum = false;
     nsb.spectral_integral_pe_s_sr_m2 = 0.0;
@@ -2787,8 +2880,17 @@ void resolveNsbSpectralRate(NsbConfig& nsb,
         integral += 0.5 * (f0 + f1) * (w1 - w0);
     }
     nsb.spectral_integral_pe_s_sr_m2 = integral;
+    nsb.microcell_geometric_acceptance = 1.0;
+    if (detector && detector->enabled && detector->microcell.enabled &&
+        detector->microcell.layout == "s17351_tiled_2x4" &&
+        !detector->microcell.pde_includes_inter_channel_gaps) {
+        nsb.microcell_geometric_acceptance =
+            electronics::interChannelActiveFraction(detector->microcell);
+    }
     nsb.rate_pe_per_ns_per_pixel =
-        1.0e-9 * integral * nsb.effective_area_m2 * nsb.pixel_solid_angle_sr;
+        1.0e-9 * integral * nsb.effective_area_m2 *
+        nsb.pixel_solid_angle_sr * nsb.collector_mean_transmission *
+        nsb.microcell_geometric_acceptance;
     nsb.computed_from_spectrum = true;
 }
 
@@ -3139,6 +3241,14 @@ void applyCameraResponse(const CameraGeometry& camera,
     double pde = electronics.peConversion(hit.wavelength_nm);
     if (hit.hit_camera && microcell && microcell->enabled &&
         microcell->layout == "s17351_tiled_2x4") {
+        if (!light_collector && hit.collector_exit_x_m == 0.0 &&
+            hit.collector_exit_y_m == 0.0 &&
+            hit.collector_exit_z_m == 0.0) {
+            throw std::runtime_error(
+                "explicit S17351 microcell geometry has no light-collector "
+                "exit coordinates; configure camera.collector or disable the "
+                "explicit microcell geometry");
+        }
         hit.sipm_geometry_enabled = true;
         const auto address = ::lact::electronics::mapMicrocellPosition(
             *microcell, hit.collector_exit_x_m, hit.collector_exit_y_m);

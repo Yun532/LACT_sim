@@ -202,8 +202,8 @@ MPLBACKEND=Agg MPLCONFIGDIR=/tmp python3 python/plot_nsb_spectral_rate.py \
 当前 dark/no-moon、考虑遮挡的默认结果约为：
 
 ```text
-rate_pe_per_ns_per_pixel = 0.076374999
-mean_pe_per_pixel_25ns   = 1.909374978
+rate_pe_per_ns_per_pixel = 0.070527457
+mean_pe_per_pixel_25ns   = 1.763186427
 ```
 
 ## 1. 完美平行光白板测试
@@ -548,7 +548,8 @@ cfg 逐项解释：
   和滤光片曲线。
 - `nsb.config=../nsb/spectral_skycalc_dark_no_obstruction.cfg`: 启用无月 SkyCalc LoNS
   光谱 NSB。固定有效面积为 `29.623570 m^2`，程序自动用相机像素尺寸和焦距计算
-  `pixel_solid_angle`，得到约 `0.09206 p.e./ns/pixel`。
+  `pixel_solid_angle`，并乘光收集器平均透过率 `0.923436437`，得到约
+  `0.08501 p.e./ns/pixel`。
 - `electronics.config=../electronics/explicit_microcell_saturation_only.cfg`: 对 Cherenkov
   和 NSB p.e. 使用相同的显式微单元、无恢复饱和，不生成单 PE 波形。
 - `trigger.config=../trigger/camera_pe_count_array_off.cfg`: 启用 PE 计数相机 trigger，
@@ -597,7 +598,8 @@ cfg 逐项解释：
   和滤光片曲线。
 - `nsb.config=../nsb/spectral_skycalc_dark_with_obstruction.cfg`: 加无月 SkyCalc LoNS
   光谱 NSB。固定有效面积为 `24.576860 m^2`，对应遮挡后的 official 平行光面积，
-  程序算得约 `0.07637 p.e./ns/pixel`。
+  程序再乘光收集器平均透过率 `0.923436437`，算得约
+  `0.07053 p.e./ns/pixel`。
 - `electronics.config=../electronics/explicit_microcell_saturation_only.cfg`: 启用显式
   微单元无恢复饱和，关闭单 PE 和采样波形。
 - `trigger.config=../trigger/camera_pe_count_array_off.cfg`: 启用 PE 计数相机 trigger，

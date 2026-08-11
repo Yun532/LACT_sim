@@ -189,6 +189,58 @@ output.whiteboard_input_photon=true
 
 完整列定义、其他输入坐标和 HTML 三维绘图见 [Photon CSV 格式](docs/photon_csv_format.md)及[用户使用手册](docs/user_guide_zh.md#photon-csv)。
 
+## 电子学的两个最小测试
+
+下面两个测试都使用仓库自带的 event 1909、19 号望远镜 Photon CSV，关闭 NSB，
+因此不需要额外的 CORSIKA 文件。它们使用相同的光学、light collector、PDE 和随机种子，
+区别只在于是否继续生成单 PE 波形，适合检查电子学开关没有改变上游结果。
+
+### 1. 只考虑显式微单元饱和，不生成波形
+
+```bash
+build/run_corsika_trace \
+  configs/examples/photon_csv_saturation_on_waveform_off_validation.cfg
+```
+
+输出位于：
+
+```text
+validation/measured_electronics/saturation_on_waveform_off/lact_events.root
+validation/measured_electronics/saturation_on_waveform_off/lact_events.h5
+```
+
+标准结果是饱和前纯切伦科夫 `3198 PE`、饱和后 `3196 PE`，其中 `2 PE` 因同一微单元
+已经触发而被拒绝；`waveform.enabled=false`，ROOT 中直接保存饱和后的积分 PE 图像。
+
+### 2. 显式微单元饱和加实测单 PE 波形
+
+```bash
+build/run_corsika_trace \
+  configs/examples/photon_csv_measured_spe_4ns_validation.cfg
+```
+
+输出位于：
+
+```text
+validation/measured_electronics/measured_waveform_no_nsb/lact_events.root
+validation/measured_electronics/measured_waveform_no_nsb/lact_events.h5
+validation/measured_electronics/measured_waveform_no_nsb/waveforms.csv
+```
+
+该测试保持相同的 `3198 -> 3196 PE` 微单元结果，然后为每次 fired PE 抽取实测相对
+电荷并叠加实测单 PE 模板，最后生成 `4 ns`、单位为 `mV` 的 1664 像素波形。
+单 PE 面积定标常数为 `84.03495572475859 mV ns / PE`。可进一步运行三种格式一致性检查：
+
+```bash
+python3 scripts/validate_measured_electronics.py \
+  validation/measured_electronics \
+  --json validation/measured_electronics/validation_report.json
+```
+
+波形 ROOT 可由 pyLAST 的 `FullWaveFormExtractor` 或带尾部补偿的
+`LocalPeakExtractor` 读取；完整数据层级和 notebook 用法见
+[实测单 PE 电子学说明](docs/measured_spe_electronics_zh.md)。
+
 ## CORSIKA 白板测试
 
 白板测试适合在接入相机前检查 CORSIKA 光子是否正确读入：

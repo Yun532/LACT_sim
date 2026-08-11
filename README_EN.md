@@ -162,6 +162,63 @@ output.whiteboard_input_photon=true
 
 See the [Photon CSV format](docs/photon_csv_format.md) and [user guide](docs/user_guide_en.md#photon-csv) for optional columns, other input frames, and 3D HTML plotting.
 
+## Two minimal electronics tests
+
+Both tests use the bundled Photon CSV for event 1909 and telescope 19 with NSB
+disabled, so no external CORSIKA file is required. They share the same optics,
+light collector, PDE, and random seed; only waveform generation differs.
+
+### 1. Explicit microcell saturation without waveforms
+
+```bash
+build/run_corsika_trace \
+  configs/examples/photon_csv_saturation_on_waveform_off_validation.cfg
+```
+
+Outputs:
+
+```text
+validation/measured_electronics/saturation_on_waveform_off/lact_events.root
+validation/measured_electronics/saturation_on_waveform_off/lact_events.h5
+```
+
+The reference result contains `3198 PE` before saturation and `3196 PE` after
+saturation; `2 PE` are rejected because their explicit microcells have already
+fired. `waveform.enabled=false`, so ROOT stores the integrated post-saturation
+PE image directly.
+
+### 2. Explicit microcell saturation with measured single-PE waveforms
+
+```bash
+build/run_corsika_trace \
+  configs/examples/photon_csv_measured_spe_4ns_validation.cfg
+```
+
+Outputs:
+
+```text
+validation/measured_electronics/measured_waveform_no_nsb/lact_events.root
+validation/measured_electronics/measured_waveform_no_nsb/lact_events.h5
+validation/measured_electronics/measured_waveform_no_nsb/waveforms.csv
+```
+
+This test preserves the same `3198 -> 3196 PE` microcell result, samples the
+measured relative charge for every fired PE, superposes the measured single-PE
+template, and writes 1664-pixel waveforms at `4 ns` sampling in `mV`. The
+single-PE area is `84.03495572475859 mV ns / PE`. Check ROOT/HDF5/CSV
+consistency with:
+
+```bash
+python3 scripts/validate_measured_electronics.py \
+  validation/measured_electronics \
+  --json validation/measured_electronics/validation_report.json
+```
+
+pyLAST can read the waveform ROOT with `FullWaveFormExtractor` or the
+tail-corrected `LocalPeakExtractor`. See the
+[measured single-PE electronics guide](docs/measured_spe_electronics_zh.md) for
+the complete data-level and notebook workflow.
+
 ## CORSIKA whiteboard
 
 ```bash

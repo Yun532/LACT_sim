@@ -34,10 +34,16 @@ def interp_to(x: np.ndarray, y: np.ndarray, xnew: np.ndarray) -> np.ndarray:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--spectrum", default="configs/nsb/nsb_spectrum.csv")
-    parser.add_argument("--mirror", default="configs/efficiency/mirror_reflectivity.csv")
+    parser.add_argument(
+        "--mirror",
+        default="configs/efficiency/mirror_reflectivity_dm0113_13point_mean.csv",
+    )
     parser.add_argument("--filter", default="configs/efficiency/filter_transmission.csv")
     parser.add_argument("--sipm", default="configs/efficiency/sipm_pde.csv")
     parser.add_argument("--effective-area-m2", type=float, default=24.576860)
+    parser.add_argument(
+        "--collector-mean-transmission", type=float, default=0.923436437
+    )
     parser.add_argument("--pixel-size-m", type=float, default=0.0244)
     parser.add_argument("--focal-length-m", type=float, default=8.0)
     parser.add_argument("--window-ns", type=float, default=25.0)
@@ -69,7 +75,15 @@ def main() -> None:
         trapezoid = np.trapz
     red_integral = float(trapezoid(detected, wave))
     omega = (args.pixel_size_m / args.focal_length_m) ** 2
-    rate = 1.0e-9 * red_integral * args.effective_area_m2 * omega
+    if not 0.0 < args.collector_mean_transmission <= 1.0:
+        raise ValueError("--collector-mean-transmission must be in (0, 1]")
+    rate = (
+        1.0e-9
+        * red_integral
+        * args.effective_area_m2
+        * omega
+        * args.collector_mean_transmission
+    )
     mean = rate * args.window_ns
 
     rng = np.random.default_rng(args.seed)
@@ -101,6 +115,8 @@ def main() -> None:
             "=========================\n"
             f"spectrum: {args.spectrum}\n"
             f"effective_area_m2: {args.effective_area_m2:.9f}\n"
+            "collector_mean_transmission: "
+            f"{args.collector_mean_transmission:.9f}\n"
             f"pixel_solid_angle_sr: {omega:.12e}\n"
             f"spectral_integral_pe_s_sr_m2: {red_integral:.10e}\n"
             f"rate_pe_per_ns_per_pixel: {rate:.10e}\n"
@@ -145,6 +161,7 @@ def main() -> None:
         0.98,
         0.04,
         f"Aeff = {args.effective_area_m2:.2f} m2\n"
+        f"Tcollector = {args.collector_mean_transmission:.4f}\n"
         f"Omega = {omega:.2e} sr\n"
         f"rate = {rate:.4f} pe/ns/pixel",
         transform=ax1.transAxes,

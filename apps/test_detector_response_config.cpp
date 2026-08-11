@@ -1,6 +1,8 @@
 #include "app/OpticalSimCommon.hpp"
 
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <string>
@@ -133,6 +135,7 @@ int main()
         {"nsb.spectrum_csv", "configs/nsb/nsb_spectrum.csv"},
         {"nsb.spectrum_unit", "ph_s_nm_sr_m2"},
         {"nsb.effective_area_m2", "24.576860"},
+        {"nsb.collector_mean_transmission", "0.923436437"},
         {"nsb.pixel_solid_angle", "auto"},
     };
     auto spectral_nsb = buildNsbConfig(spectral_nsb_cfg);
@@ -142,8 +145,12 @@ int main()
                 "spectral NSB spectrum path parsed");
     ok &= check(std::abs(spectral_nsb.effective_area_m2 - 24.576860) < 1e-12,
                 "spectral NSB effective area parsed");
+    ok &= check(std::abs(spectral_nsb.collector_mean_transmission -
+                         0.923436437) < 1e-12,
+                "spectral NSB collector transmission parsed");
 
     const auto s17351 = buildDetectorPipelineConfig({
+        {"electronics.enabled", "true"},
         {"electronics.microcell.enabled", "true"},
         {"electronics.microcell.saturation_enabled", "false"},
         {"electronics.microcell.layout", "s17351_tiled_2x4"},
@@ -167,6 +174,70 @@ int main()
                 "physical S17351 layout parsed");
     ok &= check(s17351.microcell.pde_includes_inter_channel_gaps,
                 "inter-channel-gap PDE convention parsed");
+    CameraConfig camera_without_collector;
+    camera_without_collector.enabled = true;
+    try {
+        validateCameraDetectorCompatibility(camera_without_collector, s17351);
+        std::cerr << "explicit S17351 accepted a camera without collector\n";
+        ok = false;
+    } catch (...) {
+    }
+    CameraConfig camera_with_collector = camera_without_collector;
+    camera_with_collector.collector = "bezier";
+    try {
+        validateCameraDetectorCompatibility(camera_with_collector, s17351);
+    } catch (const std::exception& error) {
+        std::cerr << "explicit S17351 rejected configured collector: "
+                  << error.what() << '\n';
+        ok = false;
+    }
+
+    const auto spectrum_path = std::filesystem::temp_directory_path() /
+        "lact_nsb_collector_factor_test.csv";
+    {
+        std::ofstream spectrum(spectrum_path);
+        spectrum << "wavelength_nm,flux\n300,1\n400,1\n";
+    }
+    CameraGeometry one_pixel;
+    CameraPixel pixel;
+    pixel.id = 0;
+    pixel.center = {0.0, 0.0, 0.0};
+    pixel.size = 0.0244;
+    pixel.shape = PixelShape::Square;
+    one_pixel.addPixel(pixel);
+    TelescopeConfig nsb_telescope;
+    auto make_spectral = [&]() {
+        return buildNsbConfig({
+            {"nsb.enabled", "true"},
+            {"nsb.model", "spectral_flux"},
+            {"nsb.spectrum_csv", spectrum_path.string()},
+            {"nsb.effective_area_m2", "1"},
+            {"nsb.collector_mean_transmission", "0.5"},
+            {"nsb.pixel_solid_angle", "manual"},
+            {"nsb.pixel_solid_angle_sr", "1"},
+        });
+    };
+    auto package_pde_nsb = make_spectral();
+    resolveNsbSpectralRate(package_pde_nsb, {}, one_pixel, nsb_telescope,
+                           &s17351);
+    ok &= check(std::abs(package_pde_nsb.rate_pe_per_ns_per_pixel - 5.0e-8) <
+                    1.0e-18,
+                "collector transmission was not applied to spectral NSB");
+    ok &= check(std::abs(package_pde_nsb.microcell_geometric_acceptance - 1.0) <
+                    1.0e-12,
+                "full-package PDE must not lose the channel gap twice");
+    auto intrinsic_pde_detector = s17351;
+    intrinsic_pde_detector.microcell.pde_includes_inter_channel_gaps = false;
+    auto intrinsic_pde_nsb = make_spectral();
+    resolveNsbSpectralRate(intrinsic_pde_nsb, {}, one_pixel, nsb_telescope,
+                           &intrinsic_pde_detector);
+    const double active_fraction =
+        electronics::interChannelActiveFraction(s17351.microcell);
+    ok &= check(std::abs(intrinsic_pde_nsb.rate_pe_per_ns_per_pixel /
+                             package_pde_nsb.rate_pe_per_ns_per_pixel -
+                         active_fraction) < 1.0e-12,
+                "intrinsic PDE spectral NSB did not apply channel active area");
+    std::filesystem::remove(spectrum_path);
 
     auto trigger_default = buildTriggerConfig({});
     ok &= check(!trigger_default.enabled, "trigger should default to disabled");
@@ -217,6 +288,14 @@ int main()
                 "legacy coincidence window should configure the array window");
 
     ok &= expectInvalid({{"nsb.rate_pe_per_ns_per_pixel", "-1"}}, "negative NSB rate");
+    ok &= expectInvalid({{"nsb.collector_mean_transmission", "0"}},
+                        "zero collector transmission");
+    ok &= expectInvalid({{"nsb.collector_mean_transmission", "1.01"}},
+                        "collector transmission above one");
+    ok &= expectInvalid({{"nsb.model", "spectral_flux"},
+                         {"nsb.spectrum_csv", "spectrum.csv"},
+                         {"nsb.effective_area_m2", "1"}},
+                        "spectral NSB missing collector transmission");
     ok &= expectInvalid({{"nsb.enabled", "true"}, {"nsb.model", "spectral_flux"}},
                         "spectral NSB missing spectrum");
     ok &= expectInvalid({{"trigger.camera_multiplicity", "0"}}, "zero camera multiplicity");

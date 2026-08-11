@@ -82,6 +82,23 @@ export MPLBACKEND=Agg
 export MPLCONFIGDIR=/tmp
 ```
 
+## 命令行覆盖cfg
+
+`run_optical_sim`、`run_corsika_trace`、`compute_nsb_rate`和
+`run_camera_electronics`均支持可重复的sim_telarray风格`-C key=value`：
+
+```bash
+build/run_corsika_trace configs/examples/photon_csv_full_camera_root.cfg \
+  -C nsb.enabled=true \
+  -C nsb.seed=20260811 \
+  -C electronics.single_pe.enabled=false \
+  -C waveform.enabled=false \
+  -C output.lact_root_path=run_logs/batch/run_20260811.root
+```
+
+命令行覆盖在所有组件cfg展开后生效，优先级最高；重复键以最后一个为准。
+也支持`-Ckey=value`、`--set key=value`和`--set=key=value`。
+
 ## 官方测试总入口
 
 不需要 CORSIKA：

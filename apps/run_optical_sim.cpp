@@ -4,16 +4,20 @@
 using namespace lact;
 
 int main(int argc, char** argv) {
-    if (argc != 2) {
-        std::cerr << "usage: run_optical_sim <config.txt>\n";
-        return 2;
-    }
-
     try {
+        const auto command = parseConfigCommandLine(argc, argv);
+        if (command.help || command.positional.size() != 1) {
+            std::cerr
+                << "usage: run_optical_sim <config.txt> [-C key=value ...]\n";
+            return command.help ? 0 : 2;
+        }
+        const std::string config_path = command.positional[0];
         const auto t_start = std::chrono::steady_clock::now();
-        auto main_cfg = readKeyValueConfig(argv[1]);
+        auto main_cfg = readKeyValueConfig(config_path);
+        applyConfigOverrides(main_cfg, command.overrides);
         ComponentConfigPaths component_paths;
-        auto cfg = expandConfig(main_cfg, argv[1], component_paths);
+        auto cfg = expandConfig(main_cfg, config_path, component_paths);
+        applyConfigOverrides(cfg, command.overrides);
         const auto t_config_read = std::chrono::steady_clock::now();
 
         SyntheticPhotonConfig source_cfg = buildSourceConfig(cfg);
@@ -71,7 +75,10 @@ int main(int argc, char** argv) {
         std::cout << "========================================\n";
 
         printSection("Configuration files");
-        printField("main", argv[1]);
+        printField("main", config_path);
+        for (const auto& [key, value] : command.overrides) {
+            printField("override", key + "=" + value);
+        }
         if (!component_paths.telescope.empty()) {
             printField("telescope", component_paths.telescope);
         }

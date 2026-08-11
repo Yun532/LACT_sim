@@ -310,29 +310,34 @@ void writeResult(const std::filesystem::path& directory,
 
 int main(int argc, char** argv)
 {
-    if (argc != 4) {
-        std::cerr
-            << "usage: run_camera_electronics CONFIG PRIMARY_HITS.csv|none "
-               "OUTPUT_DIR\n";
-        return 2;
-    }
     try {
+        const auto command = lact::parseConfigCommandLine(argc, argv);
+        if (command.help || command.positional.size() != 3) {
+            std::cerr
+                << "usage: run_camera_electronics CONFIG "
+                   "PRIMARY_HITS.csv|none OUTPUT_DIR [-C key=value ...]\n";
+            return command.help ? 0 : 2;
+        }
+        const std::string config_path = command.positional[0];
+        const std::string primary_path = command.positional[1];
+        const std::string output_path = command.positional[2];
         lact::ComponentConfigPaths paths;
-        const auto main_config = lact::readKeyValueConfig(argv[1]);
-        const auto config =
-            lact::expandConfig(main_config, argv[1], paths);
+        auto main_config = lact::readKeyValueConfig(config_path);
+        lact::applyConfigOverrides(main_config, command.overrides);
+        auto config = lact::expandConfig(main_config, config_path, paths);
+        lact::applyConfigOverrides(config, command.overrides);
         const auto detector = lact::buildDetectorPipelineConfig(config);
         const std::size_t n_pixels = static_cast<std::size_t>(
             lact::getInt(config, "electronics.n_pixels", 1664));
         const int pixel_id_base =
             lact::getInt(config, "electronics.input.pixel_id_base", 0);
-        auto events = readPrimaryHits(argv[2], pixel_id_base);
+        auto events = readPrimaryHits(primary_path, pixel_id_base);
         appendNsb(events, config, detector, n_pixels);
         if (events.empty()) {
             throw std::runtime_error(
                 "no primary p.e. input and standalone NSB is disabled");
         }
-        const std::filesystem::path root(argv[3]);
+        const std::filesystem::path root(output_path);
         std::filesystem::create_directories(root);
         for (const auto& event : events) {
             const auto result = lact::electronics::runDetectorPipeline(

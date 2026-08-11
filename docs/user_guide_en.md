@@ -59,6 +59,25 @@ export MPLBACKEND=Agg
 export MPLCONFIGDIR=/tmp
 ```
 
+## Override cfg values on the command line
+
+`run_optical_sim`, `run_corsika_trace`, `compute_nsb_rate`, and
+`run_camera_electronics` accept repeatable sim_telarray-style `-C key=value`
+overrides:
+
+```bash
+build/run_corsika_trace configs/examples/photon_csv_full_camera_root.cfg \
+  -C nsb.enabled=true \
+  -C nsb.seed=20260811 \
+  -C electronics.single_pe.enabled=false \
+  -C waveform.enabled=false \
+  -C output.lact_root_path=run_logs/batch/run_20260811.root
+```
+
+Overrides are applied after all component cfg files are expanded, so they have
+the highest precedence and the last repeated value wins. Compact `-Ckey=value`,
+`--set key=value`, and `--set=key=value` forms are also accepted.
+
 ## Official-test entry point
 
 Without CORSIKA:

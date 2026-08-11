@@ -205,12 +205,18 @@ nsb.model=spectral_flux
 nsb.spectrum_csv=configs/nsb/nsb_spectrum.csv
 nsb.spectrum_unit=ph_s_nm_sr_m2
 nsb.effective_area_m2=24.576860
+nsb.collector_mean_transmission=0.923436437
 nsb.pixel_solid_angle=auto
 ```
 
 `pixel_solid_angle=auto` uses the first configured camera pixel size and the
-telescope focal length. The computed rate is printed in the run log and stored
-under `/metadata/nsb` in HDF5 output.
+telescope focal length. `collector_mean_transmission` is applied only while
+converting `spectral_flux` to a detected-p.e. rate. A `constant_rate` value is
+already a post-detection p.e. rate and is not multiplied again. The standard
+value is the entrance-area and LACT focal-cone weighted result of the Bezier
+`true_reflect` collector scan, not the reflectivity of one wall bounce. The
+computed rate and collector factor are printed in the run log and stored under
+`/metadata/nsb` in HDF5 output.
 
 ## Trigger
 

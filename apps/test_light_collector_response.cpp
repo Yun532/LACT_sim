@@ -123,6 +123,17 @@ int main()
     tiled.sensor_size_y_m = 0.0134;
     const double channel_fraction =
         ::lact::electronics::interChannelActiveFraction(tiled);
+    auto missing_collector_coordinates =
+        makeHit(0.0, 0.0, {0.0, 0.0, 1.0});
+    try {
+        applyCameraResponse(camera, nullptr, plane, sipm, electronics,
+                            missing_collector_coordinates, 0.299792458,
+                            &tiled, 1.0 / channel_fraction);
+        std::cerr << "explicit S17351 silently accepted missing collector "
+                     "exit coordinates\n";
+        ok = false;
+    } catch (...) {
+    }
     auto conditioned = makeHit(0.0, 0.0, {0.0, 0.0, 1.0});
     conditioned.collector_exit_x_m = -0.0066875;
     conditioned.collector_exit_y_m = -0.0066875;
@@ -138,6 +149,7 @@ int main()
     auto explicit_gap = makeHit(0.0, 0.0, {0.0, 0.0, 1.0});
     explicit_gap.collector_exit_x_m = 0.0;
     explicit_gap.collector_exit_y_m = 0.0;
+    explicit_gap.collector_exit_z_m = 1.0e-9;
     applyCameraResponse(camera, nullptr, plane, sipm, electronics,
                         explicit_gap, 0.299792458, &tiled,
                         1.0 / channel_fraction);

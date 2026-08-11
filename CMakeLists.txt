@@ -118,6 +118,12 @@ add_executable(test_sha256
 target_link_libraries(test_sha256 PRIVATE simlite_core)
 add_test(NAME test_sha256 COMMAND test_sha256)
 
+add_executable(test_config_overrides
+    apps/test_config_overrides.cpp
+)
+target_link_libraries(test_config_overrides PRIVATE simlite_core)
+add_test(NAME test_config_overrides COMMAND test_config_overrides)
+
 add_executable(run_optical_sim
     apps/run_optical_sim.cpp
 )
