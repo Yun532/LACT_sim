@@ -234,6 +234,20 @@ passing the camera trigger. The trigger requires at least three pixels in a
 20 ns window to reach `19.267713 mV`, the mean 8-PE-equivalent threshold after
 4 ns sampling of the measured template. The array trigger remains disabled.
 
+The Cherenkov-only CORSIKA baseline with microcell saturation but no NSB or
+waveform is:
+
+```bash
+build/run_corsika_trace \
+  configs/examples/corsika_lact_pylast_root_only_microcell_no_nsb.cfg \
+  /path/to/input.zst \
+  -C output.lact_root_path=/path/to/lact_events.root
+```
+
+It uses the `10 PE / 3 pixel` count trigger in a 20 ns window and retains only
+triggered telescopes. ROOT `observations.image_pe` is the NSB-free integrated
+image after explicit microcell saturation and maps directly to pyLAST DL0.
+
 ## CORSIKA whiteboard
 
 ```bash

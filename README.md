@@ -252,6 +252,17 @@ build/run_corsika_trace \
 
 该配置开启暗夜 NSB、微单元饱和和实测单 PE 波形，只写 ROOT，并只保存通过相机触发的望远镜。触发条件是 20 ns 内至少 3 个像素的 4 ns 波形采样值达到 `19.267713 mV`；这个电压是实测模板经 4 ns 采样后的平均 8 PE 等效阈值。阵列触发保持关闭。
 
+只保留微单元饱和、关闭 NSB 和波形的 CORSIKA 基线配置为：
+
+```bash
+build/run_corsika_trace \
+  configs/examples/corsika_lact_pylast_root_only_microcell_no_nsb.cfg \
+  /path/to/input.zst \
+  -C output.lact_root_path=/path/to/lact_events.root
+```
+
+该配置使用 20 ns 内 `10 PE / 3 像素` 的计数触发，只保存触发望远镜；ROOT 的 `observations.image_pe` 是无 NSB、经过显式微单元饱和后的积分图像，并由 pyLAST 直接映射到 DL0。
+
 ## CORSIKA 白板测试
 
 白板测试适合在接入相机前检查 CORSIKA 光子是否正确读入：
