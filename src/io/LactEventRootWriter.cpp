@@ -923,6 +923,10 @@ LactRootPreparedData prepareLactRootObservations(
                 continue;
             }
         }
+        if (!output_cfg.save_only_triggered &&
+            candidate.observation.total_pe <= 0.0) {
+            continue;
+        }
         if (candidate.has_waveform) {
             prepared.waveforms.push_back(std::move(candidate.waveform));
         }

@@ -268,7 +268,7 @@ build/run_corsika_trace \
   -C output.lact_root_path=/path/to/lact_events.root
 ```
 
-该配置使用 20 ns 内 `10 PE / 3 像素` 的计数触发，只保存触发望远镜；ROOT 的 `observations.image_pe` 是无 NSB、经过显式微单元饱和后的积分图像，并由 pyLAST 直接映射到 DL0。
+该配置使用 20 ns 内 `10 PE / 3 像素` 的计数触发，并保存所有最终积分图像非空的望远镜（包括低于触发阈值的望远镜；全零相机不保存）；ROOT 的 `observations.image_pe` 是无 NSB、经过显式微单元饱和后的稀疏积分图像，并由 pyLAST 自动补零后映射到 DL0。每台望远镜的触发结果保存在 `observations.triggered`。
 
 正式配置默认使用紧凑 ROOT 输出（`output.lact_root_write_components=false`）。其中始终保留
 `image_pe`、`image_time_peak_ns` 和纯切伦科夫真值

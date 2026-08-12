@@ -33,6 +33,12 @@ using CameraElectronicsEventMap =
 double waveformReferenceTimeNs(const WaveformOutputConfig& waveform,
                                const TraceSummary& summary);
 
+// True when the final integrated detector image contains at least one p.e.
+// This deliberately uses fired p.e. rather than primary input so a camera
+// whose photons are all rejected by the detector is treated as empty.
+bool hasFinalIntegratedImageSignal(
+    const electronics::DetectorPipelineResult& result);
+
 CameraElectronicsEventMap buildCameraElectronicsEvents(
     const electronics::DetectorPipelineConfig& detector,
     const WaveformOutputConfig& waveform,

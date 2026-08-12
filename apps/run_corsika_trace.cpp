@@ -2484,8 +2484,10 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
             });
         }
 
+        std::set<SummaryKey> selected_image_keys;
+        bool filter_images = false;
         if (output_cfg.save_only_triggered && trigger_cfg.enabled) {
-            std::set<SummaryKey> triggered_image_keys;
+            filter_images = true;
             for (const auto& row : telescope_trigger_rows) {
                 const auto& array_decision =
                     array_trigger_decisions[static_cast<int>(row.event_id)];
@@ -2495,12 +2497,25 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                     static_cast<int>(row.telescope_id));
                 if (row.triggered && array_decision.triggered &&
                     telescope_is_coincident) {
-                    triggered_image_keys.insert({
+                    selected_image_keys.insert({
                         static_cast<int>(row.event_id),
                         static_cast<int>(row.telescope_id),
                     });
                 }
             }
+        } else if (!output_cfg.save_only_triggered) {
+            filter_images = true;
+            for (const auto& image : image_rows) {
+                if (image.total_pe > 0.0) {
+                    selected_image_keys.insert({
+                        static_cast<int>(image.event_id),
+                        static_cast<int>(image.telescope_id),
+                    });
+                }
+            }
+        }
+
+        if (filter_images) {
 
             std::vector<ImageIndexRow> filtered_image_rows;
             std::vector<SparsePixelRow> filtered_sparse_rows;
@@ -2520,22 +2535,22 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
 
             const std::size_t n_pixels = camera_rows.size();
             if (have_dense_images) {
-                filtered_dense_signal.reserve(triggered_image_keys.size() * n_pixels);
-                filtered_dense_pe.reserve(triggered_image_keys.size() * n_pixels);
-                filtered_dense_photon_count.reserve(triggered_image_keys.size() * n_pixels);
+                filtered_dense_signal.reserve(selected_image_keys.size() * n_pixels);
+                filtered_dense_pe.reserve(selected_image_keys.size() * n_pixels);
+                filtered_dense_photon_count.reserve(selected_image_keys.size() * n_pixels);
                 if (!dense_cherenkov_pe.empty()) {
-                    filtered_dense_cherenkov_pe.reserve(triggered_image_keys.size() * n_pixels);
-                    filtered_dense_nsb_pe.reserve(triggered_image_keys.size() * n_pixels);
-                    filtered_dense_primary_dark_pe.reserve(triggered_image_keys.size() * n_pixels);
-                    filtered_dense_fired_cherenkov_pe.reserve(triggered_image_keys.size() * n_pixels);
-                    filtered_dense_fired_nsb_pe.reserve(triggered_image_keys.size() * n_pixels);
-                    filtered_dense_fired_dark_pe.reserve(triggered_image_keys.size() * n_pixels);
-                    filtered_dense_gap_lost_pe.reserve(triggered_image_keys.size() * n_pixels);
-                    filtered_dense_saturation_lost_pe.reserve(triggered_image_keys.size() * n_pixels);
+                    filtered_dense_cherenkov_pe.reserve(selected_image_keys.size() * n_pixels);
+                    filtered_dense_nsb_pe.reserve(selected_image_keys.size() * n_pixels);
+                    filtered_dense_primary_dark_pe.reserve(selected_image_keys.size() * n_pixels);
+                    filtered_dense_fired_cherenkov_pe.reserve(selected_image_keys.size() * n_pixels);
+                    filtered_dense_fired_nsb_pe.reserve(selected_image_keys.size() * n_pixels);
+                    filtered_dense_fired_dark_pe.reserve(selected_image_keys.size() * n_pixels);
+                    filtered_dense_gap_lost_pe.reserve(selected_image_keys.size() * n_pixels);
+                    filtered_dense_saturation_lost_pe.reserve(selected_image_keys.size() * n_pixels);
                 }
                 if (output_cfg.write_pixel_time_stats) {
-                    filtered_dense_time_mean_ns.reserve(triggered_image_keys.size() * n_pixels);
-                    filtered_dense_time_rms_ns.reserve(triggered_image_keys.size() * n_pixels);
+                    filtered_dense_time_mean_ns.reserve(selected_image_keys.size() * n_pixels);
+                    filtered_dense_time_rms_ns.reserve(selected_image_keys.size() * n_pixels);
                 }
             }
 
@@ -2544,7 +2559,7 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                     static_cast<int>(image.event_id),
                     static_cast<int>(image.telescope_id),
                 };
-                if (triggered_image_keys.find(key) == triggered_image_keys.end()) {
+                if (selected_image_keys.find(key) == selected_image_keys.end()) {
                     continue;
                 }
 
@@ -4476,10 +4491,16 @@ int main(int argc, char** argv) {
                         array_decision.coincident_telescope_ids.begin(),
                         array_decision.coincident_telescope_ids.end(),
                         event.telescope_id);
-                    event.selected_for_output =
-                        !output_cfg.save_only_triggered || !trigger_cfg.enabled ||
-                        (event.detector.camera_trigger.triggered &&
-                         array_decision.triggered && telescope_is_coincident);
+                    if (!output_cfg.save_only_triggered) {
+                        event.selected_for_output =
+                            hasFinalIntegratedImageSignal(event.detector);
+                    } else if (!trigger_cfg.enabled) {
+                        event.selected_for_output = true;
+                    } else {
+                        event.selected_for_output =
+                            event.detector.camera_trigger.triggered &&
+                            array_decision.triggered && telescope_is_coincident;
+                    }
                 }
             }
 #ifdef LACT_HAS_ROOT

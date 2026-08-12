@@ -1,4 +1,5 @@
 #include "electronics/DetectorPipeline.hpp"
+#include "io/CameraElectronicsEvent.hpp"
 
 #include <cmath>
 #include <iostream>
@@ -51,6 +52,8 @@ int main(int argc, char** argv)
          HitOrigin::Cherenkov},
     };
     auto result = runDetectorPipeline(config, 2, hits);
+    require(lact::hasFinalIntegratedImageSignal(result),
+            "a fired p.e. must make the final integrated image non-empty");
     require(result.primary_hits.size() == 4,
             "all primary hits must be preserved");
     require(result.microcell_decisions.size() == 4,
@@ -70,6 +73,13 @@ int main(int argc, char** argv)
     require(result.camera_trigger.first_trigger_bin == 1 &&
                 std::abs(result.camera_trigger.trigger_time_ns - 6.0) < 1.0e-12,
             "camera trigger time must be the causal window-end sample");
+
+    DetectorPipelineResult empty_result;
+    empty_result.pixels.resize(2);
+    empty_result.pixels[0].primary_cherenkov_pe = 3.0;
+    empty_result.pixels[0].gap_lost_pe = 3.0;
+    require(!lact::hasFinalIntegratedImageSignal(empty_result),
+            "primary p.e. rejected before firing must leave an empty image");
 
     MicrocellConfig s17351;
     s17351.layout = "s17351_tiled_2x4";

@@ -22,6 +22,19 @@ double waveformReferenceTimeNs(const WaveformOutputConfig& waveform,
     return 0.0;
 }
 
+bool hasFinalIntegratedImageSignal(
+    const electronics::DetectorPipelineResult& result)
+{
+    for (const auto& pixel : result.pixels) {
+        const double fired_pe = pixel.fired_cherenkov_pe +
+            pixel.fired_nsb_pe + pixel.fired_dark_pe;
+        if (fired_pe > 0.0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 CameraElectronicsEventMap buildCameraElectronicsEvents(
     const electronics::DetectorPipelineConfig& detector,
     const WaveformOutputConfig& waveform,
