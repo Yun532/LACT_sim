@@ -363,8 +363,15 @@ pylast 读取、ROOT tree 说明和 notebook 流程见
 
 完整的阵列/core、触发时延、相机图像、Hillas、方向/芯位重建和 3D SDP
 流程见 [pyLAST Jupyter notebook](notebooks/lact_root_to_pylast_visualize.ipynb)。
+同一完整结构的两种 NSB 示例同时保存在 LACT_sim 和 pyLAST：
+
+- [无 NSB 单事件重建](notebooks/lact_event_reconstruction_no_nsb.ipynb)
+- [加入 pyLAST 泊松 NSB 的单事件重建](notebooks/lact_event_reconstruction_with_nsb.ipynb)
+
+两本 notebook 只在 Cell 1 的 NSB 参数上不同，其他读取、绘图、清理、
+Hillas 和方向/芯位重建步骤保持一致。
 LACT ROOT adapter 和这些可视化接口位于
-[pyLAST `lact_sim` 分支](https://github.com/Yun532/pylast/tree/lact_sim)。
+[pyLAST `main` 分支](https://github.com/Yun532/pylast/tree/main)。
 
 ## 常用 cfg
 
