@@ -270,6 +270,15 @@ build/run_corsika_trace \
 
 该配置使用 20 ns 内 `10 PE / 3 像素` 的计数触发，只保存触发望远镜；ROOT 的 `observations.image_pe` 是无 NSB、经过显式微单元饱和后的积分图像，并由 pyLAST 直接映射到 DL0。
 
+正式配置默认使用紧凑 ROOT 输出（`output.lact_root_write_components=false`）。其中始终保留
+`image_pe`、`image_time_peak_ns` 和纯切伦科夫真值
+`image_primary_cherenkov_pe`；pyLAST 将后者映射为
+`event.simulation.tels[tel_id].true_image`。开启波形时还会保留
+`waveform_config` 与 `waveforms`。NSB/dark/fired 分量、gap/饱和损失、逐像素平均/均方根
+时间和 `trace_summary` 都属于测试诊断量，只在
+`output.lact_root_write_components=true` 时写入。逐 PE 和逐微单元树还需要同时开启各自的
+`electronics.output.save_*` 开关；因此正式批量输出不会被测试记录撑大。
+
 ## CORSIKA 白板测试
 
 白板测试适合在接入相机前检查 CORSIKA 光子是否正确读入：

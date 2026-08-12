@@ -248,6 +248,18 @@ It uses the `10 PE / 3 pixel` count trigger in a 20 ns window and retains only
 triggered telescopes. ROOT `observations.image_pe` is the NSB-free integrated
 image after explicit microcell saturation and maps directly to pyLAST DL0.
 
+Production configurations use compact ROOT output by default
+(`output.lact_root_write_components=false`). They always retain `image_pe`,
+`image_time_peak_ns`, and the Cherenkov-only truth
+`image_primary_cherenkov_pe`; pyLAST maps the latter to
+`event.simulation.tels[tel_id].true_image`. Waveform-enabled output also keeps
+`waveform_config` and `waveforms`. NSB/dark/fired components, gap/saturation
+losses, per-pixel mean/RMS timing, and `trace_summary` are validation data and
+are written only when `output.lact_root_write_components=true`. Per-PE and
+per-microcell trees additionally require their corresponding
+`electronics.output.save_*` switches, so they cannot accidentally expand a
+production file.
+
 ## CORSIKA whiteboard
 
 ```bash

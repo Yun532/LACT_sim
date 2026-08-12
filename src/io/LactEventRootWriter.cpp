@@ -499,7 +499,8 @@ LactRootPreparedData prepareLactRootObservations(
                     pixel.fired_dark_pe;
                 image_pe_by_col[col] = image_fired_pe_by_col[col];
             }
-            if (detector_cfg.save_primary_sequence) {
+            if (output_cfg.lact_root_write_components &&
+                detector_cfg.save_primary_sequence) {
                 for (const auto& hit : detector_result.primary_hits) {
                     prepared.primary_hits.push_back({
                         hit.event_id,
@@ -516,7 +517,8 @@ LactRootPreparedData prepareLactRootObservations(
                     });
                 }
             }
-            if (detector_cfg.save_fired_sequence) {
+            if (output_cfg.lact_root_write_components &&
+                detector_cfg.save_fired_sequence) {
                 for (const auto& hit : detector_result.fired_hits) {
                     prepared.fired_hits.push_back({
                         hit.event_id,
@@ -534,7 +536,8 @@ LactRootPreparedData prepareLactRootObservations(
                     });
                 }
             }
-            if (detector_cfg.save_microcell_decisions) {
+            if (output_cfg.lact_root_write_components &&
+                detector_cfg.save_microcell_decisions) {
                 for (const auto& item :
                      detector_result.microcell_decisions) {
                     prepared.microcell_decisions.push_back({
@@ -1222,23 +1225,31 @@ struct LactEventRootStreamWriter::Impl {
       observation_tree->Branch("n_pixels_saved", &n_pixels_saved);
       observation_tree->Branch("pixel_id", &obs_pixel_id);
       observation_tree->Branch("image_pe", &image_pe);
+      // Keep the pre-electronics Cherenkov image in production files.  The
+      // pyLAST LactEventSource exposes this branch as simulation.true_image.
       observation_tree->Branch("image_primary_cherenkov_pe",
                                &image_primary_cherenkov_pe);
-      observation_tree->Branch("image_primary_nsb_pe",
-                               &image_primary_nsb_pe);
-      observation_tree->Branch("image_primary_dark_pe",
-                               &image_primary_dark_pe);
-      if (detector_cfg.enabled) {
-        observation_tree->Branch("image_fired_cherenkov_pe",
-                                 &image_fired_cherenkov_pe);
-        observation_tree->Branch("image_fired_nsb_pe", &image_fired_nsb_pe);
-        observation_tree->Branch("image_fired_dark_pe", &image_fired_dark_pe);
-        observation_tree->Branch("image_gap_lost_pe", &image_gap_lost_pe);
-        observation_tree->Branch("image_saturation_lost_pe",
-                                 &image_saturation_lost_pe);
+      // Origin-resolved images and intermediate detector losses are useful
+      // for validation, but duplicate large per-pixel arrays in production.
+      if (output_cfg.lact_root_write_components) {
+        observation_tree->Branch("image_primary_nsb_pe",
+                                 &image_primary_nsb_pe);
+        observation_tree->Branch("image_primary_dark_pe",
+                                 &image_primary_dark_pe);
+        if (detector_cfg.enabled) {
+          observation_tree->Branch("image_fired_cherenkov_pe",
+                                   &image_fired_cherenkov_pe);
+          observation_tree->Branch("image_fired_nsb_pe", &image_fired_nsb_pe);
+          observation_tree->Branch("image_fired_dark_pe", &image_fired_dark_pe);
+          observation_tree->Branch("image_gap_lost_pe", &image_gap_lost_pe);
+          observation_tree->Branch("image_saturation_lost_pe",
+                                   &image_saturation_lost_pe);
+        }
+        observation_tree->Branch("image_time_mean_ns", &image_time_mean_ns);
+        observation_tree->Branch("image_time_rms_ns", &image_time_rms_ns);
       }
-      observation_tree->Branch("image_time_mean_ns", &image_time_mean_ns);
-      observation_tree->Branch("image_time_rms_ns", &image_time_rms_ns);
+      // Peak time is part of the compact analysis interface and is consumed
+      // by pyLAST when no sampled waveform is stored.
       observation_tree->Branch("image_time_peak_ns", &image_time_peak_ns);
       observation_tree->Branch("total_pe", &total_pe);
       observation_tree->Branch("reference_time_ns", &reference_time_ns);
@@ -1283,7 +1294,8 @@ struct LactEventRootStreamWriter::Impl {
                                    output_cfg.lact_root_auto_flush_mb);
       }
 
-      if (detector_cfg.enabled && detector_cfg.save_primary_sequence) {
+      if (output_cfg.lact_root_write_components && detector_cfg.enabled &&
+          detector_cfg.save_primary_sequence) {
         primary_hit_tree = std::make_unique<TTree>(
             "primary_pe_hits",
             "Detected primary p.e. after optics, collector and PDE");
@@ -1305,7 +1317,8 @@ struct LactEventRootStreamWriter::Impl {
                                  &primary_hit_row.primary_pe);
         primary_hit_tree->Branch("origin", &primary_hit_row.origin);
       }
-      if (detector_cfg.enabled && detector_cfg.save_fired_sequence) {
+      if (output_cfg.lact_root_write_components && detector_cfg.enabled &&
+          detector_cfg.save_fired_sequence) {
         fired_hit_tree = std::make_unique<TTree>(
             "fired_pe_hits",
             "SiPM microcell firings after explicit saturation");
@@ -1327,7 +1340,7 @@ struct LactEventRootStreamWriter::Impl {
         fired_hit_tree->Branch("time_jitter_ns",
                                &fired_hit_row.time_jitter_ns);
       }
-      if (detector_cfg.enabled &&
+      if (output_cfg.lact_root_write_components && detector_cfg.enabled &&
           detector_cfg.save_microcell_decisions) {
         microcell_decision_tree = std::make_unique<TTree>(
             "microcell_decisions",
@@ -1367,27 +1380,29 @@ struct LactEventRootStreamWriter::Impl {
             "origin", &microcell_decision_row.origin);
       }
 
-      trace_tree = std::make_unique<TTree>("trace_summary",
-                                           "Event-telescope trace summary");
-      trace_tree->SetDirectory(file.get());
-      trace_tree->Branch("event_id", &trace_event_id);
-      trace_tree->Branch("telescope_id", &trace_telescope_id);
-      trace_tree->Branch("input_bunches", &input_bunches);
-      trace_tree->Branch("input_photons", &input_photons);
-      trace_tree->Branch("blocked_by_obstruction", &blocked_by_obstruction);
-      trace_tree->Branch("blocked_incoming", &blocked_incoming);
-      trace_tree->Branch("blocked_reflected", &blocked_reflected);
-      trace_tree->Branch("hit_mirror", &hit_mirror);
-      trace_tree->Branch("hit_output_plane", &hit_output_plane);
-      trace_tree->Branch("hit_camera", &hit_camera);
-      trace_tree->Branch("accepted_camera", &accepted_camera);
-      trace_tree->Branch("lost_between_pixels", &lost_between_pixels);
-      trace_tree->Branch("unique_hit_pixels", &unique_hit_pixels);
-      trace_tree->Branch("signal_pe", &signal_pe);
-      trace_tree->Branch("time_mean_ns", &trace_time_mean_ns);
-      trace_tree->Branch("time_rms_ns", &trace_time_rms_ns);
-      configureRootTreeAutoFlush(trace_tree.get(),
-                                 output_cfg.lact_root_auto_flush_mb);
+      if (output_cfg.lact_root_write_components) {
+        trace_tree = std::make_unique<TTree>("trace_summary",
+                                             "Event-telescope trace summary");
+        trace_tree->SetDirectory(file.get());
+        trace_tree->Branch("event_id", &trace_event_id);
+        trace_tree->Branch("telescope_id", &trace_telescope_id);
+        trace_tree->Branch("input_bunches", &input_bunches);
+        trace_tree->Branch("input_photons", &input_photons);
+        trace_tree->Branch("blocked_by_obstruction", &blocked_by_obstruction);
+        trace_tree->Branch("blocked_incoming", &blocked_incoming);
+        trace_tree->Branch("blocked_reflected", &blocked_reflected);
+        trace_tree->Branch("hit_mirror", &hit_mirror);
+        trace_tree->Branch("hit_output_plane", &hit_output_plane);
+        trace_tree->Branch("hit_camera", &hit_camera);
+        trace_tree->Branch("accepted_camera", &accepted_camera);
+        trace_tree->Branch("lost_between_pixels", &lost_between_pixels);
+        trace_tree->Branch("unique_hit_pixels", &unique_hit_pixels);
+        trace_tree->Branch("signal_pe", &signal_pe);
+        trace_tree->Branch("time_mean_ns", &trace_time_mean_ns);
+        trace_tree->Branch("time_rms_ns", &trace_time_rms_ns);
+        configureRootTreeAutoFlush(trace_tree.get(),
+                                   output_cfg.lact_root_auto_flush_mb);
+      }
     }
 
     void writeCorsikaEvent(long long event_id) {
@@ -1490,7 +1505,8 @@ struct LactEventRootStreamWriter::Impl {
 
     void writeWaveformConfig(const LactRootPreparedData& prepared)
     {
-        if (waveform_config_written || prepared.time_centers_ns.empty()) return;
+        if (!waveform_tree || waveform_config_written ||
+            prepared.time_centers_ns.empty()) return;
         waveform_config_tree = std::make_unique<TTree>("waveform_config", "waveform metadata");
         waveform_config_tree->SetDirectory(nullptr);
         waveform_enabled = true;
@@ -1600,6 +1616,7 @@ struct LactEventRootStreamWriter::Impl {
 
     void
     writeTraceSummary(const std::map<SummaryKey, TraceSummary> &summaries) {
+      if (!trace_tree) return;
       for (const auto &kv : summaries) {
         const auto &s = kv.second;
         trace_event_id = s.event_id;
