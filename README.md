@@ -371,7 +371,7 @@ pylast 读取、ROOT tree 说明和 notebook 流程见
 两本 notebook 只在 Cell 1 的 NSB 参数上不同，其他读取、绘图、清理、
 Hillas 和方向/芯位重建步骤保持一致。
 LACT ROOT adapter 和这些可视化接口位于
-[pyLAST `main` 分支](https://github.com/Yun532/pylast/tree/main)。
+[pyLAST `lact_sim` 分支](https://github.com/Yun532/pylast/tree/lact_sim)。
 
 ## 常用 cfg
 
