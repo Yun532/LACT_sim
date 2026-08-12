@@ -250,6 +250,13 @@ build/run_corsika_trace \
   -C output.lact_root_path=/path/to/lact_events.root
 ```
 
+The production NSB configuration uses `nsb.window_ns=32`. This is the NSB
+integration gate for the saved p.e. image, relative to the event reference
+time: only NSB primary/fired p.e. in `[0, 32 ns)` enter `image_pe` and
+`total_pe`. The measured-electronics waveform and voltage trigger still use
+the complete configured waveform, including padded NSB outside this image
+gate, so waveform edges remain stationary without inflating the saved image.
+
 该配置开启暗夜 NSB、微单元饱和和实测单 PE 波形，只写 ROOT，并只保存通过相机触发的望远镜。触发条件是 20 ns 内至少 3 个像素的 4 ns 波形采样值达到 `19.267713 mV`；这个电压是实测模板经 4 ns 采样后的平均 8 PE 等效阈值。阵列触发保持关闭。
 
 只保留微单元饱和、关闭 NSB 和波形的 CORSIKA 基线配置为：

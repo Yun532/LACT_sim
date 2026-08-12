@@ -625,15 +625,18 @@ LactRootPreparedData prepareLactRootObservations(
                                        std::size_t bin,
                                        double pe,
                                        double cherenkov_pe,
-                                       double nsb_pe) {
+                                       double nsb_pe,
+                                       bool add_to_image = true) {
                 if (col >= n_pixels || bin >= n_bins || pe == 0.0) {
                     return;
                 }
                 const std::size_t index = col * n_bins + bin;
                 waveform_pe[index] += pe;
-                image_pe_by_col[col] += pe;
-                image_cherenkov_pe_by_col[col] += cherenkov_pe;
-                image_nsb_pe_by_col[col] += nsb_pe;
+                if (add_to_image) {
+                    image_pe_by_col[col] += pe;
+                    image_cherenkov_pe_by_col[col] += cherenkov_pe;
+                    image_nsb_pe_by_col[col] += nsb_pe;
+                }
                 camera_time_series[bin] += pe;
             };
 
@@ -690,7 +693,10 @@ LactRootPreparedData prepareLactRootObservations(
                 n_pixels,
                 n_bins,
                 [&](std::size_t col, std::size_t bin, float nsb_pe) {
-                    add_waveform_pe(col, bin, nsb_pe, 0.0, nsb_pe);
+                    add_waveform_pe(
+                        col, bin, nsb_pe, 0.0, nsb_pe,
+                        nsbTimeInImageWindow(
+                            nsb_cfg, prepared.time_centers_ns[bin]));
                 });
 
             waveform_peak_by_col.assign(n_pixels, -1.0);

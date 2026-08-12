@@ -2916,6 +2916,12 @@ void generateIntegratedNsbPe(const NsbConfig& nsb,
     }
 }
 
+bool nsbTimeInImageWindow(const NsbConfig& nsb, double relative_time_ns)
+{
+    return nsb.enabled && nsb.window_ns > 0.0 &&
+           relative_time_ns >= 0.0 && relative_time_ns < nsb.window_ns;
+}
+
 void generateTimeBinnedNsbPe(const NsbConfig& nsb,
                              const WaveformOutputConfig& waveform_cfg,
                              int event_id,

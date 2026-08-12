@@ -2186,14 +2186,20 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                             static_cast<int>(image.telescope_id),
                             n_pixels,
                             n_bins,
-                            [&](std::size_t col, std::size_t, float nsb_pe) {
+                            [&](std::size_t col, std::size_t bin, float nsb_pe) {
                                 const std::size_t index = row * n_pixels + col;
-                                if (!dense_nsb_pe.empty()) {
-                                    dense_nsb_pe[index] += nsb_pe;
-                                    dense_fired_nsb_pe[index] += nsb_pe;
+                                if (nsbTimeInImageWindow(
+                                        nsb_cfg,
+                                        waveform_cfg.time_window_start_ns +
+                                            (static_cast<double>(bin) + 0.5) *
+                                                waveform_cfg.time_bin_width_ns)) {
+                                    if (!dense_nsb_pe.empty()) {
+                                        dense_nsb_pe[index] += nsb_pe;
+                                        dense_fired_nsb_pe[index] += nsb_pe;
+                                    }
+                                    dense_pe[index] += nsb_pe;
+                                    dense_signal[index] += nsb_pe;
                                 }
-                                dense_pe[index] += nsb_pe;
-                                dense_signal[index] += nsb_pe;
                             });
                     }
                 } else {

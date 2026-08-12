@@ -87,7 +87,16 @@ int main()
     auto default_nsb = buildNsbConfig({});
     ok &= check(!default_nsb.enabled, "NSB should default to disabled");
     ok &= check(default_nsb.model == "constant_rate", "NSB default model");
-    ok &= check(std::abs(default_nsb.window_ns - 16.0) < 1e-12, "NSB default window");
+    ok &= check(std::abs(default_nsb.window_ns - 32.0) < 1e-12, "NSB default window");
+    auto enabled_default_nsb = default_nsb;
+    enabled_default_nsb.enabled = true;
+    ok &= check(nsbTimeInImageWindow(enabled_default_nsb, 0.0),
+                "NSB image gate includes its lower edge");
+    ok &= check(nsbTimeInImageWindow(enabled_default_nsb, 31.999),
+                "NSB image gate includes times below its upper edge");
+    ok &= check(!nsbTimeInImageWindow(enabled_default_nsb, -0.001) &&
+                    !nsbTimeInImageWindow(enabled_default_nsb, 32.0),
+                "NSB image gate excludes times outside [0, window_ns)");
 
     std::map<std::string, std::string> nsb_cfg{
         {"nsb.enabled", "true"},

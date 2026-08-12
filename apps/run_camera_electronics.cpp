@@ -2,6 +2,7 @@
 #include "electronics/DetectorPipeline.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -80,6 +81,22 @@ void appendNsb(std::map<EventKey, std::vector<PrimaryPeHit>>& events,
     const std::uint64_t seed = lact::getUInt64(
         config, "electronics.nsb.seed",
         lact::getUInt64(config, "nsb.seed", 12345ULL));
+    lact::NsbConfig image_nsb;
+    image_nsb.enabled = enabled;
+    image_nsb.window_ns = lact::getDouble(
+        config, "electronics.nsb.window_ns",
+        lact::getDouble(config, "nsb.window_ns", image_nsb.window_ns));
+    if (!std::isfinite(image_nsb.window_ns) || image_nsb.window_ns < 0.0) {
+        throw std::runtime_error(
+            "electronics.nsb.window_ns must be finite and >= 0");
+    }
+    if (image_nsb.window_ns > 0.0 &&
+        (detector.sampling.start_ns > 0.0 ||
+         detector.sampling.end_ns < image_nsb.window_ns)) {
+        throw std::runtime_error(
+            "electronics sampling window must contain the NSB image gate "
+            "[0, electronics.nsb.window_ns)");
+    }
     if (!(rate >= 0.0) || !(end_ns > start_ns)) {
         throw std::runtime_error("invalid standalone NSB configuration");
     }
@@ -102,8 +119,7 @@ void appendNsb(std::map<EventKey, std::vector<PrimaryPeHit>>& events,
             seed);
         for (auto& hit : nsb_hits) {
             hit.count_in_integrated_image =
-                hit.time_ns >= detector.sampling.start_ns &&
-                hit.time_ns < detector.sampling.end_ns;
+                lact::nsbTimeInImageWindow(image_nsb, hit.time_ns);
         }
         event.second.insert(
             event.second.end(), nsb_hits.begin(), nsb_hits.end());

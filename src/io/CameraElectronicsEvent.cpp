@@ -85,6 +85,13 @@ CameraElectronicsEventMap buildCameraElectronicsEvents(
         }
 
         if (nsb.enabled && nsb.rate_pe_per_ns_per_pixel > 0.0) {
+            if (nsb.window_ns > 0.0 &&
+                (detector.sampling.start_ns > 0.0 ||
+                 detector.sampling.end_ns < nsb.window_ns)) {
+                throw std::runtime_error(
+                    "electronics sampling window must contain the NSB image "
+                    "gate [0, nsb.window_ns)");
+            }
             const auto generation_window =
                 electronics::waveformContributingPrimaryWindow(detector);
             auto nsb_hits = electronics::generateUniformNsbPrimaryHits(
@@ -98,8 +105,7 @@ CameraElectronicsEventMap buildCameraElectronicsEvents(
                 nsb.seed);
             for (auto& hit : nsb_hits) {
                 hit.count_in_integrated_image =
-                    hit.time_ns >= detector.sampling.start_ns &&
-                    hit.time_ns < detector.sampling.end_ns;
+                    nsbTimeInImageWindow(nsb, hit.time_ns);
             }
             primary_hits.insert(primary_hits.end(),
                                 nsb_hits.begin(), nsb_hits.end());

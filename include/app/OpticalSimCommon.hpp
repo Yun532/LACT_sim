@@ -169,7 +169,10 @@ struct NsbConfig {
     bool enabled = false;
     std::string model = "constant_rate";
     double rate_pe_per_ns_per_pixel = 0.0;
-    double window_ns = 16.0;
+    // NSB integration gate used by the saved camera image. The gate is
+    // [0, window_ns) relative to the event/waveform reference time. Waveform
+    // generation and triggering may use a wider interval.
+    double window_ns = 32.0;
     std::uint64_t seed = 12345ULL;
     std::string spectrum_csv;
     std::string spectrum_unit = "ph_s_nm_sr_m2";
@@ -386,6 +389,7 @@ void generateIntegratedNsbPe(const NsbConfig& nsb,
                              std::size_t n_pixels,
                              double window_ns,
                              const std::function<void(std::size_t, float)>& add_sample);
+bool nsbTimeInImageWindow(const NsbConfig& nsb, double relative_time_ns);
 void generateTimeBinnedNsbPe(const NsbConfig& nsb,
                              const WaveformOutputConfig& waveform_cfg,
                              int event_id,

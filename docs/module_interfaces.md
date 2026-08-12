@@ -183,16 +183,21 @@ The simplest NSB implementation is a constant-rate Poisson model:
 nsb.enabled=false
 nsb.model=constant_rate
 nsb.rate_pe_per_ns_per_pixel=0.05
-nsb.window_ns=16
+nsb.window_ns=32
 nsb.seed=12345
 ```
 
-It applies only to dense pixel-camera HDF5 output. The final
+`nsb.window_ns` defines the saved-image integration gate `[0, window_ns)`
+relative to the event/waveform reference time. It is used consistently with
+or without the detector pipeline and with or without waveform output. A wider
+NSB stream may still be generated for waveform boundary padding and triggering;
+those extra hits do not directly inflate the saved image. The final
 `/images/dense/pe` includes the NSB p.e. contribution. Use
 `output.hdf5_write_components=true` to additionally write `cherenkov_pe` and
 `nsb_pe`. When waveform output is enabled with `waveform.source=pe`, NSB is
 sampled per waveform time bin using `rate_pe_per_ns_per_pixel *
-waveform.time_bin_width_ns`; otherwise it is sampled once per pixel with
+waveform.time_bin_width_ns`; only bins inside the image gate are accumulated
+into the image. Without a waveform it is sampled once per pixel with
 `rate_pe_per_ns_per_pixel * nsb.window_ns`.
 
 The spectral model computes the same `rate_pe_per_ns_per_pixel` from a LoNS

@@ -197,6 +197,25 @@ int main(int argc, char** argv)
                 waveformSum(boundary_result, 0) > 1.0,
             "NSB padding hits must still contribute to the stored waveform");
 
+    std::vector<PrimaryPeHit> image_gate_hits = {
+        {5, 6, 0, -1.0, 0.0, 0.0, 0.0, 1.0,
+         HitOrigin::Nsb, false},
+        {5, 6, 0, 0.0, 0.001, 0.0, 0.0, 1.0,
+         HitOrigin::Nsb, true},
+        {5, 6, 0, 31.999, 0.002, 0.0, 0.0, 1.0,
+         HitOrigin::Nsb, true},
+        {5, 6, 0, 32.0, 0.003, 0.0, 0.0, 1.0,
+         HitOrigin::Nsb, false},
+    };
+    const auto image_gate_result =
+        runDetectorPipeline(boundary_config, 1, image_gate_hits);
+    require(image_gate_result.pixels[0].primary_nsb_pe == 2.0 &&
+                image_gate_result.pixels[0].fired_nsb_pe == 2.0,
+            "electronic image truth must include exactly the configured "
+            "32 ns NSB gate");
+    require(image_gate_result.fired_hits.size() == 4,
+            "NSB outside the image gate must remain available to the waveform");
+
     config.camera_trigger.enabled = false;
     config.single_pe.charge_fluctuation.enabled = true;
     config.single_pe.charge_fluctuation.empirical_samples = {0.5, 1.5};
