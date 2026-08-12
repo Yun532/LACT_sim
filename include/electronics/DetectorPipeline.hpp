@@ -30,6 +30,10 @@ struct PrimaryPeHit {
     double wavelength_nm = 0.0;
     double primary_pe = 1.0;
     HitOrigin origin = HitOrigin::Cherenkov;
+    // False for NSB warm-up/cool-down hits generated outside the stored
+    // sampling window. Such hits participate in microcell occupancy and
+    // waveform convolution, but not in the window-integrated image truth.
+    bool count_in_integrated_image = true;
 };
 
 struct MicrocellConfig {
@@ -165,6 +169,12 @@ struct FiredCellHit {
     // fired_pe remains the integer avalanche truth used by saturation studies.
     double charge_factor = 1.0;
     double time_jitter_ns = 0.0;
+    bool count_in_integrated_image = true;
+};
+
+struct PrimaryHitGenerationWindow {
+    double start_ns = 0.0;
+    double end_ns = 0.0;
 };
 
 struct PixelSummary {
@@ -221,6 +231,13 @@ MicrocellAddress mapMicrocellPosition(
     double sensor_y_m);
 
 double interChannelActiveFraction(const MicrocellConfig& config);
+
+// Return the primary-hit interval whose single-p.e. pulses can overlap the
+// stored sampling window. With single-p.e. shaping disabled this is exactly
+// the sampling window. A finite six-sigma guard is added for enabled Gaussian
+// timing jitter.
+PrimaryHitGenerationWindow waveformContributingPrimaryWindow(
+    const DetectorPipelineConfig& config);
 
 DetectorPipelineResult runDetectorPipeline(
     const DetectorPipelineConfig& config,

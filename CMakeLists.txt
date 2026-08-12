@@ -259,7 +259,8 @@ add_executable(test_detector_pipeline
     apps/test_detector_pipeline.cpp
 )
 target_link_libraries(test_detector_pipeline PRIVATE simlite_core)
-add_test(NAME test_detector_pipeline COMMAND test_detector_pipeline)
+add_test(NAME test_detector_pipeline COMMAND test_detector_pipeline
+         ${CMAKE_CURRENT_SOURCE_DIR}/configs/electronics/parameters/spe_template_measured.csv)
 
 add_executable(test_array_timing_correction
     apps/test_array_timing_correction.cpp

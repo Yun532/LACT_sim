@@ -71,10 +71,12 @@ void appendNsb(std::map<EventKey, std::vector<PrimaryPeHit>>& events,
     const double rate = lact::getDouble(
         config, "electronics.nsb.rate_pe_per_ns_per_pixel",
         lact::getDouble(config, "nsb.rate_pe_per_ns_per_pixel", 0.0));
+    const auto automatic_window =
+        lact::electronics::waveformContributingPrimaryWindow(detector);
     const double start_ns = lact::getDouble(
-        config, "electronics.nsb.start_ns", detector.sampling.start_ns);
+        config, "electronics.nsb.start_ns", automatic_window.start_ns);
     const double end_ns = lact::getDouble(
-        config, "electronics.nsb.end_ns", detector.sampling.end_ns);
+        config, "electronics.nsb.end_ns", automatic_window.end_ns);
     const std::uint64_t seed = lact::getUInt64(
         config, "electronics.nsb.seed",
         lact::getUInt64(config, "nsb.seed", 12345ULL));
@@ -98,6 +100,11 @@ void appendNsb(std::map<EventKey, std::vector<PrimaryPeHit>>& events,
             end_ns,
             detector.microcell,
             seed);
+        for (auto& hit : nsb_hits) {
+            hit.count_in_integrated_image =
+                hit.time_ns >= detector.sampling.start_ns &&
+                hit.time_ns < detector.sampling.end_ns;
+        }
         event.second.insert(
             event.second.end(), nsb_hits.begin(), nsb_hits.end());
     }

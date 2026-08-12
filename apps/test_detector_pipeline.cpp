@@ -24,7 +24,7 @@ double waveformSum(const lact::electronics::DetectorPipelineResult& result,
 
 } // namespace
 
-int main()
+int main(int argc, char** argv)
 {
     using namespace lact::electronics;
     DetectorPipelineConfig config;
@@ -155,6 +155,47 @@ int main()
             "serialized reference pulse must reproduce single-p.e. area");
     require(result.camera_trigger.triggered,
             "voltage threshold must operate on sampled waveform");
+
+    DetectorPipelineConfig boundary_config;
+    boundary_config.microcell.enabled = false;
+    boundary_config.single_pe.enabled = true;
+    boundary_config.single_pe.model = "analytic";
+    boundary_config.single_pe.unit = "pe_charge";
+    boundary_config.single_pe.support_ns = 30.0;
+    boundary_config.sampling.start_ns = 0.0;
+    boundary_config.sampling.end_ns = 40.0;
+    boundary_config.sampling.width_ns = 4.0;
+    const auto generation_window =
+        waveformContributingPrimaryWindow(boundary_config);
+    require(std::abs(generation_window.start_ns + 30.0) < 1.0e-12 &&
+                std::abs(generation_window.end_ns - 40.0) < 1.0e-12,
+            "causal pulse support must extend the NSB generation prehistory");
+    if (argc > 1) {
+        boundary_config.single_pe.model = "measured_csv";
+        boundary_config.single_pe.csv_path = argv[1];
+        boundary_config.single_pe.template_time_reference = "peak";
+        boundary_config.sampling.start_ns = -40.0;
+        boundary_config.sampling.end_ns = 220.0;
+        const auto measured_window =
+            waveformContributingPrimaryWindow(boundary_config);
+        require(std::abs(measured_window.start_ns + 220.0) < 1.0e-9 &&
+                    std::abs(measured_window.end_ns - 260.0) < 1.0e-9,
+                "measured peak-aligned pulse must pad both NSB boundaries");
+    }
+    std::vector<PrimaryPeHit> boundary_hits = {
+        {3, 4, 0, -10.0, 0.0, 0.0, 0.0, 1.0,
+         HitOrigin::Nsb, false},
+        {3, 4, 0, 10.0, 0.0, 0.0, 0.0, 1.0,
+         HitOrigin::Nsb, true},
+    };
+    const auto boundary_result =
+        runDetectorPipeline(boundary_config, 1, boundary_hits);
+    require(boundary_result.pixels[0].primary_nsb_pe == 1.0 &&
+                boundary_result.pixels[0].fired_nsb_pe == 1.0,
+            "NSB padding hits must not inflate the integrated image truth");
+    require(boundary_result.fired_hits.size() == 2 &&
+                waveformSum(boundary_result, 0) > 1.0,
+            "NSB padding hits must still contribute to the stored waveform");
 
     config.camera_trigger.enabled = false;
     config.single_pe.charge_fluctuation.enabled = true;

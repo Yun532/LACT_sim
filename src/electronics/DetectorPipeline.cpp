@@ -321,6 +321,31 @@ double interChannelActiveFraction(const MicrocellConfig& config)
     return channel_area / sensor_area;
 }
 
+PrimaryHitGenerationWindow waveformContributingPrimaryWindow(
+    const DetectorPipelineConfig& config)
+{
+    PrimaryHitGenerationWindow window{
+        config.sampling.start_ns, config.sampling.end_ns};
+    if (!config.single_pe.enabled) return window;
+
+    const auto pulse = makePulse(config.single_pe, config.sampling.width_ns);
+    const auto limits = std::minmax_element(
+        pulse.begin(), pulse.end(),
+        [](const PulsePoint& left, const PulsePoint& right) {
+            return left.time_ns < right.time_ns;
+        });
+    window.start_ns -= limits.second->time_ns;
+    window.end_ns -= limits.first->time_ns;
+    if (config.single_pe.time_jitter.enabled &&
+        config.single_pe.time_jitter.sigma_ns > 0.0) {
+        const double guard_ns =
+            6.0 * config.single_pe.time_jitter.sigma_ns;
+        window.start_ns -= guard_ns;
+        window.end_ns += guard_ns;
+    }
+    return window;
+}
+
 MicrocellAddress mapMicrocellPosition(
     const MicrocellConfig& config,
     double sensor_x_m,
@@ -661,15 +686,20 @@ DetectorPipelineResult runDetectorPipeline(
             !std::isfinite(hit.primary_pe) || hit.primary_pe < 0.0) {
             throw std::runtime_error("invalid primary p.e. hit");
         }
-        addPrimary(out.pixels[static_cast<std::size_t>(hit.pixel_id)],
-                   hit.origin, hit.primary_pe);
+        if (hit.count_in_integrated_image) {
+            addPrimary(out.pixels[static_cast<std::size_t>(hit.pixel_id)],
+                       hit.origin, hit.primary_pe);
+        }
         if (!config.microcell.enabled) {
             if (hit.primary_pe > 0.0) {
                 out.fired_hits.push_back({
                     hit.event_id, hit.telescope_id, hit.pixel_id, hit.time_ns,
-                    -1, -1, hit.primary_pe, hit.origin});
-                addFired(out.pixels[static_cast<std::size_t>(hit.pixel_id)],
-                         hit.origin, hit.primary_pe);
+                    -1, -1, hit.primary_pe, hit.origin, 1.0, 0.0,
+                    hit.count_in_integrated_image});
+                if (hit.count_in_integrated_image) {
+                    addFired(out.pixels[static_cast<std::size_t>(hit.pixel_id)],
+                             hit.origin, hit.primary_pe);
+                }
             }
             continue;
         }
@@ -708,8 +738,10 @@ DetectorPipelineResult runDetectorPipeline(
                         hit.origin,
                     });
                 }
-                out.pixels[static_cast<std::size_t>(hit.pixel_id)]
-                    .gap_lost_pe += 1.0;
+                if (hit.count_in_integrated_image) {
+                    out.pixels[static_cast<std::size_t>(hit.pixel_id)]
+                        .gap_lost_pe += 1.0;
+                }
             }
             continue;
         }
@@ -747,12 +779,17 @@ DetectorPipelineResult runDetectorPipeline(
             if (fired) {
                 out.fired_hits.push_back({
                     hit.event_id, hit.telescope_id, hit.pixel_id, hit.time_ns,
-                    address.channel_id, address.microcell_id, 1.0, hit.origin});
-                addFired(out.pixels[static_cast<std::size_t>(hit.pixel_id)],
-                         hit.origin, 1.0);
+                    address.channel_id, address.microcell_id, 1.0, hit.origin,
+                    1.0, 0.0, hit.count_in_integrated_image});
+                if (hit.count_in_integrated_image) {
+                    addFired(out.pixels[static_cast<std::size_t>(hit.pixel_id)],
+                             hit.origin, 1.0);
+                }
             } else {
-                out.pixels[static_cast<std::size_t>(hit.pixel_id)]
-                    .saturation_lost_pe += 1.0;
+                if (hit.count_in_integrated_image) {
+                    out.pixels[static_cast<std::size_t>(hit.pixel_id)]
+                        .saturation_lost_pe += 1.0;
+                }
             }
         }
     }
