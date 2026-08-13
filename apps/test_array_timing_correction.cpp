@@ -96,6 +96,18 @@ int main()
     ok &= check(near(eventio_triggers[0].coincidence_time_ns,
                      eventio_triggers[1].coincidence_time_ns),
                 "EventIO timing context did not align telescope times");
+    const auto all_delays = eventIOArrayGeometricDelaysNs(
+        {1, 2}, 1203, "event_array100", eventio_trigger, telescope, metadata);
+    ok &= check(near(all_delays.at(1), 0.0) &&
+                    near(all_delays.at(2), delay),
+                "EventIO geometric delays were not available for all telescopes");
+    eventio_trigger.array_time_correction = "none";
+    const auto disabled_delays = eventIOArrayGeometricDelaysNs(
+        {1, 2}, 1203, "event_array100", eventio_trigger, telescope, metadata);
+    ok &= check(near(disabled_delays.at(1), 0.0) &&
+                    near(disabled_delays.at(2), 0.0),
+                "disabled timing correction must serialize finite zero delays");
+    eventio_trigger.array_time_correction = "plane_wave";
     eventio_trigger.array_wavefront_speed_m_per_ns = 0.0;
     ok &= check(near(resolveEventIOArrayWavefrontSpeedMPerNs(
                          eventio_trigger, metadata),

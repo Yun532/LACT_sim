@@ -4455,7 +4455,10 @@ int main(int argc, char** argv) {
                 event_raw_waveform_hits);
             if (detector_pipeline_cfg.enabled) {
                 std::vector<TelescopeTriggerTime> telescope_times;
+                std::vector<int> all_telescope_ids;
+                all_telescope_ids.reserve(event_electronics.size());
                 for (const auto& item : event_electronics) {
+                    all_telescope_ids.push_back(item.second.telescope_id);
                     if (item.second.detector.camera_trigger.triggered) {
                         telescope_times.push_back(TelescopeTriggerTime{
                             item.second.telescope_id,
@@ -4463,6 +4466,13 @@ int main(int argc, char** argv) {
                         });
                     }
                 }
+                const auto geometric_delays = eventIOArrayGeometricDelaysNs(
+                    all_telescope_ids,
+                    event_id,
+                    source_runtime_cfg.event_id_mode,
+                    trigger_cfg,
+                    telescope_cfg,
+                    metadata);
                 applyEventIOArrayTimingCorrection(
                     telescope_times,
                     event_id,
@@ -4474,6 +4484,8 @@ int main(int argc, char** argv) {
                     evaluateArrayTrigger(telescope_times, trigger_cfg);
                 for (auto& item : event_electronics) {
                     auto& event = item.second;
+                    event.geometric_delay_ns =
+                        geometric_delays.at(event.telescope_id);
                     const auto corrected = std::find_if(
                         telescope_times.begin(), telescope_times.end(),
                         [&event](const TelescopeTriggerTime& value) {

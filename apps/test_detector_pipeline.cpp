@@ -28,6 +28,17 @@ double waveformSum(const lact::electronics::DetectorPipelineResult& result,
 int main(int argc, char** argv)
 {
     using namespace lact::electronics;
+    lact::WaveformOutputConfig trigger_time_axis;
+    trigger_time_axis.enabled = false;
+    trigger_time_axis.time_reference = "image_first";
+    lact::TraceSummary trigger_time_summary;
+    trigger_time_summary.first_cherenkov_time_ns = -321.5;
+    require(std::abs(lact::waveformReferenceTimeNs(
+                         trigger_time_axis, trigger_time_summary) + 321.5) <
+                1.0e-12,
+            "p.e.-count trigger must retain per-telescope image-first timing "
+            "when waveform serialization is disabled");
+
     DetectorPipelineConfig config;
     config.microcell.enabled = true;
     config.save_microcell_decisions = true;

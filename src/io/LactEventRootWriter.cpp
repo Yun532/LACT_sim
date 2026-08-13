@@ -871,6 +871,20 @@ LactRootPreparedData prepareLactRootObservations(
 
     std::map<int, ArrayTriggerDecision> array_trigger_decisions;
     std::map<SummaryKey, TelescopeTriggerTime> array_trigger_times;
+    std::map<SummaryKey, double> geometric_delays;
+    std::map<int, std::vector<int>> telescope_ids_by_event;
+    for (const auto& candidate : candidates) {
+        telescope_ids_by_event[static_cast<int>(candidate.observation.event_id)]
+            .push_back(candidate.observation.telescope_id);
+    }
+    for (const auto& item : telescope_ids_by_event) {
+        const auto event_delays = eventIOArrayGeometricDelaysNs(
+            item.second, item.first, source_runtime_cfg.event_id_mode,
+            trigger_cfg, telescope_cfg, metadata);
+        for (const auto& delay : event_delays) {
+            geometric_delays[{item.first, delay.first}] = delay.second;
+        }
+    }
     for (auto& item : telescope_trigger_times_by_event) {
         applyEventIOArrayTimingCorrection(
             item.second, item.first, source_runtime_cfg.event_id_mode, trigger_cfg,
@@ -889,15 +903,22 @@ LactRootPreparedData prepareLactRootObservations(
             candidate.observation.telescope_id};
         const auto canonical = electronics_events.find(candidate_key);
         if (detector_pipeline_available && canonical != electronics_events.end()) {
+            const auto delay = geometric_delays.find(candidate_key);
             candidate.observation.geometric_delay_ns =
-                canonical->second.geometric_delay_ns;
+                std::isfinite(canonical->second.geometric_delay_ns)
+                    ? canonical->second.geometric_delay_ns
+                    : (delay != geometric_delays.end()
+                           ? delay->second
+                           : std::numeric_limits<double>::quiet_NaN());
             candidate.observation.coincidence_time_ns =
                 canonical->second.coincidence_time_ns;
         } else {
+            const auto delay = geometric_delays.find(candidate_key);
+            if (delay != geometric_delays.end()) {
+                candidate.observation.geometric_delay_ns = delay->second;
+            }
             const auto corrected_time = array_trigger_times.find(candidate_key);
             if (corrected_time != array_trigger_times.end()) {
-                candidate.observation.geometric_delay_ns =
-                    corrected_time->second.geometric_delay_ns;
                 candidate.observation.coincidence_time_ns =
                     std::isfinite(corrected_time->second.coincidence_time_ns)
                         ? corrected_time->second.coincidence_time_ns
