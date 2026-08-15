@@ -58,8 +58,14 @@ CameraElectronicsEventMap buildCameraElectronicsEvents(
     for (const auto& item : summaries) {
         keys.insert(item.first);
     }
+    // Bucket the raw hits by (event, telescope) once. The per-key loop below
+    // used to rescan the whole vector, which is quadratic in the number of
+    // saved telescopes.
+    std::map<SummaryKey, std::vector<const RawWaveformHit*>> hits_by_key;
     for (const auto& hit : raw_hits) {
-        keys.insert({hit.event_id, hit.telescope_id});
+        const SummaryKey key{hit.event_id, hit.telescope_id};
+        keys.insert(key);
+        hits_by_key[key].push_back(&hit);
     }
 
     for (const auto& key : keys) {
@@ -76,10 +82,11 @@ CameraElectronicsEventMap buildCameraElectronicsEvents(
         event.reference_time_ns = waveformReferenceTimeNs(waveform, summary);
 
         std::vector<electronics::PrimaryPeHit> primary_hits;
-        for (const auto& hit : raw_hits) {
-            if (hit.event_id != key.first || hit.telescope_id != key.second) {
-                continue;
-            }
+        const auto bucket = hits_by_key.find(key);
+        static const std::vector<const RawWaveformHit*> kNoHits;
+        for (const RawWaveformHit* hit_ptr :
+             (bucket == hits_by_key.end() ? kNoHits : bucket->second)) {
+            const RawWaveformHit& hit = *hit_ptr;
             const auto column = pixel_to_column.find(hit.pixel_id);
             if (column == pixel_to_column.end()) {
                 continue;

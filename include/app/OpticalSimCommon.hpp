@@ -110,8 +110,21 @@ struct ObstructionMask {
     int ny = 0;
     std::vector<std::uint8_t> blocked;
 
+    // Primitive kinds are resolved once while loading the CSV so the photon
+    // loop compares an enum instead of lowercasing `type` per primitive per
+    // hit. Hand-built masks that leave `kind` unset still work: the lookup
+    // falls back to `type`, so forgetting to populate it costs speed, never
+    // correctness.
+    enum class PrimitiveKind {
+        Unknown,
+        Cylinder,
+        Box,
+        PolygonPrism,
+    };
+
     struct Primitive {
         std::string type;
+        PrimitiveKind kind = PrimitiveKind::Unknown;
         std::string name;
         std::string role = "default";
         std::string material_id = "default";
@@ -133,8 +146,20 @@ struct ObstructionMask {
 
     std::vector<Primitive> primitives;
 
+    // Bounding radius around the local origin enclosing every primitive,
+    // resolved once by buildObstructionMask. Zero means "not derived yet";
+    // the upstream check then computes it on the fly.
+    double primitive_bound_radius_m = 0.0;
+
+    bool usesPrimitives() const { return mode == "primitives"; }
+
     bool contains(double x_m, double y_m) const;
 };
+
+// Kind of a loaded primitive, falling back to the textual type when the
+// enum has not been resolved (hand-built masks in tests).
+ObstructionMask::PrimitiveKind obstructionPrimitiveKind(
+    const ObstructionMask::Primitive& primitive);
 
 struct CameraConfig {
     bool enabled = false;
@@ -214,7 +239,6 @@ class ElectronicsResponse {
 public:
     ElectronicsResponse() = default;
     explicit ElectronicsResponse(const ElectronicsConfig& cfg);
-    double peConversion(double wavelength_nm) const;
     double saturatedPe(double primary_pe) const;
     std::vector<double> saturatedWaveform(
         const std::vector<double>& primary_pe_by_time_bin) const;

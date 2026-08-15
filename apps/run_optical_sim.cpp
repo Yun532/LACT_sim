@@ -56,12 +56,19 @@ int main(int argc, char** argv) {
         OpticalEfficiency eff(efficiency_cfg);
         AtmosphereTransmission atmosphere(atmosphere_cfg);
         std::string output_csv = getString(cfg, "output.csv", "surface_hits.csv");
+        // "none"/"off"/"" disable the CSV here as they do everywhere else,
+        // instead of producing a file literally named "none".
+        if (isDisabledText(output_csv)) {
+            output_csv.clear();
+        }
         std::string output_pixel_csv = getString(cfg, "output.pixel_csv", "camera_pixel_image.csv");
         const std::string output_mode = lowerCopy(trim(getString(cfg, "output.mode", "hits")));
         const bool save_pixel_csv = camera_cfg.enabled &&
             (output_mode == "pixel" || output_mode == "pixels" ||
              output_mode == "both" || cfg.find("output.pixel_csv") != cfg.end());
-        const bool save_hits_csv = !(output_mode == "pixel" || output_mode == "pixels");
+        const bool save_hits_csv =
+            !(output_mode == "pixel" || output_mode == "pixels") &&
+            !output_csv.empty();
         const bool write_input_local_photon =
             getBool(cfg, "output.whiteboard_input_photon", false);
         const auto t_setup_done = std::chrono::steady_clock::now();

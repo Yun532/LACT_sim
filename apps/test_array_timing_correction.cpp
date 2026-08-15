@@ -48,6 +48,18 @@ int main()
                     near(zenith.y, 0.0, 1.0e-10) && near(zenith.z, 1.0),
                 "altitude 90 must point Up (+z)");
 
+    ok &= check(near(showerAxisImpactParameterM(
+                         Vec3{13.0, -1.0, 20.0},
+                         Vec3{10.0, -5.0, 0.0}, zenith),
+                     5.0),
+                "vertical shower impact parameter must equal core distance");
+    const Vec3 diagonal = Vec3{1.0, 0.0, 1.0}.normalized();
+    ok &= check(near(showerAxisImpactParameterM(
+                         Vec3{1.0, 0.0, 0.0},
+                         Vec3{0.0, 0.0, 0.0}, diagonal),
+                     std::sqrt(0.5)),
+                "inclined shower impact parameter is incorrect");
+
     const double delay = planeWavefrontGeometricDelayNs(
         Vec3{30.0, 0.0, 0.0}, north, c);
     ok &= check(near(delay, 30.0 / c),

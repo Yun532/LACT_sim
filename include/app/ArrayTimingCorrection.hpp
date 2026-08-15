@@ -23,6 +23,11 @@ double airLightSpeedAtAltitudeM(double altitude_m);
 Vec3 corsikaNwuViewingDirection(double azimuth_north_to_east_deg,
                                 double altitude_deg);
 
+double showerAxisImpactParameterM(
+    const Vec3& telescope_position_nwu_m,
+    const Vec3& shower_core_nwu_m,
+    const Vec3& viewing_direction_nwu);
+
 // Plane-wave correction used before applying an array coincidence window.
 // A positive projection means that the wavefront reaches this telescope
 // earlier, so the projection/c term is added to the raw local trigger time.

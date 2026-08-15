@@ -52,6 +52,19 @@ int main(int argc, char** argv)
     config.camera_trigger.multiplicity = 2;
     config.camera_trigger.coincidence_window_ns = 8.0;
 
+    DetectorPipelineConfig non_integral_grid = config;
+    non_integral_grid.sampling.end_ns = 10.0;
+    non_integral_grid.sampling.width_ns = 4.0;
+    try {
+        (void)runDetectorPipeline(non_integral_grid, 1, {});
+        throw std::runtime_error(
+            "non-integral detector sampling grid was accepted");
+    } catch (const std::runtime_error& error) {
+        require(std::string(error.what()).find("integer multiple") !=
+                    std::string::npos,
+                "non-integral sampling grid failed for the wrong reason");
+    }
+
     std::vector<PrimaryPeHit> hits = {
         {1, 2, 0, 4.0, 0.0, 0.0, 420.0, 1.0,
          HitOrigin::Cherenkov},

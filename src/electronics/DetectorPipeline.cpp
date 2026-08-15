@@ -472,6 +472,16 @@ void validateDetectorPipelineConfig(const DetectorPipelineConfig& config)
         !(config.sampling.end_ns > config.sampling.start_ns)) {
         throw std::runtime_error("invalid detector sampling time grid");
     }
+    const double bin_count =
+        (config.sampling.end_ns - config.sampling.start_ns) /
+        config.sampling.width_ns;
+    const double rounded_bin_count = std::round(bin_count);
+    const double bin_tolerance =
+        1.0e-10 * std::max(1.0, std::abs(bin_count));
+    if (std::abs(bin_count - rounded_bin_count) > bin_tolerance) {
+        throw std::runtime_error(
+            "detector sampling interval must be an integer multiple of width_ns");
+    }
     if (config.microcell.model != "explicit_no_recovery") {
         throw std::runtime_error(
             "only microcell.model=explicit_no_recovery is supported");
@@ -633,7 +643,7 @@ DetectorPipelineResult runDetectorPipeline(
     out.n_pixels = n_pixels;
     out.primary_hits = input_hits;
     out.pixels.resize(n_pixels);
-    out.n_samples = static_cast<std::size_t>(std::ceil(
+    out.n_samples = static_cast<std::size_t>(std::llround(
         (config.sampling.end_ns - config.sampling.start_ns) /
         config.sampling.width_ns));
     out.time_edges_ns.resize(out.n_samples + 1);
@@ -853,10 +863,37 @@ DetectorPipelineResult runDetectorPipeline(
         if (config.single_pe.unit == "mv") {
             out.single_pe_area_mv_ns = raw_area;
         }
+        // The template has finite support, so only the bins overlapping
+        // [t + pulse_begin, t + pulse_end] can receive charge; everywhere else
+        // cumulativeAt() returns the same value at both edges and the sample
+        // is exactly zero. One bin of margin on each side keeps this an
+        // identity, not an approximation.
+        const double pulse_begin_ns = pulse.front().time_ns;
+        const double pulse_end_ns = pulse.back().time_ns;
         for (const auto& hit : out.fired_hits) {
             const double waveform_time_ns =
                 hit.time_ns + hit.time_jitter_ns;
-            for (std::size_t bin = 0; bin < out.n_samples; ++bin) {
+            const double span_lo = waveform_time_ns + pulse_begin_ns;
+            const double span_hi = waveform_time_ns + pulse_end_ns;
+            const double first_edge = (span_lo - config.sampling.start_ns) /
+                                      config.sampling.width_ns;
+            const double last_edge = (span_hi - config.sampling.start_ns) /
+                                     config.sampling.width_ns;
+            std::size_t begin_bin = 0;
+            if (first_edge > 1.0) {
+                begin_bin = std::min<std::size_t>(
+                    out.n_samples,
+                    static_cast<std::size_t>(std::floor(first_edge)) - 1);
+            }
+            std::size_t end_bin = out.n_samples;
+            if (last_edge >= 0.0) {
+                end_bin = std::min<std::size_t>(
+                    out.n_samples,
+                    static_cast<std::size_t>(std::ceil(last_edge)) + 2);
+            } else {
+                end_bin = 0;
+            }
+            for (std::size_t bin = begin_bin; bin < end_bin; ++bin) {
                 const double elapsed_start =
                     out.time_edges_ns[bin] - waveform_time_ns;
                 const double elapsed_end =
