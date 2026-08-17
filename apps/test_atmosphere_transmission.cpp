@@ -89,6 +89,39 @@ int main(int argc, char** argv)
     } catch (const std::runtime_error&) {
     }
 
+    const auto require_invalid_choice = [&](const char* field,
+                                            auto set_invalid) {
+        try {
+            AtmosphereTransmissionConfig invalid_cfg = cfg;
+            set_invalid(invalid_cfg);
+            AtmosphereTransmission should_fail(invalid_cfg);
+            (void)should_fail;
+            ok &= check(false, field);
+        } catch (const std::runtime_error&) {
+        }
+    };
+    require_invalid_choice("invalid large-angle behavior was accepted",
+                           [](auto& value) {
+                               value.large_angle_behavior = "clmap";
+                           });
+    require_invalid_choice("invalid out-of-range behavior was accepted",
+                           [](auto& value) { value.out_of_range = "clmap"; });
+    require_invalid_choice("invalid tau behavior was accepted",
+                           [](auto& value) { value.invalid_tau = "opqaue"; });
+    require_invalid_choice("invalid missing-altitude behavior was accepted",
+                           [](auto& value) {
+                               value.missing_emission_altitude = "defualt";
+                           });
+
+    try {
+        (void)buildAtmosphereTransmissionConfig({
+            {"atmosphere.model", "modtran_tau"},
+            {"atmosphere.slant_correction", "secnat"},
+        });
+        ok &= check(false, "invalid slant correction was accepted");
+    } catch (const std::runtime_error&) {
+    }
+
     const auto legacy_cfg = buildAtmosphereTransmissionConfig({
         {"atmosphere.model", "modtran_tau"},
         {"atmosphere.tau_table", argv[1]},

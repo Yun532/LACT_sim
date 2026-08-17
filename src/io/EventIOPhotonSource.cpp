@@ -27,6 +27,18 @@ namespace {
 
 constexpr double RAD_TO_DEG = 180.0 / 3.14159265358979323846;
 
+double wrapDegrees360(double degrees)
+{
+    if (!std::isfinite(degrees)) {
+        return degrees;
+    }
+    double wrapped = std::fmod(degrees, 360.0);
+    if (wrapped < 0.0) {
+        wrapped += 360.0;
+    }
+    return wrapped;
+}
+
 struct IoBufferGuard {
     IO_BUFFER* ptr = nullptr;
     ~IoBufferGuard() {
@@ -306,7 +318,11 @@ int readEventHeaderMetadata(IO_BUFFER* iobuf,
         event.theta_deg = data[10] * RAD_TO_DEG;
         event.phi_deg = data[11] * RAD_TO_DEG;
         event.altitude_deg = 90.0 - event.theta_deg;
-        event.azimuth_north_to_east_deg = (data[92] - data[11] + M_PI) * RAD_TO_DEG;
+        // pi + ARRANG - phip is the standard sim_telarray conversion from
+        // CORSIKA's north-to-west momentum azimuth. Wrap it so the stored
+        // truth is always a canonical [0, 360) bearing.
+        event.azimuth_north_to_east_deg =
+            wrapDegrees360((data[92] - data[11] + M_PI) * RAD_TO_DEG);
         event.core_x_m = data[98] * 0.01;
         event.core_y_m = data[118] * 0.01;
         event.array_rotation_deg = data[92] * RAD_TO_DEG;
@@ -448,7 +464,8 @@ int readSimtelMcShowerMetadata(IO_BUFFER* iobuf,
     event.energy_gev = shower.energy * 1000.0;
     event.altitude_deg = shower.altitude * RAD_TO_DEG;
     event.theta_deg = 90.0 - event.altitude_deg;
-    event.azimuth_north_to_east_deg = shower.azimuth * RAD_TO_DEG;
+    event.azimuth_north_to_east_deg =
+        wrapDegrees360(shower.azimuth * RAD_TO_DEG);
     event.h_first_int_m = shower.h_first_int;
     event.x_max_g_cm2 = shower.xmax;
     event.h_max_m = shower.hmax;

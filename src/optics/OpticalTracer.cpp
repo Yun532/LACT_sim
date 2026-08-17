@@ -2,7 +2,6 @@
 #include <cmath>
 #include <limits>
 #include <algorithm>
-#include <random>
 #include <stdexcept>
 #include "core/DeterministicSeed.hpp"
 #include "optics/Reflection.hpp"
@@ -46,6 +45,18 @@ bool insideAperture(const Vec3& rel, const Vec3& normal, const MirrorTile& tile)
     return false;
 }
 
+// Two independent uniforms from the stable integer hash already used by the
+// photon-response sampler. The previous code built a fresh std::mt19937_64
+// (2.5 kB of state, a full init plus a twist) for every scattered photon and
+// then discarded it after drawing two numbers.
+double hashedUniform01(std::uint64_t seed, std::uint64_t substream)
+{
+    const std::uint64_t bits =
+        lact::splitMix64(lact::deriveSeed(seed, substream));
+    constexpr double scale = 1.0 / 9007199254740992.0; // 2^-53
+    return static_cast<double>(bits >> 11U) * scale;
+}
+
 Vec3 perturbDirection(const Vec3& direction, double sigma_rad, std::uint64_t seed)
 {
     if (sigma_rad <= 0.0) {
@@ -58,11 +69,13 @@ Vec3 perturbDirection(const Vec3& direction, double sigma_rad, std::uint64_t see
     Vec3 u = ref.cross(w).normalized();
     Vec3 v = w.cross(u).normalized();
 
-    std::mt19937_64 rng(seed);
-    std::uniform_real_distribution<double> uniform(0.0, 1.0);
-    double theta = sigma_rad * std::sqrt(-2.0 * std::log(std::max(1e-16, 1.0 - uniform(rng))));
+    // Rayleigh polar angle with scale sigma_rad, uniform azimuth: unchanged
+    // distribution, different draw.
+    const double u1 = hashedUniform01(seed, 1);
+    const double u2 = hashedUniform01(seed, 2);
+    double theta = sigma_rad * std::sqrt(-2.0 * std::log(std::max(1e-16, 1.0 - u1)));
     theta = std::min(theta, 3.14159265358979323846);
-    double phi = 2.0 * 3.14159265358979323846 * uniform(rng);
+    double phi = 2.0 * 3.14159265358979323846 * u2;
 
     return (w * std::cos(theta) +
             u * (std::sin(theta) * std::cos(phi)) +
@@ -157,17 +170,22 @@ OpticalSurfaceHit OpticalTracer::traceToPlaneImpl(
     Vec3 out_dir = reflectDirection(photon.dir, n);
     const double scatter_sigma_rad = std::hypot(reflect_direction_sigma_rad_,
                                                 best_tile->roughness_sigma_rad);
-    if (scatter_sigma_rad > 0.0 && photon.random_stream_id == 0) {
-        throw std::runtime_error(
-            "non-zero mirror scatter requires Photon.random_stream_id");
+    if (scatter_sigma_rad > 0.0) {
+        if (photon.random_stream_id == 0) {
+            throw std::runtime_error(
+                "non-zero mirror scatter requires Photon.random_stream_id");
+        }
+        // Only derive the stream when it is actually consumed; an ideal
+        // mirror layout would otherwise hash three times per traced photon
+        // and immediately discard the result.
+        std::uint64_t scatter_seed =
+            lact::stageSeed(random_seed_, lact::RandomStage::MirrorRoughness);
+        scatter_seed = lact::deriveSeed(
+            scatter_seed, photon.random_stream_id);
+        scatter_seed = lact::deriveSeed(
+            scatter_seed, static_cast<std::uint64_t>(best_tile->id + 1));
+        out_dir = perturbDirection(out_dir, scatter_sigma_rad, scatter_seed);
     }
-    std::uint64_t scatter_seed =
-        lact::stageSeed(random_seed_, lact::RandomStage::MirrorRoughness);
-    scatter_seed = lact::deriveSeed(
-        scatter_seed, photon.random_stream_id);
-    scatter_seed = lact::deriveSeed(
-        scatter_seed, static_cast<std::uint64_t>(best_tile->id + 1));
-    out_dir = perturbDirection(out_dir, scatter_sigma_rad, scatter_seed);
 
     auto surf_sol = intersectOutputPlane(best_sol.point, out_dir, plane);
     if (!surf_sol.has_value()) {

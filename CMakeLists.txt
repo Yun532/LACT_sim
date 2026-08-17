@@ -85,6 +85,11 @@ add_library(simlite_core
     src/io/Sha256.cpp
     src/io/CameraElectronicsEvent.cpp
     src/app/OpticalSimCommon.cpp
+    src/app/PhotonTransport.cpp
+    src/app/CorsikaTraceReport.cpp
+    src/app/CorsikaTraceConfig.cpp
+    src/io/CorsikaTraceAccumulators.cpp
+    src/io/CorsikaTraceCsvOutput.cpp
     src/app/ArrayTimingCorrection.cpp
     src/app/PhotonResponseSampler.cpp
     src/app/TelescopeOpticsCache.cpp
@@ -101,6 +106,8 @@ target_compile_definitions(
 
 if(LACT_HAS_HESSIO)
     target_sources(simlite_core PRIVATE src/io/EventIOPhotonSource.cpp)
+    target_sources(simlite_core PRIVATE src/io/CorsikaTraceEventMetadata.cpp)
+    target_sources(simlite_core PRIVATE src/io/CorsikaTraceEventIOInput.cpp)
     target_include_directories(simlite_core PRIVATE "${HESSIO_ROOT}/include")
     target_link_libraries(simlite_core PUBLIC "${HESSIO_LIBRARY}")
     target_compile_definitions(simlite_core PUBLIC LACT_HAS_HESSIO=1)
@@ -147,6 +154,7 @@ if(LACT_HAS_HESSIO)
     target_link_libraries(run_corsika_trace PRIVATE simlite_core)
     if(LACT_HAS_HDF5)
         target_sources(run_corsika_trace PRIVATE src/io/Hdf5WaveformWriter.cpp)
+        target_sources(run_corsika_trace PRIVATE src/io/CorsikaTraceHdf5Writer.cpp)
         target_compile_definitions(run_corsika_trace PRIVATE LACT_HAS_HDF5=1)
         target_link_libraries(run_corsika_trace PRIVATE ${HDF5_LIBRARIES})
     endif()
@@ -186,6 +194,13 @@ add_executable(test_raytrace_primitives
 )
 target_link_libraries(test_raytrace_primitives PRIVATE simlite_core)
 add_test(NAME test_raytrace_primitives COMMAND test_raytrace_primitives)
+
+add_executable(test_optical_scatter_distribution
+    apps/test_optical_scatter_distribution.cpp
+)
+target_link_libraries(test_optical_scatter_distribution PRIVATE simlite_core)
+add_test(NAME test_optical_scatter_distribution
+         COMMAND test_optical_scatter_distribution)
 
 add_executable(test_dc_center_rays
     apps/test_dc_center_rays.cpp

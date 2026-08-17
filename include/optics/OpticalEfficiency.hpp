@@ -1,5 +1,6 @@
 #pragma once
 #include <algorithm>
+#include <cstddef>
 #include <cmath>
 #include <fstream>
 #include <sstream>
@@ -76,9 +77,15 @@ public:
         }
     }
 
+    // Photons outside the tabulated range are dropped: no measurement means
+    // no assumed response. Counted so a run can report how many were lost
+    // instead of silently discarding them.
+    std::size_t outOfRangeCount() const { return out_of_range_count_; }
+
     double evaluate(double wavelength_nm) const {
         if (points_.empty() || wavelength_nm < points_.front().first ||
             wavelength_nm > points_.back().first) {
+            ++out_of_range_count_;
             return 0.0;
         }
 
@@ -86,11 +93,11 @@ public:
             points_.begin(), points_.end(), wavelength_nm,
             [](const auto& p, double wl) { return p.first < wl; });
 
+        // `it == begin()` is reachable when the wavelength equals the first
+        // tabulated point. `it == end()` is not: the range check above has
+        // already returned for anything past the last point.
         if (it == points_.begin()) {
             return it->second;
-        }
-        if (it == points_.end()) {
-            return points_.back().second;
         }
         if (it->first == wavelength_nm) {
             return it->second;
@@ -104,6 +111,7 @@ public:
 
 private:
     std::vector<std::pair<double, double>> points_;
+    mutable std::size_t out_of_range_count_ = 0;
 };
 
 struct EfficiencyFactorConfig {

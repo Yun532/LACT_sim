@@ -194,6 +194,7 @@ def main():
             f"source.config={source_cfg}",
             f"telescope.pointing_el_deg={elevation}",
             f"source.n_bunches={args.n_bunches}",
+            "camera.mode=whiteboard",
             f"output.csv={hit_csv}",
         ]
         if output_cfg is not None:

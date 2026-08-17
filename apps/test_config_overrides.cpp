@@ -1,7 +1,9 @@
 #include "app/OpticalSimCommon.hpp"
+#include "app/CorsikaTraceConfig.hpp"
 
 #include <iostream>
 #include <map>
+#include <stdexcept>
 #include <string>
 
 using namespace lact;
@@ -56,6 +58,28 @@ int main()
                 "compact -Ckey=value syntax failed");
     ok &= check(cfg["output.lact_root_path"] == "batch/run_17.root",
                 "--set=key=value syntax failed");
+
+    const auto default_source = buildSourceRuntimeConfig({});
+    ok &= check(default_source.event_id_mode == "event",
+                "default EventIO identity must remain backward compatible");
+    const auto array_source = buildSourceRuntimeConfig({
+        {"source.event_id_mode", "event_array100"},
+    });
+    ok &= check(array_source.event_id_mode == "event_array100",
+                "array/core identity mode must remain explicitly selectable");
+
+    try {
+        (void)buildWaveformOutputConfig({
+            {"waveform.enabled", "true"},
+            {"waveform.source", "pe"},
+            {"waveform.time_window_start_ns", "0"},
+            {"waveform.time_window_end_ns", "10"},
+            {"waveform.time_bin_width_ns", "4"},
+        });
+        std::cerr << "non-integral waveform sampling grid was accepted\n";
+        ok = false;
+    } catch (const std::runtime_error&) {
+    }
 
     try {
         const char* invalid[] = {"program", "config.cfg", "-C", "missing_equal"};

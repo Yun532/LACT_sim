@@ -55,6 +55,7 @@ telescope.config=../../../configs/official_tests/telescope_1229_minimal.cfg
 mirror.config=../../../configs/mirrors/mirror_6m_parabolic.cfg
 source.config=../../../configs/sources/${source_cfg}
 output.config=../../../configs/outputs/${output_cfg}
+camera.mode=whiteboard
 propagation.speed_of_light_m_per_ns=0.299792458
 output.csv=${output_csv}
 CFG
@@ -95,6 +96,7 @@ telescope.config=../../../configs/official_tests/telescope_1229_minimal.cfg
 mirror.config=../../../configs/mirrors/mirror_6m_parabolic.cfg
 source.config=../../../configs/sources/parallel_1M_on_axis.cfg
 output.config=../../../configs/outputs/whiteboard_f8.cfg
+camera.mode=whiteboard
 propagation.speed_of_light_m_per_ns=0.299792458
 output.csv=run_logs/parabolic_tests/elevation_scan/hits.csv
 CFG

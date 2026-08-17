@@ -2019,7 +2019,8 @@ SourceRuntimeConfig buildSourceRuntimeConfig(const std::map<std::string, std::st
     runtime.use_eventio = isEventIOMode(mode_text);
     runtime.csv_path = getString(cfg, "source.csv_path", "");
     runtime.eventio_path = getString(cfg, "source.eventio_path", "");
-    runtime.event_id_mode = getString(cfg, "source.event_id_mode", "event");
+    runtime.event_id_mode = getString(
+        cfg, "source.event_id_mode", runtime.event_id_mode);
     const auto coordinate_frame_it = cfg.find("source.coordinate_frame");
     if (coordinate_frame_it != cfg.end()) {
         runtime.coordinate_frame = normalizeSourceCoordinateFrame(coordinate_frame_it->second);
@@ -2273,6 +2274,7 @@ CameraConfig buildCameraConfig(const std::map<std::string, std::string>& cfg) {
     CameraConfig camera;
     camera.enabled = getBool(cfg, "camera.enabled", false);
     camera.mode = getString(cfg, "camera.mode", camera.enabled ? "hex_grid" : "none");
+    camera.mode = lowerCopy(trim(camera.mode));
     camera.csv_path = getString(cfg, "camera.csv_path", "");
     camera.pixel_shape = getString(cfg, "camera.pixel_shape", camera.pixel_shape);
     camera.pixel_size_m = getDouble(cfg, "camera.pixel_size_m", camera.pixel_size_m);
@@ -2291,8 +2293,34 @@ CameraConfig buildCameraConfig(const std::map<std::string, std::string>& cfg) {
                   camera.collector_exit_size_m);
     camera.collector_height_m =
         getDouble(cfg, "camera.collector_height_m", camera.collector_height_m);
-    if (isDisabledText(camera.mode)) {
+    camera.whiteboard = camera.mode == "whiteboard";
+    if (camera.whiteboard && camera.enabled) {
+        throw std::runtime_error(
+            "camera.mode=whiteboard conflicts with camera.enabled=true");
+    }
+    if (camera.whiteboard) {
         camera.enabled = false;
+        const std::string output_mode = lowerCopy(trim(getString(
+            cfg, "output.mode", "hits")));
+        if (output_mode == "pixel" || output_mode == "pixels" ||
+            output_mode == "both" || cfg.find("output.pixel_csv") != cfg.end()) {
+            throw std::runtime_error(
+                "camera.mode=whiteboard cannot be used with pixel output");
+        }
+        if (getBool(cfg, "electronics.enabled", false)) {
+            throw std::runtime_error(
+                "camera.mode=whiteboard cannot enable electronics");
+        }
+        if (getBool(cfg, "trigger.enabled", false)) {
+            throw std::runtime_error(
+                "camera.mode=whiteboard cannot enable trigger");
+        }
+    } else if (isDisabledText(camera.mode)) {
+        camera.enabled = false;
+    }
+    camera.implicit_whiteboard_legacy = !camera.enabled && !camera.whiteboard;
+    if (camera.implicit_whiteboard_legacy) {
+        camera.mode = "none";
     }
     if (camera.enabled) {
         if (!std::isfinite(camera.pixel_size_m) || camera.pixel_size_m <= 0.0) {
@@ -2344,12 +2372,6 @@ ElectronicsResponse::ElectronicsResponse(const ElectronicsConfig& cfg)
         throw std::runtime_error(
             "electronics.sipm.saturation_model must be hard_no_recovery");
     }
-}
-
-double ElectronicsResponse::peConversion(double wavelength_nm) const
-{
-    (void)wavelength_nm;
-    return 1.0;
 }
 
 double ElectronicsResponse::totalMicrocellsPerPixel() const
@@ -3244,7 +3266,6 @@ void applyCameraResponse(const CameraGeometry& camera,
         }
     }
 
-    double pde = electronics.peConversion(hit.wavelength_nm);
     if (hit.hit_camera && microcell && microcell->enabled &&
         microcell->layout == "s17351_tiled_2x4") {
         if (!light_collector && hit.collector_exit_x_m == 0.0 &&
@@ -3275,9 +3296,6 @@ void applyCameraResponse(const CameraGeometry& camera,
         // package, condition it on being inside a real channel before the
         // explicit channel-gap geometry is applied.
         hit.relative_efficiency *= post_geometry_pde_scale;
-    }
-    if (hit.hit_camera) {
-        hit.relative_efficiency *= pde;
     }
     hit.accepted = hit.hit_camera && hit.relative_efficiency > 0.0;
 }
@@ -3689,29 +3707,34 @@ bool segmentBlockedLocal(const Vec3& a,
     if (!obstruction.enabled) {
         return false;
     }
-    if (lowerCopy(obstruction.mode) == "primitives") {
+    if (obstruction.usesPrimitives()) {
         for (const auto& primitive : obstruction.primitives) {
             if (!primitiveAppliesToLeg(primitive, leg)) {
                 continue;
             }
-            const std::string type = lowerCopy(primitive.type);
-            if (type == "cylinder") {
-                if (segmentIntersectsCylinder(a, b, primitive.p0, primitive.p1,
-                                              primitive.radius_m)) {
-                    return true;
-                }
-            } else if (type == "box" || type == "aabb") {
-                if (segmentIntersectsBoxWithHole(a, b, primitive)) {
-                    return true;
-                }
-            } else if (type == "polygon_prism") {
-                if (segmentIntersectsRegularPrism(a, b, primitive.center,
-                                                  primitive.radius_m,
-                                                  primitive.height_m,
-                                                  primitive.rotation_rad,
-                                                  primitive.sides)) {
-                    return true;
-                }
+            switch (obstructionPrimitiveKind(primitive)) {
+                case ObstructionMask::PrimitiveKind::Cylinder:
+                    if (segmentIntersectsCylinder(a, b, primitive.p0, primitive.p1,
+                                                  primitive.radius_m)) {
+                        return true;
+                    }
+                    break;
+                case ObstructionMask::PrimitiveKind::Box:
+                    if (segmentIntersectsBoxWithHole(a, b, primitive)) {
+                        return true;
+                    }
+                    break;
+                case ObstructionMask::PrimitiveKind::PolygonPrism:
+                    if (segmentIntersectsRegularPrism(a, b, primitive.center,
+                                                      primitive.radius_m,
+                                                      primitive.height_m,
+                                                      primitive.rotation_rad,
+                                                      primitive.sides)) {
+                        return true;
+                    }
+                    break;
+                case ObstructionMask::PrimitiveKind::Unknown:
+                    break;
             }
         }
         return false;
@@ -3729,6 +3752,51 @@ bool segmentBlockedLocal(const Vec3& a,
 }
 
 } // namespace
+
+ObstructionMask::PrimitiveKind obstructionPrimitiveKind(
+    const ObstructionMask::Primitive& primitive)
+{
+    if (primitive.kind != ObstructionMask::PrimitiveKind::Unknown) {
+        return primitive.kind;
+    }
+    // Masks assembled by hand (unit tests) only set the textual type.
+    if (primitive.type == "cylinder") {
+        return ObstructionMask::PrimitiveKind::Cylinder;
+    }
+    if (primitive.type == "box" || primitive.type == "aabb") {
+        return ObstructionMask::PrimitiveKind::Box;
+    }
+    if (primitive.type == "polygon_prism") {
+        return ObstructionMask::PrimitiveKind::PolygonPrism;
+    }
+    return ObstructionMask::PrimitiveKind::Unknown;
+}
+
+static double obstructionPrimitiveBoundRadiusM(const ObstructionMask& obstruction)
+{
+    double bound = 0.0;
+    for (const auto& primitive : obstruction.primitives) {
+        double reach = 0.0;
+        switch (obstructionPrimitiveKind(primitive)) {
+            case ObstructionMask::PrimitiveKind::Cylinder:
+                reach = std::max(primitive.p0.norm(), primitive.p1.norm()) +
+                        std::max(0.0, primitive.radius_m);
+                break;
+            case ObstructionMask::PrimitiveKind::Box:
+                reach = primitive.center.norm() + primitive.half_size.norm();
+                break;
+            case ObstructionMask::PrimitiveKind::PolygonPrism:
+                reach = primitive.center.norm() +
+                        std::hypot(std::max(0.0, primitive.radius_m),
+                                   0.5 * std::max(0.0, primitive.height_m));
+                break;
+            case ObstructionMask::PrimitiveKind::Unknown:
+                break;
+        }
+        bound = std::max(bound, reach);
+    }
+    return bound;
+}
 
 ObstructionMask buildObstructionMask(const std::map<std::string, std::string>& cfg)
 {
@@ -3774,6 +3842,13 @@ ObstructionMask buildObstructionMask(const std::map<std::string, std::string>& c
             }
             ObstructionMask::Primitive p;
             p.type = lowerCopy(csvGetString(row, "type"));
+            if (p.type == "cylinder") {
+                p.kind = ObstructionMask::PrimitiveKind::Cylinder;
+            } else if (p.type == "box" || p.type == "aabb") {
+                p.kind = ObstructionMask::PrimitiveKind::Box;
+            } else if (p.type == "polygon_prism") {
+                p.kind = ObstructionMask::PrimitiveKind::PolygonPrism;
+            }
             p.name = csvGetString(row, "name", csvGetString(row, "role", p.type));
             p.role = csvGetString(row, "role", "default");
             p.material_id = csvGetString(row, "material_id", "default");
@@ -3814,6 +3889,8 @@ ObstructionMask buildObstructionMask(const std::map<std::string, std::string>& c
             throw std::runtime_error("obstruction primitives CSV has no primitives: " +
                                      obstruction.primitives_csv);
         }
+        obstruction.primitive_bound_radius_m =
+            obstructionPrimitiveBoundRadiusM(obstruction);
         return obstruction;
     }
     if (isDisabledText(obstruction.mask_csv)) {
@@ -3952,29 +4029,12 @@ bool incomingRayBlockedByObstruction(const Vec3& mirror_point,
     d = d.normalized();
 
     double upstream_length = 0.0;
-    if (lowerCopy(obstruction.mode) == "primitives") {
-        double obstruction_radius = 0.0;
-        for (const auto& primitive : obstruction.primitives) {
-            const std::string type = lowerCopy(primitive.type);
-            if (type == "cylinder") {
-                obstruction_radius = std::max(
-                    obstruction_radius,
-                    std::max(primitive.p0.norm(), primitive.p1.norm()) +
-                        std::max(0.0, primitive.radius_m));
-            } else if (type == "box" || type == "aabb") {
-                obstruction_radius = std::max(
-                    obstruction_radius,
-                    primitive.center.norm() + primitive.half_size.norm());
-            } else if (type == "polygon_prism") {
-                const double half_height = 0.5 * std::max(0.0, primitive.height_m);
-                const double local_radius =
-                    std::hypot(std::max(0.0, primitive.radius_m), half_height);
-                obstruction_radius = std::max(
-                    obstruction_radius,
-                    primitive.center.norm() + local_radius);
-            }
+    if (obstruction.usesPrimitives()) {
+        double bound_radius = obstruction.primitive_bound_radius_m;
+        if (!(bound_radius > 0.0)) {
+            bound_radius = obstructionPrimitiveBoundRadiusM(obstruction);
         }
-        upstream_length = p.norm() + obstruction_radius + 1.0;
+        upstream_length = p.norm() + bound_radius + 1.0;
     } else {
         if (std::abs(d.z) < 1e-12) {
             return false;

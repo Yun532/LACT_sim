@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cmath>
 #include <fstream>
+#include <initializer_list>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
@@ -44,6 +45,14 @@ bool disabledText(const std::string& text)
     const std::string value = lowerCopyLocal(trimCopy(text));
     return value.empty() || value == "none" || value == "off" ||
            value == "false" || value == "no";
+}
+
+bool isOneOf(const std::string& value,
+             std::initializer_list<const char*> allowed)
+{
+    return std::any_of(
+        allowed.begin(), allowed.end(),
+        [&value](const char* candidate) { return value == candidate; });
 }
 
 double altitudeKmToLogCm(double altitude_km)
@@ -94,6 +103,23 @@ AtmosphereTransmission::AtmosphereTransmission(const AtmosphereTransmissionConfi
     }
     if (cfg_.min_cos_theta <= 0.0 || cfg_.min_cos_theta > 1.0) {
         throw std::runtime_error("atmosphere.min_cos_theta must be in (0, 1]");
+    }
+    if (!isOneOf(cfg_.large_angle_behavior,
+                 {"clamp", "opaque", "zero", "error"})) {
+        throw std::runtime_error(
+            "atmosphere.large_angle_behavior must be clamp, opaque, zero, or error");
+    }
+    if (!isOneOf(cfg_.out_of_range, {"clamp", "zero"})) {
+        throw std::runtime_error(
+            "atmosphere.out_of_range must be clamp or zero");
+    }
+    if (!isOneOf(cfg_.invalid_tau, {"opaque", "zero"})) {
+        throw std::runtime_error(
+            "atmosphere.invalid_tau must be opaque or zero");
+    }
+    if (!isOneOf(cfg_.missing_emission_altitude, {"error", "default"})) {
+        throw std::runtime_error(
+            "atmosphere.missing_emission_altitude must be error or default");
     }
     loadModtranTauTable(cfg_.tau_table_path);
     if (std::isfinite(cfg_.table_reference_altitude_km) &&
@@ -346,7 +372,14 @@ AtmosphereTransmissionConfig buildAtmosphereTransmissionConfig(
     }
     const std::string slant =
         lowerCopyLocal(trimCopy(getStringLocal(cfg, "atmosphere.slant_correction", "secant")));
-    out.slant_correction = !(disabledText(slant) || slant == "none");
+    if (disabledText(slant) || slant == "none") {
+        out.slant_correction = false;
+    } else if (isOneOf(slant, {"secant", "on", "true", "yes"})) {
+        out.slant_correction = true;
+    } else {
+        throw std::runtime_error(
+            "atmosphere.slant_correction must be secant or disabled");
+    }
     out.min_cos_theta = getDoubleLocal(cfg, "atmosphere.min_cos_theta", out.min_cos_theta);
     out.large_angle_behavior =
         lowerCopyLocal(trimCopy(getStringLocal(cfg, "atmosphere.large_angle_behavior",

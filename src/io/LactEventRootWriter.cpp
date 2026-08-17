@@ -1,5 +1,7 @@
+#include "io/CorsikaTraceOutputTypes.hpp"
 #include "io/LactEventRootWriter.hpp"
 
+#include "app/ArrayTimingCorrection.hpp"
 #include "app/TriggerResponse.hpp"
 #include "io/EventIOArrayTiming.hpp"
 
@@ -29,6 +31,7 @@ struct OutputEventMetadata {
     double core_x_north_m = 0.0;
     double core_y_west_m = 0.0;
     double azimuth_north_to_east_deg = 0.0;
+    double altitude_deg = std::numeric_limits<double>::quiet_NaN();
     double array_time_offset_ns = 0.0;
     double area_weight_m2 = 0.0;
     bool has_explicit_area_weight = false;
@@ -83,6 +86,9 @@ OutputEventMetadata outputEventMetadata(int event_id,
     out.core_x_north_m = event_it->core_x_m;
     out.core_y_west_m = event_it->core_y_m;
     out.azimuth_north_to_east_deg = event_it->azimuth_north_to_east_deg;
+    out.altitude_deg = std::isfinite(event_it->altitude_deg)
+        ? event_it->altitude_deg
+        : 90.0 - event_it->theta_deg;
 
     if (auto offsets = metadata.arrayOffsetsForShower(out.shower_event)) {
         out.array_time_offset_ns = offsets->time_offset_ns;
@@ -101,6 +107,39 @@ OutputEventMetadata outputEventMetadata(int event_id,
     return out;
 }
 
+double observationImpactParameterM(
+    int event_id,
+    int telescope_id,
+    const SourceRuntimeConfig& source_runtime_cfg,
+    const TelescopeConfig& telescope_cfg,
+    const EventIOMetadata& metadata)
+{
+    const auto event = outputEventMetadata(
+        event_id, source_runtime_cfg.event_id_mode, metadata);
+    if (!event.found || !std::isfinite(event.core_x_north_m) ||
+        !std::isfinite(event.core_y_west_m) ||
+        !std::isfinite(event.azimuth_north_to_east_deg) ||
+        !std::isfinite(event.altitude_deg)) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    Vec3 telescope_position;
+    if (const auto telescope = metadata.telescopeById(telescope_id)) {
+        telescope_position = {telescope->x_m, telescope->y_m, telescope->z_m};
+    } else if (metadata.telescopes.empty() && telescope_id == telescope_cfg.id) {
+        telescope_position = telescope_cfg.position_m;
+    } else {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    const Vec3 core_position{
+        event.core_x_north_m, event.core_y_west_m, 0.0};
+    const Vec3 viewing_direction = corsikaNwuViewingDirection(
+        event.azimuth_north_to_east_deg, event.altitude_deg);
+    return showerAxisImpactParameterM(
+        telescope_position, core_position, viewing_direction);
+}
+
 void configureRootTreeAutoFlush(TTree* tree, double auto_flush_mb)
 {
     if (!tree || auto_flush_mb <= 0.0) {
@@ -112,34 +151,6 @@ void configureRootTreeAutoFlush(TTree* tree, double auto_flush_mb)
     }
     tree->SetAutoFlush(-bytes);
     tree->SetAutoSave(-bytes);
-}
-
-std::size_t waveformBinCount(const WaveformOutputConfig& cfg)
-{
-    if (!cfg.enabled) {
-        return 0;
-    }
-    const double span = cfg.time_window_end_ns - cfg.time_window_start_ns;
-    return static_cast<std::size_t>(std::ceil(span / cfg.time_bin_width_ns));
-}
-
-int waveformBinForTime(const WaveformOutputConfig& cfg, double time_ns)
-{
-    if (!cfg.enabled ||
-        time_ns < cfg.time_window_start_ns ||
-        time_ns >= cfg.time_window_end_ns) {
-        return -1;
-    }
-    const auto bin = static_cast<int>(
-        std::floor((time_ns - cfg.time_window_start_ns) / cfg.time_bin_width_ns));
-    const auto n_bins = static_cast<int>(waveformBinCount(cfg));
-    return bin >= 0 && bin < n_bins ? bin : -1;
-}
-
-bool waveformUsesImageReference(const WaveformOutputConfig& cfg)
-{
-    return cfg.enabled &&
-        (cfg.time_reference == "image_mean" || cfg.time_reference == "image_first");
 }
 
 int lactRootPixelShapeCode(PixelShape shape)
@@ -374,6 +385,9 @@ LactRootPreparedData prepareLactRootObservations(
         obs.event_id = event_id;
         obs.telescope_id = telescope_id;
         obs.n_pixels_camera = static_cast<int>(n_pixels);
+        obs.impact_parameter_m = observationImpactParameterM(
+            event_id, telescope_id, source_runtime_cfg, telescope_cfg,
+            metadata);
 
         std::vector<double> image_pe_by_col(n_pixels, 0.0);
         std::vector<double> image_cherenkov_pe_by_col(n_pixels, 0.0);
