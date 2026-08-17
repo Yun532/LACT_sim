@@ -1,12 +1,7 @@
 #pragma once
 
-// One traced photon, start to finish.
-//
-// The pipeline is deliberately free of accumulators and output streams: it
-// takes a photon candidate, walks it through the optical stages in order, and
-// reports how far it got. Everything that counts, writes, or histograms lives
-// in the caller, driven by the returned stage. Reading runPhotonTrace() top to
-// bottom is meant to be the fastest way to learn what happens to a photon.
+// One traced photon, start to finish. This transport layer owns no run-level
+// accumulators or output streams.
 
 #include "app/OpticalSimCommon.hpp"
 #include "app/PhotonResponseSampler.hpp"
@@ -23,7 +18,7 @@
 
 namespace lact {
 
-// Where a photon stopped. Each value is one exit point of runPhotonTrace(),
+// Where a photon stopped. Each value is one exit point of tracePhoton(),
 // in the order the stages are attempted.
 enum class PhotonTraceStage {
     // Absorbed by the atmosphere, or lost to the wavelength-dependent
@@ -62,6 +57,10 @@ struct PhotonTraceContext {
     const PhotonResponseSampler* response_sampler = nullptr;
     double speed_of_light_m_per_ns = 0.299792458;
     bool camera_enabled = false;
+    bool normalize_direction = true;
+    const TelescopeFrame* obstruction_frame = nullptr;
+    bool obstruction_mark_only = false;
+    bool incoming_obstruction_uses_ray = false;
     // EventIO 2D records are anchors on a line, not creation points, so the
     // mirror may sit at either sign of the ray parameter.
     bool eventio_2d_backproject = false;
@@ -94,9 +93,9 @@ struct PhotonTraceResult {
 
 // Trace one candidate. `candidate` is taken by value because the acceptance
 // stages consume its remaining probability as they go.
-PhotonTraceResult runPhotonTrace(const PhotonTraceContext& context,
-                                 const PhotonTraceBunch& bunch,
-                                 PhotonCandidate candidate,
-                                 PhotonTraceProfile* profile);
+PhotonTraceResult tracePhoton(const PhotonTraceContext& context,
+                              const PhotonTraceBunch& bunch,
+                              PhotonCandidate candidate,
+                              PhotonTraceProfile* profile);
 
 } // namespace lact

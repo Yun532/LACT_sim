@@ -164,6 +164,8 @@ ObstructionMask::PrimitiveKind obstructionPrimitiveKind(
 struct CameraConfig {
     bool enabled = false;
     std::string mode = "none";
+    bool whiteboard = false;
+    bool implicit_whiteboard_legacy = false;
     std::string csv_path;
     std::string pixel_shape = "hexagonal";
     double pixel_size_m = 0.05;

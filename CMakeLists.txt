@@ -85,7 +85,7 @@ add_library(simlite_core
     src/io/Sha256.cpp
     src/io/CameraElectronicsEvent.cpp
     src/app/OpticalSimCommon.cpp
-    src/app/PhotonTracePipeline.cpp
+    src/app/PhotonTransport.cpp
     src/app/CorsikaTraceReport.cpp
     src/app/CorsikaTraceConfig.cpp
     src/io/CorsikaTraceAccumulators.cpp

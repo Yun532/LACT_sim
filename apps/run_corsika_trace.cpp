@@ -1,5 +1,5 @@
 #include "app/OpticalSimCommon.hpp"
-#include "app/PhotonTracePipeline.hpp"
+#include "app/PhotonTransport.hpp"
 #include "io/CorsikaTraceEventMetadata.hpp"
 #include "io/CorsikaTraceHdf5Writer.hpp"
 #include "io/CorsikaTraceStats.hpp"
@@ -634,6 +634,10 @@ int main(int argc, char** argv) {
             &response_sampler,
             propagation_cfg.speed_of_light_m_per_ns,
             camera_cfg.enabled,
+            true,
+            nullptr,
+            obstruction.mark_only,
+            true,
             eventio_2d_backproject,
         };
 
@@ -682,7 +686,7 @@ int main(int argc, char** argv) {
                 PhotonTraceProfile stage_profile;
                 const PhotonTraceBunch trace_bunch{&bunch, &telescope_mirrors,
                                                    global_dir};
-                const auto trace = runPhotonTrace(
+                const auto trace = tracePhoton(
                     photon_trace_context, trace_bunch, std::move(candidate),
                     profile_cfg.enabled ? &stage_profile : nullptr);
                 if (profile_cfg.enabled) {
@@ -1025,6 +1029,13 @@ int main(int argc, char** argv) {
         std::cout << "shower_events=" << metadata.events.size() << "\n";
         std::cout << "streams=" << summaries.size() << "\n";
         std::cout << "camera_enabled=" << (camera_cfg.enabled ? 1 : 0) << "\n";
+        std::cout << "camera_mode="
+                  << (camera_cfg.enabled
+                          ? camera_cfg.mode
+                          : (camera_cfg.whiteboard
+                                 ? "whiteboard"
+                                 : "implicit_whiteboard_legacy"))
+                  << "\n";
         if (save_hdf5) {
             std::cout << "hdf5_path=" << output_cfg.hdf5_path << "\n";
         }

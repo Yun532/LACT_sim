@@ -2274,6 +2274,7 @@ CameraConfig buildCameraConfig(const std::map<std::string, std::string>& cfg) {
     CameraConfig camera;
     camera.enabled = getBool(cfg, "camera.enabled", false);
     camera.mode = getString(cfg, "camera.mode", camera.enabled ? "hex_grid" : "none");
+    camera.mode = lowerCopy(trim(camera.mode));
     camera.csv_path = getString(cfg, "camera.csv_path", "");
     camera.pixel_shape = getString(cfg, "camera.pixel_shape", camera.pixel_shape);
     camera.pixel_size_m = getDouble(cfg, "camera.pixel_size_m", camera.pixel_size_m);
@@ -2292,8 +2293,34 @@ CameraConfig buildCameraConfig(const std::map<std::string, std::string>& cfg) {
                   camera.collector_exit_size_m);
     camera.collector_height_m =
         getDouble(cfg, "camera.collector_height_m", camera.collector_height_m);
-    if (isDisabledText(camera.mode)) {
+    camera.whiteboard = camera.mode == "whiteboard";
+    if (camera.whiteboard && camera.enabled) {
+        throw std::runtime_error(
+            "camera.mode=whiteboard conflicts with camera.enabled=true");
+    }
+    if (camera.whiteboard) {
         camera.enabled = false;
+        const std::string output_mode = lowerCopy(trim(getString(
+            cfg, "output.mode", "hits")));
+        if (output_mode == "pixel" || output_mode == "pixels" ||
+            output_mode == "both" || cfg.find("output.pixel_csv") != cfg.end()) {
+            throw std::runtime_error(
+                "camera.mode=whiteboard cannot be used with pixel output");
+        }
+        if (getBool(cfg, "electronics.enabled", false)) {
+            throw std::runtime_error(
+                "camera.mode=whiteboard cannot enable electronics");
+        }
+        if (getBool(cfg, "trigger.enabled", false)) {
+            throw std::runtime_error(
+                "camera.mode=whiteboard cannot enable trigger");
+        }
+    } else if (isDisabledText(camera.mode)) {
+        camera.enabled = false;
+    }
+    camera.implicit_whiteboard_legacy = !camera.enabled && !camera.whiteboard;
+    if (camera.implicit_whiteboard_legacy) {
+        camera.mode = "none";
     }
     if (camera.enabled) {
         if (!std::isfinite(camera.pixel_size_m) || camera.pixel_size_m <= 0.0) {

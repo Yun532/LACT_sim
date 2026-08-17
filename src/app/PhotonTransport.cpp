@@ -1,4 +1,4 @@
-#include "app/PhotonTracePipeline.hpp"
+#include "app/PhotonTransport.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -53,14 +53,16 @@ bool conditionsPdeOnChannelArea(const PhotonTraceContext& context,
 
 } // namespace
 
-PhotonTraceResult runPhotonTrace(const PhotonTraceContext& context,
-                                 const PhotonTraceBunch& bunch,
-                                 PhotonCandidate candidate,
-                                 PhotonTraceProfile* profile)
+PhotonTraceResult tracePhoton(const PhotonTraceContext& context,
+                              const PhotonTraceBunch& bunch,
+                              PhotonCandidate candidate,
+                              PhotonTraceProfile* profile)
 {
     PhotonTraceResult result;
     Photon& photon = candidate.photon;
-    photon.normalizeDirection();
+    if (context.normalize_direction) {
+        photon.normalizeDirection();
+    }
 
     // ---- 1. Atmospheric transmission from the emission altitude ----------
     double atmosphere_transmission = 1.0;
@@ -115,10 +117,19 @@ PhotonTraceResult runPhotonTrace(const PhotonTraceContext& context,
         // A 2D EventIO position is only an anchor on the incoming line, so the
         // upstream leg is checked on the physical ray rather than on whichever
         // side of the mirror holds the record plane.
-        const bool blocked = incomingRayBlockedByObstruction(
-            result.hit.mirror_point, photon.dir, *context.obstruction, nullptr);
+        const bool use_incoming_ray =
+            context.incoming_obstruction_uses_ray || backproject;
+        const bool blocked = use_incoming_ray
+            ? incomingRayBlockedByObstruction(
+                  result.hit.mirror_point, photon.dir, *context.obstruction,
+                  context.obstruction_frame)
+            : incomingSegmentBlockedByObstruction(
+                  photon.pos, result.hit.mirror_point, *context.obstruction,
+                  context.obstruction_frame);
+        result.hit.obstruction_blocked_incoming = blocked;
         timer.chargeTo(&PhotonTraceProfile::obstruction_s);
-        if (blocked) {
+        if (blocked && !context.obstruction_mark_only) {
+            result.hit.obstruction_blocked = true;
             result.stage = PhotonTraceStage::BlockedIncoming;
             return result;
         }
@@ -134,10 +145,15 @@ PhotonTraceResult runPhotonTrace(const PhotonTraceContext& context,
     timer.restart();
     const bool blocked_reflected = segmentBlockedByObstruction(
         result.hit.mirror_point, result.hit.surface_point,
-        *context.obstruction, nullptr);
+        *context.obstruction, context.obstruction_frame);
+    result.hit.obstruction_blocked_reflected = blocked_reflected;
+    result.hit.obstruction_blocked =
+        result.hit.obstruction_blocked_incoming || blocked_reflected;
     timer.chargeTo(&PhotonTraceProfile::obstruction_s);
-    if (blocked_reflected) {
-        result.stage = PhotonTraceStage::BlockedReflected;
+    if (result.hit.obstruction_blocked) {
+        result.stage = blocked_reflected
+            ? PhotonTraceStage::BlockedReflected
+            : PhotonTraceStage::BlockedIncoming;
         return result;
     }
     result.reached_output_plane = true;

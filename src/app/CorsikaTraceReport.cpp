@@ -452,7 +452,9 @@ void printCorsikaOpticalConfiguration(
             }
         }
     } else {
-        printField("mode", "whiteboard only");
+        printField("mode", camera_cfg.whiteboard
+                               ? "whiteboard"
+                               : "implicit_whiteboard_legacy");
     }
 
     printSection("SiPM");

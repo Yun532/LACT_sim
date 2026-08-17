@@ -57,11 +57,48 @@ bool expectInvalidDetector(const std::map<std::string, std::string>& cfg,
     return false;
 }
 
+bool expectInvalidCamera(const std::map<std::string, std::string>& cfg,
+                         const std::string& label)
+{
+    try {
+        (void)buildCameraConfig(cfg);
+    } catch (...) {
+        return true;
+    }
+    std::cerr << "expected invalid camera config: " << label << "\n";
+    return false;
+}
+
 } // namespace
 
 int main()
 {
     bool ok = true;
+
+    const auto explicit_whiteboard = buildCameraConfig({
+        {"camera.mode", "whiteboard"},
+    });
+    ok &= check(explicit_whiteboard.whiteboard &&
+                    !explicit_whiteboard.enabled &&
+                    !explicit_whiteboard.implicit_whiteboard_legacy,
+                "explicit whiteboard mode should be distinct from a camera");
+    const auto legacy_whiteboard = buildCameraConfig({});
+    ok &= check(!legacy_whiteboard.whiteboard &&
+                    !legacy_whiteboard.enabled &&
+                    legacy_whiteboard.implicit_whiteboard_legacy,
+                "missing camera mode should retain legacy whiteboard behavior");
+    ok &= expectInvalidCamera(
+        {{"camera.mode", "whiteboard"}, {"camera.enabled", "true"}},
+        "whiteboard with camera enabled");
+    ok &= expectInvalidCamera(
+        {{"camera.mode", "whiteboard"}, {"output.mode", "pixel"}},
+        "whiteboard with pixel output");
+    ok &= expectInvalidCamera(
+        {{"camera.mode", "whiteboard"}, {"electronics.enabled", "true"}},
+        "whiteboard with electronics");
+    ok &= expectInvalidCamera(
+        {{"camera.mode", "whiteboard"}, {"trigger.enabled", "true"}},
+        "whiteboard with trigger");
 
     const auto default_detector = buildDetectorPipelineConfig({});
     ok &= check(!default_detector.enabled,
