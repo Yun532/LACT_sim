@@ -3344,6 +3344,10 @@ TelescopeConfig buildTelescopeConfig(const std::map<std::string, std::string>& c
         getDouble(cfg, "telescope.pointing_el_deg", telescope.pointing_el_deg);
     telescope.focal_length_m =
         getDouble(cfg, "telescope.focal_length_m", telescope.focal_length_m);
+    telescope.effective_focal_length_m = getDouble(
+        cfg,
+        "telescope.effective_focal_length_m",
+        telescope.effective_focal_length_m);
     telescope.coordinate_system =
         getString(cfg, "telescope.coordinate_system", telescope.coordinate_system);
 
@@ -3358,6 +3362,11 @@ TelescopeConfig buildTelescopeConfig(const std::map<std::string, std::string>& c
     }
     if (!std::isfinite(telescope.focal_length_m) || telescope.focal_length_m <= 0.0) {
         throw std::runtime_error("telescope.focal_length_m must be finite and > 0");
+    }
+    if (!std::isfinite(telescope.effective_focal_length_m) ||
+        telescope.effective_focal_length_m <= 0.0) {
+        throw std::runtime_error(
+            "telescope.effective_focal_length_m must be finite and > 0");
     }
     return telescope;
 }

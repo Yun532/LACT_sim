@@ -248,6 +248,19 @@ int main()
     const TelescopeConfig default_telescope = buildTelescopeConfig({});
     ok &= check(nearVec(default_telescope.position_m, {0.0, 0.0, 0.0}),
                 "unset telescope.position_m must default to the array origin");
+    ok &= check(near(default_telescope.focal_length_m, 8.0),
+                "physical focal length must retain the 8.0 m default");
+    ok &= check(near(default_telescope.effective_focal_length_m, 8.1787),
+                "reconstruction effective focal length must default to 8.1787 m");
+
+    const TelescopeConfig custom_effective_focal = buildTelescopeConfig({
+        {"telescope.focal_length_m", "7.5"},
+        {"telescope.effective_focal_length_m", "7.7"},
+    });
+    ok &= check(near(custom_effective_focal.focal_length_m, 7.5),
+                "physical focal length override must remain independent");
+    ok &= check(near(custom_effective_focal.effective_focal_length_m, 7.7),
+                "effective focal length override must be parsed independently");
 
     ok &= check(normalizeSourceCoordinateFrame("corsika_iact") ==
                     "corsika_nwu_relative",

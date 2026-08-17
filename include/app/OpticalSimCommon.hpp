@@ -69,6 +69,7 @@ struct TelescopeConfig {
     double pointing_az_deg = 0.0;
     double pointing_el_deg = 90.0;
     double focal_length_m = 8.0;
+    double effective_focal_length_m = 8.1787;
     std::string coordinate_system = "array";
 };
 

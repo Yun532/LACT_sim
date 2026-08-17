@@ -1161,7 +1161,7 @@ struct LactEventRootStreamWriter::Impl {
       for (const auto &facet : facets)
         mirror_area_m2 += mirrorFacetArea(facet);
       double equivalent_focal_length_m = telescope_cfg.focal_length_m;
-      double effective_focal_length_m = telescope_cfg.focal_length_m;
+      double effective_focal_length_m = telescope_cfg.effective_focal_length_m;
       optics_tree.Branch("optics_id", &optics_id);
       optics_tree.Branch("name", &optics_name);
       optics_tree.Branch("num_mirrors", &num_mirrors);
