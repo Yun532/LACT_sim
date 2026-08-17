@@ -1,19 +1,28 @@
 #include "app/OpticalSimCommon.hpp"
+#include "app/CorsikaTraceConfig.hpp"
 #include "app/PhotonResponseSampler.hpp"
+#include "app/PhotonTransport.hpp"
+#include "io/CameraElectronicsEvent.hpp"
+#include "io/CorsikaTraceAccumulators.hpp"
+#include "io/CorsikaTraceCsvOutput.hpp"
 
 using namespace lact;
 
 int main(int argc, char** argv) {
-    if (argc != 2) {
-        std::cerr << "usage: run_optical_sim <config.txt>\n";
-        return 2;
-    }
-
     try {
+        const auto command = parseConfigCommandLine(argc, argv);
+        if (command.help || command.positional.size() != 1) {
+            std::cerr
+                << "usage: run_optical_sim <config.txt> [-C key=value ...]\n";
+            return command.help ? 0 : 2;
+        }
+        const std::string config_path = command.positional[0];
         const auto t_start = std::chrono::steady_clock::now();
-        auto main_cfg = readKeyValueConfig(argv[1]);
+        auto main_cfg = readKeyValueConfig(config_path);
+        applyConfigOverrides(main_cfg, command.overrides);
         ComponentConfigPaths component_paths;
-        auto cfg = expandConfig(main_cfg, argv[1], component_paths);
+        auto cfg = expandConfig(main_cfg, config_path, component_paths);
+        applyConfigOverrides(cfg, command.overrides);
         const auto t_config_read = std::chrono::steady_clock::now();
 
         SyntheticPhotonConfig source_cfg = buildSourceConfig(cfg);
@@ -41,23 +50,77 @@ int main(int argc, char** argv) {
         SipmConfig sipm_cfg = buildSipmConfig(cfg);
         ElectronicsConfig electronics_cfg = buildElectronicsConfig(cfg);
         ElectronicsResponse electronics(electronics_cfg);
+        const auto detector_pipeline_cfg = buildDetectorPipelineConfig(cfg);
+        validateCameraDetectorCompatibility(camera_cfg, detector_pipeline_cfg);
         CameraGeometry camera = buildCameraGeometry(camera_cfg);
+        std::vector<int> camera_pixel_id_axis;
+        camera_pixel_id_axis.reserve(camera.size());
+        for (const auto& pixel : camera.pixels()) {
+            camera_pixel_id_axis.push_back(pixel.id);
+        }
+        std::sort(camera_pixel_id_axis.begin(), camera_pixel_id_axis.end());
         auto light_collector = buildLightCollector(camera_cfg, camera);
         applyFacetErrors(facets, error_cfg);
-        applyTelescopeFrame(facets, plane, telescope_frame);
         MirrorLayout mirrors = makeMirrorLayoutFromFacets(facets);
         OpticalEfficiencyConfig efficiency_cfg = buildEfficiencyConfig(cfg);
         AtmosphereTransmissionConfig atmosphere_cfg = buildAtmosphereTransmissionConfig(cfg);
         PropagationConfig propagation_cfg = buildPropagationConfig(cfg);
         OpticalEfficiency eff(efficiency_cfg);
         AtmosphereTransmission atmosphere(atmosphere_cfg);
+        PhotonResponseConfig transport_response_cfg;
+        if (cfg.find("response.mode") != cfg.end() ||
+            cfg.find("detector.response_mode") != cfg.end() ||
+            detector_pipeline_cfg.enabled) {
+            transport_response_cfg = buildPhotonResponseConfig(cfg);
+        } else {
+            transport_response_cfg.mode = PhotonResponseMode::Expectation;
+        }
+        EventIOPhotonConfig transport_eventio_cfg;
+        PhotonResponseSampler response_sampler(transport_response_cfg,
+                                               transport_eventio_cfg);
+        NsbConfig nsb_cfg = buildNsbConfig(cfg);
+        resolveNsbSpectralRate(nsb_cfg, efficiency_cfg, camera, telescope_cfg,
+                               &detector_pipeline_cfg);
+        const WaveformOutputConfig waveform_cfg = buildWaveformOutputConfig(cfg);
+        if (waveform_cfg.enabled && waveform_cfg.source == "electronics" &&
+            !detector_pipeline_cfg.enabled) {
+            throw std::runtime_error(
+                "waveform.source=electronics requires electronics.enabled=true");
+        }
+        if (waveform_cfg.enabled && waveform_cfg.source == "electronics" &&
+            !detector_pipeline_cfg.single_pe.enabled) {
+            throw std::runtime_error(
+                "waveform.source=electronics requires "
+                "electronics.single_pe.enabled=true");
+        }
         std::string output_csv = getString(cfg, "output.csv", "surface_hits.csv");
+        // "none"/"off"/"" disable the CSV here as they do everywhere else,
+        // instead of producing a file literally named "none".
+        if (isDisabledText(output_csv)) {
+            output_csv.clear();
+        }
         std::string output_pixel_csv = getString(cfg, "output.pixel_csv", "camera_pixel_image.csv");
+        std::string output_waveform_csv = getString(
+            cfg, "output.waveform_csv", "camera_waveforms.csv");
+        std::string output_trigger_csv = getString(
+            cfg, "output.trigger_csv", "camera_triggers.csv");
+        std::string output_primary_pe_csv = getString(
+            cfg, "output.primary_pe_csv", "camera_primary_pe.csv");
+        std::string output_fired_pe_csv = getString(
+            cfg, "output.fired_pe_csv", "camera_fired_pe.csv");
         const std::string output_mode = lowerCopy(trim(getString(cfg, "output.mode", "hits")));
         const bool save_pixel_csv = camera_cfg.enabled &&
             (output_mode == "pixel" || output_mode == "pixels" ||
              output_mode == "both" || cfg.find("output.pixel_csv") != cfg.end());
-        const bool save_hits_csv = !(output_mode == "pixel" || output_mode == "pixels");
+        const bool save_hits_csv =
+            !(output_mode == "pixel" || output_mode == "pixels") &&
+            !output_csv.empty();
+        const bool save_primary_pe_csv = detector_pipeline_cfg.enabled &&
+            detector_pipeline_cfg.save_primary_sequence &&
+            !isDisabledText(output_primary_pe_csv);
+        const bool save_fired_pe_csv = detector_pipeline_cfg.enabled &&
+            detector_pipeline_cfg.save_fired_sequence &&
+            !isDisabledText(output_fired_pe_csv);
         const bool write_input_local_photon =
             getBool(cfg, "output.whiteboard_input_photon", false);
         const auto t_setup_done = std::chrono::steady_clock::now();
@@ -71,7 +134,10 @@ int main(int argc, char** argv) {
         std::cout << "========================================\n";
 
         printSection("Configuration files");
-        printField("main", argv[1]);
+        printField("main", config_path);
+        for (const auto& [key, value] : command.overrides) {
+            printField("override", key + "=" + value);
+        }
         if (!component_paths.telescope.empty()) {
             printField("telescope", component_paths.telescope);
         }
@@ -114,7 +180,10 @@ int main(int argc, char** argv) {
         printField("pointing_el_deg", doubleToString(telescope_cfg.pointing_el_deg));
         printField("focal_length_m", doubleToString(telescope_cfg.focal_length_m));
         printField("coordinate_system", telescope_cfg.coordinate_system);
-        printField("coordinate_transform", "local telescope frame -> global frame");
+        printField("trace_geometry_frame",
+                   "telescope-local; mirror/output geometry is not globally rotated");
+        printField("source_adapter_transform",
+                   "configured input frame -> telescope-local");
         const std::string normalized_source_frame = normalizeSourceCoordinateFrame(
             source_runtime_cfg.coordinate_frame);
         printField("position_role",
@@ -122,10 +191,11 @@ int main(int argc, char** argv) {
                            normalized_source_frame == "enu_east_global" ||
                            normalized_source_frame == "lact_generic_global"
                        ? "global input is converted through the selected input frame"
-                       : "local input is placed with the original telescope frame");
-        printField("frame_x_axis", vec3ToString(telescope_frame.x_axis));
-        printField("frame_y_axis", vec3ToString(telescope_frame.y_axis));
-        printField("frame_z_axis", vec3ToString(telescope_frame.z_axis));
+                       : "relative/local input is rotated into the telescope frame");
+        printField("local_x_in_input_frame", vec3ToString(telescope_frame.x_axis));
+        printField("local_y_in_input_frame", vec3ToString(telescope_frame.y_axis));
+        printField("local_z_boresight_in_input_frame",
+                   vec3ToString(telescope_frame.z_axis));
 
         printSection("Mirror");
         printField("mode", mirror_mode);
@@ -281,7 +351,9 @@ int main(int argc, char** argv) {
                            doubleToString(camera_cfg.collector_height_m));
             }
         } else {
-            printField("mode", "whiteboard only");
+            printField("mode", camera_cfg.whiteboard
+                                   ? "whiteboard"
+                                   : "implicit_whiteboard_legacy");
         }
 
         printSection("SiPM");
@@ -289,7 +361,14 @@ int main(int argc, char** argv) {
         printField("pde", factorDescription(efficiency_cfg.sipm_pde));
 
         printSection("Electronics");
-        printField("response", "reserved; SiPM PDE is handled by sipm.pde");
+        printField("enabled", detector_pipeline_cfg.enabled ? "true" : "false");
+        printField("microcell_enabled",
+                   detector_pipeline_cfg.microcell.enabled ? "true" : "false");
+        printField("single_pe_enabled",
+                   detector_pipeline_cfg.single_pe.enabled ? "true" : "false");
+        printField("waveform_enabled", waveform_cfg.enabled ? "true" : "false");
+        printField("camera_trigger_enabled",
+                   detector_pipeline_cfg.camera_trigger.enabled ? "true" : "false");
 
         printSection("Efficiency");
         printField("constant_scale", doubleToString(efficiency_cfg.constant_scale));
@@ -358,10 +437,9 @@ int main(int argc, char** argv) {
         printField("optics", "facet reflection with configured optical errors");
         printField("speed_of_light_m/ns",
                    doubleToString(propagation_cfg.speed_of_light_m_per_ns, 9));
-        printField("not included",
-                   light_collector
-                       ? "camera electronics"
-                       : "collector, camera electronics");
+        if (!light_collector) {
+            printField("not included", "collector");
+        }
 
         printSection("Run");
         printField("setup_time_s", doubleToString(elapsedSeconds(t_start, t_setup_done)));
@@ -385,15 +463,38 @@ int main(int argc, char** argv) {
         OpticalTracer tracer(propagation_cfg.speed_of_light_m_per_ns,
                              effectiveReflectDirectionSigmaRad(facets, error_cfg),
                              error_cfg.random_seed);
+        const PhotonTraceContext photon_trace_context{
+            &tracer,
+            &plane,
+            &eff,
+            &atmosphere,
+            &obstruction,
+            &camera,
+            light_collector.get(),
+            &sipm_cfg,
+            &electronics,
+            &detector_pipeline_cfg,
+            &response_sampler,
+            propagation_cfg.speed_of_light_m_per_ns,
+            camera_cfg.enabled,
+            true,
+            nullptr,
+            obstruction.mark_only,
+            false,
+            source_runtime_cfg.eventio_2d_plane_mode != "forward",
+        };
 
         std::vector<OpticalSurfaceHit> hits;
         if (save_hits_csv) {
             hits.reserve(reserve_hits);
         }
         std::map<PixelKey, PixelAccumulator> pixels;
+        std::map<SummaryKey, TraceSummary> summaries;
+        std::map<WaveformKey, WaveformPixelAccumulator> waveforms;
+        std::vector<RawWaveformHit> raw_waveform_hits;
 
         PhotonBunch raw_bunch;
-        int n_total = 0;
+        std::uint64_t n_total = 0;
         int n_hit_mirror_before_obstruction = 0;
         int n_hit_surface_before_obstruction = 0;
         int n_hit_mirror = 0;
@@ -409,95 +510,97 @@ int main(int argc, char** argv) {
 
         const auto t_trace_start = std::chrono::steady_clock::now();
         while (source->next(raw_bunch)) {
-            ++n_total;
-
             PhotonBunch bunch = transformBunchToTelescopeLocal(
                 raw_bunch, telescope_cfg, source_runtime_cfg.coordinate_frame);
             if (bunch.eventio_2d) {
                 applyEventIOReferenceZOffset(
                     bunch, source_runtime_cfg.eventio_reference_z_m);
             }
-            Photon photon = bunch.photon;
-            photon.random_stream_id = photonIdentityStreamId(bunch, 0);
-            photon.normalizeDirection();
-            photon.weight *= bunch.multiplicity;
-            applyTelescopeFrame(photon, telescope_frame);
-            if (atmosphere.enabled()) {
-                photon.weight *= atmosphere.transmission(photon.wavelength_nm,
-                                                         bunch.emission_altitude_km,
-                                                         sourceDirectionInWorld(
-                                                             raw_bunch,
-                                                             telescope_cfg,
-                                                             source_runtime_cfg.coordinate_frame));
-                if (photon.weight <= 0.0) {
+            const Vec3 global_direction = sourceDirectionInWorld(
+                raw_bunch, telescope_cfg, source_runtime_cfg.coordinate_frame);
+            auto& summary = summaries[{bunch.event_id, bunch.telescope_id}];
+            summary.event_id = bunch.event_id;
+            summary.telescope_id = bunch.telescope_id;
+            summary.input_bunches += 1;
+            summary.input_photons += bunch.multiplicity;
+
+            const std::uint64_t candidate_count =
+                response_sampler.candidateCount(bunch);
+            n_total += candidate_count;
+            for (std::uint64_t represented_index = 0;
+                 represented_index < candidate_count;
+                 ++represented_index) {
+                const PhotonTraceBunch trace_bunch{&bunch, &mirrors,
+                                                   global_direction};
+                auto candidate = response_sampler.candidate(
+                    bunch, represented_index);
+                const auto trace = tracePhoton(
+                    photon_trace_context, trace_bunch,
+                    std::move(candidate),
+                    nullptr);
+                OpticalSurfaceHit hit = trace.hit;
+                if (hit.hit_mirror) {
+                    ++n_hit_mirror_before_obstruction;
+                    ++summary.hit_mirror_before_obstruction;
+                    if (hit.hit_surface) {
+                        ++n_hit_surface_before_obstruction;
+                        ++summary.hit_output_before_obstruction;
+                    }
+                    if (hit.obstruction_blocked_incoming) {
+                        ++n_blocked;
+                        ++n_blocked_incoming;
+                        ++summary.blocked_by_obstruction;
+                        ++summary.blocked_incoming;
+                        if (!obstruction.mark_only) {
+                            continue;
+                        }
+                    } else {
+                        ++n_hit_mirror;
+                        ++summary.hit_mirror;
+                    }
+                }
+                if (!hit.hit_surface) {
                     continue;
                 }
-            }
-
-            const bool signed_line =
-                bunch.eventio_2d &&
-                source_runtime_cfg.eventio_2d_plane_mode != "forward";
-            OpticalSurfaceHit hit = signed_line
-                ? tracer.traceBackprojectedToPlane(photon, mirrors, plane, eff)
-                : tracer.traceToPlane(photon, mirrors, plane, eff);
-            if (hit.hit_mirror) {
-                ++n_hit_mirror_before_obstruction;
-                if (hit.hit_surface) {
-                    ++n_hit_surface_before_obstruction;
-                }
-                // A signed-line 2D record position is only an anchor on the
-                // incoming photon line. Check the physical upstream ray rather
-                // than the finite anchor-to-mirror segment, which can lie on
-                // the downstream side of the mirror after backprojection.
-                hit.obstruction_blocked_incoming = signed_line
-                    ? incomingRayBlockedByObstruction(hit.mirror_point, photon.dir,
-                                                      obstruction, &telescope_frame)
-                    : incomingSegmentBlockedByObstruction(photon.pos, hit.mirror_point,
-                                                          obstruction, &telescope_frame);
-                if (hit.obstruction_blocked_incoming) {
-                    ++n_blocked;
-                    ++n_blocked_incoming;
-                    if (!obstruction.mark_only) {
-                        continue;
-                    }
-                } else {
-                    ++n_hit_mirror;
-                }
-            }
-            if (hit.hit_surface) {
-                hit.obstruction_blocked_reflected =
-                    segmentBlockedByObstruction(hit.mirror_point, hit.surface_point,
-                                                obstruction, &telescope_frame);
                 if (hit.obstruction_blocked_reflected) {
                     ++n_blocked_reflected;
+                    ++summary.blocked_reflected;
                     if (!hit.obstruction_blocked_incoming) {
                         ++n_blocked;
+                        ++summary.blocked_by_obstruction;
                     }
                     if (!obstruction.mark_only) {
                         continue;
                     }
                 }
-                hit.obstruction_blocked = hit.obstruction_blocked_incoming ||
-                                          hit.obstruction_blocked_reflected;
                 const bool physically_reaches_output = !hit.obstruction_blocked;
                 if (camera_cfg.enabled && physically_reaches_output) {
-                    applyCameraResponse(
-                        camera, light_collector.get(), plane, sipm_cfg,
-                        electronics, hit,
-                        propagation_cfg.speed_of_light_m_per_ns);
                     if (hit.hit_camera) {
                         ++n_hit_camera;
+                        ++summary.hit_camera;
                         unique_hit_pixels.insert(hit.pixel_id);
+                        summary.unique_pixels.insert(hit.pixel_id);
+                    } else {
+                        ++summary.lost_between_pixels;
                     }
                     if (hit.accepted) {
                         ++n_accepted;
-                    }
-                    if (save_pixel_csv) {
-                        accumulatePixelHit(pixels, bunch.event_id, bunch.telescope_id, hit);
+                        ++summary.accepted_camera;
+                        accumulatePixelHit(
+                            pixels, bunch.event_id, bunch.telescope_id, hit);
+                        accumulateWaveformHit(
+                            waveforms,
+                            raw_waveform_hits,
+                            waveform_cfg,
+                            detector_pipeline_cfg.enabled,
+                            bunch.event_id,
+                            bunch.telescope_id,
+                            hit);
                     }
                 }
                 if (physically_reaches_output) {
                     ++n_hit_surface;
+                    ++summary.hit_output_plane;
                 }
                 if (save_hits_csv) {
                     if (write_input_local_photon) {
@@ -509,10 +612,17 @@ int main(int argc, char** argv) {
                 }
 
                 if (physically_reaches_output) {
-                    double w = hit.weight * hit.relative_efficiency;
-                    double r2 = hit.u_m * hit.u_m + hit.v_m * hit.v_m;
+                    const double w = hit.weight * hit.relative_efficiency;
+                    const double r2 = hit.u_m * hit.u_m + hit.v_m * hit.v_m;
                     sum_w += w;
                     sum_r2 += w * r2;
+                    summary.weighted_signal += w;
+                    summary.weighted_time_sum += w * hit.time_ns;
+                    summary.weighted_time2_sum += w * hit.time_ns * hit.time_ns;
+                    if (camera_cfg.enabled && hit.accepted) {
+                        summary.first_cherenkov_time_ns = std::min(
+                            summary.first_cherenkov_time_ns, hit.time_ns);
+                    }
                 }
             }
         }
@@ -522,7 +632,43 @@ int main(int argc, char** argv) {
             !writeSurfaceHitsCSV(output_csv, hits, write_input_local_photon)) {
             throw std::runtime_error("failed to write output CSV: " + output_csv);
         }
-        if (save_pixel_csv) {
+        CameraElectronicsEventMap electronics_events;
+        if (detector_pipeline_cfg.enabled) {
+            electronics_events = buildCameraElectronicsEvents(
+                detector_pipeline_cfg,
+                waveform_cfg,
+                nsb_cfg,
+                camera_pixel_id_axis,
+                summaries,
+                raw_waveform_hits);
+            if (save_pixel_csv) {
+                writeElectronicsPixelCsv(
+                    output_pixel_csv,
+                    camera_pixel_id_axis,
+                    electronics_events,
+                    pixels);
+            }
+            if (waveform_cfg.enabled && !isDisabledText(output_waveform_csv)) {
+                writeElectronicsWaveformCsv(
+                    output_waveform_csv,
+                    camera_pixel_id_axis,
+                    electronics_events);
+            }
+            if (detector_pipeline_cfg.camera_trigger.enabled &&
+                !isDisabledText(output_trigger_csv)) {
+                writeElectronicsTriggerCsv(
+                    output_trigger_csv, electronics_events);
+            }
+            if (save_primary_pe_csv || save_fired_pe_csv) {
+                writeElectronicsHitCsv(
+                    output_primary_pe_csv,
+                    output_fired_pe_csv,
+                    camera_pixel_id_axis,
+                    electronics_events,
+                    save_primary_pe_csv,
+                    save_fired_pe_csv);
+            }
+        } else if (save_pixel_csv) {
             writePixelCsv(output_pixel_csv, pixels);
         }
         const auto t_write_done = std::chrono::steady_clock::now();
@@ -636,6 +782,30 @@ int main(int argc, char** argv) {
         if (save_pixel_csv) {
             printField("pixel_csv", output_pixel_csv);
         }
+        if (detector_pipeline_cfg.enabled) {
+            std::size_t triggered_cameras = 0;
+            double fired_pe = 0.0;
+            for (const auto& [key, event] : electronics_events) {
+                (void)key;
+                if (event.detector.camera_trigger.triggered) {
+                    ++triggered_cameras;
+                }
+                for (const auto& pixel : event.detector.pixels) {
+                    fired_pe += pixel.fired_cherenkov_pe +
+                        pixel.fired_nsb_pe + pixel.fired_dark_pe;
+                }
+            }
+            printField("electronics_events", intToString(electronics_events.size()));
+            printField("triggered_cameras", intToString(triggered_cameras));
+            printField("final_fired_pe", doubleToString(fired_pe));
+            if (waveform_cfg.enabled && !isDisabledText(output_waveform_csv)) {
+                printField("waveform_csv", output_waveform_csv);
+            }
+            if (detector_pipeline_cfg.camera_trigger.enabled &&
+                !isDisabledText(output_trigger_csv)) {
+                printField("trigger_csv", output_trigger_csv);
+            }
+        }
 
         printSection("Timing");
         printField("trace_time_s", doubleToString(elapsedSeconds(t_trace_start, t_trace_done)));
@@ -644,6 +814,13 @@ int main(int argc, char** argv) {
 
         printSection("Machine-readable summary");
         std::cout << "mirror_facets=" << mirrors.size() << "\n";
+        std::cout << "camera_mode="
+                  << (camera_cfg.enabled
+                          ? camera_cfg.mode
+                          : (camera_cfg.whiteboard
+                                 ? "whiteboard"
+                                 : "implicit_whiteboard_legacy"))
+                  << "\n";
         std::cout << "total_photons=" << n_total << "\n";
         std::cout << "blocked_by_obstruction=" << n_blocked << "\n";
         std::cout << "blocked_incoming=" << n_blocked_incoming << "\n";
@@ -683,6 +860,9 @@ int main(int argc, char** argv) {
         }
         if (save_pixel_csv) {
             std::cout << "pixel_csv=" << output_pixel_csv << "\n";
+        }
+        if (detector_pipeline_cfg.enabled) {
+            std::cout << "electronics_events=" << electronics_events.size() << "\n";
         }
         return 0;
     } catch (const std::exception& ex) {

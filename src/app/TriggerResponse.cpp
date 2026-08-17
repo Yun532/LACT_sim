@@ -41,23 +41,20 @@ BinnedPeTriggerDecision evaluateBinnedPeTrigger(
                                        bin_width_ns))))
             : n_bins;
 
+    // The value at bin `end` is the decision that can be made at that time
+    // from the current sample and the preceding coincidence-window samples.
+    // This causal convention avoids assigning a trigger to the beginning of
+    // a window whose later samples have not arrived yet.
     std::vector<int> pixels_above_threshold(n_bins, 0);
     for (std::size_t col = 0; col < n_pixels; ++col) {
         double window_pe = 0.0;
-        for (std::size_t bin = 0; bin < window_bins; ++bin) {
-            window_pe += pe_at(col, bin);
-        }
-        if (window_pe >= trigger.pixel_threshold_pe) {
-            ++pixels_above_threshold[0];
-        }
-        for (std::size_t start = 1; start < n_bins; ++start) {
-            window_pe -= pe_at(col, start - 1);
-            const std::size_t add_bin = start + window_bins - 1;
-            if (add_bin < n_bins) {
-                window_pe += pe_at(col, add_bin);
+        for (std::size_t end = 0; end < n_bins; ++end) {
+            window_pe += pe_at(col, end);
+            if (end >= window_bins) {
+                window_pe -= pe_at(col, end - window_bins);
             }
             if (window_pe >= trigger.pixel_threshold_pe) {
-                ++pixels_above_threshold[start];
+                ++pixels_above_threshold[end];
             }
         }
     }
@@ -74,21 +71,18 @@ BinnedPeTriggerDecision evaluateBinnedPeTrigger(
             out.window_start_bin = start;
         }
     }
-    const auto window_center_time_ns =
-        [&](std::size_t window_start_bin) {
-            const std::size_t center_offset = std::min(
-                n_bins - 1 - window_start_bin, window_bins / 2);
+    const auto decision_time_ns =
+        [&](std::size_t decision_bin) {
             return first_bin_center_time_ns +
-                static_cast<double>(window_start_bin + center_offset) *
-                    bin_width_ns;
+                static_cast<double>(decision_bin) * bin_width_ns;
         };
     out.max_multiplicity_time_ns =
-        window_center_time_ns(out.window_start_bin);
+        decision_time_ns(out.window_start_bin);
     out.trigger_time_ns = out.max_multiplicity_time_ns;
     out.triggered = found_first_trigger;
     if (out.triggered) {
         out.first_trigger_time_ns =
-            window_center_time_ns(out.first_trigger_window_start_bin);
+            decision_time_ns(out.first_trigger_window_start_bin);
         out.trigger_time_ns = out.first_trigger_time_ns;
     }
     return out;
@@ -109,6 +103,23 @@ ArrayTriggerDecision evaluateArrayTrigger(
                        }),
         telescope_triggers.end());
     if (telescope_triggers.empty()) {
+        return out;
+    }
+
+    if (!trigger.array_enabled) {
+        out.triggered = true;
+        out.coincidence_start_time_ns =
+            coincidenceTime(telescope_triggers.front());
+        out.coincidence_end_time_ns = out.coincidence_start_time_ns;
+        for (const auto& item : telescope_triggers) {
+            out.coincident_telescope_ids.push_back(item.telescope_id);
+            out.coincidence_start_time_ns = std::min(
+                out.coincidence_start_time_ns, coincidenceTime(item));
+            out.coincidence_end_time_ns = std::max(
+                out.coincidence_end_time_ns, coincidenceTime(item));
+        }
+        std::sort(out.coincident_telescope_ids.begin(),
+                  out.coincident_telescope_ids.end());
         return out;
     }
 
