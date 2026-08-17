@@ -1,0 +1,311 @@
+#!/usr/bin/env python3
+"""Plot LACT_sim proxy waveform camera frames from HDF5.
+
+The waveform datasets are optional debug/diagnostic outputs. They represent
+time-binned photon count or p.e. at the camera/collector output, not a real
+electronics waveform.
+"""
+
+import argparse
+from pathlib import Path
+
+import h5py
+import matplotlib.pyplot as plt
+
+from plot_hdf5_camera import (
+    draw_camera,
+    find_images,
+    resolve_event_id,
+)
+
+
+def output_frame_path(output_dir, image, quantity, frame_index):
+    return output_dir / (
+        f"event_{int(image['event_id'])}_tel_id_{int(image['telescope_id']):02d}_"
+        f"{quantity}_bin_{frame_index:04d}.png"
+    )
+
+
+def output_gif_path(gif_arg, output_dir, image, quantity, multiple):
+    if not gif_arg:
+        return None
+    gif_path = Path(gif_arg)
+    if not multiple:
+        return gif_path
+    gif_dir = gif_path if gif_path.suffix == "" else gif_path.with_suffix("")
+    gif_dir.mkdir(parents=True, exist_ok=True)
+    return gif_dir / (
+        f"event_{int(image['event_id'])}_tel_id_{int(image['telescope_id']):02d}_{quantity}.gif"
+    )
+
+
+def infer_uniform_bin_width_ns(time_edges):
+    if len(time_edges) < 2:
+        raise SystemExit("waveforms/time_edges_ns must contain at least two edges.")
+    widths = time_edges[1:] - time_edges[:-1]
+    width = float(widths.mean())
+    if abs(float(widths.max()) - width) > 1e-6 or abs(float(widths.min()) - width) > 1e-6:
+        raise SystemExit("non-uniform waveform time bins are not supported for rebinning.")
+    return width
+
+
+def combine_bin_count(args, time_edges):
+    if args.combine_bins < 1:
+        raise SystemExit("--combine-bins must be >= 1")
+    if args.combine_width_ns is None:
+        return args.combine_bins
+    if args.combine_bins != 1:
+        raise SystemExit("Use only one of --combine-bins or --combine-width-ns.")
+    if args.combine_width_ns <= 0:
+        raise SystemExit("--combine-width-ns must be > 0")
+    base_width = infer_uniform_bin_width_ns(time_edges)
+    bins = int(round(args.combine_width_ns / base_width))
+    if bins < 1 or abs(bins * base_width - args.combine_width_ns) > 1e-6:
+        raise SystemExit(
+            f"--combine-width-ns={args.combine_width_ns} is not an integer multiple "
+            f"of the HDF5 bin width {base_width:g} ns."
+        )
+    return bins
+
+
+def decode_attr(value, default=""):
+    if value is None:
+        return default
+    if isinstance(value, bytes):
+        return value.decode("utf-8")
+    return str(value)
+
+
+def stored_time_reference(h5):
+    if "waveforms" not in h5:
+        return "absolute"
+    return decode_attr(h5["waveforms"].attrs.get("time_reference"), "absolute")
+
+
+def time_reference_ns(args, image, stored_reference, stored_reference_times):
+    if args.time_reference == "none":
+        return 0.0
+    if args.time_reference == "stored":
+        if stored_reference in ("image_mean", "image_first"):
+            image_index = int(image["image_index"])
+            if stored_reference_times is not None and image_index < len(stored_reference_times):
+                return float(stored_reference_times[image_index])
+            field = "time_first_ns" if stored_reference == "image_first" else "time_mean_ns"
+            if field in (image.dtype.names or ()):
+                return float(image[field])
+            return float(image["time_mean_ns"])
+        return 0.0
+    if args.time_reference == "image-mean":
+        return float(image["time_mean_ns"])
+    if args.time_reference == "image-first":
+        if "time_first_ns" in (image.dtype.names or ()):
+            return float(image["time_first_ns"])
+        return 0.0
+    raise SystemExit(f"Unsupported --time-reference={args.time_reference}")
+
+
+def frame_center_for_plot(args, t0_ns, t1_ns, ref_ns, stored_reference):
+    center = 0.5 * (t0_ns + t1_ns)
+    if args.time_reference == "stored" and stored_reference in ("image_mean", "image_first"):
+        return center
+    return center - ref_ns
+
+
+def keep_frame(args, t0_ns, t1_ns, ref_ns, stored_reference):
+    if args.plot_window_start_ns is None and args.plot_window_end_ns is None:
+        return True
+    center = frame_center_for_plot(args, t0_ns, t1_ns, ref_ns, stored_reference)
+    if args.plot_window_start_ns is not None and center < args.plot_window_start_ns:
+        return False
+    if args.plot_window_end_ns is not None and center >= args.plot_window_end_ns:
+        return False
+    return True
+
+
+def time_title(args, t0_ns, t1_ns, ref_ns, stored_reference):
+    if args.time_reference == "none":
+        return f"t = {t0_ns:.2f}..{t1_ns:.2f} ns"
+    if args.time_reference == "stored" and stored_reference == "image_mean":
+        return (
+            f"t - mean = {t0_ns:.2f}..{t1_ns:.2f} ns "
+            f"(mean = {ref_ns:.2f} ns)"
+        )
+    if args.time_reference == "stored" and stored_reference == "image_first":
+        return (
+            f"t - T0 = {t0_ns:.2f}..{t1_ns:.2f} ns "
+            f"(T0 = {ref_ns:.2f} ns)"
+        )
+    if args.time_reference == "image-first":
+        return (
+            f"t - T0 = {t0_ns - ref_ns:.2f}..{t1_ns - ref_ns:.2f} ns "
+            f"(T0 = {ref_ns:.2f} ns)"
+        )
+    return (
+        f"t - mean = {t0_ns - ref_ns:.2f}..{t1_ns - ref_ns:.2f} ns "
+        f"(mean = {ref_ns:.2f} ns)"
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Plot time-binned proxy waveform frames from LACT_sim HDF5."
+    )
+    parser.add_argument("h5", help="HDF5 file written by run_corsika_trace")
+    parser.add_argument("--event-id", type=int, default=None)
+    parser.add_argument("--shower-event-number", "--event-number", type=int, default=None)
+    parser.add_argument("--shower-event-id", type=int, default=None)
+    parser.add_argument("--array-id", type=int, default=0)
+    parser.add_argument("--telescope-id", type=int, default=None)
+    parser.add_argument("--image-index", type=int, default=None)
+    parser.add_argument(
+        "--quantity",
+        choices=("photon_count", "cherenkov_pe", "nsb_pe", "pe"),
+        default="pe",
+    )
+    parser.add_argument("--output-dir", default="waveform_frames")
+    parser.add_argument("--gif", default=None, help="optional animated GIF path")
+    parser.add_argument("--stride", type=int, default=1, help="plot every Nth rebinned frame")
+    parser.add_argument(
+        "--combine-bins",
+        type=int,
+        default=1,
+        help="sum this many consecutive waveform bins before plotting each frame",
+    )
+    parser.add_argument(
+        "--combine-width-ns",
+        type=float,
+        default=None,
+        help="sum bins into this time width, e.g. 5 for 5 ns frames",
+    )
+    parser.add_argument(
+        "--time-reference",
+        choices=("stored", "none", "image-mean", "image-first"),
+        default="stored",
+        help=(
+            "time coordinate used only for plotting labels/windows. 'stored' uses "
+            "the HDF5 waveform time_reference; 'image-mean' subtracts images/index "
+            "time_mean_ns for older absolute-time files."
+        ),
+    )
+    parser.add_argument(
+        "--plot-window-start-ns",
+        type=float,
+        default=None,
+        help="optional frame-center lower bound in the selected plotting time reference",
+    )
+    parser.add_argument(
+        "--plot-window-end-ns",
+        type=float,
+        default=None,
+        help="optional frame-center upper bound in the selected plotting time reference",
+    )
+    parser.add_argument("--dpi", type=int, default=180)
+    args = parser.parse_args()
+
+    if args.stride < 1:
+        raise SystemExit("--stride must be >= 1")
+
+    out_dir = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    with h5py.File(args.h5, "r") as h5:
+        if "waveforms" not in h5:
+            raise SystemExit("This HDF5 file has no /waveforms group.")
+        dataset_name = f"waveforms/{args.quantity}"
+        if dataset_name not in h5:
+            available = ", ".join(k for k in h5["waveforms"].keys())
+            raise SystemExit(f"{dataset_name} is missing. Available waveform datasets: {available}")
+
+        event_id = resolve_event_id(
+            h5,
+            event_id=args.event_id,
+            shower_event_id=args.shower_event_id,
+            shower_event_number=args.shower_event_number,
+            array_id=args.array_id,
+        )
+        index = h5["images/index"][:]
+        images = find_images(index, event_id, args.telescope_id, args.image_index)
+        camera = h5["camera/pixels"][:]
+        pixel_axis = h5["waveforms/pixel_id_axis"][:]
+        time_edges = h5["waveforms/time_edges_ns"][:]
+        waveform = h5[dataset_name]
+        combine_bins = combine_bin_count(args, time_edges)
+        stored_reference = stored_time_reference(h5)
+        stored_reference_times = (
+            h5["waveforms/reference_time_ns"][:]
+            if "waveforms/reference_time_ns" in h5
+            else None
+        )
+
+        all_saved = []
+        gif_outputs = []
+        multiple = len(images) > 1
+        for image in images:
+            image_index = int(image["image_index"])
+            if image_index < 0 or image_index >= waveform.shape[0]:
+                raise SystemExit(f"image_index={image_index} is outside waveform dataset shape.")
+
+            image_frame_dir = out_dir if not multiple else out_dir / (
+                f"event_{int(image['event_id'])}_tel_id_{int(image['telescope_id']):02d}_{args.quantity}"
+            )
+            image_frame_dir.mkdir(parents=True, exist_ok=True)
+            saved = []
+            frame_index = 0
+            ref_ns = time_reference_ns(
+                args, image, stored_reference, stored_reference_times)
+            for bin_index in range(0, waveform.shape[1], combine_bins * args.stride):
+                end_bin = min(bin_index + combine_bins, waveform.shape[1])
+                t0 = float(time_edges[bin_index])
+                t1 = float(time_edges[end_bin])
+                if not keep_frame(args, t0, t1, ref_ns, stored_reference):
+                    continue
+                values = waveform[image_index, bin_index:end_bin, :].sum(axis=0)
+                values_by_pixel = {int(pid): float(v) for pid, v in zip(pixel_axis, values)}
+                fig = draw_camera(
+                    camera,
+                    image,
+                    values_by_pixel,
+                    args.quantity,
+                    args.dpi,
+                )
+                ax = fig.axes[0]
+                ax.set_title(
+                    f"event {int(image['event_id'])}, telescope_id={int(image['telescope_id'])}, "
+                    f"{time_title(args, t0, t1, ref_ns, stored_reference)}"
+                )
+                out = output_frame_path(image_frame_dir, image, args.quantity, frame_index)
+                fig.savefig(out, bbox_inches="tight")
+                plt.close(fig)
+                saved.append(out)
+                frame_index += 1
+            all_saved.extend(saved)
+
+            gif_path = output_gif_path(args.gif, out_dir, image, args.quantity, multiple)
+            if gif_path:
+                try:
+                    from PIL import Image
+                except ImportError as exc:
+                    raise SystemExit(
+                        "Pillow is required for --gif. Frames were written; install pillow to make GIF."
+                    ) from exc
+                frames = [Image.open(path) for path in saved]
+                if frames:
+                    if gif_path.parent:
+                        gif_path.parent.mkdir(parents=True, exist_ok=True)
+                    frames[0].save(
+                        gif_path,
+                        save_all=True,
+                        append_images=frames[1:],
+                        duration=120,
+                        loop=0,
+                    )
+                    gif_outputs.append(gif_path)
+
+    if gif_outputs:
+        print(f"Saved {len(all_saved)} frames to {out_dir} and {len(gif_outputs)} GIF files")
+    else:
+        print(f"Saved {len(all_saved)} waveform frames to {out_dir}")
+
+
+if __name__ == "__main__":
+    main()

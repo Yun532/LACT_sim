@@ -1,0 +1,146 @@
+#include "io/CameraElectronicsEvent.hpp"
+
+#include <cmath>
+#include <limits>
+#include <set>
+#include <stdexcept>
+#include <unordered_map>
+
+namespace lact {
+
+double waveformReferenceTimeNs(const WaveformOutputConfig& waveform,
+                               const TraceSummary& summary)
+{
+    if (waveform.time_reference == "image_first" &&
+        std::isfinite(summary.first_cherenkov_time_ns)) {
+        return summary.first_cherenkov_time_ns;
+    }
+    if (waveform.time_reference == "image_mean" &&
+        summary.weighted_signal > 0.0) {
+        return summary.weighted_time_sum / summary.weighted_signal;
+    }
+    return 0.0;
+}
+
+bool hasFinalIntegratedImageSignal(
+    const electronics::DetectorPipelineResult& result)
+{
+    for (const auto& pixel : result.pixels) {
+        const double fired_pe = pixel.fired_cherenkov_pe +
+            pixel.fired_nsb_pe + pixel.fired_dark_pe;
+        if (fired_pe > 0.0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+CameraElectronicsEventMap buildCameraElectronicsEvents(
+    const electronics::DetectorPipelineConfig& detector,
+    const WaveformOutputConfig& waveform,
+    const NsbConfig& nsb,
+    const std::vector<int>& pixel_id_axis,
+    const std::map<SummaryKey, TraceSummary>& summaries,
+    const std::vector<RawWaveformHit>& raw_hits)
+{
+    CameraElectronicsEventMap output;
+    if (!detector.enabled || pixel_id_axis.empty()) {
+        return output;
+    }
+
+    std::unordered_map<int, std::size_t> pixel_to_column;
+    pixel_to_column.reserve(pixel_id_axis.size());
+    for (std::size_t column = 0; column < pixel_id_axis.size(); ++column) {
+        pixel_to_column.emplace(pixel_id_axis[column], column);
+    }
+
+    std::set<SummaryKey> keys;
+    for (const auto& item : summaries) {
+        keys.insert(item.first);
+    }
+    // Bucket the raw hits by (event, telescope) once. The per-key loop below
+    // used to rescan the whole vector, which is quadratic in the number of
+    // saved telescopes.
+    std::map<SummaryKey, std::vector<const RawWaveformHit*>> hits_by_key;
+    for (const auto& hit : raw_hits) {
+        const SummaryKey key{hit.event_id, hit.telescope_id};
+        keys.insert(key);
+        hits_by_key[key].push_back(&hit);
+    }
+
+    for (const auto& key : keys) {
+        const auto summary_it = summaries.find(key);
+        TraceSummary empty_summary;
+        empty_summary.event_id = key.first;
+        empty_summary.telescope_id = key.second;
+        const TraceSummary& summary =
+            summary_it == summaries.end() ? empty_summary : summary_it->second;
+
+        CameraElectronicsEvent event;
+        event.event_id = key.first;
+        event.telescope_id = key.second;
+        event.reference_time_ns = waveformReferenceTimeNs(waveform, summary);
+
+        std::vector<electronics::PrimaryPeHit> primary_hits;
+        const auto bucket = hits_by_key.find(key);
+        static const std::vector<const RawWaveformHit*> kNoHits;
+        for (const RawWaveformHit* hit_ptr :
+             (bucket == hits_by_key.end() ? kNoHits : bucket->second)) {
+            const RawWaveformHit& hit = *hit_ptr;
+            const auto column = pixel_to_column.find(hit.pixel_id);
+            if (column == pixel_to_column.end()) {
+                continue;
+            }
+            primary_hits.push_back({
+                hit.event_id,
+                hit.telescope_id,
+                static_cast<int>(column->second),
+                hit.time_ns - event.reference_time_ns,
+                hit.sensor_x_m,
+                hit.sensor_y_m,
+                hit.wavelength_nm,
+                hit.pe,
+                hit.origin,
+            });
+        }
+
+        if (nsb.enabled && nsb.rate_pe_per_ns_per_pixel > 0.0) {
+            if (nsb.window_ns > 0.0 &&
+                (detector.sampling.start_ns > 0.0 ||
+                 detector.sampling.end_ns < nsb.window_ns)) {
+                throw std::runtime_error(
+                    "electronics sampling window must contain the NSB image "
+                    "gate [0, nsb.window_ns)");
+            }
+            const auto generation_window =
+                electronics::waveformContributingPrimaryWindow(detector);
+            auto nsb_hits = electronics::generateUniformNsbPrimaryHits(
+                key.first,
+                key.second,
+                pixel_id_axis.size(),
+                nsb.rate_pe_per_ns_per_pixel,
+                generation_window.start_ns,
+                generation_window.end_ns,
+                detector.microcell,
+                nsb.seed);
+            for (auto& hit : nsb_hits) {
+                hit.count_in_integrated_image =
+                    nsbTimeInImageWindow(nsb, hit.time_ns);
+            }
+            primary_hits.insert(primary_hits.end(),
+                                nsb_hits.begin(), nsb_hits.end());
+        }
+
+        event.detector = electronics::runDetectorPipeline(
+            detector, pixel_id_axis.size(), primary_hits);
+        if (event.detector.camera_trigger.triggered) {
+            event.trigger_time_ns =
+                event.reference_time_ns +
+                event.detector.camera_trigger.trigger_time_ns;
+        }
+        output.emplace(key, std::move(event));
+    }
+    return output;
+}
+
+} // namespace lact

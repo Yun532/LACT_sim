@@ -1,0 +1,2 @@
+event_id,telescope_id,input_bunches,input_photons,blocked_by_obstruction,blocked_incoming,blocked_reflected,hit_mirror_before_obstruction,hit_output_before_obstruction,hit_mirror,hit_output_plane,hit_camera,accepted_camera,mirror_transmission_after_incoming_obstruction,output_transmission_after_obstruction,lost_between_pixels,unique_hit_pixels,pe,signal,time_mean_ns,time_rms_ns
+110,0,520,2474.320005,328,314,14,1885,1885,1571,1557,0,0,0.8334217507,0.825994695,0,0,1557,1557,-37.23749983,0.5329825384

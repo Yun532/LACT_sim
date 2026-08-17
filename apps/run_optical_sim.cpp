@@ -1,19 +1,24 @@
 #include "app/OpticalSimCommon.hpp"
 #include "app/PhotonResponseSampler.hpp"
+#include "app/PhotonTransport.hpp"
 
 using namespace lact;
 
 int main(int argc, char** argv) {
-    if (argc != 2) {
-        std::cerr << "usage: run_optical_sim <config.txt>\n";
-        return 2;
-    }
-
     try {
+        const auto command = parseConfigCommandLine(argc, argv);
+        if (command.help || command.positional.size() != 1) {
+            std::cerr
+                << "usage: run_optical_sim <config.txt> [-C key=value ...]\n";
+            return command.help ? 0 : 2;
+        }
+        const std::string config_path = command.positional[0];
         const auto t_start = std::chrono::steady_clock::now();
-        auto main_cfg = readKeyValueConfig(argv[1]);
+        auto main_cfg = readKeyValueConfig(config_path);
+        applyConfigOverrides(main_cfg, command.overrides);
         ComponentConfigPaths component_paths;
-        auto cfg = expandConfig(main_cfg, argv[1], component_paths);
+        auto cfg = expandConfig(main_cfg, config_path, component_paths);
+        applyConfigOverrides(cfg, command.overrides);
         const auto t_config_read = std::chrono::steady_clock::now();
 
         SyntheticPhotonConfig source_cfg = buildSourceConfig(cfg);
@@ -51,13 +56,26 @@ int main(int argc, char** argv) {
         PropagationConfig propagation_cfg = buildPropagationConfig(cfg);
         OpticalEfficiency eff(efficiency_cfg);
         AtmosphereTransmission atmosphere(atmosphere_cfg);
+        PhotonResponseConfig transport_response_cfg;
+        transport_response_cfg.mode = PhotonResponseMode::Expectation;
+        EventIOPhotonConfig transport_eventio_cfg;
+        PhotonResponseSampler response_sampler(transport_response_cfg,
+                                               transport_eventio_cfg);
+        electronics::DetectorPipelineConfig detector_transport_cfg;
         std::string output_csv = getString(cfg, "output.csv", "surface_hits.csv");
+        // "none"/"off"/"" disable the CSV here as they do everywhere else,
+        // instead of producing a file literally named "none".
+        if (isDisabledText(output_csv)) {
+            output_csv.clear();
+        }
         std::string output_pixel_csv = getString(cfg, "output.pixel_csv", "camera_pixel_image.csv");
         const std::string output_mode = lowerCopy(trim(getString(cfg, "output.mode", "hits")));
         const bool save_pixel_csv = camera_cfg.enabled &&
             (output_mode == "pixel" || output_mode == "pixels" ||
              output_mode == "both" || cfg.find("output.pixel_csv") != cfg.end());
-        const bool save_hits_csv = !(output_mode == "pixel" || output_mode == "pixels");
+        const bool save_hits_csv =
+            !(output_mode == "pixel" || output_mode == "pixels") &&
+            !output_csv.empty();
         const bool write_input_local_photon =
             getBool(cfg, "output.whiteboard_input_photon", false);
         const auto t_setup_done = std::chrono::steady_clock::now();
@@ -71,7 +89,10 @@ int main(int argc, char** argv) {
         std::cout << "========================================\n";
 
         printSection("Configuration files");
-        printField("main", argv[1]);
+        printField("main", config_path);
+        for (const auto& [key, value] : command.overrides) {
+            printField("override", key + "=" + value);
+        }
         if (!component_paths.telescope.empty()) {
             printField("telescope", component_paths.telescope);
         }
@@ -281,7 +302,9 @@ int main(int argc, char** argv) {
                            doubleToString(camera_cfg.collector_height_m));
             }
         } else {
-            printField("mode", "whiteboard only");
+            printField("mode", camera_cfg.whiteboard
+                                   ? "whiteboard"
+                                   : "implicit_whiteboard_legacy");
         }
 
         printSection("SiPM");
@@ -385,6 +408,26 @@ int main(int argc, char** argv) {
         OpticalTracer tracer(propagation_cfg.speed_of_light_m_per_ns,
                              effectiveReflectDirectionSigmaRad(facets, error_cfg),
                              error_cfg.random_seed);
+        const PhotonTraceContext photon_trace_context{
+            &tracer,
+            &plane,
+            &eff,
+            &atmosphere,
+            &obstruction,
+            &camera,
+            light_collector.get(),
+            &sipm_cfg,
+            &electronics,
+            &detector_transport_cfg,
+            &response_sampler,
+            propagation_cfg.speed_of_light_m_per_ns,
+            camera_cfg.enabled,
+            false,
+            &telescope_frame,
+            obstruction.mark_only,
+            false,
+            source_runtime_cfg.eventio_2d_plane_mode != "forward",
+        };
 
         std::vector<OpticalSurfaceHit> hits;
         if (save_hits_csv) {
@@ -417,43 +460,22 @@ int main(int argc, char** argv) {
                 applyEventIOReferenceZOffset(
                     bunch, source_runtime_cfg.eventio_reference_z_m);
             }
-            Photon photon = bunch.photon;
-            photon.random_stream_id = photonIdentityStreamId(bunch, 0);
-            photon.normalizeDirection();
-            photon.weight *= bunch.multiplicity;
-            applyTelescopeFrame(photon, telescope_frame);
-            if (atmosphere.enabled()) {
-                photon.weight *= atmosphere.transmission(photon.wavelength_nm,
-                                                         bunch.emission_altitude_km,
-                                                         sourceDirectionInWorld(
-                                                             raw_bunch,
-                                                             telescope_cfg,
-                                                             source_runtime_cfg.coordinate_frame));
-                if (photon.weight <= 0.0) {
-                    continue;
-                }
-            }
-
-            const bool signed_line =
-                bunch.eventio_2d &&
-                source_runtime_cfg.eventio_2d_plane_mode != "forward";
-            OpticalSurfaceHit hit = signed_line
-                ? tracer.traceBackprojectedToPlane(photon, mirrors, plane, eff)
-                : tracer.traceToPlane(photon, mirrors, plane, eff);
+            PhotonBunch transport_bunch = bunch;
+            transport_bunch.photon.normalizeDirection();
+            applyTelescopeFrame(transport_bunch.photon, telescope_frame);
+            const Vec3 global_direction = sourceDirectionInWorld(
+                raw_bunch, telescope_cfg, source_runtime_cfg.coordinate_frame);
+            const PhotonTraceBunch trace_bunch{&transport_bunch, &mirrors,
+                                               global_direction};
+            const auto trace = tracePhoton(
+                photon_trace_context, trace_bunch,
+                response_sampler.candidate(transport_bunch, 0), nullptr);
+            OpticalSurfaceHit hit = trace.hit;
             if (hit.hit_mirror) {
                 ++n_hit_mirror_before_obstruction;
                 if (hit.hit_surface) {
                     ++n_hit_surface_before_obstruction;
                 }
-                // A signed-line 2D record position is only an anchor on the
-                // incoming photon line. Check the physical upstream ray rather
-                // than the finite anchor-to-mirror segment, which can lie on
-                // the downstream side of the mirror after backprojection.
-                hit.obstruction_blocked_incoming = signed_line
-                    ? incomingRayBlockedByObstruction(hit.mirror_point, photon.dir,
-                                                      obstruction, &telescope_frame)
-                    : incomingSegmentBlockedByObstruction(photon.pos, hit.mirror_point,
-                                                          obstruction, &telescope_frame);
                 if (hit.obstruction_blocked_incoming) {
                     ++n_blocked;
                     ++n_blocked_incoming;
@@ -465,9 +487,6 @@ int main(int argc, char** argv) {
                 }
             }
             if (hit.hit_surface) {
-                hit.obstruction_blocked_reflected =
-                    segmentBlockedByObstruction(hit.mirror_point, hit.surface_point,
-                                                obstruction, &telescope_frame);
                 if (hit.obstruction_blocked_reflected) {
                     ++n_blocked_reflected;
                     if (!hit.obstruction_blocked_incoming) {
@@ -477,14 +496,8 @@ int main(int argc, char** argv) {
                         continue;
                     }
                 }
-                hit.obstruction_blocked = hit.obstruction_blocked_incoming ||
-                                          hit.obstruction_blocked_reflected;
                 const bool physically_reaches_output = !hit.obstruction_blocked;
                 if (camera_cfg.enabled && physically_reaches_output) {
-                    applyCameraResponse(
-                        camera, light_collector.get(), plane, sipm_cfg,
-                        electronics, hit,
-                        propagation_cfg.speed_of_light_m_per_ns);
                     if (hit.hit_camera) {
                         ++n_hit_camera;
                         unique_hit_pixels.insert(hit.pixel_id);
@@ -644,6 +657,13 @@ int main(int argc, char** argv) {
 
         printSection("Machine-readable summary");
         std::cout << "mirror_facets=" << mirrors.size() << "\n";
+        std::cout << "camera_mode="
+                  << (camera_cfg.enabled
+                          ? camera_cfg.mode
+                          : (camera_cfg.whiteboard
+                                 ? "whiteboard"
+                                 : "implicit_whiteboard_legacy"))
+                  << "\n";
         std::cout << "total_photons=" << n_total << "\n";
         std::cout << "blocked_by_obstruction=" << n_blocked << "\n";
         std::cout << "blocked_incoming=" << n_blocked_incoming << "\n";

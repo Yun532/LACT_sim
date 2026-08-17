@@ -1,0 +1,259 @@
+# LACT_sim Module Interfaces
+
+This document records the intended boundaries for modules that are not yet full
+detector implementations.
+
+## Event Identity
+
+Formal output uses one event key:
+
+```text
+event_id
+```
+
+For CORSIKA/EventIO runs with `source.event_id_mode=event_array100`, LACT_sim
+sets:
+
+```text
+event_id = shower_event * 100 + array_id
+```
+
+The HDF5 output stores only `event_id` in `/events/table` and `/images/index`.
+Intermediate logs may still print decoded shower/array information for human
+debugging, but downstream analysis should use `event_id`.
+
+For example, original CORSIKA shower `468898` with `array_id=0` is stored as
+`event_id=46889800`; with `array_id=2` it is stored as `event_id=46889802`.
+Those trailing two digits are the array/core-offset stream, not an extra shower
+number.
+
+## Atmosphere
+
+CORSIKA photons are interpreted as photons already at the telescope plane. The
+atmosphere module is therefore an optional extra transmission factor, not a
+second full shower propagation.
+
+Supported first-stage configuration:
+
+```ini
+atmosphere.transmission=none
+atmosphere.transmission=0.92
+atmosphere.transmission=configs/atmosphere/transmission.csv
+```
+
+CSV tables use:
+
+```text
+wavelength_nm,transmission
+```
+
+For a MODTRAN total optical-depth table, use:
+
+```ini
+atmosphere.model=modtran_tau
+atmosphere.tau_table=configs/atmosphere/atm_trans_4400_1_10_0_0_4400.dat
+atmosphere.ground_altitude_km=4.4
+atmosphere.slant_correction=secant
+atmosphere.min_cos_theta=0.2
+```
+
+The table is interpreted as `tau_total(lambda, emission_altitude -> ground)`,
+and runtime transmission is `T=exp(-tau_total)`. The secant correction uses the
+global photon direction with `cos(theta)=-dir.z`; below `min_cos_theta`, the
+configured large-angle behavior prevents extrapolating the vertical table too
+far.
+
+For formal production, this CSV should come from the same atmospheric profile
+used in the CORSIKA run, or from a clearly documented site measurement/model.
+Until that source is fixed, the recommended benchmark setting is
+`atmosphere.transmission=none` to avoid adding uncalibrated physics.
+
+Atmospheric refractive-index timing is reserved but disabled by default:
+
+```ini
+atmosphere.refractive_index_model=none
+atmosphere.speed_of_light_correction=false
+```
+
+Current optical-path timing uses:
+
+```ini
+propagation.speed_of_light_m_per_ns=0.299792458
+```
+
+## Obstruction
+
+The obstruction module is intentionally input-driven. No built-in telescope
+support model is distributed. Provide an external obstruction configuration
+when you want to include support shadows:
+
+```ini
+obstruction.enabled=true
+obstruction.mode=primitives
+obstruction.primitives_csv=path/to/obstruction_primitives.csv
+obstruction.check_incoming=true
+obstruction.check_reflected=true
+```
+
+Primitive CSV columns:
+
+```text
+type,name,role,material_id,x0_m,y0_m,z0_m,x1_m,y1_m,z1_m,
+center_x_m,center_y_m,center_z_m,radius_m,height_m,rotation_rad,sides,
+half_x_m,half_y_m,half_z_m,bbox_min_*,bbox_max_*,
+hole_radius_m,hole_rotation_rad,hole_sides
+```
+
+Supported primitive types:
+
+- `cylinder`: uses `p0`, `p1`, and `radius_m`; intended for support tubes.
+- `box`/`aabb`: uses `center_*_m` and `half_*_m`; optional `hole_*`
+  describes a vertical regular-polygon aperture that does not block rays.
+- `polygon_prism`: uses `center_*_m`, `radius_m`, `height_m`,
+  `rotation_rad`, and `sides`; intended for regular camera-body prisms.
+
+Coordinates are LACT telescope-local meters. The code can test both the
+incoming segment before mirror intersection and the reflected segment from
+mirror to output plane, so the shadow depends on source direction and telescope
+pointing. The caller explicitly identifies the incoming or reflected leg; the
+leg is not inferred from local `dir.z`. Incoming checks include all solid
+objects, while reflected checks include `role=support_strut`, so camera-side
+bodies do not incorrectly self-block photons ending at the camera plane.
+
+The legacy `obstruction.mode=mask` path still exists for diagnostic 2D masks,
+but it should not be used as the formal off-axis obstruction model because a
+single projected mask does not change with ray direction.
+
+## SiPM And Electronics
+
+The current SiPM/electronics path is an interface layer:
+
+```text
+collector photon -> SiPM PDE -> integrated pixel image
+```
+
+The active setting is:
+
+```ini
+sipm.pde=none
+sipm.pde=0.35
+sipm.pde=configs/efficiency/sipm_pde.csv
+```
+
+SiPM microcell saturation is implemented at this boundary. Without waveform
+output it is applied to the integrated primary p.e. image. With
+`waveform.source=pe`, it is applied cumulatively in time and each output sample
+is the fired-microcell increment for that bin; the trigger and integrated image
+both consume that fired-p.e. waveform. Detailed analog/ADC pulse shaping,
+crosstalk, afterpulse, dark count, gain fluctuation, microcell recovery, and
+hardware trigger electronics remain future work. The HDF5 format keeps
+integrated and time-binned `pe` and `primary_pe` together with truth components.
+
+For each collected Cherenkov photon or photon bunch, the integrated weight is
+handled multiplicatively:
+
+```text
+p.e. contribution =
+  CORSIKA bunch multiplicity
+  * optical photon weight
+  * mirror/filter/atmosphere efficiency factors
+  * light-collector acceptance and reflection weight
+  * sipm.pde
+```
+
+`sipm.pde` can be disabled, a constant, or a wavelength table. The current
+production output is an integrated p.e. image. With
+`electronics.sipm.saturation_enabled=true`, `pe` is the fired-cell-equivalent
+image after `hard_no_recovery` microcell saturation; `primary_pe` is retained
+for dense HDF5 diagnostics. It is not yet an analog/ADC waveform and it does
+not model crosstalk, afterpulse, dark count, or gain fluctuations.
+Legacy `electronics.pe_conversion` and `efficiency.sipm_pde` config keys are
+accepted only as compatibility aliases and are mapped to the same SiPM PDE path.
+
+For wavelength tables, duplicate wavelength rows are merged by arithmetic mean,
+then linear interpolation is used. Values outside the table wavelength range are
+treated as zero. Use `python/plot_efficiency_curves.py` to inspect each table and
+the combined efficiency before running a full response simulation.
+
+## NSB
+
+The simplest NSB implementation is a constant-rate Poisson model:
+
+```ini
+nsb.enabled=false
+nsb.model=constant_rate
+nsb.rate_pe_per_ns_per_pixel=0.05
+nsb.window_ns=32
+nsb.seed=12345
+```
+
+`nsb.window_ns` defines the saved-image integration gate `[0, window_ns)`
+relative to the event/waveform reference time. It is used consistently with
+or without the detector pipeline and with or without waveform output. A wider
+NSB stream may still be generated for waveform boundary padding and triggering;
+those extra hits do not directly inflate the saved image. The final
+`/images/dense/pe` includes the NSB p.e. contribution. Use
+`output.hdf5_write_components=true` to additionally write `cherenkov_pe` and
+`nsb_pe`. When waveform output is enabled with `waveform.source=pe`, NSB is
+sampled per waveform time bin using `rate_pe_per_ns_per_pixel *
+waveform.time_bin_width_ns`; only bins inside the image gate are accumulated
+into the image. Without a waveform it is sampled once per pixel with
+`rate_pe_per_ns_per_pixel * nsb.window_ns`.
+
+The spectral model computes the same `rate_pe_per_ns_per_pixel` from a LoNS
+spectrum, a fixed effective area, the camera pixel solid angle, and the
+configured optical efficiency curves:
+
+```ini
+nsb.enabled=true
+nsb.model=spectral_flux
+nsb.spectrum_csv=configs/nsb/nsb_spectrum.csv
+nsb.spectrum_unit=ph_s_nm_sr_m2
+nsb.effective_area_m2=24.576860
+nsb.collector_mean_transmission=0.923436437
+nsb.pixel_solid_angle=auto
+```
+
+`pixel_solid_angle=auto` uses the first configured camera pixel size and the
+telescope focal length. `collector_mean_transmission` is applied only while
+converting `spectral_flux` to a detected-p.e. rate. A `constant_rate` value is
+already a post-detection p.e. rate and is not multiplied again. The standard
+value is the entrance-area and LACT focal-cone weighted result of the Bezier
+`true_reflect` collector scan, not the reflectivity of one wall bounce. The
+computed rate and collector factor are printed in the run log and stored under
+`/metadata/nsb` in HDF5 output.
+
+## Trigger
+
+The first trigger implementation is intentionally simple:
+
+```ini
+trigger.enabled=false
+trigger.pixel_threshold_pe=5
+trigger.camera_multiplicity=3
+trigger.array_multiplicity=2
+trigger.camera_coincidence_window_ns=20
+trigger.array_coincidence_window_ns=0
+trigger.array_time_correction=none
+trigger.array_wavefront_speed_m_per_ns=0
+```
+
+Camera trigger counts pixels above threshold in a sliding p.e. time window.
+Array trigger counts triggered telescopes for the same `event_id`. For EventIO
+inputs, set `trigger.array_time_correction=plane_wave` together with a positive
+array window to remove the expected planar wavefront delay from the local
+camera-trigger times. The correction uses CORSIKA North-West-Up telescope
+positions and the per-shower altitude/azimuth. Missing geometry is rejected.
+Neighbor topology and hardware-specific trigger logic are reserved for the
+future electronics implementation.
+
+If HDF5 output sets:
+
+```ini
+output.save_only_triggered=true
+```
+
+then `/images/index` and `/images/dense/*` keep only telescope images that pass
+the camera trigger. The trigger decision tables still keep the evaluated
+telescope and array trigger rows, so excluded telescope images can be audited
+without storing their full 1664-pixel vectors.

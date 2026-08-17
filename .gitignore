@@ -1,4 +1,5 @@
 build*/
+/results/
 run_logs/*
 !run_logs/official_tests/
 run_logs/official_tests/*

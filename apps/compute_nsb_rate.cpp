@@ -7,25 +7,34 @@ using namespace lact;
 
 int main(int argc, char** argv)
 {
-    if (argc != 2) {
-        std::cerr << "usage: compute_nsb_rate CONFIG.cfg\n";
-        return 2;
-    }
-
     try {
+        const auto command = parseConfigCommandLine(argc, argv);
+        if (command.help || command.positional.size() != 1) {
+            std::cerr
+                << "usage: compute_nsb_rate CONFIG.cfg [-C key=value ...]\n";
+            return command.help ? 0 : 2;
+        }
+        const std::string config_path = command.positional[0];
         ComponentConfigPaths component_paths;
-        auto main_cfg = readKeyValueConfig(argv[1]);
-        auto cfg = expandConfig(main_cfg, argv[1], component_paths);
+        auto main_cfg = readKeyValueConfig(config_path);
+        applyConfigOverrides(main_cfg, command.overrides);
+        auto cfg = expandConfig(main_cfg, config_path, component_paths);
+        applyConfigOverrides(cfg, command.overrides);
 
         TelescopeConfig telescope_cfg = buildTelescopeConfig(cfg);
         CameraConfig camera_cfg = buildCameraConfig(cfg);
         CameraGeometry camera = buildCameraGeometry(camera_cfg);
         OpticalEfficiencyConfig efficiency_cfg = buildEfficiencyConfig(cfg);
+        const auto detector_cfg = buildDetectorPipelineConfig(cfg);
         NsbConfig nsb_cfg = buildNsbConfig(cfg);
-        resolveNsbSpectralRate(nsb_cfg, efficiency_cfg, camera, telescope_cfg);
+        resolveNsbSpectralRate(nsb_cfg, efficiency_cfg, camera, telescope_cfg,
+                               &detector_cfg);
 
         printSection("NSB spectral rate");
-        printField("config", argv[1]);
+        printField("config", config_path);
+        for (const auto& [key, value] : command.overrides) {
+            printField("override", key + "=" + value);
+        }
         if (!component_paths.nsb.empty()) printField("nsb_config", component_paths.nsb);
         if (!component_paths.camera.empty()) printField("camera_config", component_paths.camera);
         if (!component_paths.sipm.empty()) printField("sipm_config", component_paths.sipm);
@@ -37,6 +46,10 @@ int main(int argc, char** argv)
         printField("spectrum_csv", nsb_cfg.spectrum_csv);
         printField("spectrum_unit", nsb_cfg.spectrum_unit);
         printField("effective_area_m2", doubleToString(nsb_cfg.effective_area_m2, 9));
+        printField("collector_mean_transmission",
+                   doubleToString(nsb_cfg.collector_mean_transmission, 9));
+        printField("microcell_geometric_acceptance",
+                   doubleToString(nsb_cfg.microcell_geometric_acceptance, 9));
         printField("pixel_solid_angle_sr", doubleToString(nsb_cfg.pixel_solid_angle_sr, 12));
         printField("spectral_integral_pe_s_sr_m2",
                    doubleToString(nsb_cfg.spectral_integral_pe_s_sr_m2, 3));
