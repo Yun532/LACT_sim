@@ -12,11 +12,9 @@ namespace lact {
 struct BinnedPeTriggerDecision {
     bool triggered = false;
     int n_pixels_above_threshold = 0;
-    // Earliest causal decision bin whose preceding coincidence window
-    // satisfies the camera trigger.  The historic field name is internal;
-    // serialized output uses the unambiguous time fields below.
+    // Earliest window whose multiplicity satisfies the camera trigger.
     std::size_t first_trigger_window_start_bin = 0;
-    // Decision bin with the largest multiplicity. Ties select the earliest.
+    // Window with the largest multiplicity. Ties select the earliest window.
     std::size_t window_start_bin = 0;
     double first_trigger_time_ns =
         std::numeric_limits<double>::quiet_NaN();

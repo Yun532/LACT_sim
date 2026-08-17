@@ -55,20 +55,17 @@ double resolveEventIOArrayWavefrontSpeedMPerNs(
     return airLightSpeedAtAltitudeM(metadata.observation_altitude_m);
 }
 
-std::map<int, double> eventIOArrayGeometricDelaysNs(
-    const std::vector<int>& telescope_ids,
+void applyEventIOArrayTimingCorrection(
+    std::vector<TelescopeTriggerTime>& telescope_triggers,
     int output_event_id,
     const std::string& event_id_mode,
     const TriggerConfig& trigger_cfg,
     const TelescopeConfig& telescope_cfg,
     const EventIOMetadata& metadata)
 {
-    std::map<int, double> delays;
-    for (const int telescope_id : telescope_ids) {
-        delays[telescope_id] = 0.0;
-    }
-    if (trigger_cfg.array_time_correction == "none" || delays.empty()) {
-        return delays;
+    if (trigger_cfg.array_time_correction == "none" ||
+        telescope_triggers.empty()) {
+        return;
     }
     if (trigger_cfg.array_time_correction != "plane_wave") {
         throw std::runtime_error("unsupported array timing correction mode: " +
@@ -96,48 +93,12 @@ std::map<int, double> eventIOArrayGeometricDelaysNs(
             "array plane-wave timing requires EventIO shower altitude and azimuth");
     }
 
-    const auto positions = telescopePositions(metadata, telescope_cfg);
-    const Vec3 direction = corsikaNwuViewingDirection(
-        event->azimuth_north_to_east_deg, altitude_deg);
-    const double speed = resolveEventIOArrayWavefrontSpeedMPerNs(
-        trigger_cfg, metadata);
-    for (auto& item : delays) {
-        const auto position = positions.find(item.first);
-        if (position == positions.end()) {
-            throw std::runtime_error(
-                "array plane-wave timing has no position for telescope " +
-                std::to_string(item.first));
-        }
-        item.second = planeWavefrontGeometricDelayNs(
-            position->second, direction, speed);
-    }
-    return delays;
-}
-
-void applyEventIOArrayTimingCorrection(
-    std::vector<TelescopeTriggerTime>& telescope_triggers,
-    int output_event_id,
-    const std::string& event_id_mode,
-    const TriggerConfig& trigger_cfg,
-    const TelescopeConfig& telescope_cfg,
-    const EventIOMetadata& metadata)
-{
-    if (telescope_triggers.empty()) {
-        return;
-    }
-    std::vector<int> telescope_ids;
-    telescope_ids.reserve(telescope_triggers.size());
-    for (const auto& trigger : telescope_triggers) {
-        telescope_ids.push_back(trigger.telescope_id);
-    }
-    const auto delays = eventIOArrayGeometricDelaysNs(
-        telescope_ids, output_event_id, event_id_mode, trigger_cfg,
-        telescope_cfg, metadata);
-    for (auto& trigger : telescope_triggers) {
-        trigger.geometric_delay_ns = delays.at(trigger.telescope_id);
-        trigger.coincidence_time_ns =
-            trigger.trigger_time_ns + trigger.geometric_delay_ns;
-    }
+    applyPlaneWavefrontTimingCorrection(
+        telescope_triggers,
+        telescopePositions(metadata, telescope_cfg),
+        event->azimuth_north_to_east_deg,
+        altitude_deg,
+        resolveEventIOArrayWavefrontSpeedMPerNs(trigger_cfg, metadata));
 }
 
 } // namespace lact

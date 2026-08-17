@@ -15,7 +15,6 @@ struct SparseWaveformSample {
     std::int32_t time_bin = 0;
     std::int32_t photon_count = 0;
     float pe = 0.0f;
-    float sample_value = 0.0f;
     float cherenkov_pe = 0.0f;
     float nsb_pe = 0.0f;
 };
@@ -40,20 +39,6 @@ void writeStringAttribute(hid_t object,
     check(H5Awrite(attribute, type, value.c_str()), "attribute " + name);
     H5Aclose(attribute);
     H5Tclose(type);
-    H5Sclose(space);
-}
-
-template <typename T>
-void writeScalarAttribute(hid_t object,
-                          const std::string& name,
-                          hid_t type,
-                          const T& value)
-{
-    hid_t space = H5Screate(H5S_SCALAR);
-    hid_t attribute = H5Acreate2(
-        object, name.c_str(), type, space, H5P_DEFAULT, H5P_DEFAULT);
-    check(H5Awrite(attribute, type, &value), "attribute " + name);
-    H5Aclose(attribute);
     H5Sclose(space);
 }
 
@@ -109,8 +94,6 @@ void writeSparseSamples(hid_t group,
     H5Tinsert(type, "photon_count",
               HOFFSET(SparseWaveformSample, photon_count), H5T_NATIVE_INT32);
     H5Tinsert(type, "pe", HOFFSET(SparseWaveformSample, pe), H5T_NATIVE_FLOAT);
-    H5Tinsert(type, "sample_value",
-              HOFFSET(SparseWaveformSample, sample_value), H5T_NATIVE_FLOAT);
     H5Tinsert(type, "cherenkov_pe",
               HOFFSET(SparseWaveformSample, cherenkov_pe), H5T_NATIVE_FLOAT);
     H5Tinsert(type, "nsb_pe",
@@ -166,8 +149,7 @@ void writeHdf5Waveforms(
     const std::vector<std::int32_t>& pixel_id_axis,
     const std::vector<Hdf5WaveformImage>& images,
     const std::map<WaveformKey, WaveformPixelAccumulator>& waveforms,
-    const std::vector<RawWaveformHit>& raw_hits,
-    const CameraElectronicsEventMap& electronics_events)
+    const std::vector<RawWaveformHit>& raw_hits)
 {
     if (!waveform.enabled || !output.hdf5_write_waveforms ||
         pixel_id_axis.empty()) {
@@ -175,26 +157,16 @@ void writeHdf5Waveforms(
     }
     const std::size_t n_images = images.size();
     const std::size_t n_pixels = pixel_id_axis.size();
-    const bool electronics_source = waveform.source == "electronics";
-    std::size_t n_bins = binCount(waveform);
-    if (electronics_source && !electronics_events.empty()) {
-        n_bins = electronics_events.begin()->second.detector.n_samples;
-    }
+    const std::size_t n_bins = binCount(waveform);
 
     std::vector<double> time_edges(n_bins + 1, 0.0);
     std::vector<double> time_centers(n_bins, 0.0);
-    if (electronics_source && !electronics_events.empty()) {
-        time_edges = electronics_events.begin()->second.detector.time_edges_ns;
-        time_centers =
-            electronics_events.begin()->second.detector.time_centers_ns;
-    } else {
-        for (std::size_t i = 0; i <= n_bins; ++i) {
-            time_edges[i] = waveform.time_window_start_ns +
-                            static_cast<double>(i) * waveform.time_bin_width_ns;
-        }
-        for (std::size_t i = 0; i < n_bins; ++i) {
-            time_centers[i] = 0.5 * (time_edges[i] + time_edges[i + 1]);
-        }
+    for (std::size_t i = 0; i <= n_bins; ++i) {
+        time_edges[i] = waveform.time_window_start_ns +
+                        static_cast<double>(i) * waveform.time_bin_width_ns;
+    }
+    for (std::size_t i = 0; i < n_bins; ++i) {
+        time_centers[i] = 0.5 * (time_edges[i] + time_edges[i + 1]);
     }
 
     std::map<SummaryKey, std::size_t> image_row_by_key;
@@ -207,11 +179,7 @@ void writeHdf5Waveforms(
     for (std::size_t row = 0; row < images.size(); ++row) {
         image_row_by_key[{images[row].event_id, images[row].telescope_id}] = row;
         row_by_image_index[images[row].image_index] = row;
-        const auto canonical = electronics_events.find(
-            {images[row].event_id, images[row].telescope_id});
-        if (electronics_source && canonical != electronics_events.end()) {
-            reference_time_ns[row] = canonical->second.reference_time_ns;
-        } else if (waveform.time_reference == "image_first" &&
+        if (waveform.time_reference == "image_first" &&
             std::isfinite(images[row].time_first_ns)) {
             reference_time_ns[row] = images[row].time_first_ns;
         } else if (waveform.time_reference == "image_mean" &&
@@ -236,40 +204,11 @@ void writeHdf5Waveforms(
         sample.time_bin = static_cast<std::int32_t>(bin);
         sample.photon_count += photon_count;
         sample.pe += pe;
-        sample.sample_value += pe;
         sample.cherenkov_pe += cherenkov_pe;
         sample.nsb_pe += nsb_pe;
     };
 
-    if (electronics_source) {
-        for (std::size_t row = 0; row < images.size(); ++row) {
-            const auto canonical = electronics_events.find(
-                {images[row].event_id, images[row].telescope_id});
-            if (canonical == electronics_events.end()) {
-                throw std::runtime_error(
-                    "HDF5 waveform writer has no canonical electronics event");
-            }
-            const auto& result = canonical->second.detector;
-            if (result.n_pixels != n_pixels || result.n_samples != n_bins) {
-                throw std::runtime_error(
-                    "canonical electronics waveform shape mismatch");
-            }
-            for (std::size_t col = 0; col < n_pixels; ++col) {
-                for (std::size_t bin = 0; bin < n_bins; ++bin) {
-                    const float value = static_cast<float>(
-                        result.waveform[col * n_bins + bin]);
-                    if (value == 0.0f) continue;
-                    const std::size_t flat =
-                        (row * n_bins + bin) * n_pixels + col;
-                    auto& sample = samples_by_index[flat];
-                    sample.image_index = images[row].image_index;
-                    sample.pixel_id = pixel_id_axis[col];
-                    sample.time_bin = static_cast<std::int32_t>(bin);
-                    sample.sample_value = value;
-                }
-            }
-        }
-    } else for (const auto& item : waveforms) {
+    for (const auto& item : waveforms) {
         const auto& value = item.second;
         const auto image = image_row_by_key.find(
             {value.event_id, value.telescope_id});
@@ -291,7 +230,7 @@ void writeHdf5Waveforms(
                       0, pe, pe, 0.0f);
         }
     }
-    if (!electronics_source && usesImageReference(waveform)) {
+    if (usesImageReference(waveform)) {
         for (const auto& hit : raw_hits) {
             const auto image = image_row_by_key.find(
                 {hit.event_id, hit.telescope_id});
@@ -315,7 +254,7 @@ void writeHdf5Waveforms(
             }
         }
     }
-    if (!electronics_source && waveform.source == "pe" && nsb.enabled &&
+    if (waveform.source == "pe" && nsb.enabled &&
         nsb.rate_pe_per_ns_per_pixel > 0.0) {
         for (std::size_t row = 0; row < images.size(); ++row) {
             generateTimeBinnedNsbPe(
@@ -342,31 +281,11 @@ void writeHdf5Waveforms(
                              ? "sparse_coo"
                              : "dense");
     writeStringAttribute(group, "shape", "image_index,time_bin,pixel_id_axis");
-    if (electronics_source && !electronics_events.empty()) {
-        const auto& detector = electronics_events.begin()->second.detector;
-        writeStringAttribute(group, "sample_unit", detector.sample_unit);
-        writeStringAttribute(group, "template_time_reference",
-                             detector.template_time_reference);
-        writeScalarAttribute(group, "single_pe_area_mv_ns", H5T_NATIVE_DOUBLE,
-                             detector.single_pe_area_mv_ns);
-        const std::uint8_t charge_enabled =
-            detector.charge_fluctuation_enabled ? 1U : 0U;
-        const std::uint8_t jitter_enabled =
-            detector.time_jitter_enabled ? 1U : 0U;
-        writeScalarAttribute(group, "charge_fluctuation_enabled",
-                             H5T_NATIVE_UINT8, charge_enabled);
-        writeScalarAttribute(group, "time_jitter_enabled",
-                             H5T_NATIVE_UINT8, jitter_enabled);
-        writePlain1D(group, "reference_pulse_time_ns", H5T_NATIVE_DOUBLE,
-                     detector.reference_pulse_time_ns);
-        writePlain1D(group, "reference_pulse_amplitude", H5T_NATIVE_DOUBLE,
-                     detector.reference_pulse_amplitude);
-    }
     writeStringAttribute(
         group, "note",
-        electronics_source
-            ? "canonical detector waveform shared with ROOT and CSV"
-            : "proxy waveform accumulated at camera/collector output");
+        output.hdf5_waveform_storage == "sparse"
+            ? "sparse proxy waveform at camera/collector output; real electronics is not modeled"
+            : "proxy waveform accumulated at camera/collector output; real electronics waveform is not modeled");
     writePlain1D(group, "pixel_id_axis", H5T_NATIVE_INT32, pixel_id_axis);
     writePlain1D(group, "time_edges_ns", H5T_NATIVE_DOUBLE, time_edges);
     writePlain1D(group, "time_centers_ns", H5T_NATIVE_DOUBLE, time_centers);
@@ -378,12 +297,9 @@ void writeHdf5Waveforms(
         const std::size_t size = n_images * n_bins * n_pixels;
         std::vector<std::int32_t> photon_count;
         std::vector<float> pe;
-        std::vector<float> sample_value;
         std::vector<float> cherenkov_pe;
         std::vector<float> nsb_pe;
-        if (electronics_source) {
-            sample_value.assign(size, 0.0f);
-        } else if (waveform.source == "photon_count") {
+        if (waveform.source == "photon_count") {
             photon_count.assign(size, 0);
         } else if (waveform.source == "pe") {
             pe.assign(size, 0.0f);
@@ -398,9 +314,7 @@ void writeHdf5Waveforms(
             const std::size_t flat =
                 (row * n_bins + static_cast<std::size_t>(sample.time_bin)) *
                     n_pixels + col;
-            if (electronics_source) {
-                sample_value[flat] = sample.sample_value;
-            } else if (waveform.source == "photon_count") {
+            if (waveform.source == "photon_count") {
                 photon_count[flat] = sample.photon_count;
             } else if (waveform.source == "pe") {
                 pe[flat] = sample.pe;
@@ -410,10 +324,7 @@ void writeHdf5Waveforms(
                 }
             }
         }
-        if (electronics_source) {
-            writePlain3D(group, "sample_value", H5T_NATIVE_FLOAT,
-                         sample_value, n_images, n_bins, n_pixels);
-        } else if (waveform.source == "photon_count") {
+        if (waveform.source == "photon_count") {
             writePlain3D(group, "photon_count", H5T_NATIVE_INT32, photon_count,
                          n_images, n_bins, n_pixels);
         } else if (waveform.source == "pe") {

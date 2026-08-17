@@ -54,32 +54,6 @@ Vec3 corsikaNwuViewingDirection(double azimuth_north_to_east_deg,
     }.normalized();
 }
 
-double showerAxisImpactParameterM(
-    const Vec3& telescope_position_nwu_m,
-    const Vec3& shower_core_nwu_m,
-    const Vec3& viewing_direction_nwu)
-{
-    requireFinite(telescope_position_nwu_m.x, "impact telescope x");
-    requireFinite(telescope_position_nwu_m.y, "impact telescope y");
-    requireFinite(telescope_position_nwu_m.z, "impact telescope z");
-    requireFinite(shower_core_nwu_m.x, "impact shower core x");
-    requireFinite(shower_core_nwu_m.y, "impact shower core y");
-    requireFinite(shower_core_nwu_m.z, "impact shower core z");
-    if (!std::isfinite(viewing_direction_nwu.x) ||
-        !std::isfinite(viewing_direction_nwu.y) ||
-        !std::isfinite(viewing_direction_nwu.z) ||
-        viewing_direction_nwu.norm() <= 0.0) {
-        throw std::runtime_error(
-            "impact viewing direction must be finite and non-zero");
-    }
-
-    const Vec3 direction = viewing_direction_nwu.normalized();
-    const Vec3 displacement = telescope_position_nwu_m - shower_core_nwu_m;
-    const Vec3 perpendicular =
-        displacement - direction * displacement.dot(direction);
-    return perpendicular.norm();
-}
-
 double planeWavefrontGeometricDelayNs(
     const Vec3& telescope_position_nwu_m,
     const Vec3& viewing_direction_nwu,

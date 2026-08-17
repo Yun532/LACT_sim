@@ -8,11 +8,9 @@
 #include <set>
 #include <string>
 #include <tuple>
-#include <utility>
 #include <vector>
 
 #include "core/Photon.hpp"
-#include "electronics/DetectorPipeline.hpp"
 #include "geometry/CameraGeometry.hpp"
 #include "geometry/FacetFactory.hpp"
 #include "geometry/FacetLayoutUtils.hpp"
@@ -52,12 +50,6 @@ struct ComponentConfigPaths {
     std::string obstruction;
 };
 
-struct ConfigCommandLine {
-    std::vector<std::string> positional;
-    std::vector<std::pair<std::string, std::string>> overrides;
-    bool help = false;
-};
-
 struct PropagationConfig {
     double speed_of_light_m_per_ns = 0.299792458;
 };
@@ -69,7 +61,6 @@ struct TelescopeConfig {
     double pointing_az_deg = 0.0;
     double pointing_el_deg = 90.0;
     double focal_length_m = 8.0;
-    double effective_focal_length_m = 8.1787;
     std::string coordinate_system = "array";
 };
 
@@ -111,21 +102,8 @@ struct ObstructionMask {
     int ny = 0;
     std::vector<std::uint8_t> blocked;
 
-    // Primitive kinds are resolved once while loading the CSV so the photon
-    // loop compares an enum instead of lowercasing `type` per primitive per
-    // hit. Hand-built masks that leave `kind` unset still work: the lookup
-    // falls back to `type`, so forgetting to populate it costs speed, never
-    // correctness.
-    enum class PrimitiveKind {
-        Unknown,
-        Cylinder,
-        Box,
-        PolygonPrism,
-    };
-
     struct Primitive {
         std::string type;
-        PrimitiveKind kind = PrimitiveKind::Unknown;
         std::string name;
         std::string role = "default";
         std::string material_id = "default";
@@ -147,26 +125,12 @@ struct ObstructionMask {
 
     std::vector<Primitive> primitives;
 
-    // Bounding radius around the local origin enclosing every primitive,
-    // resolved once by buildObstructionMask. Zero means "not derived yet";
-    // the upstream check then computes it on the fly.
-    double primitive_bound_radius_m = 0.0;
-
-    bool usesPrimitives() const { return mode == "primitives"; }
-
     bool contains(double x_m, double y_m) const;
 };
-
-// Kind of a loaded primitive, falling back to the textual type when the
-// enum has not been resolved (hand-built masks in tests).
-ObstructionMask::PrimitiveKind obstructionPrimitiveKind(
-    const ObstructionMask::Primitive& primitive);
 
 struct CameraConfig {
     bool enabled = false;
     std::string mode = "none";
-    bool whiteboard = false;
-    bool implicit_whiteboard_legacy = false;
     std::string csv_path;
     std::string pixel_shape = "hexagonal";
     double pixel_size_m = 0.05;
@@ -185,32 +149,17 @@ struct SipmConfig {
 };
 
 struct ElectronicsConfig {
-    // Integrated SiPM microcell saturation.  This operates directly on the
-    // detected p.e. image and therefore does not require waveform output.
-    int channels_per_pixel = 8;
-    int microcells_per_channel = 33792;
-    bool saturation_enabled = true;
-    std::string saturation_model = "hard_no_recovery";
 };
 
 struct NsbConfig {
     bool enabled = false;
     std::string model = "constant_rate";
     double rate_pe_per_ns_per_pixel = 0.0;
-    // NSB integration gate used by the saved camera image. The gate is
-    // [0, window_ns) relative to the event/waveform reference time. Waveform
-    // generation and triggering may use a wider interval.
-    double window_ns = 32.0;
+    double window_ns = 16.0;
     std::uint64_t seed = 12345ULL;
     std::string spectrum_csv;
     std::string spectrum_unit = "ph_s_nm_sr_m2";
     double effective_area_m2 = 0.0;
-    // Angular/spectral average probability for a photon at the collector
-    // entrance to reach the SiPM exit. Applied only when spectral_flux is
-    // converted into a detected-p.e. rate; constant_rate is already in p.e.
-    double collector_mean_transmission = 1.0;
-    bool collector_mean_transmission_configured = false;
-    double microcell_geometric_acceptance = 1.0;
     std::string pixel_solid_angle = "auto";
     double pixel_solid_angle_sr = 0.0;
     bool computed_from_spectrum = false;
@@ -219,10 +168,6 @@ struct NsbConfig {
 
 struct TriggerConfig {
     bool enabled = false;
-    // Camera triggering remains the default retained-event decision.  Array
-    // coincidence is an independent optional stage and is disabled by
-    // default for current LACT production.
-    bool array_enabled = false;
     double pixel_threshold_pe = 5.0;
     int camera_multiplicity = 3;
     int array_multiplicity = 2;
@@ -242,10 +187,7 @@ class ElectronicsResponse {
 public:
     ElectronicsResponse() = default;
     explicit ElectronicsResponse(const ElectronicsConfig& cfg);
-    double saturatedPe(double primary_pe) const;
-    std::vector<double> saturatedWaveform(
-        const std::vector<double>& primary_pe_by_time_bin) const;
-    double totalMicrocellsPerPixel() const;
+    double peConversion(double wavelength_nm) const;
 
 private:
     ElectronicsConfig cfg_;
@@ -312,10 +254,6 @@ std::string lowerCopy(std::string s);
 bool startsWith(const std::string& text, const std::string& prefix);
 std::string resolveRelativePath(const std::string& base_config_path, const std::string& path);
 std::map<std::string, std::string> readKeyValueConfig(const std::string& path);
-ConfigCommandLine parseConfigCommandLine(int argc, char** argv);
-void applyConfigOverrides(
-    std::map<std::string, std::string>& cfg,
-    const std::vector<std::pair<std::string, std::string>>& overrides);
 std::string scopedComponentKey(const std::string& key, const std::string& prefix);
 std::map<std::string, std::string> expandConfig(const std::map<std::string, std::string>& main_cfg,
                                                 const std::string& main_config_path,
@@ -399,24 +337,17 @@ OutputPlane buildOutputPlane(const std::map<std::string, std::string>& cfg);
 CameraConfig buildCameraConfig(const std::map<std::string, std::string>& cfg);
 SipmConfig buildSipmConfig(const std::map<std::string, std::string>& cfg);
 ElectronicsConfig buildElectronicsConfig(const std::map<std::string, std::string>& cfg);
-electronics::DetectorPipelineConfig buildDetectorPipelineConfig(
-    const std::map<std::string, std::string>& cfg);
-void validateCameraDetectorCompatibility(
-    const CameraConfig& camera,
-    const electronics::DetectorPipelineConfig& detector);
 NsbConfig buildNsbConfig(const std::map<std::string, std::string>& cfg);
 void resolveNsbSpectralRate(NsbConfig& nsb,
                             const OpticalEfficiencyConfig& efficiency_cfg,
                             const CameraGeometry& camera,
-                            const TelescopeConfig& telescope,
-                            const electronics::DetectorPipelineConfig* detector = nullptr);
+                            const TelescopeConfig& telescope);
 void generateIntegratedNsbPe(const NsbConfig& nsb,
                              int event_id,
                              int telescope_id,
                              std::size_t n_pixels,
                              double window_ns,
                              const std::function<void(std::size_t, float)>& add_sample);
-bool nsbTimeInImageWindow(const NsbConfig& nsb, double relative_time_ns);
 void generateTimeBinnedNsbPe(const NsbConfig& nsb,
                              const WaveformOutputConfig& waveform_cfg,
                              int event_id,
@@ -441,9 +372,7 @@ void applyCameraResponse(const CameraGeometry& camera,
                          const SipmConfig& sipm,
                          const ElectronicsResponse& electronics,
                          OpticalSurfaceHit& hit,
-                         double speed_of_light_m_per_ns = 0.299792458,
-                         const ::lact::electronics::MicrocellConfig* microcell = nullptr,
-                         double post_geometry_pde_scale = 1.0);
+                         double speed_of_light_m_per_ns = 0.299792458);
 void accumulatePixelHit(std::map<PixelKey, PixelAccumulator>& pixels,
                         int event_id,
                         int telescope_id,

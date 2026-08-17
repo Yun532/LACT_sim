@@ -7,7 +7,6 @@
 
 #include "app/OpticalSimCommon.hpp"
 #include "io/CorsikaTraceOutputTypes.hpp"
-#include "io/CameraElectronicsEvent.hpp"
 #include "io/EventIOPhotonSource.hpp"
 
 namespace lact {
@@ -33,8 +32,7 @@ public:
     void writeEvent(const std::map<SummaryKey, TraceSummary>& summaries,
                     const std::map<PixelKey, PixelAccumulator>& pixels,
                     const std::map<WaveformKey, WaveformPixelAccumulator>& waveforms,
-                    const std::vector<RawWaveformHit>& raw_waveform_hits,
-                    const CameraElectronicsEventMap& electronics_events);
+                    const std::vector<RawWaveformHit>& raw_waveform_hits);
     void finish();
 
 private:

@@ -184,60 +184,6 @@ std::map<std::string, std::string> readKeyValueConfig(const std::string& path) {
     return values;
 }
 
-ConfigCommandLine parseConfigCommandLine(int argc, char** argv)
-{
-    ConfigCommandLine out;
-    bool parse_options = true;
-    auto append_override = [&](const std::string& text) {
-        const auto equal = text.find('=');
-        if (equal == std::string::npos) {
-            throw std::runtime_error(
-                "configuration override must be key=value: " + text);
-        }
-        const std::string key = lowerCopy(trim(text.substr(0, equal)));
-        if (key.empty()) {
-            throw std::runtime_error(
-                "configuration override has an empty key: " + text);
-        }
-        out.overrides.emplace_back(key, trim(text.substr(equal + 1)));
-    };
-
-    for (int i = 1; i < argc; ++i) {
-        const std::string argument = argv[i];
-        if (parse_options && argument == "--") {
-            parse_options = false;
-        } else if (parse_options &&
-                   (argument == "--help" || argument == "-h")) {
-            out.help = true;
-        } else if (parse_options &&
-                   (argument == "-C" || argument == "--set")) {
-            if (i + 1 >= argc) {
-                throw std::runtime_error(argument + " requires key=value");
-            }
-            append_override(argv[++i]);
-        } else if (parse_options && startsWith(argument, "-C") &&
-                   argument.size() > 2) {
-            append_override(argument.substr(2));
-        } else if (parse_options && startsWith(argument, "--set=")) {
-            append_override(argument.substr(6));
-        } else if (parse_options && !argument.empty() && argument[0] == '-') {
-            throw std::runtime_error("unknown command-line option: " + argument);
-        } else {
-            out.positional.push_back(argument);
-        }
-    }
-    return out;
-}
-
-void applyConfigOverrides(
-    std::map<std::string, std::string>& cfg,
-    const std::vector<std::pair<std::string, std::string>>& overrides)
-{
-    for (const auto& [key, value] : overrides) {
-        cfg[key] = value;
-    }
-}
-
 std::string scopedComponentKey(const std::string& key, const std::string& prefix) {
     if (startsWith(key, "telescope.") ||
         startsWith(key, "mirror.") || startsWith(key, "source.") ||
@@ -341,14 +287,6 @@ void mergeComponentConfig(std::map<std::string, std::string>& dst,
             value = resolveRelativePath(path, value);
         }
         if (scoped == "nsb.spectrum_csv") {
-            value = resolveRelativePath(path, value);
-        }
-        if (scoped == "electronics.microcell.device" ||
-            scoped == "electronics.single_pe.csv" ||
-            scoped == "electronics.single_pe.csv_path" ||
-            scoped == "electronics.single_pe.template" ||
-            scoped == "electronics.single_pe.charge_fluctuation.csv_path" ||
-            scoped == "electronics.single_pe.charge_fluctuation.samples") {
             value = resolveRelativePath(path, value);
         }
         dst[scoped] = value;
@@ -2019,8 +1957,7 @@ SourceRuntimeConfig buildSourceRuntimeConfig(const std::map<std::string, std::st
     runtime.use_eventio = isEventIOMode(mode_text);
     runtime.csv_path = getString(cfg, "source.csv_path", "");
     runtime.eventio_path = getString(cfg, "source.eventio_path", "");
-    runtime.event_id_mode = getString(
-        cfg, "source.event_id_mode", runtime.event_id_mode);
+    runtime.event_id_mode = getString(cfg, "source.event_id_mode", "event");
     const auto coordinate_frame_it = cfg.find("source.coordinate_frame");
     if (coordinate_frame_it != cfg.end()) {
         runtime.coordinate_frame = normalizeSourceCoordinateFrame(coordinate_frame_it->second);
@@ -2274,7 +2211,6 @@ CameraConfig buildCameraConfig(const std::map<std::string, std::string>& cfg) {
     CameraConfig camera;
     camera.enabled = getBool(cfg, "camera.enabled", false);
     camera.mode = getString(cfg, "camera.mode", camera.enabled ? "hex_grid" : "none");
-    camera.mode = lowerCopy(trim(camera.mode));
     camera.csv_path = getString(cfg, "camera.csv_path", "");
     camera.pixel_shape = getString(cfg, "camera.pixel_shape", camera.pixel_shape);
     camera.pixel_size_m = getDouble(cfg, "camera.pixel_size_m", camera.pixel_size_m);
@@ -2293,34 +2229,8 @@ CameraConfig buildCameraConfig(const std::map<std::string, std::string>& cfg) {
                   camera.collector_exit_size_m);
     camera.collector_height_m =
         getDouble(cfg, "camera.collector_height_m", camera.collector_height_m);
-    camera.whiteboard = camera.mode == "whiteboard";
-    if (camera.whiteboard && camera.enabled) {
-        throw std::runtime_error(
-            "camera.mode=whiteboard conflicts with camera.enabled=true");
-    }
-    if (camera.whiteboard) {
+    if (isDisabledText(camera.mode)) {
         camera.enabled = false;
-        const std::string output_mode = lowerCopy(trim(getString(
-            cfg, "output.mode", "hits")));
-        if (output_mode == "pixel" || output_mode == "pixels" ||
-            output_mode == "both" || cfg.find("output.pixel_csv") != cfg.end()) {
-            throw std::runtime_error(
-                "camera.mode=whiteboard cannot be used with pixel output");
-        }
-        if (getBool(cfg, "electronics.enabled", false)) {
-            throw std::runtime_error(
-                "camera.mode=whiteboard cannot enable electronics");
-        }
-        if (getBool(cfg, "trigger.enabled", false)) {
-            throw std::runtime_error(
-                "camera.mode=whiteboard cannot enable trigger");
-        }
-    } else if (isDisabledText(camera.mode)) {
-        camera.enabled = false;
-    }
-    camera.implicit_whiteboard_legacy = !camera.enabled && !camera.whiteboard;
-    if (camera.implicit_whiteboard_legacy) {
-        camera.mode = "none";
     }
     if (camera.enabled) {
         if (!std::isfinite(camera.pixel_size_m) || camera.pixel_size_m <= 0.0) {
@@ -2360,391 +2270,19 @@ SipmConfig buildSipmConfig(const std::map<std::string, std::string>& cfg) {
 ElectronicsResponse::ElectronicsResponse(const ElectronicsConfig& cfg)
     : cfg_(cfg)
 {
-    if (cfg_.channels_per_pixel <= 0) {
-        throw std::runtime_error(
-            "electronics.sipm.channels_per_pixel must be > 0");
-    }
-    if (cfg_.microcells_per_channel <= 0) {
-        throw std::runtime_error(
-            "electronics.sipm.microcells_per_channel must be > 0");
-    }
-    if (cfg_.saturation_model != "hard_no_recovery") {
-        throw std::runtime_error(
-            "electronics.sipm.saturation_model must be hard_no_recovery");
-    }
+    (void)cfg_;
 }
 
-double ElectronicsResponse::totalMicrocellsPerPixel() const
+double ElectronicsResponse::peConversion(double wavelength_nm) const
 {
-    return static_cast<double>(cfg_.channels_per_pixel) *
-           static_cast<double>(cfg_.microcells_per_channel);
-}
-
-double ElectronicsResponse::saturatedPe(double primary_pe) const
-{
-    if (!std::isfinite(primary_pe) || primary_pe < 0.0) {
-        throw std::runtime_error("integrated primary p.e. must be finite and >= 0");
-    }
-    if (!cfg_.saturation_enabled || primary_pe == 0.0) {
-        return primary_pe;
-    }
-    const double cells = totalMicrocellsPerPixel();
-    return -cells * std::expm1(-primary_pe / cells);
-}
-
-std::vector<double> ElectronicsResponse::saturatedWaveform(
-    const std::vector<double>& primary_pe_by_time_bin) const
-{
-    for (const double primary_pe : primary_pe_by_time_bin) {
-        if (!std::isfinite(primary_pe) || primary_pe < 0.0) {
-            throw std::runtime_error(
-                "primary p.e. waveform samples must be finite and >= 0");
-        }
-    }
-    if (!cfg_.saturation_enabled) {
-        return primary_pe_by_time_bin;
-    }
-    std::vector<double> fired_pe_by_time_bin;
-    fired_pe_by_time_bin.reserve(primary_pe_by_time_bin.size());
-    double cumulative_primary_pe = 0.0;
-    double cumulative_fired_pe = 0.0;
-    for (const double primary_pe : primary_pe_by_time_bin) {
-        cumulative_primary_pe += primary_pe;
-        const double next_cumulative_fired_pe =
-            saturatedPe(cumulative_primary_pe);
-        fired_pe_by_time_bin.push_back(std::max(
-            0.0, next_cumulative_fired_pe - cumulative_fired_pe));
-        cumulative_fired_pe = next_cumulative_fired_pe;
-    }
-    return fired_pe_by_time_bin;
+    (void)wavelength_nm;
+    return 1.0;
 }
 
 ElectronicsConfig buildElectronicsConfig(const std::map<std::string, std::string>& cfg) {
+    (void)cfg;
     ElectronicsConfig electronics;
-    electronics.channels_per_pixel = getInt(
-        cfg, "electronics.sipm.channels_per_pixel",
-        electronics.channels_per_pixel);
-    electronics.microcells_per_channel = getInt(
-        cfg, "electronics.sipm.microcells_per_channel",
-        electronics.microcells_per_channel);
-    electronics.saturation_enabled = getBool(
-        cfg, "electronics.sipm.saturation_enabled",
-        electronics.saturation_enabled);
-    electronics.saturation_model = lowerCopy(trim(getString(
-        cfg, "electronics.sipm.saturation_model",
-        electronics.saturation_model)));
-    // Validate the parsed values even when only the configuration object is
-    // used later by an output writer.
-    (void)ElectronicsResponse(electronics);
     return electronics;
-}
-
-std::vector<double> readNormalizedPositiveCsvColumn(
-    const std::string& path,
-    const std::string& requested_column)
-{
-    std::ifstream input(path);
-    if (!input) {
-        throw std::runtime_error(
-            "failed to open empirical single-p.e. charge CSV: " + path);
-    }
-    std::string line;
-    if (!std::getline(input, line)) {
-        throw std::runtime_error(
-            "empty empirical single-p.e. charge CSV: " + path);
-    }
-    const auto header = splitCsvCells(line);
-    const auto column_it = std::find(
-        header.begin(), header.end(), requested_column);
-    if (column_it == header.end()) {
-        throw std::runtime_error(
-            "missing column '" + requested_column +
-            "' in empirical single-p.e. charge CSV: " + path);
-    }
-    const std::size_t column = static_cast<std::size_t>(
-        std::distance(header.begin(), column_it));
-    std::vector<double> values;
-    while (std::getline(input, line)) {
-        if (trim(line).empty() || trim(line).front() == '#') continue;
-        const auto cells = splitCsvCells(line);
-        if (column >= cells.size()) continue;
-        try {
-            const double value = std::stod(cells[column]);
-            if (std::isfinite(value) && value > 0.0) {
-                values.push_back(value);
-            }
-        } catch (const std::exception&) {
-            // Ignore non-numeric rows; the final empty check remains strict.
-        }
-    }
-    if (values.empty()) {
-        throw std::runtime_error(
-            "no positive numeric values in empirical single-p.e. charge CSV: " +
-            path);
-    }
-    double mean = 0.0;
-    for (const double value : values) mean += value;
-    mean /= static_cast<double>(values.size());
-    for (double& value : values) value /= mean;
-    return values;
-}
-
-void applyMicrocellDeviceConfig(
-    electronics::MicrocellConfig& microcell,
-    const std::string& path)
-{
-    if (trim(path).empty()) return;
-    const auto device = readKeyValueConfig(path);
-    const auto int_value = [&](const std::string& key, int fallback) {
-        return getInt(
-            device, key,
-            getInt(device, "microcell." + key, fallback));
-    };
-    const auto double_value = [&](const std::string& key, double fallback) {
-        return getDouble(
-            device, key,
-            getDouble(device, "microcell." + key, fallback));
-    };
-    const auto string_value = [&](const std::string& key,
-                                  const std::string& fallback) {
-        return getString(
-            device, key,
-            getString(device, "microcell." + key, fallback));
-    };
-
-    microcell.layout = lowerCopy(trim(string_value("layout", microcell.layout)));
-    microcell.channel_columns = int_value(
-        "channel_columns", microcell.channel_columns);
-    microcell.channel_rows = int_value("channel_rows", microcell.channel_rows);
-    microcell.channel_size_x_m = double_value(
-        "channel_size_x_m", microcell.channel_size_x_m);
-    microcell.channel_size_y_m = double_value(
-        "channel_size_y_m", microcell.channel_size_y_m);
-    microcell.channel_gap_x_m = double_value(
-        "channel_gap_x_m", microcell.channel_gap_x_m);
-    microcell.channel_gap_y_m = double_value(
-        "channel_gap_y_m", microcell.channel_gap_y_m);
-    microcell.microcell_columns_per_channel = int_value(
-        "microcell_columns_per_channel",
-        microcell.microcell_columns_per_channel);
-    microcell.microcell_rows_per_channel = int_value(
-        "microcell_rows_per_channel",
-        microcell.microcell_rows_per_channel);
-
-    // All redundant totals are derived from the independent device inputs.
-    microcell.channels_per_pixel =
-        microcell.channel_columns * microcell.channel_rows;
-    microcell.microcells_per_channel =
-        microcell.microcell_columns_per_channel *
-        microcell.microcell_rows_per_channel;
-    microcell.grid_columns =
-        microcell.channel_columns *
-        microcell.microcell_columns_per_channel;
-    microcell.grid_rows =
-        microcell.channel_rows *
-        microcell.microcell_rows_per_channel;
-    microcell.sensor_size_x_m =
-        microcell.channel_columns * microcell.channel_size_x_m +
-        (microcell.channel_columns - 1) * microcell.channel_gap_x_m;
-    microcell.sensor_size_y_m =
-        microcell.channel_rows * microcell.channel_size_y_m +
-        (microcell.channel_rows - 1) * microcell.channel_gap_y_m;
-}
-
-electronics::DetectorPipelineConfig buildDetectorPipelineConfig(
-    const std::map<std::string, std::string>& cfg)
-{
-    electronics::DetectorPipelineConfig out;
-    if (cfg.find("electronics.pipeline.enabled") != cfg.end()) {
-        throw std::runtime_error(
-            "electronics.pipeline.enabled has been removed; "
-            "use electronics.enabled instead");
-    }
-    out.enabled = getBool(cfg, "electronics.enabled", out.enabled);
-    out.random_seed = getUInt64(
-        cfg, "electronics.random_seed", out.random_seed);
-
-    const std::string microcell_device = getString(
-        cfg, "electronics.microcell.device", "");
-    applyMicrocellDeviceConfig(out.microcell, microcell_device);
-    out.microcell.enabled = getBool(
-        cfg, "electronics.microcell.enabled", out.microcell.enabled);
-    out.microcell.saturation_enabled = getBool(
-        cfg, "electronics.microcell.saturation_enabled",
-        out.microcell.saturation_enabled);
-    out.microcell.model = lowerCopy(trim(getString(
-        cfg, "electronics.microcell.model", out.microcell.model)));
-    out.microcell.layout = lowerCopy(trim(getString(
-        cfg, "electronics.microcell.layout", out.microcell.layout)));
-    out.microcell.sensor_size_x_m = getDouble(
-        cfg, "electronics.microcell.sensor_size_x_m",
-        getDouble(cfg, "sipm.size_m", out.microcell.sensor_size_x_m));
-    out.microcell.sensor_size_y_m = getDouble(
-        cfg, "electronics.microcell.sensor_size_y_m",
-        getDouble(cfg, "sipm.size_m", out.microcell.sensor_size_y_m));
-    out.microcell.grid_columns = getInt(
-        cfg, "electronics.microcell.grid_columns",
-        out.microcell.grid_columns);
-    out.microcell.grid_rows = getInt(
-        cfg, "electronics.microcell.grid_rows", out.microcell.grid_rows);
-    out.microcell.channels_per_pixel = getInt(
-        cfg, "electronics.microcell.channels_per_pixel",
-        out.microcell.channels_per_pixel);
-    out.microcell.microcells_per_channel = getInt(
-        cfg, "electronics.microcell.microcells_per_channel",
-        out.microcell.microcells_per_channel);
-    out.microcell.channel_columns = getInt(
-        cfg, "electronics.microcell.channel_columns",
-        out.microcell.channel_columns);
-    out.microcell.channel_rows = getInt(
-        cfg, "electronics.microcell.channel_rows",
-        out.microcell.channel_rows);
-    out.microcell.channel_size_x_m = getDouble(
-        cfg, "electronics.microcell.channel_size_x_m",
-        out.microcell.channel_size_x_m);
-    out.microcell.channel_size_y_m = getDouble(
-        cfg, "electronics.microcell.channel_size_y_m",
-        out.microcell.channel_size_y_m);
-    out.microcell.channel_gap_x_m = getDouble(
-        cfg, "electronics.microcell.channel_gap_x_m",
-        out.microcell.channel_gap_x_m);
-    out.microcell.channel_gap_y_m = getDouble(
-        cfg, "electronics.microcell.channel_gap_y_m",
-        out.microcell.channel_gap_y_m);
-    out.microcell.microcell_columns_per_channel = getInt(
-        cfg, "electronics.microcell.microcell_columns_per_channel",
-        out.microcell.microcell_columns_per_channel);
-    out.microcell.microcell_rows_per_channel = getInt(
-        cfg, "electronics.microcell.microcell_rows_per_channel",
-        out.microcell.microcell_rows_per_channel);
-    out.microcell.pde_includes_inter_channel_gaps = getBool(
-        cfg, "electronics.microcell.pde_includes_inter_channel_gaps",
-        out.microcell.pde_includes_inter_channel_gaps);
-    if (getBool(cfg, "electronics.microcell.recovery_enabled", false)) {
-        throw std::runtime_error(
-            "microcell recovery is not available; use "
-            "electronics.microcell.recovery_enabled=false");
-    }
-    out.single_pe.enabled = getBool(
-        cfg, "electronics.single_pe.enabled", out.single_pe.enabled);
-    out.single_pe.model = lowerCopy(trim(getString(
-        cfg, "electronics.single_pe.model", out.single_pe.model)));
-    out.single_pe.csv_path = getString(
-        cfg, "electronics.single_pe.template",
-        getString(cfg, "electronics.single_pe.csv",
-            getString(cfg, "electronics.single_pe.csv_path",
-                      out.single_pe.csv_path)));
-    out.single_pe.template_time_reference = lowerCopy(trim(getString(
-        cfg, "electronics.single_pe.template_time_reference",
-        out.single_pe.template_time_reference)));
-    out.single_pe.unit = lowerCopy(trim(getString(
-        cfg, "electronics.single_pe.unit", out.single_pe.unit)));
-    out.single_pe.rise_ns = getDouble(
-        cfg, "electronics.single_pe.rise_ns", out.single_pe.rise_ns);
-    out.single_pe.fall_ns = getDouble(
-        cfg, "electronics.single_pe.fall_ns", out.single_pe.fall_ns);
-    out.single_pe.support_ns = getDouble(
-        cfg, "electronics.single_pe.support_ns", out.single_pe.support_ns);
-    out.single_pe.amplitude_scale = getDouble(
-        cfg, "electronics.single_pe.amplitude_scale",
-        out.single_pe.amplitude_scale);
-
-    auto& charge = out.single_pe.charge_fluctuation;
-    charge.enabled = getBool(
-        cfg, "electronics.single_pe.charge_fluctuation.enabled",
-        charge.enabled);
-    charge.model = lowerCopy(trim(getString(
-        cfg, "electronics.single_pe.charge_fluctuation.model",
-        charge.model)));
-    charge.csv_path = getString(
-        cfg, "electronics.single_pe.charge_fluctuation.samples",
-        getString(cfg,
-            "electronics.single_pe.charge_fluctuation.csv_path",
-            charge.csv_path));
-    charge.csv_column = getString(
-        cfg, "electronics.single_pe.charge_fluctuation.csv_column",
-        charge.csv_column);
-    if (charge.enabled && !charge.csv_path.empty()) {
-        charge.empirical_samples = readNormalizedPositiveCsvColumn(
-            charge.csv_path, charge.csv_column);
-    }
-
-    auto& jitter = out.single_pe.time_jitter;
-    jitter.enabled = getBool(
-        cfg, "electronics.single_pe.time_jitter.enabled", jitter.enabled);
-    jitter.model = lowerCopy(trim(getString(
-        cfg, "electronics.single_pe.time_jitter.model", jitter.model)));
-    jitter.sigma_ns = getDouble(
-        cfg, "electronics.single_pe.time_jitter.sigma_ns",
-        jitter.sigma_ns);
-
-    out.sampling.width_ns = getDouble(
-        cfg, "electronics.sampling.width_ns",
-        getDouble(cfg, "waveform.time_bin_width_ns",
-                  out.sampling.width_ns));
-    out.sampling.start_ns = getDouble(
-        cfg, "electronics.sampling.start_ns",
-        getDouble(cfg, "waveform.time_window_start_ns",
-                  out.sampling.start_ns));
-    out.sampling.end_ns = getDouble(
-        cfg, "electronics.sampling.end_ns",
-        getDouble(cfg, "waveform.time_window_end_ns",
-                  out.sampling.end_ns));
-
-    out.camera_trigger.enabled = getBool(
-        cfg, "trigger.camera.enabled",
-        getBool(cfg, "trigger.enabled", out.camera_trigger.enabled));
-    out.camera_trigger.mode = lowerCopy(trim(getString(
-        cfg, "trigger.camera.mode", out.camera_trigger.mode)));
-    out.camera_trigger.pixel_threshold_pe = getDouble(
-        cfg, "trigger.camera.pixel_threshold_pe",
-        getDouble(cfg, "trigger.pixel_threshold_pe",
-                  out.camera_trigger.pixel_threshold_pe));
-    out.camera_trigger.pixel_threshold_mv = getDouble(
-        cfg, "trigger.camera.pixel_threshold_mv",
-        out.camera_trigger.pixel_threshold_mv);
-    out.camera_trigger.multiplicity = getInt(
-        cfg, "trigger.camera.multiplicity",
-        getInt(cfg, "trigger.camera_multiplicity",
-               out.camera_trigger.multiplicity));
-    out.camera_trigger.coincidence_window_ns = getDouble(
-        cfg, "trigger.camera.coincidence_window_ns",
-        getDouble(cfg, "trigger.camera_coincidence_window_ns",
-                  out.camera_trigger.coincidence_window_ns));
-    out.save_primary_sequence = getBool(
-        cfg, "electronics.output.save_primary_sequence",
-        out.save_primary_sequence);
-    out.save_fired_sequence = getBool(
-        cfg, "electronics.output.save_fired_sequence",
-        out.save_fired_sequence);
-    out.save_microcell_decisions = getBool(
-        cfg, "electronics.output.save_microcell_decisions",
-        out.save_microcell_decisions);
-    out.save_channel_waveforms = getBool(
-        cfg, "electronics.output.save_channel_waveforms",
-        out.save_channel_waveforms);
-    electronics::validateDetectorPipelineConfig(out);
-    return out;
-}
-
-void validateCameraDetectorCompatibility(
-    const CameraConfig& camera,
-    const electronics::DetectorPipelineConfig& detector)
-{
-    if (!detector.enabled || !detector.microcell.enabled ||
-        detector.microcell.layout != "s17351_tiled_2x4") {
-        return;
-    }
-    if (!camera.enabled) {
-        throw std::runtime_error(
-            "explicit S17351 microcell geometry requires camera.enabled=true");
-    }
-    if (isDisabledText(camera.collector)) {
-        throw std::runtime_error(
-            "explicit S17351 microcell geometry requires an enabled light "
-            "collector because microcell positions use collector-exit "
-            "coordinates; refusing the previous silent (0,0) gap rejection");
-    }
 }
 
 NsbConfig buildNsbConfig(const std::map<std::string, std::string>& cfg) {
@@ -2760,11 +2298,6 @@ NsbConfig buildNsbConfig(const std::map<std::string, std::string>& cfg) {
         lowerCopy(trim(getString(cfg, "nsb.spectrum_unit", nsb.spectrum_unit)));
     nsb.effective_area_m2 =
         getDouble(cfg, "nsb.effective_area_m2", nsb.effective_area_m2);
-    nsb.collector_mean_transmission = getDouble(
-        cfg, "nsb.collector_mean_transmission",
-        nsb.collector_mean_transmission);
-    nsb.collector_mean_transmission_configured =
-        cfg.find("nsb.collector_mean_transmission") != cfg.end();
     nsb.pixel_solid_angle =
         lowerCopy(trim(getString(cfg, "nsb.pixel_solid_angle", nsb.pixel_solid_angle)));
     nsb.pixel_solid_angle_sr =
@@ -2783,12 +2316,6 @@ NsbConfig buildNsbConfig(const std::map<std::string, std::string>& cfg) {
     }
     if (!std::isfinite(nsb.effective_area_m2) || nsb.effective_area_m2 < 0.0) {
         throw std::runtime_error("nsb.effective_area_m2 must be finite and >= 0");
-    }
-    if (!std::isfinite(nsb.collector_mean_transmission) ||
-        nsb.collector_mean_transmission <= 0.0 ||
-        nsb.collector_mean_transmission > 1.0) {
-        throw std::runtime_error(
-            "nsb.collector_mean_transmission must be finite and in (0, 1]");
     }
     if (!std::isfinite(nsb.pixel_solid_angle_sr) || nsb.pixel_solid_angle_sr < 0.0) {
         throw std::runtime_error("nsb.pixel_solid_angle_sr must be finite and >= 0");
@@ -2809,13 +2336,6 @@ NsbConfig buildNsbConfig(const std::map<std::string, std::string>& cfg) {
         if (nsb.effective_area_m2 <= 0.0) {
             throw std::runtime_error(
                 "nsb.effective_area_m2 must be > 0 for nsb.model=spectral_flux");
-        }
-        if (!nsb.collector_mean_transmission_configured) {
-            throw std::runtime_error(
-                "nsb.collector_mean_transmission must be explicitly set for "
-                "nsb.model=spectral_flux; use a measured/simulated collector "
-                "average, or set 1 only when effective_area_m2 already "
-                "includes the collector");
         }
     }
     if (isDisabledText(nsb.model)) {
@@ -2863,8 +2383,7 @@ std::vector<std::pair<double, double>> readNsbSpectrumCsv(const std::string& pat
 void resolveNsbSpectralRate(NsbConfig& nsb,
                             const OpticalEfficiencyConfig& efficiency_cfg,
                             const CameraGeometry& camera,
-                            const TelescopeConfig& telescope,
-                            const electronics::DetectorPipelineConfig* detector)
+                            const TelescopeConfig& telescope)
 {
     nsb.computed_from_spectrum = false;
     nsb.spectral_integral_pe_s_sr_m2 = 0.0;
@@ -2902,17 +2421,8 @@ void resolveNsbSpectralRate(NsbConfig& nsb,
         integral += 0.5 * (f0 + f1) * (w1 - w0);
     }
     nsb.spectral_integral_pe_s_sr_m2 = integral;
-    nsb.microcell_geometric_acceptance = 1.0;
-    if (detector && detector->enabled && detector->microcell.enabled &&
-        detector->microcell.layout == "s17351_tiled_2x4" &&
-        !detector->microcell.pde_includes_inter_channel_gaps) {
-        nsb.microcell_geometric_acceptance =
-            electronics::interChannelActiveFraction(detector->microcell);
-    }
     nsb.rate_pe_per_ns_per_pixel =
-        1.0e-9 * integral * nsb.effective_area_m2 *
-        nsb.pixel_solid_angle_sr * nsb.collector_mean_transmission *
-        nsb.microcell_geometric_acceptance;
+        1.0e-9 * integral * nsb.effective_area_m2 * nsb.pixel_solid_angle_sr;
     nsb.computed_from_spectrum = true;
 }
 
@@ -2936,12 +2446,6 @@ void generateIntegratedNsbPe(const NsbConfig& nsb,
             add_sample(col, pe);
         }
     }
-}
-
-bool nsbTimeInImageWindow(const NsbConfig& nsb, double relative_time_ns)
-{
-    return nsb.enabled && nsb.window_ns > 0.0 &&
-           relative_time_ns >= 0.0 && relative_time_ns < nsb.window_ns;
 }
 
 void generateTimeBinnedNsbPe(const NsbConfig& nsb,
@@ -2982,35 +2486,23 @@ void generateTimeBinnedNsbPe(const NsbConfig& nsb,
 
 TriggerConfig buildTriggerConfig(const std::map<std::string, std::string>& cfg) {
     TriggerConfig trigger;
-    trigger.enabled = getBool(
-        cfg, "trigger.camera.enabled",
-        getBool(cfg, "trigger.enabled", trigger.enabled));
-    trigger.array_enabled = getBool(
-        cfg, "trigger.array.enabled", trigger.array_enabled);
-    trigger.pixel_threshold_pe = getDouble(
-        cfg, "trigger.camera.pixel_threshold_pe",
-        getDouble(cfg, "trigger.pixel_threshold_pe",
-                  trigger.pixel_threshold_pe));
-    trigger.camera_multiplicity = getInt(
-        cfg, "trigger.camera.multiplicity",
-        getInt(cfg, "trigger.camera_multiplicity",
-               trigger.camera_multiplicity));
-    trigger.array_multiplicity = getInt(
-        cfg, "trigger.array.multiplicity",
-        getInt(cfg, "trigger.array_multiplicity",
-               trigger.array_multiplicity));
+    trigger.enabled = getBool(cfg, "trigger.enabled", trigger.enabled);
+    trigger.pixel_threshold_pe =
+        getDouble(cfg, "trigger.pixel_threshold_pe", trigger.pixel_threshold_pe);
+    trigger.camera_multiplicity =
+        getInt(cfg, "trigger.camera_multiplicity", trigger.camera_multiplicity);
+    trigger.array_multiplicity =
+        getInt(cfg, "trigger.array_multiplicity", trigger.array_multiplicity);
     const bool has_legacy_coincidence_window =
         cfg.find("trigger.coincidence_window_ns") != cfg.end();
     trigger.coincidence_window_ns = getDouble(
         cfg, "trigger.coincidence_window_ns", trigger.coincidence_window_ns);
     trigger.camera_coincidence_window_ns = getDouble(
-        cfg, "trigger.camera.coincidence_window_ns",
-        getDouble(
-            cfg,
-            "trigger.camera_coincidence_window_ns",
-            has_legacy_coincidence_window
-                ? trigger.coincidence_window_ns
-                : trigger.camera_coincidence_window_ns));
+        cfg,
+        "trigger.camera_coincidence_window_ns",
+        has_legacy_coincidence_window
+            ? trigger.coincidence_window_ns
+            : trigger.camera_coincidence_window_ns);
     trigger.array_coincidence_window_ns = getDouble(
         cfg,
         "trigger.array_coincidence_window_ns",
@@ -3213,19 +2705,12 @@ void applyCameraResponse(const CameraGeometry& camera,
                          const SipmConfig& sipm,
                          const ElectronicsResponse& electronics,
                          OpticalSurfaceHit& hit,
-                         double speed_of_light_m_per_ns,
-                         const ::lact::electronics::MicrocellConfig* microcell,
-                         double post_geometry_pde_scale)
+                         double speed_of_light_m_per_ns)
 {
     if (!std::isfinite(speed_of_light_m_per_ns) ||
         speed_of_light_m_per_ns <= 0.0) {
         throw std::runtime_error(
             "collector propagation speed must be finite and > 0");
-    }
-    if (!std::isfinite(post_geometry_pde_scale) ||
-        post_geometry_pde_scale <= 0.0) {
-        throw std::runtime_error(
-            "post-geometry PDE scale must be finite and > 0");
     }
     hit.camera_enabled = true;
     const double front_face_cosine =
@@ -3266,36 +2751,8 @@ void applyCameraResponse(const CameraGeometry& camera,
         }
     }
 
-    if (hit.hit_camera && microcell && microcell->enabled &&
-        microcell->layout == "s17351_tiled_2x4") {
-        if (!light_collector && hit.collector_exit_x_m == 0.0 &&
-            hit.collector_exit_y_m == 0.0 &&
-            hit.collector_exit_z_m == 0.0) {
-            throw std::runtime_error(
-                "explicit S17351 microcell geometry has no light-collector "
-                "exit coordinates; configure camera.collector or disable the "
-                "explicit microcell geometry");
-        }
-        hit.sipm_geometry_enabled = true;
-        const auto address = ::lact::electronics::mapMicrocellPosition(
-            *microcell, hit.collector_exit_x_m, hit.collector_exit_y_m);
-        hit.sipm_grid_column = address.grid_column;
-        hit.sipm_grid_row = address.grid_row;
-        hit.sipm_channel_id = address.channel_id;
-        hit.sipm_microcell_id = address.microcell_id;
-        if (!address.inside_channel) {
-            hit.sipm_gap_rejected = true;
-            hit.sipm_channel_gap_rejected = address.channel_gap;
-            hit.hit_camera = false;
-            hit.accepted = false;
-            hit.relative_efficiency = 0.0;
-            return;
-        }
-        // In expectation mode the datasheet PDE is still carried by the
-        // optical hit weight.  If that PDE was averaged over the full tiled
-        // package, condition it on being inside a real channel before the
-        // explicit channel-gap geometry is applied.
-        hit.relative_efficiency *= post_geometry_pde_scale;
+    if (hit.hit_camera) {
+        hit.relative_efficiency *= electronics.peConversion(hit.wavelength_nm);
     }
     hit.accepted = hit.hit_camera && hit.relative_efficiency > 0.0;
 }
@@ -3362,10 +2819,6 @@ TelescopeConfig buildTelescopeConfig(const std::map<std::string, std::string>& c
         getDouble(cfg, "telescope.pointing_el_deg", telescope.pointing_el_deg);
     telescope.focal_length_m =
         getDouble(cfg, "telescope.focal_length_m", telescope.focal_length_m);
-    telescope.effective_focal_length_m = getDouble(
-        cfg,
-        "telescope.effective_focal_length_m",
-        telescope.effective_focal_length_m);
     telescope.coordinate_system =
         getString(cfg, "telescope.coordinate_system", telescope.coordinate_system);
 
@@ -3380,11 +2833,6 @@ TelescopeConfig buildTelescopeConfig(const std::map<std::string, std::string>& c
     }
     if (!std::isfinite(telescope.focal_length_m) || telescope.focal_length_m <= 0.0) {
         throw std::runtime_error("telescope.focal_length_m must be finite and > 0");
-    }
-    if (!std::isfinite(telescope.effective_focal_length_m) ||
-        telescope.effective_focal_length_m <= 0.0) {
-        throw std::runtime_error(
-            "telescope.effective_focal_length_m must be finite and > 0");
     }
     return telescope;
 }
@@ -3707,34 +3155,29 @@ bool segmentBlockedLocal(const Vec3& a,
     if (!obstruction.enabled) {
         return false;
     }
-    if (obstruction.usesPrimitives()) {
+    if (lowerCopy(obstruction.mode) == "primitives") {
         for (const auto& primitive : obstruction.primitives) {
             if (!primitiveAppliesToLeg(primitive, leg)) {
                 continue;
             }
-            switch (obstructionPrimitiveKind(primitive)) {
-                case ObstructionMask::PrimitiveKind::Cylinder:
-                    if (segmentIntersectsCylinder(a, b, primitive.p0, primitive.p1,
-                                                  primitive.radius_m)) {
-                        return true;
-                    }
-                    break;
-                case ObstructionMask::PrimitiveKind::Box:
-                    if (segmentIntersectsBoxWithHole(a, b, primitive)) {
-                        return true;
-                    }
-                    break;
-                case ObstructionMask::PrimitiveKind::PolygonPrism:
-                    if (segmentIntersectsRegularPrism(a, b, primitive.center,
-                                                      primitive.radius_m,
-                                                      primitive.height_m,
-                                                      primitive.rotation_rad,
-                                                      primitive.sides)) {
-                        return true;
-                    }
-                    break;
-                case ObstructionMask::PrimitiveKind::Unknown:
-                    break;
+            const std::string type = lowerCopy(primitive.type);
+            if (type == "cylinder") {
+                if (segmentIntersectsCylinder(a, b, primitive.p0, primitive.p1,
+                                              primitive.radius_m)) {
+                    return true;
+                }
+            } else if (type == "box" || type == "aabb") {
+                if (segmentIntersectsBoxWithHole(a, b, primitive)) {
+                    return true;
+                }
+            } else if (type == "polygon_prism") {
+                if (segmentIntersectsRegularPrism(a, b, primitive.center,
+                                                  primitive.radius_m,
+                                                  primitive.height_m,
+                                                  primitive.rotation_rad,
+                                                  primitive.sides)) {
+                    return true;
+                }
             }
         }
         return false;
@@ -3752,51 +3195,6 @@ bool segmentBlockedLocal(const Vec3& a,
 }
 
 } // namespace
-
-ObstructionMask::PrimitiveKind obstructionPrimitiveKind(
-    const ObstructionMask::Primitive& primitive)
-{
-    if (primitive.kind != ObstructionMask::PrimitiveKind::Unknown) {
-        return primitive.kind;
-    }
-    // Masks assembled by hand (unit tests) only set the textual type.
-    if (primitive.type == "cylinder") {
-        return ObstructionMask::PrimitiveKind::Cylinder;
-    }
-    if (primitive.type == "box" || primitive.type == "aabb") {
-        return ObstructionMask::PrimitiveKind::Box;
-    }
-    if (primitive.type == "polygon_prism") {
-        return ObstructionMask::PrimitiveKind::PolygonPrism;
-    }
-    return ObstructionMask::PrimitiveKind::Unknown;
-}
-
-static double obstructionPrimitiveBoundRadiusM(const ObstructionMask& obstruction)
-{
-    double bound = 0.0;
-    for (const auto& primitive : obstruction.primitives) {
-        double reach = 0.0;
-        switch (obstructionPrimitiveKind(primitive)) {
-            case ObstructionMask::PrimitiveKind::Cylinder:
-                reach = std::max(primitive.p0.norm(), primitive.p1.norm()) +
-                        std::max(0.0, primitive.radius_m);
-                break;
-            case ObstructionMask::PrimitiveKind::Box:
-                reach = primitive.center.norm() + primitive.half_size.norm();
-                break;
-            case ObstructionMask::PrimitiveKind::PolygonPrism:
-                reach = primitive.center.norm() +
-                        std::hypot(std::max(0.0, primitive.radius_m),
-                                   0.5 * std::max(0.0, primitive.height_m));
-                break;
-            case ObstructionMask::PrimitiveKind::Unknown:
-                break;
-        }
-        bound = std::max(bound, reach);
-    }
-    return bound;
-}
 
 ObstructionMask buildObstructionMask(const std::map<std::string, std::string>& cfg)
 {
@@ -3842,13 +3240,6 @@ ObstructionMask buildObstructionMask(const std::map<std::string, std::string>& c
             }
             ObstructionMask::Primitive p;
             p.type = lowerCopy(csvGetString(row, "type"));
-            if (p.type == "cylinder") {
-                p.kind = ObstructionMask::PrimitiveKind::Cylinder;
-            } else if (p.type == "box" || p.type == "aabb") {
-                p.kind = ObstructionMask::PrimitiveKind::Box;
-            } else if (p.type == "polygon_prism") {
-                p.kind = ObstructionMask::PrimitiveKind::PolygonPrism;
-            }
             p.name = csvGetString(row, "name", csvGetString(row, "role", p.type));
             p.role = csvGetString(row, "role", "default");
             p.material_id = csvGetString(row, "material_id", "default");
@@ -3889,8 +3280,6 @@ ObstructionMask buildObstructionMask(const std::map<std::string, std::string>& c
             throw std::runtime_error("obstruction primitives CSV has no primitives: " +
                                      obstruction.primitives_csv);
         }
-        obstruction.primitive_bound_radius_m =
-            obstructionPrimitiveBoundRadiusM(obstruction);
         return obstruction;
     }
     if (isDisabledText(obstruction.mask_csv)) {
@@ -4029,12 +3418,29 @@ bool incomingRayBlockedByObstruction(const Vec3& mirror_point,
     d = d.normalized();
 
     double upstream_length = 0.0;
-    if (obstruction.usesPrimitives()) {
-        double bound_radius = obstruction.primitive_bound_radius_m;
-        if (!(bound_radius > 0.0)) {
-            bound_radius = obstructionPrimitiveBoundRadiusM(obstruction);
+    if (lowerCopy(obstruction.mode) == "primitives") {
+        double obstruction_radius = 0.0;
+        for (const auto& primitive : obstruction.primitives) {
+            const std::string type = lowerCopy(primitive.type);
+            if (type == "cylinder") {
+                obstruction_radius = std::max(
+                    obstruction_radius,
+                    std::max(primitive.p0.norm(), primitive.p1.norm()) +
+                        std::max(0.0, primitive.radius_m));
+            } else if (type == "box" || type == "aabb") {
+                obstruction_radius = std::max(
+                    obstruction_radius,
+                    primitive.center.norm() + primitive.half_size.norm());
+            } else if (type == "polygon_prism") {
+                const double half_height = 0.5 * std::max(0.0, primitive.height_m);
+                const double local_radius =
+                    std::hypot(std::max(0.0, primitive.radius_m), half_height);
+                obstruction_radius = std::max(
+                    obstruction_radius,
+                    primitive.center.norm() + local_radius);
+            }
         }
-        upstream_length = p.norm() + bound_radius + 1.0;
+        upstream_length = p.norm() + obstruction_radius + 1.0;
     } else {
         if (std::abs(d.z) < 1e-12) {
             return false;

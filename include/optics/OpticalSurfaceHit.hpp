@@ -60,15 +60,6 @@ struct OpticalSurfaceHit {
     double collector_dir_v = 0.0;
     double collector_dir_w = 0.0;
 
-    // Optional S17351 channel geometry diagnostics, populated before PDE.
-    bool sipm_geometry_enabled = false;
-    bool sipm_gap_rejected = false;
-    bool sipm_channel_gap_rejected = false;
-    int sipm_grid_column = -1;
-    int sipm_grid_row = -1;
-    int sipm_channel_id = -1;
-    int sipm_microcell_id = -1;
-
     // 时间、波长、权重
     double time_ns = 0.0;
     double wavelength_nm = 0.0;
