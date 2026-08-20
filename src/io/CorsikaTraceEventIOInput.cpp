@@ -30,8 +30,8 @@ PhotonBunch transformEventIOBunchToTraceFrame(
     }
     PhotonBunch out = transformBunchToTelescopeLocal(input, telescope, frame_name);
     if (source_runtime_cfg.use_eventio || out.eventio_2d) {
-        applyEventIOReferenceZOffset(
-            out, source_runtime_cfg.eventio_reference_z_m);
+        applyEventIORotationCenter(
+            out, source_runtime_cfg.eventio_rotation_center_local_m);
     }
     return out;
 }
