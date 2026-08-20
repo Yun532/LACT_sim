@@ -1,6 +1,9 @@
 #include "app/OpticalSimCommon.hpp"
 #include "app/CorsikaTraceConfig.hpp"
 
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <stdexcept>
@@ -95,6 +98,65 @@ int main()
         ok = false;
     } catch (...) {
     }
+
+    const auto original_cwd = std::filesystem::current_path();
+    const auto path_test_root = std::filesystem::temp_directory_path() /
+        ("lact_config_path_" + std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()));
+    try {
+        const auto project = path_test_root / "project";
+        const auto config_dir = project / "configs" / "examples";
+        const auto asset = project / "configs" / "assets" / "input.csv";
+        const auto cwd = path_test_root / "cwd";
+        std::filesystem::create_directories(config_dir);
+        std::filesystem::create_directories(asset.parent_path());
+        std::filesystem::create_directories(cwd / "cwd-only");
+        std::ofstream(config_dir / "main.cfg") << "source.mode=PhotonCsv\n";
+        std::ofstream(asset) << "x,y\n0,0\n";
+        std::ofstream(cwd / "cwd-only" / "input.csv") << "x,y\n0,0\n";
+
+        const auto root_relative = resolveRelativePath(
+            (config_dir / "main.cfg").string(),
+            "configs/assets/input.csv");
+        ok &= check(std::filesystem::equivalent(root_relative, asset),
+                    "repository-root-style config path fallback failed");
+
+        const auto owner_relative = resolveRelativePath(
+            (config_dir / "main.cfg").string(),
+            "../assets/input.csv");
+        ok &= check(std::filesystem::equivalent(owner_relative, asset),
+                    "config-directory-relative path resolution changed");
+
+        const auto absolute = resolveRelativePath(
+            (config_dir / "main.cfg").string(), asset.string());
+        ok &= check(std::filesystem::equivalent(absolute, asset),
+                    "absolute input path was prefixed or rewritten");
+
+        std::filesystem::current_path(cwd);
+        const auto cwd_relative = resolveRelativePath(
+            (config_dir / "main.cfg").string(), "cwd-only/input.csv");
+        ok &= check(std::filesystem::equivalent(
+                        cwd_relative, cwd / "cwd-only" / "input.csv"),
+                    "working-directory path fallback failed");
+
+        std::filesystem::create_directories(config_dir / "ambiguous");
+        std::filesystem::create_directories(cwd / "ambiguous");
+        std::ofstream(config_dir / "ambiguous" / "input.csv") << "owner\n";
+        std::ofstream(cwd / "ambiguous" / "input.csv") << "cwd\n";
+        try {
+            (void)resolveRelativePath(
+                (config_dir / "main.cfg").string(), "ambiguous/input.csv");
+            std::cerr << "ambiguous config input path was accepted\n";
+            ok = false;
+        } catch (const std::runtime_error&) {
+        }
+    } catch (const std::exception& error) {
+        std::cerr << "config path test setup failed: " << error.what() << '\n';
+        ok = false;
+    }
+    std::filesystem::current_path(original_cwd);
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(path_test_root, cleanup_error);
 
     return ok ? 0 : 1;
 }

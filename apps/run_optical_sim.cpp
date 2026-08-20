@@ -187,9 +187,9 @@ int main(int argc, char** argv) {
                        sourceCoordinateFrameDescription(source_runtime_cfg.coordinate_frame));
             if (source_runtime_cfg.use_photon_csv &&
                 getBool(cfg, "source.eventio_2d", false)) {
-                printField("eventio_reference_z_m",
-                           doubleToString(
-                               source_runtime_cfg.eventio_reference_z_m));
+                printField("rotation_center_local_m",
+                           vec3ToString(source_runtime_cfg
+                                            .eventio_rotation_center_local_m));
                 printField("eventio_2d_plane_mode",
                            source_runtime_cfg.eventio_2d_plane_mode);
                 printField(
@@ -457,8 +457,8 @@ int main(int argc, char** argv) {
             PhotonBunch bunch = transformBunchToTelescopeLocal(
                 raw_bunch, telescope_cfg, source_runtime_cfg.coordinate_frame);
             if (bunch.eventio_2d) {
-                applyEventIOReferenceZOffset(
-                    bunch, source_runtime_cfg.eventio_reference_z_m);
+                applyEventIORotationCenter(
+                    bunch, source_runtime_cfg.eventio_rotation_center_local_m);
             }
             PhotonBunch transport_bunch = bunch;
             transport_bunch.photon.normalizeDirection();

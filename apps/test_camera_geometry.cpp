@@ -1,5 +1,7 @@
 #include <cmath>
 #include <iostream>
+#include <vector>
+#include "app/OpticalSimCommon.hpp"
 #include "geometry/CameraGeometry.hpp"
 
 namespace {
@@ -22,7 +24,7 @@ int bruteForceContainingPixel(const CameraGeometry& camera, double x, double y) 
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     CameraGeometry camera;
 
     CameraPixel center;
@@ -84,6 +86,35 @@ int main() {
     if (camera.findContainingPixel(1.0e100, -1.0e100) != -1) {
         std::cerr << "far out-of-camera lookup should return no pixel\n";
         return 1;
+    }
+
+    if (argc == 2) {
+        const auto lact_camera = lact::readCameraCsv(argv[1]);
+        if (lact_camera.pixels().size() != 1656) {
+            std::cerr << "expected 1656 pixels in the default LACT camera\n";
+            return 1;
+        }
+        for (std::size_t i = 0; i < lact_camera.pixels().size(); ++i) {
+            if (lact_camera.pixels()[i].id != static_cast<int>(i + 1)) {
+                std::cerr << "default LACT camera pixel IDs are not contiguous\n";
+                return 1;
+            }
+        }
+        const std::vector<std::pair<double, double>> removed{
+            {-0.3333, 0.5231}, {0.3333, 0.5231},
+            {-0.5231, 0.3333}, {0.5231, 0.3333},
+            {-0.5231, -0.3333}, {0.5231, -0.3333},
+            {-0.3333, -0.5231}, {0.3333, -0.5231},
+        };
+        for (const auto& position : removed) {
+            for (const auto& pixel : lact_camera.pixels()) {
+                if (std::abs(pixel.center.x - position.first) < 1e-6 &&
+                    std::abs(pixel.center.y - position.second) < 1e-6) {
+                    std::cerr << "removed outer-corner pixel remains in default camera\n";
+                    return 1;
+                }
+            }
+        }
     }
 
     std::cout << "camera geometry checks passed\n";

@@ -11,6 +11,7 @@
 #include <limits>
 #include <optional>
 #include <random>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -129,19 +130,180 @@ std::string parentDirectory(const std::string& path) {
     return path.substr(0, pos);
 }
 
-bool isAbsolutePath(const std::string& path) {
-    return !path.empty() && path.front() == '/';
+namespace {
+
+struct PathCandidate {
+    std::filesystem::path path;
+    std::string base;
+};
+
+std::filesystem::path normalizedAbsolutePath(const std::filesystem::path& path)
+{
+    return std::filesystem::absolute(path).lexically_normal();
 }
+
+void appendPathCandidate(std::vector<PathCandidate>& candidates,
+                         const std::filesystem::path& path,
+                         const std::string& base)
+{
+    const auto normalized = normalizedAbsolutePath(path);
+    const auto duplicate = std::find_if(
+        candidates.begin(), candidates.end(), [&](const PathCandidate& item) {
+            return item.path == normalized;
+        });
+    if (duplicate == candidates.end()) {
+        candidates.push_back({normalized, base});
+    }
+}
+
+std::vector<PathCandidate> relativePathCandidates(
+    const std::string& base_config_path,
+    const std::filesystem::path& configured)
+{
+    std::vector<PathCandidate> candidates;
+    const auto base = normalizedAbsolutePath(base_config_path);
+    auto directory = base.parent_path();
+    appendPathCandidate(candidates, directory / configured, "config_directory");
+
+    auto ancestor = directory.parent_path();
+    while (!ancestor.empty() && ancestor != ancestor.parent_path()) {
+        appendPathCandidate(candidates, ancestor / configured,
+                            "config_ancestor");
+        ancestor = ancestor.parent_path();
+    }
+    appendPathCandidate(candidates,
+                        std::filesystem::current_path() / configured,
+                        "working_directory");
+    return candidates;
+}
+
+std::string resolveConfiguredPath(const std::string& base_config_path,
+                                  const std::string& configured_path,
+                                  bool match_parent)
+{
+    const std::string expanded = expandEnvironmentVariables(trim(configured_path));
+    if (expanded.empty()) {
+        return expanded;
+    }
+
+    const std::filesystem::path configured(expanded);
+    if (configured.is_absolute()) {
+        const auto resolved = configured.lexically_normal();
+        std::clog << "[config:path] configured=" << configured_path
+                  << " resolved=" << resolved.string()
+                  << " base=absolute\n";
+        return resolved.string();
+    }
+
+    const auto candidates = relativePathCandidates(base_config_path, configured);
+    std::vector<PathCandidate> matches;
+    std::set<std::filesystem::path> canonical_matches;
+    for (const auto& candidate : candidates) {
+        const bool matches_candidate = match_parent
+            ? std::filesystem::exists(candidate.path.parent_path())
+            : std::filesystem::exists(candidate.path);
+        if (!matches_candidate) {
+            continue;
+        }
+        std::error_code ec;
+        const auto canonical = std::filesystem::weakly_canonical(candidate.path, ec);
+        const auto identity = ec ? candidate.path : canonical;
+        if (canonical_matches.insert(identity).second) {
+            matches.push_back(candidate);
+        }
+    }
+
+    if (matches.size() > 1) {
+        std::ostringstream message;
+        message << "ambiguous config input path '" << configured_path << "' from "
+                << base_config_path << "; matches:";
+        for (const auto& match : matches) {
+            message << "\n  [" << match.base << "] " << match.path.string();
+        }
+        throw std::runtime_error(message.str());
+    }
+
+    if (matches.size() == 1) {
+        std::clog << "[config:path] configured=" << configured_path
+                  << " resolved=" << matches.front().path.string()
+                  << " base=" << matches.front().base << '\n';
+        return matches.front().path.string();
+    }
+
+    std::clog << "[config:path] configured=" << configured_path
+              << " unresolved; tried";
+    for (const auto& candidate : candidates) {
+        std::clog << " [" << candidate.base << "]=" << candidate.path.string();
+    }
+    std::clog << '\n';
+    return candidates.front().path.string();
+}
+
+bool isInputPathKey(const std::string& key)
+{
+    static const std::set<std::string> keys{
+        "mirror.csv_path",
+        "mirror.series_csv_path",
+        "efficiency.mirror_reflectivity_scale_csv",
+        "efficiency.mirror_reflectivity",
+        "efficiency.filter_transmission",
+        "efficiency.atmosphere_transmission",
+        "sipm.pde",
+        "source.csv_path",
+        "source.eventio_path",
+        "camera.csv_path",
+        "camera.collector_reflectivity_csv",
+        "error.structural_deformation_config",
+        "obstruction.mask_csv",
+        "obstruction.primitives_csv",
+        "atmosphere.tau_table",
+        "nsb.spectrum_csv",
+        "electronics.microcell.device",
+        "electronics.single_pe.csv",
+        "electronics.single_pe.csv_path",
+        "electronics.single_pe.template",
+        "electronics.single_pe.charge_fluctuation.csv_path",
+        "electronics.single_pe.charge_fluctuation.samples",
+    };
+    return keys.find(key) != keys.end();
+}
+
+bool isPathPatternKey(const std::string& key)
+{
+    return key == "mirror.series_csv_pattern";
+}
+
+bool isNonPathValue(const std::string& value)
+{
+    const std::string normalized = lowerCopy(trim(value));
+    if (normalized.empty() || normalized == "none" || normalized == "off" ||
+        normalized == "false" || normalized == "true") {
+        return true;
+    }
+    char* end = nullptr;
+    std::strtod(normalized.c_str(), &end);
+    return end && *end == '\0';
+}
+
+std::string resolveConfigValuePath(const std::string& base_config_path,
+                                   const std::string& key,
+                                   const std::string& value)
+{
+    if (isPathPatternKey(key)) {
+        return resolveConfiguredPath(base_config_path, value, true);
+    }
+    if (isInputPathKey(key) && !isNonPathValue(value)) {
+        return resolveConfiguredPath(base_config_path, value, false);
+    }
+    return value;
+}
+
+} // namespace
 
 std::string resolveRelativePath(const std::string& base_config_path,
                                 const std::string& path)
 {
-    if (path.empty() || isAbsolutePath(path)) {
-        return path;
-    }
-    std::filesystem::path base(base_config_path);
-    std::filesystem::path resolved = base.parent_path() / path;
-    return std::filesystem::absolute(resolved).lexically_normal().string();
+    return resolveConfiguredPath(base_config_path, path, false);
 }
 
 std::map<std::string, std::string> readKeyValueConfig(const std::string& path) {
@@ -303,6 +465,8 @@ void mergeTelescopeConfig(std::map<std::string, std::string>& dst,
         std::string value = kv.second;
         if (isIncludeConfigKey(key)) {
             value = resolveRelativePath(path, value);
+        } else {
+            value = resolveConfigValuePath(path, key, value);
         }
         dst[key] = value;
     }
@@ -326,31 +490,7 @@ void mergeComponentConfig(std::map<std::string, std::string>& dst,
     for (const auto& kv : component_cfg) {
         const std::string scoped = scopedComponentKey(kv.first, prefix);
         std::string value = kv.second;
-        if (scoped == "mirror.series_csv_path" || scoped == "mirror.series_csv_pattern" ||
-            scoped == "efficiency.mirror_reflectivity_scale_csv") {
-            value = resolveRelativePath(path, value);
-        }
-        if (scoped == "error.structural_deformation_config") {
-            value = resolveRelativePath(path, value);
-        }
-        if (scoped == "obstruction.mask_csv" ||
-            scoped == "obstruction.primitives_csv") {
-            value = resolveRelativePath(path, value);
-        }
-        if (scoped == "atmosphere.tau_table") {
-            value = resolveRelativePath(path, value);
-        }
-        if (scoped == "nsb.spectrum_csv") {
-            value = resolveRelativePath(path, value);
-        }
-        if (scoped == "electronics.microcell.device" ||
-            scoped == "electronics.single_pe.csv" ||
-            scoped == "electronics.single_pe.csv_path" ||
-            scoped == "electronics.single_pe.template" ||
-            scoped == "electronics.single_pe.charge_fluctuation.csv_path" ||
-            scoped == "electronics.single_pe.charge_fluctuation.samples") {
-            value = resolveRelativePath(path, value);
-        }
+        value = resolveConfigValuePath(path, scoped, value);
         dst[scoped] = value;
     }
 
@@ -391,7 +531,13 @@ std::map<std::string, std::string> expandConfig(const std::map<std::string, std:
 
     // Values in the main file intentionally override telescope defaults.
     for (const auto& kv : main_cfg) {
-        assembly_cfg[kv.first] = kv.second;
+        std::string value = kv.second;
+        if (kv.first == "telescope.config" || isIncludeConfigKey(kv.first)) {
+            value = resolveRelativePath(main_config_path, value);
+        } else {
+            value = resolveConfigValuePath(main_config_path, kv.first, value);
+        }
+        assembly_cfg[kv.first] = value;
     }
 
     mergeComponentConfig(expanded, paths, assembly_cfg, main_config_path,
@@ -808,14 +954,19 @@ PhotonBunch transformBunchToTelescopeLocal(const PhotonBunch& input,
 void applyEventIOReferenceZOffset(PhotonBunch& bunch,
                                   double eventio_reference_z_m)
 {
-    if (!std::isfinite(eventio_reference_z_m)) {
+    applyEventIORotationCenter(bunch, {0.0, 0.0, eventio_reference_z_m});
+}
+
+void applyEventIORotationCenter(PhotonBunch& bunch,
+                                const Vec3& rotation_center_local_m)
+{
+    if (!std::isfinite(rotation_center_local_m.x) ||
+        !std::isfinite(rotation_center_local_m.y) ||
+        !std::isfinite(rotation_center_local_m.z)) {
         throw std::runtime_error(
-            "source.eventio_reference_z_m must be finite");
+            "telescope.rotation_center_local_m must be finite");
     }
-    // The user config remains one scalar. Internally it is the
-    // telescope-local translation (0,0,z); the physical x/y carried by the
-    // bunch are deliberately left unchanged.
-    bunch.photon.pos.z += eventio_reference_z_m;
+    bunch.photon.pos += rotation_center_local_m;
 }
 
 Vec3 sourceDirectionInWorld(const PhotonBunch& input,
@@ -1889,7 +2040,8 @@ std::map<std::string, std::string> loadScopedMirrorConfig(const std::string& pat
     auto cfg = readKeyValueConfig(path);
     std::map<std::string, std::string> scoped;
     for (const auto& kv : cfg) {
-        scoped[scopedComponentKey(kv.first, "mirror.")] = kv.second;
+        const std::string key = scopedComponentKey(kv.first, "mirror.");
+        scoped[key] = resolveConfigValuePath(path, key, kv.second);
     }
     return scoped;
 }
@@ -2036,6 +2188,7 @@ SourceRuntimeConfig buildSourceRuntimeConfig(const std::map<std::string, std::st
         runtime.coordinate_frame = "telescope_local";
     }
     runtime.eventio_coordinate_frame = runtime.coordinate_frame;
+    const auto rotation_center = cfg.find("telescope.rotation_center_local_m");
     const auto reference_z = cfg.find("source.eventio_reference_z_m");
     const auto legacy_2d_z = cfg.find("source.eventio_2d_input_plane_z_m");
     if (reference_z != cfg.end() && legacy_2d_z != cfg.end()) {
@@ -2049,13 +2202,25 @@ SourceRuntimeConfig buildSourceRuntimeConfig(const std::map<std::string, std::st
                 "source.eventio_2d_input_plane_z_m");
         }
     }
-    runtime.eventio_reference_z_m = getDouble(
-        cfg,
-        "source.eventio_reference_z_m",
+    const double compatible_reference_z = getDouble(
+        cfg, "source.eventio_reference_z_m",
         getDouble(cfg, "source.eventio_2d_input_plane_z_m", -16.0));
-    if (!std::isfinite(runtime.eventio_reference_z_m)) {
+    runtime.eventio_rotation_center_local_m = rotation_center != cfg.end()
+        ? getVec3(cfg, "telescope.rotation_center_local_m", {0.0, 0.0, -16.0})
+        : Vec3{0.0, 0.0, -16.0};
+    // The source-level scalar keys predate telescope component configs.  Keep
+    // their established main-config override precedence while preserving any
+    // explicitly configured local x/y rotation-center coordinates.
+    if (reference_z != cfg.end() || legacy_2d_z != cfg.end()) {
+        runtime.eventio_rotation_center_local_m.z = compatible_reference_z;
+    }
+    runtime.eventio_reference_z_m =
+        runtime.eventio_rotation_center_local_m.z;
+    if (!std::isfinite(runtime.eventio_rotation_center_local_m.x) ||
+        !std::isfinite(runtime.eventio_rotation_center_local_m.y) ||
+        !std::isfinite(runtime.eventio_rotation_center_local_m.z)) {
         throw std::runtime_error(
-            "source.eventio_reference_z_m must be finite");
+            "telescope.rotation_center_local_m must be finite");
     }
     runtime.eventio_2d_plane_mode =
         lowerCopy(getString(cfg, "source.eventio_2d_plane_mode", "auto"));

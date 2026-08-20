@@ -219,7 +219,8 @@ add_executable(test_camera_geometry
     apps/test_camera_geometry.cpp
 )
 target_link_libraries(test_camera_geometry PRIVATE simlite_core)
-add_test(NAME test_camera_geometry COMMAND test_camera_geometry)
+add_test(NAME test_camera_geometry COMMAND test_camera_geometry
+         ${CMAKE_CURRENT_SOURCE_DIR}/configs/cameras/new_camera_pixels_1656.csv)
 
 add_executable(test_off_axis_orientation
     apps/test_off_axis_orientation.cpp

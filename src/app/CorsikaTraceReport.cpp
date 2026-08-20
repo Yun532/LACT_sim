@@ -305,7 +305,9 @@ void printCorsikaOpticalConfiguration(
     printField("source_coordinate_frame", source_runtime_cfg.coordinate_frame);
     printField("coordinate_interpretation",
                sourceCoordinateFrameDescription(source_runtime_cfg.coordinate_frame));
-    printField("eventio_reference_z_m",
+    printField("rotation_center_local_m",
+               vec3ToString(source_runtime_cfg.eventio_rotation_center_local_m));
+    printField("eventio_reference_z_m_compat",
                doubleToString(source_runtime_cfg.eventio_reference_z_m));
     printField("eventio_2d_plane_mode", source_runtime_cfg.eventio_2d_plane_mode);
     printField("eventio_mirror_front_z_m", doubleToString(eventio_mirror_front_z_m));

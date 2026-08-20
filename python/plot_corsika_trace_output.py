@@ -248,7 +248,7 @@ def main():
     )
     parser.add_argument(
         "--camera-csv",
-        default="configs/cameras/new_camera_pixels_1664.csv",
+        default="configs/cameras/new_camera_pixels_1656.csv",
     )
     parser.add_argument(
         "--config",

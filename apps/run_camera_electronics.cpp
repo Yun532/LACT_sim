@@ -351,7 +351,7 @@ int main(int argc, char** argv)
         lact::applyConfigOverrides(config, command.overrides);
         const auto detector = lact::buildDetectorPipelineConfig(config);
         const std::size_t n_pixels = static_cast<std::size_t>(
-            lact::getInt(config, "electronics.n_pixels", 1664));
+            lact::getInt(config, "electronics.n_pixels", 1656));
         const int pixel_id_base =
             lact::getInt(config, "electronics.input.pixel_id_base", 0);
         auto events = readPrimaryHits(primary_path, pixel_id_base);

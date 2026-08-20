@@ -266,10 +266,7 @@ struct SourceRuntimeConfig {
     std::string csv_path;
     std::string eventio_path;
     std::string eventio_coordinate_frame = "corsika_iact";
-    // User-facing scalar telescope-local z offset from the EventIO
-    // telescope/fiducial reference to the imported LACT optical origin.
-    // Internally this is the translation (0,0,z) and applies to both 2D and
-    // 3D EventIO positions after their input frame is converted to local.
+    Vec3 eventio_rotation_center_local_m{0.0, 0.0, -16.0};
     double eventio_reference_z_m = -16.0;
     std::string eventio_2d_plane_mode = "auto";
     std::string event_id_mode = "event";
@@ -359,6 +356,8 @@ PhotonBunch transformBunchToTelescopeLocal(const PhotonBunch& input,
                                            const std::string& frame_name);
 void applyEventIOReferenceZOffset(PhotonBunch& bunch,
                                   double eventio_reference_z_m);
+void applyEventIORotationCenter(PhotonBunch& bunch,
+                                const Vec3& rotation_center_local_m);
 Vec3 sourceDirectionInWorld(const PhotonBunch& input,
                             const TelescopeConfig& telescope,
                             const std::string& frame_name);

@@ -218,6 +218,16 @@ int main()
     });
     ok &= check(near(legacy_eventio_z.eventio_reference_z_m, -12.5),
                 "legacy EventIO 2D z key must remain a compatible scalar alias");
+    const SourceRuntimeConfig explicit_rotation_center = buildSourceRuntimeConfig({
+        {"source.mode", "EventIO"},
+        {"source.eventio_path", "corsika.zst"},
+        {"telescope.rotation_center_local_m", "0,0,-18"},
+    });
+    ok &= check(nearVec(explicit_rotation_center.eventio_rotation_center_local_m,
+                        {0.0, 0.0, -18.0}),
+                "EventIO rotation center must accept an explicit local vector");
+    ok &= check(near(explicit_rotation_center.eventio_reference_z_m, -18.0),
+                "legacy EventIO z view must follow the rotation-center z");
     try {
         (void)buildSourceRuntimeConfig({
             {"source.mode", "EventIO"},
@@ -229,6 +239,15 @@ int main()
         std::cerr << "conflicting EventIO z-origin keys were accepted\n";
     } catch (...) {
     }
+    const SourceRuntimeConfig legacy_z_override = buildSourceRuntimeConfig({
+        {"source.mode", "EventIO"},
+        {"source.eventio_path", "corsika.zst"},
+        {"telescope.rotation_center_local_m", "1,2,-18"},
+        {"source.eventio_reference_z_m", "-16"},
+    });
+    ok &= check(nearVec(legacy_z_override.eventio_rotation_center_local_m,
+                        {1.0, 2.0, -16.0}),
+                "legacy source z must override the telescope default z only");
 
     PhotonBunch eventio_2d_position;
     eventio_2d_position.eventio_2d = true;
@@ -245,6 +264,52 @@ int main()
     ok &= check(nearVec(eventio_3d_position.photon.pos,
                         {1.25, -2.5, -15.25}),
                 "3D EventIO must use the same scalar z-origin offset");
+
+    PhotonBunch vector_center_position;
+    vector_center_position.photon.pos = {1.25, -2.5, 0.75};
+    applyEventIORotationCenter(vector_center_position, {0.5, -1.0, -18.0});
+    ok &= check(nearVec(vector_center_position.photon.pos,
+                        {1.75, -3.5, -17.25}),
+                "EventIO rotation-center translation must support local x/y/z");
+
+    for (const auto& pointing : std::vector<std::pair<double, double>>{
+             {0.0, 0.0}, {0.0, 45.0}, {90.0, 45.0}, {230.0, 70.0}}) {
+        TelescopeConfig pointing_telescope;
+        pointing_telescope.pointing_az_deg = pointing.first;
+        pointing_telescope.pointing_el_deg = pointing.second;
+        PhotonBunch origin;
+        origin.photon.pos = {0.0, 0.0, 0.0};
+        origin = transformBunchToTelescopeLocal(
+            origin, pointing_telescope, "corsika_nwu_relative");
+        applyEventIORotationCenter(origin, {0.0, 0.0, -18.0});
+        ok &= check(nearVec(origin.photon.pos, {0.0, 0.0, -18.0}),
+                    "relative CORSIKA origin must map to the local rotation center at every pointing");
+    }
+
+    TelescopeConfig north_45;
+    north_45.pointing_az_deg = 0.0;
+    north_45.pointing_el_deg = 45.0;
+    PhotonBunch special_xy;
+    special_xy.photon.pos = {10.0, 20.0, 0.0};
+    special_xy = transformBunchToTelescopeLocal(
+        special_xy, north_45, "corsika_nwu_relative");
+    applyEventIORotationCenter(special_xy, {0.0, 0.0, -18.0});
+    ok &= check(nearVec(special_xy.photon.pos,
+                        {20.0, -10.0 / std::sqrt(2.0),
+                         10.0 / std::sqrt(2.0) - 18.0}),
+                "az=0 el=45 CORSIKA (10,20,0) rotation about the local center is incorrect");
+
+    TelescopeConfig east_45;
+    east_45.pointing_az_deg = 90.0;
+    east_45.pointing_el_deg = 45.0;
+    special_xy.photon.pos = {10.0, 20.0, 0.0};
+    special_xy = transformBunchToTelescopeLocal(
+        special_xy, east_45, "corsika_nwu_relative");
+    applyEventIORotationCenter(special_xy, {0.0, 0.0, -18.0});
+    ok &= check(nearVec(special_xy.photon.pos,
+                        {10.0, 20.0 / std::sqrt(2.0),
+                         -20.0 / std::sqrt(2.0) - 18.0}),
+                "az=90 el=45 CORSIKA (10,20,0) rotation about the local center is incorrect");
     const TelescopeConfig default_telescope = buildTelescopeConfig({});
     ok &= check(nearVec(default_telescope.position_m, {0.0, 0.0, 0.0}),
                 "unset telescope.position_m must default to the array origin");
