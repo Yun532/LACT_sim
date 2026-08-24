@@ -75,7 +75,7 @@ nb["cells"] = [
     import os
     import platform
     import sys
-    from dataclasses import dataclass, asdict
+    from dataclasses import dataclass, asdict, replace
     from pathlib import Path
     from itertools import combinations
 
@@ -197,12 +197,12 @@ nb["cells"] = [
         ["mirror area after obstruction", "available", "main NSB model: 24.576860 m²", "used directly"],
         ["mirror/filter/PDE curves", "available", "main configs/efficiency", "collapsed to 20% reference throughput"],
         ["measured SPE template", "available", "537 clean pulses; 84.0349557 mV ns/PE", "used in short waveform"],
-        ["SPE charge dispersion", "available", "RMS factor 1.016142", "used in long-exposure ENF"],
+        ["SPE charge dispersion", "available", "537 empirical factors; RMS factor 1.016142", "sampled per PE and used in long-exposure ENF"],
         ["dark-sky NSB", "model estimate", "70.527 MHz/pixel under documented SkyCalc conditions", "scenario input"],
         ["S17351 microcell geometry", "available", "8 channels, 270336 cells/pixel, 25 µm pitch", "used directly"],
         ["S17351 recovery time", "not publicly specified", "10 ns provisional; Hamamatsu generic scale ~15 ns", "scan 1/10/30 ns"],
-        ["ADC sample rate/full scale/bits", "engineering assumption", "625 MS/s, 200 mV, 8 bit from old v2", "used in short waveform"],
-        ["electronic noise", "engineering assumption", "0.35 mV RMS from old v2", "used in short waveform"],
+        ["ADC sample rate/full scale/bits", "engineering assumption", "625 MS/s, 200 mV, 8 bit from old v2", "short waveform plus approximate long-exposure penalty"],
+        ["electronic noise", "engineering assumption", "0.35 mV RMS from old v2", "short waveform plus approximate long-exposure penalty"],
         ["electronics correlation bandwidth", "engineering assumption", "200 MHz", "sensitivity scenario"],
         ["crosstalk/afterpulse/dark rate", "missing", "requires temperature/overvoltage calibration", "not enabled"],
         ["clock drift/residual delay", "missing", "requires timing distribution and calibration runs", "0.2 ns illustrative residual"],
@@ -597,12 +597,13 @@ nb["cells"] = [
     q(\Delta t)=1-\exp(-\Delta t/\tau_{\rm rec})
     \]
 
-    恢复，然后叠加主程序的实测 SPE 模板、0.35 mV 假设电子噪声并做 8-bit/200 mV ADC 量化。几何时延 (w/c) 先由上节计算并用数字缓冲粗校正；这里仅保留 0.2 ns 的示意残差。
+    恢复，并从 537 个实测单 PE 相对电荷中逐次抽样，然后叠加主程序的实测 SPE 模板、0.35 mV 假设电子噪声并做 8-bit/200 mV ADC 量化。几何时延 (w/c) 先由上节计算并用数字缓冲粗校正；这里仅保留 0.2 ns 的示意残差。
     """),
     code(r"""
     from sii_unified import (
         Instrument as ShortWaveformInstrument,
         detected_star_rate_hz as unified_detected_star_rate_hz,
+        load_empirical_charge_factors,
         load_measured_spe_template,
         mean_recovery_fraction,
         normalized_cross_correlation,
@@ -629,6 +630,9 @@ nb["cells"] = [
     spe_t_ns, spe_mv = load_measured_spe_template(
         REPO_ROOT / "configs" / "electronics" / "parameters" / "spe_template_measured.csv"
     )
+    empirical_charge_factors = load_empirical_charge_factors(
+        REPO_ROOT / "configs" / "electronics" / "parameters" / "spe_charge_samples_measured.csv"
+    )
     reference_star_rate = unified_detected_star_rate_hz(
         INST.source_ab_magnitude, short_instrument)
     short_record = simulate_short_pair_waveforms(
@@ -641,6 +645,7 @@ nb["cells"] = [
         template_amplitude_mv=spe_mv,
         delay_ns=0.2,
         recovery_time_ns=10.0,
+        charge_factors=empirical_charge_factors,
         seed=20260824,
     )
 
@@ -650,7 +655,8 @@ nb["cells"] = [
         record = simulate_short_pair_waveforms(
             170.0, reference_star_rate, INST.detected_nsb_rate_hz,
             float(transit_visibility2), short_instrument, spe_t_ns, spe_mv,
-            delay_ns=0.2, recovery_time_ns=tau_ns, seed=20260824)
+            delay_ns=0.2, recovery_time_ns=tau_ns,
+            charge_factors=empirical_charge_factors, seed=20260824)
         recovery_rows.append({
             "recovery_time_ns": tau_ns,
             "analytic_mean_charge_fraction": mean_recovery_fraction(
@@ -689,6 +695,9 @@ nb["cells"] = [
         "expected_sample_contrast": short_record["expected_sample_contrast"],
         "shared_correlated_counts_expected_in_record": (
             short_record["shared_count_mean_per_bin"] * len(short_record["sample_time_ns"])),
+        "empirical_charge_samples": len(empirical_charge_factors),
+        "sampled_charge_mean_A": np.mean(short_record["charge_a"]),
+        "sampled_charge_rms_A": np.sqrt(np.mean(short_record["charge_a"]**2)),
         "adc_clipped_fraction_A": np.mean(np.abs(short_record["adc_a_mv"]) >= INST.adc_full_scale_mv/2 - INST.adc_full_scale_mv/2**INST.adc_bits),
     }])
     display(short_waveform_summary.T.rename(columns={0:"value"}))
@@ -997,7 +1006,273 @@ nb["cells"] = [
     resolution_table.to_csv(OUTPUT_DIR/"angular_resolution_cases.csv",index=False)
     """),
     md(r"""
-    ## 10. Checks
+    ## 10. 观测时长、NSB 和电子学：逐情景重新模拟与重建
+
+    这里采用**单变量受控比较**，不是把参数任意混成一个难以解释的全因子网格。基准为单夜 6 h、参考 NSB、现实电子学；然后分别改变：
+
+    - 单夜窗口：2、6、10 h。每个 20 min 段仍是一个独立 UV 测量，所以扩大单夜窗口主要增加不同 UV 点；
+    - 多夜累计：同一 ±3 h 窗口重复 5 或 10 夜，总计 30/60 h。UV 位置不变，统计误差按 (1/\sqrt{N_{night}}) 降低；
+    - NSB：0、1、2 倍参考暗夜背景；
+    - 电子学：理想计数器，或实测电荷涨落加 0.35 mV 噪声和 8-bit ADC 的参考链路。
+
+    现实电子学的附加相关效率由实测 SPE 脉冲的 Poisson shot-noise 方差
+
+    \[
+    \sigma_{\rm shot}^2=r_{\rm total}E[q^2]\int h^2(t)dt
+    \]
+
+    与电子噪声、ADC 量化噪声比较得到。它是明确的近似传播，不代替实际跨镜相关器标定。10 h 单夜延伸到 ±5 h；当前源在窗口端高度约 23°，因为尚未加入随高度变化的大气消光和 NSB，该情景特意标为乐观。
+    """),
+    code(r"""
+    charge_second_moment = float(np.mean(empirical_charge_factors**2))
+    total_reference_rate_per_ns = (
+        detected_star_rate_hz(INST.source_ab_magnitude) + INST.detected_nsb_rate_hz
+    ) / 1e9
+    spe_energy_mv2_ns = float(np.trapezoid(spe_mv**2, spe_t_ns))
+    shot_variance_mv2 = (
+        total_reference_rate_per_ns * charge_second_moment * spe_energy_mv2_ns
+    )
+    adc_step_mv = INST.adc_full_scale_mv / 2**INST.adc_bits
+    adc_quantization_variance_mv2 = adc_step_mv**2 / 12.0
+    additive_variance_mv2 = (
+        INST.electronic_noise_rms_mv**2 + adc_quantization_variance_mv2
+    )
+    electronics_correlation_efficiency = (
+        shot_variance_mv2 / (shot_variance_mv2 + additive_variance_mv2)
+    )
+    electronics_budget = pd.DataFrame([{
+        "empirical_charge_second_moment": charge_second_moment,
+        "spe_energy_mv2_ns": spe_energy_mv2_ns,
+        "reference_shot_variance_mv2": shot_variance_mv2,
+        "electronic_noise_variance_mv2": INST.electronic_noise_rms_mv**2,
+        "adc_step_mv": adc_step_mv,
+        "adc_quantization_variance_mv2": adc_quantization_variance_mv2,
+        "reference_correlation_efficiency": electronics_correlation_efficiency,
+    }])
+    display(electronics_budget.T.rename(columns={0:"value"}))
+    electronics_budget.to_csv(OUTPUT_DIR/"electronics_noise_budget.csv", index=False)
+    """),
+    code(r"""
+    def minimum_altitude_deg(hours):
+        endpoints = np.array([-hours/2, hours/2]) * np.pi/12
+        return float(np.min([
+            np.rad2deg(np.arcsin(source_direction_enu(h, dec, lat)[2]))
+            for h in endpoints
+        ]))
+
+    def make_scenario_measurements(
+            single_night_hours, nights, nsb_multiplier,
+            electronics_case, seed):
+        count = int(round(single_night_hours*3600/INST.segment_s)) + 1
+        scenario_hour_angles = np.linspace(
+            -single_night_hours/2, single_night_hours/2, count)
+        scenario_uv = make_uv_coverage(
+            LACT32, scenario_hour_angles*np.pi/12, INST)
+        scenario_uv["visibility2_true"] = np.abs(binary_visibility(
+            scenario_uv.u_lambda.to_numpy(),
+            scenario_uv.v_lambda.to_numpy()))**2
+        nsb_rate = nsb_multiplier * INST.detected_nsb_rate_hz
+        if electronics_case == "ideal":
+            scenario_instrument = replace(INST, excess_noise_factor=1.0)
+            correlation_efficiency = 1.0
+        elif electronics_case == "reference":
+            scenario_instrument = INST
+            correlation_efficiency = electronics_correlation_efficiency
+        else:
+            raise ValueError(electronics_case)
+        segment_unit_snr = unit_visibility_snr(
+            INST.source_ab_magnitude, INST.segment_s,
+            scenario_instrument, nsb_rate_hz=nsb_rate)
+        sigma_stat = 1.0 / (
+            segment_unit_snr * correlation_efficiency * np.sqrt(nights))
+        sigma_total = np.sqrt(
+            sigma_stat**2 + INST.calibration_floor_visibility2**2)
+        local_rng = np.random.default_rng(seed)
+        scenario_uv["sigma_visibility2_stat"] = sigma_stat
+        scenario_uv["sigma_visibility2"] = sigma_total
+        scenario_uv["visibility2_measured"] = (
+            scenario_uv.visibility2_true
+            + local_rng.normal(0.0, sigma_total, len(scenario_uv)))
+        return scenario_uv, {
+            "single_night_hours": single_night_hours,
+            "nights": nights,
+            "total_integration_hours": single_night_hours*nights,
+            "nsb_multiplier": nsb_multiplier,
+            "nsb_rate_MHz": nsb_rate/1e6,
+            "electronics_case": electronics_case,
+            "electronics_correlation_efficiency": correlation_efficiency,
+            "minimum_altitude_deg": minimum_altitude_deg(single_night_hours),
+            "uv_measurements": len(scenario_uv),
+            "segment_unit_visibility_snr": segment_unit_snr,
+            "sigma_visibility2_stat": sigma_stat,
+            "sigma_visibility2_total": sigma_total,
+        }
+
+    def scenario_uv_data(frame, cell_mlambda=120.0):
+        grouped = bin_uv_measurements(frame, cell_mlambda)
+        grouped = pd.concat([grouped, pd.DataFrame([{
+            "ku":0, "kv":0, "u_lambda":0.0, "v_lambda":0.0,
+            "weighted_value":10_000.0, "inverse_variance":10_000.0,
+            "multiplicity":1, "visibility2":1.0, "sigma":0.01,
+        }])], ignore_index=True)
+        weights = 1.0 / grouped.sigma.to_numpy()**2
+        weights = np.clip(weights/np.mean(weights), 0.1, 10.0)
+        weights /= weights.mean()
+        return UvData(
+            u_lambda=grouped.u_lambda.to_numpy(float),
+            v_lambda=grouped.v_lambda.to_numpy(float),
+            visibility_abs2=grouped.visibility2.to_numpy(float),
+            sigma=grouped.sigma.to_numpy(float),
+            weight=weights,
+            multiplicity=grouped.multiplicity.to_numpy(int),
+            input_rows=len(frame), finite_rows=len(frame),
+            physical_violations=int(((grouped.visibility2<0)|
+                                     (grouped.visibility2>1)).sum()),
+        )
+
+    scenario_definitions = [
+        {"name":"single_2h", "hours":2, "nights":1, "nsb":1, "electronics":"reference"},
+        {"name":"reference_6h", "hours":6, "nights":1, "nsb":1, "electronics":"reference"},
+        {"name":"single_10h_optimistic", "hours":10, "nights":1, "nsb":1, "electronics":"reference"},
+        {"name":"five_nights_30h", "hours":6, "nights":5, "nsb":1, "electronics":"reference"},
+        {"name":"ten_nights_60h", "hours":6, "nights":10, "nsb":1, "electronics":"reference"},
+        {"name":"nsb_0x_6h", "hours":6, "nights":1, "nsb":0, "electronics":"reference"},
+        {"name":"nsb_2x_6h", "hours":6, "nights":1, "nsb":2, "electronics":"reference"},
+        {"name":"ideal_electronics_6h", "hours":6, "nights":1, "nsb":1, "electronics":"ideal"},
+    ]
+
+    scenario_results = []
+    scenario_images = {}
+    for scenario_index, definition in enumerate(scenario_definitions):
+        # Common random numbers isolate controlled changes for scenarios with
+        # the same uv sampling. Repeated-night, NSB, and electronics cases all
+        # reuse the 6 h Gaussian variates and optimizer starts.
+        measurement_seed = {
+            2: 20260902, 6: 20260906, 10: 20260910
+        }[definition["hours"]]
+        reconstruction_seed = {
+            2: 20261002, 6: 20261006, 10: 20261010
+        }[definition["hours"]]
+        measurements, metadata = make_scenario_measurements(
+            definition["hours"], definition["nights"], definition["nsb"],
+            definition["electronics"], measurement_seed)
+        data = scenario_uv_data(measurements)
+        reconstruction = reconstruct_uv_data(
+            data, grid_size=32, fov_mas=0.70, support_radius_mas=0.32,
+            starts=4, max_iter=800, smoothness=0.020,
+            huber_delta=0.15, seed=reconstruction_seed,
+            peak_minimum_separation_mas=0.10)
+        scenario_truth = grid_truth_on_reconstruction(reconstruction.theta_mas)
+        raw_corr, aligned, mirrored, shift = ambiguity_align(
+            reconstruction.image, scenario_truth)
+        pixel_mas = abs(reconstruction.theta_mas[1]-reconstruction.theta_mas[0])
+        common_fwhm_mas = INST.wavelength_m/lact_baselines.baseline_m.max()*RAD_TO_MAS
+        common_sigma_pixels = common_fwhm_mas/(2.355*pixel_mas)
+        aligned = gaussian_filter(aligned, common_sigma_pixels)
+        scenario_truth = gaussian_filter(scenario_truth, common_sigma_pixels)
+        aligned /= aligned.sum()
+        scenario_truth /= scenario_truth.sum()
+        common_corr = np.corrcoef(aligned.ravel(), scenario_truth.ravel())[0,1]
+        common_nrmse = (
+            np.sqrt(np.mean((aligned-scenario_truth)**2))
+            /(np.sqrt(np.mean(scenario_truth**2))+1e-15))
+        scenario_images[definition["name"]] = (
+            reconstruction.theta_mas, aligned)
+        scenario_results.append({
+            "scenario": definition["name"], **metadata,
+            "measurement_seed": measurement_seed,
+            "reconstruction_seed": reconstruction_seed,
+            "binned_uv_points": len(data.u_lambda),
+            "recovered_separation_mas": reconstruction.metrics.get("two_peak_separation_mas"),
+            "separation_error_mas": reconstruction.metrics.get("two_peak_separation_mas")-SOURCE.separation_mas,
+            "recovered_position_angle_deg": reconstruction.metrics.get("two_peak_position_angle_deg"),
+            "position_angle_error_deg": min(
+                abs(reconstruction.metrics.get("two_peak_position_angle_deg")-SOURCE.position_angle_deg),
+                180-abs(reconstruction.metrics.get("two_peak_position_angle_deg")-SOURCE.position_angle_deg)),
+            "recovered_peak_ratio": reconstruction.metrics.get("two_peak_brightness_ratio"),
+            "peak_ratio_error": reconstruction.metrics.get("two_peak_brightness_ratio")-SOURCE.flux_ratio_secondary_to_primary,
+            "weighted_forward_rmse": reconstruction.metrics["weighted_fit_rmse"],
+            "common_beam_truth_correlation": common_corr,
+            "common_beam_truth_nrmse": common_nrmse,
+            "used_180_degree_mirror": mirrored,
+        })
+        print(definition["name"], scenario_results[-1]["recovered_separation_mas"], common_corr)
+
+    scenario_table = pd.DataFrame(scenario_results)
+    display(scenario_table.round(5))
+    scenario_table.to_csv(OUTPUT_DIR/"scenario_reconstruction_comparison.csv", index=False)
+    scenario_lookup = scenario_table.set_index("scenario")
+    display(Markdown(f'''
+    ### Executed scenario findings
+
+    - Repeating the 6 h track reduces statistical sigma from
+      **{scenario_lookup.loc['reference_6h','sigma_visibility2_stat']:.4f}**
+      to **{scenario_lookup.loc['five_nights_30h','sigma_visibility2_stat']:.4f}**
+      at 30 h and **{scenario_lookup.loc['ten_nights_60h','sigma_visibility2_stat']:.4f}**
+      at 60 h. The 0.015 calibration floor prevents ideal square-root scaling
+      of the total error indefinitely.
+    - Zero/reference/double NSB give statistical sigma
+      **{scenario_lookup.loc['nsb_0x_6h','sigma_visibility2_stat']:.4f} /
+      {scenario_lookup.loc['reference_6h','sigma_visibility2_stat']:.4f} /
+      {scenario_lookup.loc['nsb_2x_6h','sigma_visibility2_stat']:.4f}**.
+    - The reference additive electronics efficiency is
+      **{electronics_correlation_efficiency:.4f}**; idealizing these electronics
+      changes total sigma only from
+      **{scenario_lookup.loc['reference_6h','sigma_visibility2_total']:.4f}**
+      to **{scenario_lookup.loc['ideal_electronics_6h','sigma_visibility2_total']:.4f}**.
+      Under this rate assumption, NSB and phase-less inversion dominate over
+      the adopted 0.35 mV/8-bit additive electronics.
+    - The 6 h reference reconstruction recovers separation
+      **{scenario_lookup.loc['reference_6h','recovered_separation_mas']:.3f} mas**,
+      PA **{scenario_lookup.loc['reference_6h','recovered_position_angle_deg']:.2f} deg**,
+      and peak ratio **{scenario_lookup.loc['reference_6h','recovered_peak_ratio']:.2f}**.
+      Position is stable, while photometry is visibly less robust in the 2 h
+      and 2x-NSB cases.
+    '''))
+    """),
+    code(r"""
+    fig, axes = plt.subplots(2, 4, figsize=(14.5, 7.0), constrained_layout=True)
+    for axis, definition in zip(axes.ravel(), scenario_definitions):
+        name = definition["name"]
+        theta, image = scenario_images[name]
+        row = scenario_table.loc[scenario_table.scenario==name].iloc[0]
+        artist = axis.imshow(
+            image, origin="lower",
+            extent=[theta[0],theta[-1],theta[0],theta[-1]], cmap="magma")
+        axis.set_title(
+            f"{name}\nsep={row.recovered_separation_mas:.3f} mas, "
+            f"ratio={row.recovered_peak_ratio:.2f}", fontsize=9)
+        axis.set(xlabel="ΔRA [mas]", ylabel="ΔDec [mas]")
+    fig.suptitle("Independent phaseless reconstruction for every controlled scenario", fontsize=13)
+    fig.savefig(OUTPUT_DIR/"scenario_reconstruction_gallery.png", bbox_inches="tight")
+    plt.show()
+
+    fig, axes = plt.subplots(2, 2, figsize=(12.5, 8.0), constrained_layout=True)
+    labels = scenario_table.scenario.str.replace("_", " ")
+    x = np.arange(len(scenario_table))
+    axes[0,0].plot(x, scenario_table.recovered_separation_mas, "o-", color=BLUE)
+    axes[0,0].axhline(SOURCE.separation_mas, color=INK, linestyle="--", label="truth")
+    axes[0,0].set(ylabel="Separation [mas]", title="Recovered binary separation")
+    axes[0,0].legend(frameon=False)
+    axes[0,1].plot(x, scenario_table.recovered_position_angle_deg, "o-", color=GOLD)
+    axes[0,1].axhline(SOURCE.position_angle_deg, color=INK, linestyle="--")
+    axes[0,1].set(ylabel="Position angle [deg]", title="Recovered position angle")
+    axes[1,0].plot(x, scenario_table.recovered_peak_ratio, "o-", color=ORANGE)
+    axes[1,0].axhline(SOURCE.flux_ratio_secondary_to_primary, color=INK, linestyle="--")
+    axes[1,0].set(ylabel="Secondary/primary peak ratio", title="Photometric ratio remains difficult")
+    axes[1,1].plot(x, scenario_table.common_beam_truth_correlation, "o-", color=BLUE, label="correlation")
+    ax_nrmse = axes[1,1].twinx()
+    ax_nrmse.plot(x, scenario_table.common_beam_truth_nrmse, "s--", color=ORANGE, label="NRMSE")
+    axes[1,1].set(ylabel="Truth correlation", title="Common-beam image quality")
+    ax_nrmse.set_ylabel("NRMSE", color=ORANGE)
+    for axis in axes.ravel():
+        axis.set_xticks(x, labels, rotation=35, ha="right", fontsize=8)
+        axis.grid(alpha=.18)
+    fig.savefig(OUTPUT_DIR/"scenario_reconstruction_metrics.png", bbox_inches="tight")
+    plt.show()
+    """),
+    md(r"""
+    ## 11. Checks
 
     下列检查是本 notebook 的最低物理闭合门槛：
 
@@ -1032,6 +1307,32 @@ nb["cells"] = [
     checks["recovery_loss_is_tiny_at_reference_rate"] = (
         recovery_table.analytic_mean_charge_fraction.min() > 0.9999
     )
+    checks["empirical_charge_sample_is_mean_one"] = (
+        len(empirical_charge_factors) == 537
+        and np.isclose(np.mean(empirical_charge_factors), 1.0, atol=1e-14)
+    )
+    checks["all_controlled_scenarios_reconstructed"] = (
+        len(scenario_table) == len(scenario_definitions) == 8
+        and scenario_table.recovered_separation_mas.notna().all()
+    )
+    scenario_indexed = scenario_table.set_index("scenario")
+    checks["repeated_nights_reduce_statistical_sigma"] = (
+        scenario_indexed.loc["ten_nights_60h", "sigma_visibility2_stat"]
+        < scenario_indexed.loc["five_nights_30h", "sigma_visibility2_stat"]
+        < scenario_indexed.loc["reference_6h", "sigma_visibility2_stat"]
+    )
+    checks["nsb_degrades_statistical_sigma"] = (
+        scenario_indexed.loc["nsb_0x_6h", "sigma_visibility2_stat"]
+        < scenario_indexed.loc["reference_6h", "sigma_visibility2_stat"]
+        < scenario_indexed.loc["nsb_2x_6h", "sigma_visibility2_stat"]
+    )
+    checks["ideal_electronics_improves_statistical_sigma"] = (
+        scenario_indexed.loc["ideal_electronics_6h", "sigma_visibility2_stat"]
+        < scenario_indexed.loc["reference_6h", "sigma_visibility2_stat"]
+    )
+    checks["ten_hour_case_is_flagged_low_altitude"] = (
+        scenario_indexed.loc["single_10h_optimistic", "minimum_altitude_deg"] < 30.0
+    )
     checks["reconstruction_forward_closure"] = result.metrics["weighted_fit_rmse"] < 0.12
     checks["reconstruction_recovers_two_peaks"] = len(result.metrics.get("peaks",[])) == 2
     checks["truth_validation_correlation"] = truth_corr > 0.55
@@ -1042,12 +1343,12 @@ nb["cells"] = [
     print("ALL CHECKS PASSED")
     """),
     md(r"""
-    ## 11. Takeaways & required caveats
+    ## 12. Takeaways & required caveats
 
     1. 统一版以最新 `main` 为底座，保留旧 v1 的全阵列源/相干/重建框架，并吸收旧 v2 的连续电子学时间尺度；旧 v2 把 ENU 坐标直接代入缺少站点纬度的矩阵，统一版已经用 topocentric ENU 投影替换。
     2. 7 镜验证阵列适合标定和直径测量；`layout_0803` 的 32 镜实际模拟坐标提供公里级基线，进入约 (0.1\,\mathrm{mas}) 及以下的成像区间。表中有物理最长基线和本次时角/赤纬的投影覆盖；它仍是生产输入坐标，不应冒充最终现场测绘值。
-    3. 单通道 6 m 望远镜的星等极限主要由口径×效率、电子带宽、NSB 与时间决定。对已被分辨的目标，实际阈值还要减去 (|V|^2) 带来的 SNR；“能检测星”不等于“能重建复杂表面”。
-    4. (|V|^2) 成像天然缺相位。当前 MAP 重建适合闭合研究，但正式论文还应做多次噪声 realization、超参数证据/交叉验证、bootstrap 图像不确定度，并与 MiRA/SQUEEZE 或 HIO/ER 相位恢复交叉比较。
+    3. 受控情景显示：多夜累计严格降低统计误差，NSB 增加严格恶化统计误差；当前 0.35 mV 与 8-bit ADC 只产生较小附加损失。10 h 单夜虽然增加 UV 覆盖，但窗口端高度只有约 23°，未加入高度相关消光前不能当作可信增益。
+    4. (|V|^2) 成像天然缺相位。各情景能稳定恢复双星位置，但峰值亮度比对短曝光和高 NSB 明显更敏感；当前 MAP 重建适合结构闭合研究，不应把峰值比直接当精密光度。正式论文还应做多次噪声 realization、超参数证据/交叉验证、bootstrap 图像不确定度，并与 MiRA/SQUEEZE 或 HIO/ER 相位恢复交叉比较。
     5. 微单元恢复现已按指数模型进入 C++ 电子学链和短波形验证；10 ns 只是没有 S17351 公开数据时的暂定值，并已扫描 1/10/30 ns。当前仍未包括 LACT 实测镜面到达时间展宽、串扰、后脉冲、通带随角度变化、完整复传递函数、时钟漂移和标定星系统误差；这些是从“研究预测”升级到“仪器性能声明”的必要输入。
     """),
 ]

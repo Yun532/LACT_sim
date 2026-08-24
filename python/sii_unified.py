@@ -220,6 +220,21 @@ def load_measured_spe_template(path) -> tuple[np.ndarray, np.ndarray]:
     return time_ns[finite], amplitude_mv[finite]
 
 
+def load_empirical_charge_factors(
+        path, column: str = "charge_factor_mean_one") -> np.ndarray:
+    """Load and exactly mean-normalize positive empirical SPE charges."""
+    data = np.genfromtxt(Path(path), delimiter=",", names=True, dtype=None,
+                         encoding="utf-8")
+    names = list(data.dtype.names or ())
+    if column not in names:
+        raise ValueError(f"{path} is missing charge column {column}")
+    values = np.asarray(data[column], dtype=float)
+    values = values[np.isfinite(values) & (values > 0.0)]
+    if values.size == 0:
+        raise ValueError(f"{path} has no positive charge factors")
+    return values / np.mean(values)
+
+
 def convolve_pe_times(times_ns, amplitudes, sample_times_ns,
                       template_time_ns, template_amplitude_mv) -> np.ndarray:
     """Directly sum shifted calibrated SPE templates on an ADC time grid."""
@@ -253,6 +268,7 @@ def simulate_short_pair_waveforms(
         template_amplitude_mv,
         delay_ns: float = 0.0,
         recovery_time_ns: float | None = None,
+        charge_factors=None,
         seed: int = 20260824) -> dict[str, np.ndarray | float]:
     """Simulate a representative two-telescope ADC record.
 
@@ -279,17 +295,29 @@ def simulate_short_pair_waveforms(
     counts_a += rng.poisson(nsb_mean, bins)
     counts_b += rng.poisson(nsb_mean, bins)
 
+    empirical_charge = (None if charge_factors is None
+                        else np.asarray(charge_factors, dtype=float))
+    if empirical_charge is not None and (
+            empirical_charge.size == 0
+            or np.any(~np.isfinite(empirical_charge))
+            or np.any(empirical_charge <= 0.0)):
+        raise ValueError("charge_factors must be finite and positive")
+
     def expand(counts, time_shift_ns):
         indices = np.repeat(np.arange(bins), counts)
         times = edges[indices] + rng.random(len(indices)) * dt_ns + time_shift_ns
         cells = rng.integers(0, instrument.microcells_per_pixel, len(times))
         tau = (instrument.microcell_recovery_time_ns if recovery_time_ns is None
                else recovery_time_ns)
-        amplitudes = apply_exponential_microcell_recovery(times, cells, tau)
-        return times, amplitudes
+        recovery = apply_exponential_microcell_recovery(times, cells, tau)
+        if empirical_charge is None:
+            charge = np.ones(len(times), dtype=float)
+        else:
+            charge = rng.choice(empirical_charge, size=len(times), replace=True)
+        return times, recovery, charge, recovery * charge
 
-    times_a, amplitudes_a = expand(counts_a, 0.0)
-    times_b, amplitudes_b = expand(counts_b, delay_ns)
+    times_a, recovery_a, charge_a, amplitudes_a = expand(counts_a, 0.0)
+    times_b, recovery_b, charge_b, amplitudes_b = expand(counts_b, delay_ns)
     waveform_a = convolve_pe_times(
         times_a, amplitudes_a, centers, template_time_ns,
         template_amplitude_mv)
@@ -310,8 +338,10 @@ def simulate_short_pair_waveforms(
         "analog_b_mv": waveform_b,
         "pe_times_a_ns": times_a,
         "pe_times_b_ns": times_b,
-        "recovery_a": amplitudes_a,
-        "recovery_b": amplitudes_b,
+        "recovery_a": recovery_a,
+        "recovery_b": recovery_b,
+        "charge_a": charge_a,
+        "charge_b": charge_b,
         "shared_count_mean_per_bin": shared_mean,
         "expected_sample_contrast": (
             instrument.coherence_area_s / dt_s * visibility2),

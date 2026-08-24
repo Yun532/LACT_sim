@@ -40,3 +40,12 @@ def test_adc_quantization_clips_and_uses_finite_levels():
     assert digitized.min() >= -100.0
     assert digitized.max() < 100.0
     assert np.all(np.isfinite(digitized))
+
+
+def test_empirical_charge_loader_is_positive_and_mean_one():
+    factors = sii.load_empirical_charge_factors(
+        ROOT / "configs" / "electronics" / "parameters"
+        / "spe_charge_samples_measured.csv")
+    assert len(factors) == 537
+    assert np.all(factors > 0.0)
+    assert np.isclose(np.mean(factors), 1.0, atol=1e-14)
