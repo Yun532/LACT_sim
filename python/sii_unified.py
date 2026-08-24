@@ -235,6 +235,98 @@ def load_empirical_charge_factors(
     return values / np.mean(values)
 
 
+def load_optical_timing_mixture(path) -> dict[str, np.ndarray | float]:
+    """Load the compact per-facet optical arrival-time mixture.
+
+    The stored means include an arbitrary common propagation time.  Sampling
+    and transfer calculations center that common time, because only the path
+    spread changes an intensity-correlation peak.
+    """
+    data = np.genfromtxt(Path(path), delimiter=",", names=True)
+    required = {"weight", "mean_time_ns", "std_time_ns"}
+    names = set(data.dtype.names or ())
+    if not required.issubset(names):
+        raise ValueError(f"{path} is missing timing-mixture columns {required-names}")
+    weights = np.atleast_1d(np.asarray(data["weight"], dtype=float))
+    means = np.atleast_1d(np.asarray(data["mean_time_ns"], dtype=float))
+    sigmas = np.atleast_1d(np.asarray(data["std_time_ns"], dtype=float))
+    finite = (np.isfinite(weights) & np.isfinite(means) & np.isfinite(sigmas)
+              & (weights > 0.0) & (sigmas >= 0.0))
+    weights, means, sigmas = weights[finite], means[finite], sigmas[finite]
+    if weights.size == 0:
+        raise ValueError(f"{path} contains no valid timing components")
+    weights = weights / weights.sum()
+    global_mean = float(weights @ means)
+    centered_means = means - global_mean
+    global_variance = float(weights @ (sigmas**2 + centered_means**2))
+    return {
+        "weights": weights,
+        "mean_delay_ns": centered_means,
+        "std_delay_ns": sigmas,
+        "absolute_mean_time_ns": global_mean,
+        "rms_spread_ns": math.sqrt(max(0.0, global_variance)),
+    }
+
+
+def sample_optical_delays_ns(rng: np.random.Generator, count: int,
+                             mixture) -> np.ndarray:
+    """Draw centered per-photoelectron optical propagation delays."""
+    if count < 0:
+        raise ValueError("count must be non-negative")
+    weights = np.asarray(mixture["weights"], dtype=float)
+    means = np.asarray(mixture["mean_delay_ns"], dtype=float)
+    sigmas = np.asarray(mixture["std_delay_ns"], dtype=float)
+    components = rng.choice(len(weights), size=count, p=weights)
+    return rng.normal(means[components], sigmas[components])
+
+
+def optical_timing_transfer_efficiency(
+        mixture, bandwidth_hz: float, samples: int = 4097) -> float:
+    """Band-averaged zero-lag HBT contrast retained by optical time spread.
+
+    For identical telescopes with timing characteristic function H(f), the
+    retained zero-lag cross spectrum over a rectangular electronics band is
+    ``mean(|H(f)|^2, 0..B)``.  A calibrated correction divides by this number
+    and therefore inflates the visibility-squared uncertainty by its inverse.
+    """
+    if bandwidth_hz <= 0.0 or samples < 3:
+        raise ValueError("bandwidth and sample count must be positive")
+    frequency_hz = np.linspace(0.0, bandwidth_hz, samples)
+    frequency_per_ns = frequency_hz * 1.0e-9
+    weights = np.asarray(mixture["weights"], dtype=float)
+    means = np.asarray(mixture["mean_delay_ns"], dtype=float)
+    sigmas = np.asarray(mixture["std_delay_ns"], dtype=float)
+    phase = np.exp(-2j * np.pi * frequency_per_ns[:, None] * means[None, :])
+    gaussian = np.exp(
+        -2.0 * np.pi**2 * frequency_per_ns[:, None]**2 * sigmas[None, :]**2)
+    transfer = (phase * gaussian) @ weights
+    return float(np.trapezoid(np.abs(transfer)**2, frequency_hz) / bandwidth_hz)
+
+
+def residual_delay_response(mixture, delay_ns, bandwidth_hz: float,
+                            samples: int = 4097) -> np.ndarray:
+    """Relative zero-lag correlation after an uncorrected pair delay."""
+    delays = np.asarray(delay_ns, dtype=float)
+    frequency_hz = np.linspace(0.0, bandwidth_hz, samples)
+    frequency_per_ns = frequency_hz * 1.0e-9
+    weights = np.asarray(mixture["weights"], dtype=float)
+    means = np.asarray(mixture["mean_delay_ns"], dtype=float)
+    sigmas = np.asarray(mixture["std_delay_ns"], dtype=float)
+    transfer = (
+        np.exp(-2j * np.pi * frequency_per_ns[:, None] * means[None, :])
+        * np.exp(-2.0 * np.pi**2 * frequency_per_ns[:, None]**2
+                 * sigmas[None, :]**2)
+    ) @ weights
+    power = np.abs(transfer)**2
+    normalization = np.trapezoid(power, frequency_hz)
+    response = np.array([
+        np.trapezoid(power * np.cos(2*np.pi*frequency_hz*tau*1.0e-9),
+                     frequency_hz) / normalization
+        for tau in delays.ravel()
+    ]).reshape(delays.shape)
+    return response
+
+
 def convolve_pe_times(times_ns, amplitudes, sample_times_ns,
                       template_time_ns, template_amplitude_mv) -> np.ndarray:
     """Directly sum shifted calibrated SPE templates on an ADC time grid."""
@@ -269,6 +361,7 @@ def simulate_short_pair_waveforms(
         delay_ns: float = 0.0,
         recovery_time_ns: float | None = None,
         charge_factors=None,
+        optical_timing_mixture=None,
         seed: int = 20260824) -> dict[str, np.ndarray | float]:
     """Simulate a representative two-telescope ADC record.
 
@@ -306,6 +399,9 @@ def simulate_short_pair_waveforms(
     def expand(counts, time_shift_ns):
         indices = np.repeat(np.arange(bins), counts)
         times = edges[indices] + rng.random(len(indices)) * dt_ns + time_shift_ns
+        if optical_timing_mixture is not None:
+            times += sample_optical_delays_ns(
+                rng, len(times), optical_timing_mixture)
         cells = rng.integers(0, instrument.microcells_per_pixel, len(times))
         tau = (instrument.microcell_recovery_time_ns if recovery_time_ns is None
                else recovery_time_ns)
@@ -343,6 +439,9 @@ def simulate_short_pair_waveforms(
         "charge_a": charge_a,
         "charge_b": charge_b,
         "shared_count_mean_per_bin": shared_mean,
+        "optical_timing_rms_ns": (
+            0.0 if optical_timing_mixture is None
+            else float(optical_timing_mixture["rms_spread_ns"])),
         "expected_sample_contrast": (
             instrument.coherence_area_s / dt_s * visibility2),
     }

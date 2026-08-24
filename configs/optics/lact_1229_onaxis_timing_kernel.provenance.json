@@ -1,0 +1,12 @@
+{
+  "description": "On-axis 400 nm parallel-ray optical arrival-time mixture; one component per facet.",
+  "source_hits_csv": "E:\\LACT_pylast2\\lact_modified_code\\LACT_sim\\run_logs\\ctest\\mirror_1229_hits.csv",
+  "source_hits_sha256": "84f7ba4ffebc17711f6f81bb54a190931386e87170be4c4786b75b1a104ef1bd",
+  "source_rows_hit_surface": 590239,
+  "components": 54,
+  "derivation_script": "E:\\LACT_pylast2\\lact_sii_unified\\tools\\derive_optical_timing_kernel.py",
+  "source_config": "E:\\LACT_pylast2\\lact_modified_code\\LACT_sim\\configs\\mirror_1229.cfg",
+  "source_config_sha256": "de805d897969af0457fedebaa8923da99ce6b7505299ffb626349ceed2bbe82d",
+  "mirror_csv": "E:\\LACT_pylast2\\lact_sii_unified\\configs\\mirror_1229_facets.csv",
+  "mirror_csv_sha256": "9825b02ce793e73a2426a0d75b42e63ea92ffacfb8c20935d31cdebd8880ba30"
+}

@@ -21,9 +21,7 @@
 
 ```bash
 python tools/build_sii_paper_notebook.py
-python tools/execute_notebook.py \
-  notebooks/lact_sii_paper_simulation.ipynb \
-  --output notebooks/lact_sii_paper_simulation.ipynb
+python tools/execute_notebook.py notebooks/lact_sii_paper_simulation.ipynb --timeout 1200
 ```
 
 notebook 包括：
@@ -33,12 +31,14 @@ notebook 包括：
 3. 理论双星天图和完整理论 `(u,v)` 功率图；
 4. 任意两镜的 ENU 基线、正确 topocentric `(u,v,w)`、`w/c` 几何时延；
 5. 全阵列 6 小时地球自转覆盖；
-6. 170 ns 实测 SPE、恢复、电子噪声和 ADC 波形诊断；
-7. 带 NSB 与误差的长曝光 `|V|²` 模拟；
+6. 590239条轴上光线导出的镜面到达时间核，以及170 ns实测 SPE、恢复、电子噪声和 ADC 波形诊断；
+7. 逐望远镜 Poisson 光子/NSB计数、共享增益/时钟/透明度误差和带协方差来源的长曝光 `|V|²` 模拟；
 8. 正值、有限支撑、平滑正则、多起点的无相位重建；
 9. 星等极限和角尺度情景；
 10. 2/6/10 h 单夜、6/30/60 h 多夜、0/1/2 倍 NSB、理想/现实电子学的逐情景重建；
-11. 自动物理闭合检查。
+11. 100次望远镜级参数 Monte Carlo；
+12. 2小时与6小时各50次双星盲重建和各50次单星空白对照，以及精确95%检出区间；
+13. 自动物理闭合检查。
 
 输出表和图片位于 `run_logs/sii_paper_notebook/`。
 
@@ -88,9 +88,12 @@ microcell.recovery_time_ns=10.0
 ## 仍不能宣称为实测性能的部分
 
 当前电子带宽、ADC 规格和 0.35 mV 噪声沿用工程假设；短波形逐 PE 抽取 537 个
-实测电荷因子，长曝光用 SPE shot-noise 方差近似传播电子噪声和 ADC 量化损失。
+实测电荷因子，长曝光用 SPE shot-noise 方差近似传播电子噪声和 ADC 量化损失。正式
+1229分片镜面轴上理想误差配置的590239条400 nm光线给出约0.602 ns RMS、1.732 ns
+峰峰值到达时间展宽，已经进入短波形和长曝光传递效率；原始128 MB逐光子表压缩为
+54个逐镜面混合分量并保存来源哈希。
 2 nm 窄带滤光片的角度响应、
-实际过压/温度下暗计数、串扰、后脉冲、镜面到达时间展宽、跨镜时钟漂移与零基线标定
+实际过压/温度下暗计数、串扰、后脉冲、随仰角/离轴角变化的光学时间核、实测跨镜时钟漂移与零基线标定
 仍缺实测输入。因此 notebook 给出的是可复现的研究预测和参数敏感性，不是 LACT 已验收
 的极限星等。
 

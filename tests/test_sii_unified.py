@@ -51,6 +51,36 @@ def test_empirical_charge_loader_is_positive_and_mean_one():
     assert np.isclose(np.mean(factors), 1.0, atol=1e-14)
 
 
+def test_optical_timing_kernel_is_normalized_and_broadens_arrivals():
+    mixture = sii.load_optical_timing_mixture(
+        ROOT / "configs" / "optics" / "lact_1229_onaxis_timing_kernel.csv")
+    assert np.isclose(np.sum(mixture["weights"]), 1.0)
+    assert 0.5 < mixture["rms_spread_ns"] < 0.7
+    assert abs(np.sum(mixture["weights"] * mixture["mean_delay_ns"])) < 1e-12
+
+
+def test_optical_timing_transfer_and_residual_delay_are_physical():
+    mixture = sii.load_optical_timing_mixture(
+        ROOT / "configs" / "optics" / "lact_1229_onaxis_timing_kernel.csv")
+    efficiency = sii.optical_timing_transfer_efficiency(mixture, 200e6)
+    response = sii.residual_delay_response(mixture, [0.0, 0.2, 1.0], 200e6)
+    assert 0.0 < efficiency < 1.0
+    assert np.isclose(response[0], 1.0, atol=1e-12)
+    assert 1.0 >= response[1] >= response[2]
+
+
+def test_short_waveform_accepts_optical_timing_kernel():
+    mixture = sii.load_optical_timing_mixture(
+        ROOT / "configs" / "optics" / "lact_1229_onaxis_timing_kernel.csv")
+    template_t = np.array([-2.0, 0.0, 2.0, 4.0])
+    template_v = np.array([0.0, 1.0, 0.2, 0.0])
+    record = sii.simulate_short_pair_waveforms(
+        32.0, 20e6, 5e6, 0.5, sii.Instrument(), template_t, template_v,
+        optical_timing_mixture=mixture, seed=7)
+    assert np.isclose(record["optical_timing_rms_ns"],
+                      mixture["rms_spread_ns"])
+
+
 def test_reconstruction_import_preserves_loaded_pyplot_backend():
     import importlib
     import matplotlib
