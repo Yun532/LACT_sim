@@ -98,6 +98,34 @@ int main(int argc, char** argv)
                 std::abs(result.camera_trigger.trigger_time_ns - 6.0) < 1.0e-12,
             "camera trigger time must be the causal window-end sample");
 
+    DetectorPipelineConfig recovery_config = config;
+    recovery_config.microcell.recovery_enabled = true;
+    recovery_config.microcell.model = "explicit_exponential_recovery";
+    recovery_config.microcell.recovery_time_ns = 10.0;
+    recovery_config.camera_trigger.enabled = false;
+    std::vector<PrimaryPeHit> recovery_hits = {
+        {9, 2, 0, 0.0, 0.0, 0.0, 420.0, 1.0,
+         HitOrigin::Cherenkov},
+        {9, 2, 0, 0.0, 0.0, 0.0, 420.0, 1.0,
+         HitOrigin::Cherenkov},
+        {9, 2, 0, 10.0, 0.0, 0.0, 420.0, 1.0,
+         HitOrigin::Cherenkov},
+    };
+    const auto recovery_result =
+        runDetectorPipeline(recovery_config, 1, recovery_hits);
+    const double one_tau_fraction = 1.0 - std::exp(-1.0);
+    require(recovery_result.fired_hits.size() == 2,
+            "zero-delay repeat must be rejected but a recovered cell must fire");
+    require(std::abs(recovery_result.fired_hits[1].fired_pe -
+                     one_tau_fraction) < 1.0e-12,
+            "one-time-constant hit must carry the exponential recovery charge");
+    require(std::abs(recovery_result.pixels[0].fired_cherenkov_pe -
+                     (1.0 + one_tau_fraction)) < 1.0e-12,
+            "integrated fired p.e. must include partial recovery charge");
+    require(std::abs(recovery_result.pixels[0].saturation_lost_pe -
+                     (2.0 - one_tau_fraction)) < 1.0e-12,
+            "saturation loss must include zero and partial-recovery deficits");
+
     DetectorPipelineResult empty_result;
     empty_result.pixels.resize(2);
     empty_result.pixels[0].primary_cherenkov_pe = 3.0;

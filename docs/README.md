@@ -23,6 +23,7 @@
 
 ## 光学、相机与触发
 
+- [恒星强度干涉统一模拟](intensity_interferometry_unified_zh.md)
 - [Photon response modes](PHOTON_RESPONSE.md)
 - [Trigger and waveform output](TRIGGER_AND_WAVEFORM_OUTPUT.md)
 - [相机时间和波形](camera_timing_waveform_zh.md)

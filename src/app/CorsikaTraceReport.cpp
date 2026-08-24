@@ -470,6 +470,10 @@ void printCorsikaOpticalConfiguration(
                detector_cfg.microcell.enabled ? "true" : "false");
     printField("microcell_saturation_enabled",
                detector_cfg.microcell.saturation_enabled ? "true" : "false");
+    printField("microcell_recovery_enabled",
+               detector_cfg.microcell.recovery_enabled ? "true" : "false");
+    printField("microcell_recovery_time_ns",
+               doubleToString(detector_cfg.microcell.recovery_time_ns));
     printField("microcell_model", detector_cfg.microcell.model);
     printField("microcell_layout", detector_cfg.microcell.layout);
     printField("inter_channel_gap_geometry", "part of tiled layout");

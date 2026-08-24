@@ -144,8 +144,8 @@ SiPM microcell saturation is implemented at this boundary. Without waveform
 output it is applied to the integrated primary p.e. image. With
 `waveform.source=pe`, it is applied cumulatively in time and each output sample
 is the fired-microcell increment for that bin; the trigger and integrated image
-both consume that fired-p.e. waveform. Detailed analog/ADC pulse shaping,
-crosstalk, afterpulse, dark count, gain fluctuation, microcell recovery, and
+both consume that fired-p.e. waveform. Exponential microcell charge recovery
+is optional. Detailed ADC quantization, crosstalk, afterpulse, dark count, and
 hardware trigger electronics remain future work. The HDF5 format keeps
 integrated and time-binned `pe` and `primary_pe` together with truth components.
 

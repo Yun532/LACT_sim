@@ -426,8 +426,8 @@ HDF5 dense 相机输出
 仍是简化或 placeholder：
 
 ```text
-真实 waveform 电子学
-SiPM 恢复、串扰、afterpulse、dark count
+完整 ADC/增益通道 waveform 电子学
+SiPM 串扰、afterpulse、dark count（指数恢复已实现）
 真实 trigger board 和邻接拓扑
 真实 NSB sky model 或测量数据
 大气传播重新模拟

@@ -36,7 +36,7 @@ The p.e. processing order is:
 
 ```text
 Cherenkov p.e. + deterministic NSB p.e.
--> time-ordered hard-no-recovery SiPM microcell occupancy
+-> time-ordered SiPM occupancy (hard no-recovery or exponential recovery)
 -> fired-p.e. waveform
 -> camera trigger and waveform integration
 -> image_pe
@@ -45,9 +45,11 @@ Cherenkov p.e. + deterministic NSB p.e.
 For every saved pixel, the full fired waveform therefore obeys
 `image_pe == sum_t(waveforms.pe)` within floating-point precision.
 `primary_pe` retains the pre-saturation Cherenkov+NSB waveform when component
-output is requested. This remains a p.e.-domain proxy: analog pulse shaping,
-ADC sampling, gain channels, crosstalk, afterpulsing, and microcell recovery
-are not modeled.
+output is requested. Exponential recovery can be enabled with
+`microcell.model=explicit_exponential_recovery`; partially recovered charge is
+stored as charge-equivalent `fired_pe`. Gain channels, ADC quantization,
+crosstalk, afterpulsing, and hardware discriminator details are not modeled in
+this p.e.-domain output path.
 
 ROOT `output.lact_profile` controls serialization only. `image_pe` evaluates
 the same time-binned trigger as `timeseries_pe` and `debug_full`, but does not

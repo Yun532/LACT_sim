@@ -19,8 +19,9 @@ B-4，右列从上到下为 A-1 至 A-4。
 和死区，也不会执行 `PDE / fill_factor`。
 
 25 μm pitch 只定义微单元索引。一个已经通过 PDE 抽样的 primary p.e.
-根据其 SiPM 坐标分配到对应微单元；无恢复饱和开启时，同一
-event/telescope/pixel 内，每个微单元最多产生一次 avalanche。
+根据其 SiPM 坐标分配到对应微单元。关闭恢复时，同一
+event/telescope/pixel 内每个微单元最多产生一次 avalanche；开启恢复时，
+重复命中的电荷等效 p.e. 按指数恢复比例计算。
 
 明确给出的 0.2 mm 通道间隔仍作为宏观无传感器区域单独处理，它不等于
 微单元内部的几何填充因子。
@@ -66,6 +67,9 @@ f_channel = 8 * (6.6 mm * 3.2 mm) / (13.4 mm * 13.4 mm)
 ```ini
 microcell.enabled=true
 microcell.saturation_enabled=true
+microcell.model=explicit_exponential_recovery
+microcell.recovery_enabled=true
+microcell.recovery_time_ns=10.0
 microcell.layout=s17351_tiled_2x4
 microcell.sensor_size_x_m=0.0134
 microcell.sensor_size_y_m=0.0134
@@ -78,8 +82,18 @@ microcell.microcell_rows_per_channel=128
 ```
 
 `saturation_enabled=false` 时，primary p.e. 不发生微单元占用损失。
-`saturation_enabled=true` 时，重复命中同一微单元的后续 p.e. 记为
-`saturation_rejected`。当前不考虑恢复时间。
+`saturation_enabled=true, recovery_enabled=false` 时，重复命中同一微单元
+的后续 p.e. 记为 `saturation_rejected`。`recovery_enabled=true` 时采用
+
+```text
+f_recovery = 1 - exp(-delta_t / recovery_time_ns)
+```
+
+作为该次 avalanche 的电荷等效 `fired_pe`；同一时刻的重复命中仍为零。
+当前 10 ns 不是 S17351 实测值：未检索到厂家公开的该型号恢复时间。
+Hamamatsu 的 MPPC 技术说明指出恢复常数由结电容与淬灭电阻的 RC 决定，
+并给出典型像元恢复约 15 ns 的量级。因此强度干涉模拟默认扫描 1、10、
+30 ns，直到获得器件在实际温度和过压下的标定。
 
 测试配置可以打开逐 hit 输出：
 

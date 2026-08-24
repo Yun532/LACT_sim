@@ -1,0 +1,8 @@
+telescope_id,name,config_path,position_x_m,position_y_m,position_z_m,pointing_az_deg,pointing_el_deg
+0,STAR_REF,configs/telescopes/lact_1229.cfg,0,0,0,0,90
+1,STAR_ZERO,configs/telescopes/lact_1229.cfg,0,0,0,0,90
+2,STAR_40M,configs/telescopes/lact_1229.cfg,40,0,0,0,90
+3,STAR_40M_N,configs/telescopes/lact_1229.cfg,0,40,0,0,90
+4,STAR_85M_NE,configs/telescopes/lact_1229.cfg,60,60,0,0,90
+5,STAR_120M_E,configs/telescopes/lact_1229.cfg,120,0,0,0,90
+6,STAR_140M_NW,configs/telescopes/lact_1229.cfg,-70,120,0,0,90

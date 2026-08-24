@@ -39,6 +39,12 @@ struct PrimaryPeHit {
 struct MicrocellConfig {
     bool enabled = false;
     bool saturation_enabled = true;
+    // If enabled, a previously fired cell recharges exponentially.  The
+    // emitted charge-equivalent p.e. fraction is
+    // 1 - exp(-delta_t / recovery_time_ns).  The default time constant is a
+    // provisional value and must be replaced when device calibration exists.
+    bool recovery_enabled = false;
+    double recovery_time_ns = 10.0;
     std::string model = "explicit_no_recovery";
     std::string layout = "uniform_interleaved";
     double sensor_size_x_m = 0.0130;
@@ -163,6 +169,8 @@ struct FiredCellHit {
     double time_ns = 0.0;
     int channel_id = -1;
     int microcell_id = -1;
+    // Charge-equivalent avalanche amplitude.  It is one for a fully charged
+    // cell and can be between zero and one during exponential recovery.
     double fired_pe = 1.0;
     HitOrigin origin = HitOrigin::Cherenkov;
     // These stochastic electronics quantities affect the waveform only.

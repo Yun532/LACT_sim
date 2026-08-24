@@ -378,6 +378,13 @@ void writeNativeTraceHdf5(const CorsikaTraceOutputConfig& output_cfg,
                              detector_cfg.microcell.saturation_enabled
                                  ? "true"
                                  : "false");
+        writeStringAttribute(electronics_group, "microcell_recovery_enabled",
+                             detector_cfg.microcell.recovery_enabled
+                                 ? "true"
+                                 : "false");
+        writeStringAttribute(
+            electronics_group, "microcell_recovery_time_ns",
+            doubleToString(detector_cfg.microcell.recovery_time_ns));
         writeStringAttribute(electronics_group, "single_pe_enabled",
                              detector_cfg.single_pe.enabled ? "true" : "false");
         writeStringAttribute(electronics_group, "single_pe_model",

@@ -1383,7 +1383,7 @@ struct LactEventRootStreamWriter::Impl {
           detector_cfg.save_microcell_decisions) {
         microcell_decision_tree = std::make_unique<TTree>(
             "microcell_decisions",
-            "Explicit no-recovery microcell decisions");
+            "Explicit microcell saturation and recovery decisions");
         microcell_decision_tree->SetDirectory(file.get());
         microcell_decision_tree->Branch(
             "event_id", &microcell_decision_row.event_id);

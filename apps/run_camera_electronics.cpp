@@ -291,6 +291,11 @@ void writeResult(const std::filesystem::path& directory,
                << "  \"microcell_saturation_enabled\": "
                << (config.microcell.saturation_enabled ? "true" : "false")
                << ",\n"
+               << "  \"microcell_recovery_enabled\": "
+               << (config.microcell.recovery_enabled ? "true" : "false")
+               << ",\n"
+               << "  \"microcell_recovery_time_ns\": "
+               << config.microcell.recovery_time_ns << ",\n"
                << "  \"microcell_layout\": \""
                << config.microcell.layout << "\",\n"
                << "  \"inter_channel_gap_geometry\": "

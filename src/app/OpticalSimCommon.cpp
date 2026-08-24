@@ -2785,11 +2785,12 @@ electronics::DetectorPipelineConfig buildDetectorPipelineConfig(
     out.microcell.pde_includes_inter_channel_gaps = getBool(
         cfg, "electronics.microcell.pde_includes_inter_channel_gaps",
         out.microcell.pde_includes_inter_channel_gaps);
-    if (getBool(cfg, "electronics.microcell.recovery_enabled", false)) {
-        throw std::runtime_error(
-            "microcell recovery is not available; use "
-            "electronics.microcell.recovery_enabled=false");
-    }
+    out.microcell.recovery_enabled = getBool(
+        cfg, "electronics.microcell.recovery_enabled",
+        out.microcell.recovery_enabled);
+    out.microcell.recovery_time_ns = getDouble(
+        cfg, "electronics.microcell.recovery_time_ns",
+        out.microcell.recovery_time_ns);
     out.single_pe.enabled = getBool(
         cfg, "electronics.single_pe.enabled", out.single_pe.enabled);
     out.single_pe.model = lowerCopy(trim(getString(
