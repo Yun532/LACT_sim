@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import json
 import math
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,7 +24,10 @@ except ImportError:  # pragma: no cover - reconstruction requires SciPy.
 try:
     import matplotlib
 
-    matplotlib.use("Agg")
+    # A reusable library must not replace an already active notebook backend.
+    # Select Agg only for headless/script imports that have not loaded pyplot.
+    if "matplotlib.pyplot" not in sys.modules:
+        matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 except ImportError:  # pragma: no cover - CSV reconstruction remains usable.
     plt = None

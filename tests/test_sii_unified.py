@@ -49,3 +49,14 @@ def test_empirical_charge_loader_is_positive_and_mean_one():
     assert len(factors) == 537
     assert np.all(factors > 0.0)
     assert np.isclose(np.mean(factors), 1.0, atol=1e-14)
+
+
+def test_reconstruction_import_preserves_loaded_pyplot_backend():
+    import importlib
+    import matplotlib
+    import matplotlib.pyplot  # noqa: F401 - establishes the active backend.
+
+    before = matplotlib.get_backend()
+    sys.modules.pop("sii_reconstruction", None)
+    importlib.import_module("sii_reconstruction")
+    assert matplotlib.get_backend() == before
