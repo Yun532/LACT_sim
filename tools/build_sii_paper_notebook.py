@@ -1475,7 +1475,7 @@ nb["cells"] = [
 
     上面的单张图不能证明可靠性。本节固定天体真值，生成100次完全独立的6小时观测。每次实现都先为32台望远镜逐段生成恒星和NSB的 Poisson 总计数，再生成随时间相关的透明度/NSB过程、每镜静态与每夜增益残差、每镜时钟残差以及每条基线零点；同一台镜的同一份实现被它参与的31条基线共同使用。
 
-    100次均做带误差权重的双星参数拟合，用来快速量化分离、方位角和流量比的抽样分布。这里固定了两个星盘直径，因此它是“已知源族条件下”的参数精度，不等于盲成像能力。更暗目标的盲检验覆盖16个“星等×积分时间”组合：2小时、6小时、5夜30小时和10夜60小时，星等从 (m_{AB}=2) 到6；每个组合做30次双星注入和30次单星空白，共960张盲图。优化器不知道源类型；只有“双星真阳性率高且单星假阳性率低”，才支持“看见两个结构”。预先固定的检出规则是峰间距0.10–0.32 mas且次/主峰比不低于0.25；比例同时给出 Clopper–Pearson 精确95%区间。一个星等/时长组合只有在真阳性率95%下限不低于80%、且假阳性率95%上限不高于20%时才标为“可靠检出”。
+    100次均做带误差权重的双星参数拟合，用来快速量化分离、方位角和流量比的抽样分布。这里固定了两个星盘直径，因此它是“已知源族条件下”的参数精度，不等于盲成像能力。更暗目标的盲检验覆盖18个“星等×积分时间”组合：2小时、6小时、5夜30小时和10夜60小时，星等从 (m_{AB}=2) 到8（7、8等只在最长的60小时检验）；每个组合做30次双星注入和30次单星空白，共1080张盲图。优化器不知道源类型；只有“双星真阳性率高且单星假阳性率低”，才支持“看见两个结构”。预先固定的检出规则是峰间距0.10–0.32 mas且次/主峰比不低于0.25；比例同时给出 Clopper–Pearson 精确95%区间。一个星等/时长组合只有在真阳性率95%下限不低于80%、且假阳性率95%上限不高于20%时才标为“可靠检出”。当双星真阳性与单星假阳性的95%区间重叠时，额外标记为本样本量下“不可区分”；这比只看双星图是否出现两个峰更接近“看不到”的含义。
 
     光子计数涨落没有被重复添加成任意的共享高斯噪声。对近零相关的不同基线，纯散粒噪声的交叉乘积协方差本来就极小；显著的跨基线相关主要来自望远镜级增益、时间和背景标定。本节分别保存了这些量，方便以后用实测稳定性替换当前工程假设。
     """),
@@ -1621,7 +1621,7 @@ nb["cells"] = [
         {"single_night_hours":2, "nights":1, "magnitudes":[2,3,4,5]},
         {"single_night_hours":6, "nights":1, "magnitudes":[2,3,4,5,6]},
         {"single_night_hours":6, "nights":5, "magnitudes":[3,4,5,6]},
-        {"single_night_hours":6, "nights":10, "magnitudes":[4,5,6]},
+        {"single_night_hours":6, "nights":10, "magnitudes":[4,5,6,7,8]},
     ]
     blind_realizations_per_case = 30
     for blind_definition in blind_scenarios:
@@ -1653,7 +1653,7 @@ nb["cells"] = [
     nonparametric_null_table = nonparametric_table.loc[
         nonparametric_table.source_case == "single_disk"].copy()
     nonparametric_table.to_csv(
-        OUTPUT_DIR/"faint_magnitude_960_binary_and_null_controls.csv", index=False)
+        OUTPUT_DIR/"faint_magnitude_1080_binary_and_null_controls.csv", index=False)
     def clopper_pearson(successes, trials, alpha=0.05):
         lower = 0.0 if successes == 0 else beta.ppf(
             alpha/2, successes, trials-successes+1)
@@ -1704,6 +1704,14 @@ nb["cells"] = [
             "false_positive_ci95_high"]]
     performance_summary = true_positive.merge(false_positive,
                                                on=scenario_key_columns)
+    performance_summary["discrimination_advantage"] = (
+        performance_summary.true_positive_rate
+        - performance_summary.false_positive_rate)
+    performance_summary["binary_null_ci95_overlap"] = (
+        (performance_summary.true_positive_ci95_low
+         <= performance_summary.false_positive_ci95_high)
+        & (performance_summary.false_positive_ci95_low
+           <= performance_summary.true_positive_ci95_high))
     performance_summary["reliable_detection"] = (
         (performance_summary.true_positive_ci95_low >= 0.80)
         & (performance_summary.false_positive_ci95_high <= 0.20))
@@ -1713,6 +1721,17 @@ nb["cells"] = [
         .source_ab_magnitude.max()
         .rename(columns={"source_ab_magnitude":"faintest_reliable_magnitude_tested"}))
     display(performance_summary.round(4))
+    display(Markdown(
+        "**最长60 h从可靠、失去可靠性到不可区分的转折：** "
+        "下表的 `binary_null_ci95_overlap=True` 表示双星注入与单星空白的"
+        "检出率95%区间重叠；此时不能声称数据能区分双星。"))
+    display(performance_summary.loc[
+        performance_summary.total_integration_hours == 60, [
+            "source_ab_magnitude", "true_positive_rate",
+            "true_positive_ci95_low", "true_positive_ci95_high",
+            "false_positive_rate", "false_positive_ci95_low",
+            "false_positive_ci95_high", "discrimination_advantage",
+            "binary_null_ci95_overlap", "reliable_detection"]].round(4))
     display(limiting_magnitude_empirical)
     display(Markdown(
         "**按预先声明的可靠性标准，本次离散网格中最暗的可靠双星检出为：** "
@@ -1876,13 +1895,13 @@ nb["cells"] = [
         len(ensemble_table) == 100 and ensemble_table.fit_success.all()
     )
     checks["blind_nonparametric_ensemble_completed"] = (
-        len(nonparametric_table) == 960
-        and len(nonparametric_binary_table) == 480
-        and len(nonparametric_null_table) == 480
+        len(nonparametric_table) == 1080
+        and len(nonparametric_binary_table) == 540
+        and len(nonparametric_null_table) == 540
         and nonparametric_table.groupby(
             detection_group_columns).size().eq(30).all()
         and nonparametric_table.groupby(
-            detection_group_columns).ngroups == 32
+            detection_group_columns).ngroups == 36
         and nonparametric_table.weighted_forward_rmse.notna().all()
     )
     validation = pd.DataFrame({"check":checks.keys(),"passed":checks.values()})
@@ -1898,7 +1917,7 @@ nb["cells"] = [
     2. 7 镜验证阵列适合标定和直径测量；`layout_0803` 的 32 镜实际模拟坐标提供公里级基线，进入约 (0.1\,\mathrm{mas}) 及以下的成像区间。表中有物理最长基线和本次时角/赤纬的投影覆盖；它仍是生产输入坐标，不应冒充最终现场测绘值。
     3. 正式1229分片镜面的轴上光追给出约0.602 ns RMS、1.732 ns峰峰值到达时间展宽；在假设的200 MHz矩形相关带宽内，只保留约 `optical_timing_efficiency` 所示比例的零延迟相关信号。notebook 已在短波形中逐 p.e. 抽样该分布，并在长曝光误差中按标定反演传播。
     4. 受控情景显示：多夜累计降低统计误差，NSB增加恶化统计误差；10 h 单夜窗口端高度低，未加入高度相关消光前不能当作可信增益。现在每次实现使用严格的20分钟段中点，不再把观测端点误算成额外积分段。
-    5. (|V|^2) 成像天然缺相位。100次望远镜级参数拟合给出亮目标的抽样区间；960张盲重建给出 (m_{AB}=2–6)、2–60小时条件下的真阳性率、单星假阳性率及精确95%区间，从而直接定位更暗目标的检出转折。单张“好看”的重建不再作为性能证据。参数拟合固定了星盘直径，仍比完全未知天体乐观。
+    5. (|V|^2) 成像天然缺相位。100次望远镜级参数拟合给出亮目标的抽样区间；1080张盲重建给出 (m_{AB}=2–8)、2–60小时条件下的真阳性率、单星假阳性率及精确95%区间，并检查两类区间是否已经重叠，从而直接定位“可靠”“不可靠”和“不可区分”的转折。单张“好看”的重建不再作为性能证据。参数拟合固定了星盘直径，仍比完全未知天体乐观。
     6. 微单元恢复10 ns仍是暂定值。当前光学核是轴上、理想误差配置的已保存光追样本；实测仰角形变配置没有对应逐光子时间表，因此尚未验证随仰角/视场变化的时间核。串扰、后脉冲、窄带滤光片角响应、实测时钟稳定性和标定星数据也仍缺失。以上参数替换为测量值之前，结果是带明确假设的研究预测，不是 LACT 最终性能声明。
     """),
 ]
