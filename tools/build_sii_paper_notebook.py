@@ -1159,7 +1159,8 @@ nb["cells"] = [
 
     def make_scenario_measurements(
             single_night_hours, nights, nsb_multiplier,
-            electronics_case, seed, source_case="binary"):
+            electronics_case, seed, source_case="binary",
+            source_ab_magnitude=None):
         count = int(round(single_night_hours*3600/INST.segment_s))
         half_segment_h = INST.segment_s/7200.0
         scenario_hour_angles = np.linspace(
@@ -1216,8 +1217,10 @@ nb["cells"] = [
         photon_relative_rms = []
         timing_attenuations = []
         shared_gain_factors = []
+        magnitude = (INST.source_ab_magnitude if source_ab_magnitude is None
+                     else float(source_ab_magnitude))
         star_rate_reference = detected_star_rate_hz(
-            INST.source_ab_magnitude, scenario_instrument)
+            magnitude, scenario_instrument)
         for night_index in range(nights):
             transparency = ar1_lognormal(INST.transparency_fractional_rms)
             nsb_factor = ar1_lognormal(INST.nsb_fractional_rms)
@@ -1290,6 +1293,7 @@ nb["cells"] = [
             "nsb_rate_MHz": nsb_rate/1e6,
             "electronics_case": electronics_case,
             "source_case": source_case,
+            "source_ab_magnitude": magnitude,
             "electronics_correlation_efficiency": correlation_efficiency,
             "optical_timing_efficiency": optical_timing_efficiency,
             "median_timing_attenuation": float(np.median(timing_attenuations)),
@@ -1471,7 +1475,7 @@ nb["cells"] = [
 
     上面的单张图不能证明可靠性。本节固定天体真值，生成100次完全独立的6小时观测。每次实现都先为32台望远镜逐段生成恒星和NSB的 Poisson 总计数，再生成随时间相关的透明度/NSB过程、每镜静态与每夜增益残差、每镜时钟残差以及每条基线零点；同一台镜的同一份实现被它参与的31条基线共同使用。
 
-    100次均做带误差权重的双星参数拟合，用来快速量化分离、方位角和流量比的抽样分布。这里固定了两个星盘直径，因此它是“已知源族条件下”的参数精度，不等于盲成像能力。另在2小时和6小时各做50次双星的非参数无相位重建，并分别用相同随机种子做50次单星空白对照，共200张盲图。优化器不知道源类型；只有“双星真阳性率高且单星假阳性率低”，才支持“看见两个结构”。预先固定的检出规则是峰间距0.10–0.32 mas且次/主峰比不低于0.25；比例同时给出 Clopper–Pearson 精确95%区间。
+    100次均做带误差权重的双星参数拟合，用来快速量化分离、方位角和流量比的抽样分布。这里固定了两个星盘直径，因此它是“已知源族条件下”的参数精度，不等于盲成像能力。更暗目标的盲检验覆盖16个“星等×积分时间”组合：2小时、6小时、5夜30小时和10夜60小时，星等从 (m_{AB}=2) 到6；每个组合做30次双星注入和30次单星空白，共960张盲图。优化器不知道源类型；只有“双星真阳性率高且单星假阳性率低”，才支持“看见两个结构”。预先固定的检出规则是峰间距0.10–0.32 mas且次/主峰比不低于0.25；比例同时给出 Clopper–Pearson 精确95%区间。一个星等/时长组合只有在真阳性率95%下限不低于80%、且假阳性率95%上限不高于20%时才标为“可靠检出”。
 
     光子计数涨落没有被重复添加成任意的共享高斯噪声。对近零相关的不同基线，纯散粒噪声的交叉乘积协方差本来就极小；显著的跨基线相关主要来自望远镜级增益、时间和背景标定。本节分别保存了这些量，方便以后用实测稳定性替换当前工程假设。
     """),
@@ -1576,13 +1580,15 @@ nb["cells"] = [
     nonparametric_rows = []
     nonparametric_images = {}
 
-    def reconstruct_blind_case(observing_hours, realization, source_case, frame):
+    def reconstruct_blind_case(single_night_hours, nights, magnitude,
+                               realization, source_case, frame):
         data = scenario_uv_data(frame)
         reconstruction = reconstruct_uv_data(
             data, grid_size=28, fov_mas=0.70, support_radius_mas=0.32,
             starts=3, max_iter=650, smoothness=0.020,
             huber_delta=0.15,
-            seed=20264000+1000*observing_hours+realization,
+            seed=(20264000 + int(10000*magnitude)
+                  + 1000*single_night_hours + 10*nights + realization),
             peak_minimum_separation_mas=0.10)
         separation = reconstruction.metrics.get("two_peak_separation_mas", np.nan)
         angle = reconstruction.metrics.get("two_peak_position_angle_deg", np.nan)
@@ -1594,7 +1600,10 @@ nb["cells"] = [
             and 0.10 <= separation <= 0.32 and ratio >= 0.25)
         row = {
             "realization": realization,
-            "observing_hours": observing_hours,
+            "single_night_hours": single_night_hours,
+            "nights": nights,
+            "total_integration_hours": single_night_hours*nights,
+            "source_ab_magnitude": magnitude,
             "source_case": source_case,
             "two_peak_detection": detected,
             "separation_mas": separation,
@@ -1603,24 +1612,40 @@ nb["cells"] = [
             "weighted_forward_rmse": reconstruction.metrics["weighted_fit_rmse"],
         }
         nonparametric_rows.append(row)
-        nonparametric_images[(observing_hours, source_case, realization)] = (
+        nonparametric_images[(single_night_hours, nights, magnitude,
+                              source_case, realization)] = (
             reconstruction.theta_mas, reconstruction.image)
         return row
 
-    for observing_hours in [2, 6]:
-        for realization in range(50):
-            binary_frame, _ = make_scenario_measurements(
-                observing_hours, 1, 1, "reference",
-                20263000+1000*observing_hours+realization,
-                source_case="binary")
-            reconstruct_blind_case(
-                observing_hours, realization, "binary", binary_frame)
-            null_frame, _ = make_scenario_measurements(
-                observing_hours, 1, 1, "reference",
-                20263000+1000*observing_hours+realization,
-                source_case="single_disk")
-            reconstruct_blind_case(
-                observing_hours, realization, "single_disk", null_frame)
+    blind_scenarios = [
+        {"single_night_hours":2, "nights":1, "magnitudes":[2,3,4,5]},
+        {"single_night_hours":6, "nights":1, "magnitudes":[2,3,4,5,6]},
+        {"single_night_hours":6, "nights":5, "magnitudes":[3,4,5,6]},
+        {"single_night_hours":6, "nights":10, "magnitudes":[4,5,6]},
+    ]
+    blind_realizations_per_case = 30
+    for blind_definition in blind_scenarios:
+        single_night_hours = blind_definition["single_night_hours"]
+        nights = blind_definition["nights"]
+        for magnitude in blind_definition["magnitudes"]:
+            for realization in range(blind_realizations_per_case):
+                measurement_seed = (
+                    20263000 + int(10000*magnitude)
+                    + 1000*single_night_hours + 10*nights + realization)
+                binary_frame, _ = make_scenario_measurements(
+                    single_night_hours, nights, 1, "reference",
+                    measurement_seed, source_case="binary",
+                    source_ab_magnitude=magnitude)
+                reconstruct_blind_case(
+                    single_night_hours, nights, magnitude, realization,
+                    "binary", binary_frame)
+                null_frame, _ = make_scenario_measurements(
+                    single_night_hours, nights, 1, "reference",
+                    measurement_seed, source_case="single_disk",
+                    source_ab_magnitude=magnitude)
+                reconstruct_blind_case(
+                    single_night_hours, nights, magnitude, realization,
+                    "single_disk", null_frame)
 
     nonparametric_table = pd.DataFrame(nonparametric_rows)
     nonparametric_binary_table = nonparametric_table.loc[
@@ -1628,7 +1653,7 @@ nb["cells"] = [
     nonparametric_null_table = nonparametric_table.loc[
         nonparametric_table.source_case == "single_disk"].copy()
     nonparametric_table.to_csv(
-        OUTPUT_DIR/"nonparametric_2h_6h_200_binary_and_null_controls.csv", index=False)
+        OUTPUT_DIR/"faint_magnitude_960_binary_and_null_controls.csv", index=False)
     def clopper_pearson(successes, trials, alpha=0.05):
         lower = 0.0 if successes == 0 else beta.ppf(
             alpha/2, successes, trials-successes+1)
@@ -1636,12 +1661,20 @@ nb["cells"] = [
             1-alpha/2, successes+1, trials-successes)
         return float(lower), float(upper)
     detection_rows = []
-    for (hours, source_case), group in nonparametric_table.groupby(
-            ["observing_hours", "source_case"]):
+    detection_group_columns = [
+        "single_night_hours", "nights", "total_integration_hours",
+        "source_ab_magnitude", "source_case"]
+    for group_key, group in nonparametric_table.groupby(
+            detection_group_columns):
+        single_night_hours, nights, total_hours, magnitude, source_case = group_key
         successes = int(group.two_peak_detection.sum())
         interval = clopper_pearson(successes, len(group))
         detection_rows.append({
-            "observing_hours": hours, "source_case": source_case,
+            "single_night_hours": single_night_hours,
+            "nights": nights,
+            "total_integration_hours": total_hours,
+            "source_ab_magnitude": magnitude,
+            "source_case": source_case,
             "realizations": len(group), "detections": successes,
             "detection_rate": successes/len(group),
             "ci95_low": interval[0], "ci95_high": interval[1],
@@ -1650,14 +1683,53 @@ nb["cells"] = [
         })
     detection_summary = pd.DataFrame(detection_rows)
     display(detection_summary.round(4))
+    scenario_key_columns = [
+        "single_night_hours", "nights", "total_integration_hours",
+        "source_ab_magnitude"]
+    true_positive = detection_summary.loc[
+        detection_summary.source_case == "binary"].rename(columns={
+            "detection_rate":"true_positive_rate",
+            "ci95_low":"true_positive_ci95_low",
+            "ci95_high":"true_positive_ci95_high",
+        })[scenario_key_columns + [
+            "true_positive_rate", "true_positive_ci95_low",
+            "true_positive_ci95_high"]]
+    false_positive = detection_summary.loc[
+        detection_summary.source_case == "single_disk"].rename(columns={
+            "detection_rate":"false_positive_rate",
+            "ci95_low":"false_positive_ci95_low",
+            "ci95_high":"false_positive_ci95_high",
+        })[scenario_key_columns + [
+            "false_positive_rate", "false_positive_ci95_low",
+            "false_positive_ci95_high"]]
+    performance_summary = true_positive.merge(false_positive,
+                                               on=scenario_key_columns)
+    performance_summary["reliable_detection"] = (
+        (performance_summary.true_positive_ci95_low >= 0.80)
+        & (performance_summary.false_positive_ci95_high <= 0.20))
+    limiting_magnitude_empirical = (
+        performance_summary.loc[performance_summary.reliable_detection]
+        .groupby("total_integration_hours", as_index=False)
+        .source_ab_magnitude.max()
+        .rename(columns={"source_ab_magnitude":"faintest_reliable_magnitude_tested"}))
+    display(performance_summary.round(4))
+    display(limiting_magnitude_empirical)
+    display(Markdown(
+        "**按预先声明的可靠性标准，本次离散网格中最暗的可靠双星检出为：** "
+        + "；".join(
+            f"{row.total_integration_hours:g} h → m_AB={row.faintest_reliable_magnitude_tested:g}"
+            for row in limiting_magnitude_empirical.itertuples())
+        + "。这些是已测试网格点，不是在相邻星等之间插值得到的连续极限。"))
     binary_recovery_intervals = (
-        nonparametric_binary_table.groupby("observing_hours")[[
+        nonparametric_binary_table.groupby(
+            ["total_integration_hours", "source_ab_magnitude"])[[
             "separation_mas", "position_angle_deg", "peak_ratio",
             "weighted_forward_rmse"]]
         .quantile([0.025, 0.5, 0.975])
-        .rename_axis(index=["observing_hours", "quantile"]))
+        .rename_axis(index=["total_integration_hours", "source_ab_magnitude",
+                            "quantile"]))
     display(binary_recovery_intervals.round(4))
-    display(nonparametric_table.groupby(["observing_hours", "source_case"]).agg(
+    display(nonparametric_table.groupby(detection_group_columns).agg(
         realizations=("realization", "size"),
         detections=("two_peak_detection", "sum"),
         detection_rate=("two_peak_detection", "mean"),
@@ -1668,21 +1740,44 @@ nb["cells"] = [
     display(nonparametric_table.head(12).round(4))
     for row in detection_rows:
         print(
-            f"{row['observing_hours']} h {row['source_case']}: "
+            f"mAB={row['source_ab_magnitude']:g}, "
+            f"{row['total_integration_hours']:g} h {row['source_case']}: "
             f"{row['detection_rate']:.1%} "
             f"(95% {row['ci95_low']:.1%}–{row['ci95_high']:.1%})")
 
-    def plot_blind_gallery(observing_hours, source_case, table, filename, title):
-        fig, axes = plt.subplots(3, 4, figsize=(12.5, 9.2), constrained_layout=True)
-        for axis, (_, row) in zip(axes.ravel(), table.head(12).iterrows()):
+    fig, axes = plt.subplots(1, 2, figsize=(12.5, 4.2), constrained_layout=True)
+    for axis, source_case, title in zip(
+            axes, ["binary", "single_disk"],
+            ["Binary true-positive rate", "Single-star false-positive rate"]):
+        subset = detection_summary.loc[detection_summary.source_case == source_case]
+        for total_hours, group in subset.groupby("total_integration_hours"):
+            group = group.sort_values("source_ab_magnitude")
+            axis.errorbar(
+                group.source_ab_magnitude, group.detection_rate,
+                yerr=[group.detection_rate-group.ci95_low,
+                      group.ci95_high-group.detection_rate],
+                marker="o", capsize=3, label=f"{total_hours:g} h")
+        axis.set(title=title, xlabel=r"Source $m_{AB}$",
+                 ylabel="Detection fraction", ylim=(-0.05, 1.05))
+        axis.grid(alpha=.2)
+        axis.legend(frameon=False, title="Total integration")
+    fig.savefig(OUTPUT_DIR/"faint_magnitude_detection_efficiency.png",
+                bbox_inches="tight")
+    plt.show()
+
+    def plot_blind_gallery(single_night_hours, nights, magnitude,
+                           source_case, table, filename, title):
+        fig, axes = plt.subplots(2, 4, figsize=(12.5, 6.2), constrained_layout=True)
+        for axis, (_, row) in zip(axes.ravel(), table.head(8).iterrows()):
             theta, image = nonparametric_images[
-                (observing_hours, source_case, int(row.realization))]
+                (single_night_hours, nights, magnitude,
+                 source_case, int(row.realization))]
             axis.imshow(image, origin="lower",
                         extent=[theta[0],theta[-1],theta[0],theta[-1]], cmap="magma")
             axis.set_title(
-                f"r{int(row.realization)}: s={row.separation_mas:.3f} mas, "
+                f"r{int(row.realization)}  s={row.separation_mas:.3f}  "
                 f"q={row.peak_ratio:.2f}\n"
-                f"{'DETECTED' if row.two_peak_detection else 'no detection'}",
+                f"{'DET' if row.two_peak_detection else 'no detection'}",
                 fontsize=8)
             axis.set(xlabel="ΔRA [mas]", ylabel="ΔDec [mas]")
         fig.suptitle(title, fontsize=13)
@@ -1690,15 +1785,19 @@ nb["cells"] = [
         plt.show()
 
     plot_blind_gallery(
-        6, "binary", nonparametric_binary_table.loc[
-            nonparametric_binary_table.observing_hours == 6],
-        "nonparametric_binary_12_of_50_realizations.png",
-        "Blind reconstructions: first 12 of 50 binary injections")
+        6, 1, 3, "binary", nonparametric_binary_table.loc[
+            (nonparametric_binary_table.single_night_hours == 6)
+            & (nonparametric_binary_table.nights == 1)
+            & (nonparametric_binary_table.source_ab_magnitude == 3)],
+        "faint_m3_6h_binary_first8.png",
+        "Blind reconstructions: first 8, binary mAB=3, 6 h")
     plot_blind_gallery(
-        6, "single_disk", nonparametric_null_table.loc[
-            nonparametric_null_table.observing_hours == 6],
-        "nonparametric_single_star_12_of_50_controls.png",
-        "Blind reconstructions: first 12 of 50 single-star null controls")
+        6, 1, 3, "single_disk", nonparametric_null_table.loc[
+            (nonparametric_null_table.single_night_hours == 6)
+            & (nonparametric_null_table.nights == 1)
+            & (nonparametric_null_table.source_ab_magnitude == 3)],
+        "faint_m3_6h_single_star_first8.png",
+        "Blind reconstructions: first 8, single-star mAB=3, 6 h")
     """),
     md(r"""
     ## 12. Checks
@@ -1777,11 +1876,13 @@ nb["cells"] = [
         len(ensemble_table) == 100 and ensemble_table.fit_success.all()
     )
     checks["blind_nonparametric_ensemble_completed"] = (
-        len(nonparametric_table) == 200
-        and len(nonparametric_binary_table) == 100
-        and len(nonparametric_null_table) == 100
+        len(nonparametric_table) == 960
+        and len(nonparametric_binary_table) == 480
+        and len(nonparametric_null_table) == 480
         and nonparametric_table.groupby(
-            ["observing_hours", "source_case"]).size().eq(50).all()
+            detection_group_columns).size().eq(30).all()
+        and nonparametric_table.groupby(
+            detection_group_columns).ngroups == 32
         and nonparametric_table.weighted_forward_rmse.notna().all()
     )
     validation = pd.DataFrame({"check":checks.keys(),"passed":checks.values()})
@@ -1797,7 +1898,7 @@ nb["cells"] = [
     2. 7 镜验证阵列适合标定和直径测量；`layout_0803` 的 32 镜实际模拟坐标提供公里级基线，进入约 (0.1\,\mathrm{mas}) 及以下的成像区间。表中有物理最长基线和本次时角/赤纬的投影覆盖；它仍是生产输入坐标，不应冒充最终现场测绘值。
     3. 正式1229分片镜面的轴上光追给出约0.602 ns RMS、1.732 ns峰峰值到达时间展宽；在假设的200 MHz矩形相关带宽内，只保留约 `optical_timing_efficiency` 所示比例的零延迟相关信号。notebook 已在短波形中逐 p.e. 抽样该分布，并在长曝光误差中按标定反演传播。
     4. 受控情景显示：多夜累计降低统计误差，NSB增加恶化统计误差；10 h 单夜窗口端高度低，未加入高度相关消光前不能当作可信增益。现在每次实现使用严格的20分钟段中点，不再把观测端点误算成额外积分段。
-    5. (|V|^2) 成像天然缺相位。100次望远镜级参数拟合给出抽样区间，2小时和6小时各50次双星盲重建、各50次单星空白对照给出真阳性率、假阳性率及精确95%区间；单张“好看”的重建不再作为性能证据。参数拟合固定了星盘直径，仍比完全未知天体乐观。
+    5. (|V|^2) 成像天然缺相位。100次望远镜级参数拟合给出亮目标的抽样区间；960张盲重建给出 (m_{AB}=2–6)、2–60小时条件下的真阳性率、单星假阳性率及精确95%区间，从而直接定位更暗目标的检出转折。单张“好看”的重建不再作为性能证据。参数拟合固定了星盘直径，仍比完全未知天体乐观。
     6. 微单元恢复10 ns仍是暂定值。当前光学核是轴上、理想误差配置的已保存光追样本；实测仰角形变配置没有对应逐光子时间表，因此尚未验证随仰角/视场变化的时间核。串扰、后脉冲、窄带滤光片角响应、实测时钟稳定性和标定星数据也仍缺失。以上参数替换为测量值之前，结果是带明确假设的研究预测，不是 LACT 最终性能声明。
     """),
 ]
