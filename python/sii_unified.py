@@ -60,6 +60,7 @@ class Instrument:
     nsb_fractional_rms: float = 0.10
     spe_template_path: str | None = None
     charge_samples_path: str | None = None
+    microcell_device_path: str | None = None
     optical_timing_kernel_path: str | None = None
     parameter_source: str = "built-in defaults"
 
@@ -172,6 +173,7 @@ class Instrument:
             "microcell_recovery_time_ns": recovery_ns,
             "spe_template_path": str(template_path.resolve()),
             "charge_samples_path": str(charge_path.resolve()),
+            "microcell_device_path": str(device_path.resolve()),
             "optical_timing_kernel_path": (
                 str(timing_path.resolve()) if timing_path.exists() else None),
             "parameter_source": str(config_path),
@@ -614,6 +616,255 @@ def normalized_cross_correlation(left, right) -> tuple[np.ndarray, np.ndarray]:
     correlation = np.correlate(left, right, mode="full") / scale
     lags = np.arange(-len(left) + 1, len(left))
     return lags, correlation
+
+
+def hbt_correlated_pair_rate_hz(star_rate_a_hz: float,
+                                star_rate_b_hz: float,
+                                coherence_area_s: float,
+                                visibility2: float) -> float:
+    """热光 HBT 超额光子对率：``R_pair=R1 R2 tau_c |V|^2``。"""
+    values = (star_rate_a_hz, star_rate_b_hz, coherence_area_s, visibility2)
+    if any(not np.isfinite(value) or value < 0.0 for value in values):
+        raise ValueError("HBT rates, coherence area, and visibility must be finite and >= 0")
+    if visibility2 > 1.0:
+        raise ValueError("squared visibility cannot exceed one")
+    return star_rate_a_hz * star_rate_b_hz * coherence_area_s * visibility2
+
+
+def _sample_active_sensor_positions(rng, count: int, device_path):
+    """按 main 的 S17351 通道几何均匀抽取有效微单元位置。"""
+    if count == 0:
+        return np.empty(0), np.empty(0)
+    if not device_path:
+        return rng.uniform(-0.006, 0.006, count), rng.uniform(-0.006, 0.006, count)
+    from config_io import read_key_value_config
+    device = read_key_value_config(device_path)
+    columns, rows = int(device["channel_columns"]), int(device["channel_rows"])
+    width, height = float(device["channel_size_x_m"]), float(device["channel_size_y_m"])
+    gap_x, gap_y = float(device["channel_gap_x_m"]), float(device["channel_gap_y_m"])
+    total_x = columns*width + (columns-1)*gap_x
+    total_y = rows*height + (rows-1)*gap_y
+    column = rng.integers(0, columns, count)
+    row = rng.integers(0, rows, count)
+    x = -total_x/2 + column*(width+gap_x) + rng.random(count)*width
+    y = -total_y/2 + row*(height+gap_y) + rng.random(count)*height
+    return x, y
+
+
+def simulate_hbt_primary_pe(
+        rng: np.random.Generator,
+        duration_ns: float,
+        star_rate_hz: float | tuple[float, float],
+        nsb_rate_hz: float | tuple[float, float],
+        visibility2: float,
+        instrument: Instrument = Instrument(),
+        optical_timing_mixture=None,
+        geometric_delay_ns: float = 0.0,
+        padding_ns: float = 200.0,
+        event_id: int = 1,
+        pixel_id: int = 0) -> tuple[pd.DataFrame, dict]:
+    """生成可直接交给 main ``run_camera_electronics`` 的双镜 p.e. 流。
+
+    在光学相干时间远短于电子学分辨率时，热光的二阶超额相关可等价为
+    稀疏相关光子对，其率为 ``R1*R2*tau_c*|V|^2``。其余恒星光子和
+    NSB 分别是独立 Poisson 流；DC 时间核独立作用于每一个恒星光子。
+    """
+    if duration_ns <= 0.0 or padding_ns < 0.0:
+        raise ValueError("duration_ns must be > 0 and padding_ns must be >= 0")
+
+    def pair(value):
+        if np.isscalar(value):
+            return float(value), float(value)
+        if len(value) != 2:
+            raise ValueError("rate must be a scalar or a two-element pair")
+        return float(value[0]), float(value[1])
+
+    star = pair(star_rate_hz)
+    nsb = pair(nsb_rate_hz)
+    if min(*star, *nsb) < 0.0:
+        raise ValueError("photon rates must be >= 0")
+    pair_rate = hbt_correlated_pair_rate_hz(
+        star[0], star[1], instrument.coherence_area_s, visibility2)
+    if pair_rate > min(star):
+        raise ValueError("correlated-pair approximation exceeds a marginal star rate")
+
+    start_ns, end_ns = -padding_ns, duration_ns + padding_ns
+    simulated_s = (end_ns-start_ns)*1.0e-9
+    pair_count = int(rng.poisson(pair_rate*simulated_s))
+    pair_centers = rng.uniform(start_ns, end_ns, pair_count)
+    next_pair_id = np.arange(pair_count, dtype=np.int64)
+    frames = []
+    for telescope_id in (0, 1):
+        star_single_count = int(rng.poisson((star[telescope_id]-pair_rate)*simulated_s))
+        nsb_count = int(rng.poisson(nsb[telescope_id]*simulated_s))
+        star_times = rng.uniform(start_ns, end_ns, star_single_count)
+        pair_times = pair_centers.copy()
+        if optical_timing_mixture is not None:
+            star_times += sample_optical_delays_ns(
+                rng, star_single_count, optical_timing_mixture)
+            pair_times += sample_optical_delays_ns(
+                rng, pair_count, optical_timing_mixture)
+        if telescope_id == 1:
+            star_times += geometric_delay_ns
+            pair_times += geometric_delay_ns
+        nsb_times = rng.uniform(start_ns, end_ns, nsb_count)
+        times = np.concatenate((star_times, pair_times, nsb_times))
+        origins = np.concatenate((
+            np.full(star_single_count+pair_count, "cherenkov", object),
+            np.full(nsb_count, "nsb", object)))
+        pair_ids = np.concatenate((
+            np.full(star_single_count, -1, np.int64), next_pair_id,
+            np.full(nsb_count, -1, np.int64)))
+        sensor_x, sensor_y = _sample_active_sensor_positions(
+            rng, len(times), instrument.microcell_device_path)
+        frames.append(pd.DataFrame({
+            "event_id": event_id, "telescope_id": telescope_id,
+            "pixel_id": pixel_id, "time_ns": times,
+            "sensor_x_m": sensor_x, "sensor_y_m": sensor_y,
+            "primary_pe": 1, "wavelength_nm": instrument.wavelength_nm,
+            "origin": origins, "hbt_pair_id": pair_ids,
+        }))
+    hits = pd.concat(frames, ignore_index=True).sort_values(
+        ["telescope_id", "time_ns"], ignore_index=True)
+    metadata = {
+        "duration_ns": float(duration_ns),
+        "padding_ns": float(padding_ns),
+        "star_rate_a_hz": star[0], "star_rate_b_hz": star[1],
+        "nsb_rate_a_hz": nsb[0], "nsb_rate_b_hz": nsb[1],
+        "visibility2": float(visibility2),
+        "coherence_area_ps": instrument.coherence_area_s*1.0e12,
+        "hbt_pair_rate_hz": pair_rate,
+        "expected_hbt_pairs_in_analysis_window": pair_rate*duration_ns*1.0e-9,
+        "generated_hbt_pairs_with_padding": pair_count,
+        "optical_timing_rms_ns": (0.0 if optical_timing_mixture is None else
+                                  float(optical_timing_mixture["rms_spread_ns"])),
+    }
+    hits.attrs.update(metadata)
+    return hits, metadata
+
+
+def write_main_primary_pe_csv(hits: pd.DataFrame, path) -> Path:
+    """写出 main ``run_camera_electronics`` 原生逐 p.e. CSV。"""
+    columns = ["event_id", "telescope_id", "pixel_id", "time_ns",
+               "sensor_x_m", "sensor_y_m", "primary_pe",
+               "wavelength_nm", "origin"]
+    missing = set(columns)-set(hits.columns)
+    if missing:
+        raise ValueError(f"primary p.e. table is missing {sorted(missing)}")
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    hits.to_csv(output, columns=columns, index=False)
+    return output
+
+
+def make_fast_spe_template(rise_ns: float = 0.15,
+                           fall_ns: float = 0.80,
+                           support_ns: float = 8.0,
+                           step_ns: float = 0.01) -> tuple[np.ndarray, np.ndarray]:
+    """生成峰值归一的快速差指数 SPE；参数可替换为实测前端响应。"""
+    if not (0.0 < rise_ns < fall_ns and support_ns > 0.0 and step_ns > 0.0):
+        raise ValueError("fast SPE needs 0 < rise < fall and positive support/step")
+    time_ns = np.arange(0.0, support_ns+step_ns/2, step_ns)
+    amplitude = np.exp(-time_ns/fall_ns)-np.exp(-time_ns/rise_ns)
+    amplitude /= amplitude.max()
+    return time_ns, amplitude
+
+
+def render_pe_waveform(
+        rng: np.random.Generator,
+        pe_times_ns,
+        duration_ns: float,
+        instrument: Instrument = Instrument(),
+        sample_width_ns: float | None = None,
+        template: tuple[np.ndarray, np.ndarray] | None = None,
+        electronic_noise_rms_mv: float | None = None) -> dict:
+    """把逐 p.e. 事件变成 main 同参数的 SiPM/SPE/ADC 波形。
+
+    使用分箱脉冲列和 FFT 卷积，避免逐 p.e. 对整段波形重复插值。微单元
+    恢复、实测电荷涨落、加性噪声和 ADC 量化均保留。
+    """
+    times = np.asarray(pe_times_ns, dtype=float)
+    dt = instrument.sample_width_ns if sample_width_ns is None else float(sample_width_ns)
+    if duration_ns <= 0.0 or dt <= 0.0:
+        raise ValueError("duration and sample width must be positive")
+    if template is None:
+        if not instrument.spe_template_path:
+            raise ValueError("instrument has no measured SPE template")
+        template = load_measured_spe_template(instrument.spe_template_path)
+    template_time, template_amplitude = map(lambda value: np.asarray(value, float), template)
+    samples = int(math.ceil(duration_ns/dt))
+
+    cells = rng.integers(0, instrument.microcells_per_pixel, len(times))
+    recovery = apply_exponential_microcell_recovery(
+        times, cells, instrument.microcell_recovery_time_ns)
+    if instrument.charge_samples_path:
+        empirical = load_empirical_charge_factors(instrument.charge_samples_path)
+        charge = rng.choice(empirical, len(times))
+    else:
+        charge = np.ones(len(times))
+    weights = recovery*charge
+
+    # 把模板支撑范围外扩，确保分析窗边缘前后的 p.e. 尾巴仍进入波形。
+    grid_start = -math.ceil(max(0.0, template_time.max())/dt)*dt
+    grid_end = duration_ns + math.ceil(max(0.0, -template_time.min())/dt)*dt
+    extended_samples = int(math.ceil((grid_end-grid_start)/dt))
+    impulses = np.zeros(extended_samples)
+    indices = np.rint((times-grid_start)/dt-0.5).astype(np.int64)
+    valid = (indices >= 0) & (indices < extended_samples)
+    np.add.at(impulses, indices[valid], weights[valid])
+    first_offset = int(math.floor(template_time.min()/dt))
+    last_offset = int(math.ceil(template_time.max()/dt))
+    offsets = np.arange(first_offset, last_offset+1)
+    pulse = np.interp(offsets*dt, template_time, template_amplitude,
+                      left=0.0, right=0.0)
+    try:
+        from scipy.signal import fftconvolve
+        full = fftconvolve(impulses, pulse, mode="full")
+    except ImportError:  # pragma: no cover
+        full = np.convolve(impulses, pulse, mode="full")
+    start = -first_offset
+    extended_analog = full[start:start+extended_samples]
+    extended_centers = grid_start+(np.arange(extended_samples)+0.5)*dt
+    analysis = (extended_centers >= 0.0) & (extended_centers < duration_ns)
+    analog = extended_analog[analysis][:samples]
+    centers = extended_centers[analysis][:samples]
+    noise_rms = (instrument.electronic_noise_rms_mv
+                 if electronic_noise_rms_mv is None else electronic_noise_rms_mv)
+    noisy = analog + rng.normal(0.0, noise_rms, samples)
+    return {
+        "sample_time_ns": centers,
+        "analog_mv": analog,
+        "noisy_mv": noisy,
+        "adc_mv": digitize_adc(noisy, instrument.adc_bits,
+                                instrument.adc_full_scale_mv),
+        "recovery_fraction": recovery,
+        "charge_factor": charge,
+        "sample_width_ns": dt,
+        "pe_count": len(times),
+    }
+
+
+def waveform_cross_correlation(left, right, sample_width_ns: float,
+                               max_lag_ns: float) -> tuple[np.ndarray, np.ndarray]:
+    """FFT 计算有限波形的无偏归一互相关。"""
+    left = np.asarray(left, float)
+    right = np.asarray(right, float)
+    if left.shape != right.shape or left.ndim != 1 or left.size < 2:
+        raise ValueError("waveforms must be equal non-trivial one-dimensional arrays")
+    if sample_width_ns <= 0.0 or max_lag_ns < 0.0:
+        raise ValueError("sample width must be positive and max lag non-negative")
+    x, y = left-left.mean(), right-right.mean()
+    try:
+        from scipy.signal import correlate
+        raw = correlate(x, y, mode="full", method="fft")
+    except ImportError:  # pragma: no cover
+        raw = np.correlate(x, y, mode="full")
+    lags = np.arange(-len(x)+1, len(x))
+    overlap = len(x)-np.abs(lags)
+    scale = np.std(x)*np.std(y)
+    correlation = raw/overlap/scale if scale > 0.0 else np.zeros_like(raw)
+    keep = np.abs(lags*sample_width_ns) <= max_lag_ns
+    return lags[keep]*sample_width_ns, correlation[keep]
 
 
 def _load_layout(layout) -> pd.DataFrame:

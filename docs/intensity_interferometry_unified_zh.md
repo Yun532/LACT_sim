@@ -161,3 +161,22 @@ microcell.recovery_time_ns=10.0
 
 Hamamatsu 参考：
 [Physics and operation of the MPPC silicon photomultiplier](https://hub.hamamatsu.com/us/en/technical-notes/mppc-sipms/physics-and-operation-of-the-MPPC-silicon-photomultiplier.html)。
+
+## 两台望远镜的逐 p.e. 波形闭环
+
+`notebooks/lact_sii_two_telescope_waveforms.ipynb` 独立验证了最底层的数据链：
+
+1. 恒星和 NSB 分别生成 Poisson 光子流；
+2. 只按
+   `R_pair = R_star,1 * R_star,2 * tau_c * |V|^2`
+   注入稀疏热光 HBT 相关光子对；
+3. 两台镜的每个恒星光子分别抽取 LACT 光线追迹时间核；
+4. 经过微单元恢复、实测电荷涨落、可替换 SPE、电子噪声和 ADC；
+5. 不读取模拟标签，直接从两条 ADC 波形计算互相关；
+6. 同时输出 `run_camera_electronics` 可直接读取的逐 p.e. CSV。
+
+参考情景为 mAB=2、`|V|²=0.5`。200 µs 中只预期约0.512个相关光子对，
+因此原始互相关由随机噪声主导；这是正确的天文尺度，不是模拟失败。对当前0.602 ns RMS
+单镜时间核，两镜相对延迟 RMS 为约0.852 ns。采用0.15/0.80 ns快速差指数SPE时，
+DC使期望相关峰高保留约58%，但峰面积仍可标定。按矩形带宽零滞后估计，当前时间核的
+最优点约243 MHz；4 ns采样的125 MHz Nyquist仍保留相关性，但相对最优SNR约87%。

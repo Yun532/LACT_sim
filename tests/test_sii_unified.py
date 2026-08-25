@@ -101,6 +101,42 @@ def test_repository_instrument_follows_main_configs():
     assert instrument.microcells_per_pixel == 270_336
     assert np.isclose(instrument.adc_sample_rate_hz, 250e6)
     assert Path(instrument.spe_template_path).is_file()
+    assert Path(instrument.microcell_device_path).is_file()
+
+
+def test_hbt_pair_rate_and_main_compatible_primary_stream(tmp_path):
+    instrument = sii.Instrument(optical_width_nm=1e-5)
+    expected = sii.hbt_correlated_pair_rate_hz(
+        1e6, 1e6, instrument.coherence_area_s, 0.5)
+    hits, metadata = sii.simulate_hbt_primary_pe(
+        np.random.default_rng(12), 1e6, 1e6, 0.0, 0.5,
+        instrument, padding_ns=0.0)
+    assert np.isclose(metadata["hbt_pair_rate_hz"], expected)
+    paired = hits[hits.hbt_pair_id >= 0]
+    assert paired.groupby("hbt_pair_id").telescope_id.nunique().eq(2).all()
+    output = sii.write_main_primary_pe_csv(hits, tmp_path / "primary.csv")
+    header = output.read_text(encoding="utf-8").splitlines()[0]
+    assert header == ("event_id,telescope_id,pixel_id,time_ns,sensor_x_m,"
+                      "sensor_y_m,primary_pe,wavelength_nm,origin")
+
+
+def test_fast_waveform_renderer_and_fft_cross_correlation():
+    instrument = sii.Instrument(
+        charge_samples_path=None, electronic_noise_rms_mv=0.0,
+        adc_sample_rate_hz=4e9)
+    template = sii.make_fast_spe_template()
+    times = np.array([10.0, 20.0, 51.0, 77.0])
+    left = sii.render_pe_waveform(
+        np.random.default_rng(1), times, 100.0, instrument,
+        template=template, electronic_noise_rms_mv=0.0)
+    right = sii.render_pe_waveform(
+        np.random.default_rng(2), times, 100.0, instrument,
+        template=template, electronic_noise_rms_mv=0.0)
+    lags, correlation = sii.waveform_cross_correlation(
+        left["analog_mv"], right["analog_mv"], 0.25, 5.0)
+    assert np.isclose(lags[np.argmax(correlation)], 0.0)
+    assert np.isclose(np.max(correlation), 1.0)
+    assert len(left["sample_time_ns"]) == 400
 
 
 def test_complete_pipeline_without_reconstruction():
