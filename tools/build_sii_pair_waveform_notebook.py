@@ -58,7 +58,7 @@ nb["cells"] = [
         BinarySource, Instrument, Observation, detected_star_rate_hz,
         generate_uvw, hbt_correlated_pair_rate_hz,
         load_measured_spe_template, load_optical_timing_mixture,
-        optical_timing_transfer_efficiency, render_pe_waveform,
+        optical_timing_transfer_efficiency, reconstruct_uv, render_pe_waveform,
         sample_optical_delays_ns,
         simulate_hbt_primary_pe, simulate_uv_observation, unit_visibility_snr,
         waveform_cross_correlation, write_main_primary_pe_csv,
@@ -451,6 +451,30 @@ nb["cells"] = [
         "中位统计误差": meta["sigma_visibility2_stat"],
         "总积分_h": meta["total_integration_hours"],
     } for (label, bandwidth), (_, _, meta) in zip(uv_cases, uv_results)]))
+
+    reconstructions = []
+    for index, (label, measured, _) in enumerate(uv_results):
+        result = reconstruct_uv(
+            measured, cell_mlambda=120.0, grid_size=40, fov_mas=1.6,
+            support_radius_mas=0.70, starts=2, max_iter=250,
+            smoothness=0.15, peak_minimum_separation_mas=0.10,
+            seed=4400+index)
+        reconstructions.append((label, result))
+    vmax = max(result.image.max() for _, result in reconstructions)
+    fig, axes = plt.subplots(1, 3, figsize=(12.8, 4), constrained_layout=True)
+    for axis, (label, result) in zip(axes, reconstructions):
+        axis.imshow(result.image, origin="lower", cmap="inferno", vmin=0, vmax=vmax,
+                    extent=[result.theta_mas[0], result.theta_mas[-1],
+                            result.theta_mas[0], result.theta_mas[-1]])
+        axis.set(title=label, xlabel="角位置 [mas]", ylabel="角位置 [mas]")
+    fig.savefig(OUTPUT_DIR/"reconstruction_electronics_comparison.png", dpi=160)
+    plt.show()
+    display(pd.DataFrame([{
+        "情况": label,
+        "重建双峰间距_mas": result.metrics.get("two_peak_separation_mas"),
+        "重建位置角_deg": result.metrics.get("two_peak_position_angle_deg"),
+        "加权拟合RMSE": result.metrics["weighted_fit_rmse"],
+    } for label, result in reconstructions]))
     """),
     md("## 10. 可选：把同一批光子直接交给 main 电子学"),
     code("""
