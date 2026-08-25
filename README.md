@@ -120,6 +120,27 @@ build/run_optical_sim configs/official_tests/perfect_point_900m_whiteboard.cfg
 逐镜 CSV、统一误差和效率乘数的完整优先级见
 [`docs/facet_parameter_precedence_zh.md`](docs/facet_parameter_precedence_zh.md)。
 
+### 强度干涉的完整单光子光学响应
+
+长时间 HBT 模拟不需要把数小时内的每个光子反复追迹，但必须先用当前 `main`
+校准单光子响应。下面的运行同时包含 LACT2 实测逐镜参数、70° 仰角插值、3D
+结构遮挡、真实相机、集光器、反射率、滤光片和 PDE：
+
+```bash
+build/run_optical_sim configs/optics/lact2_measured_full_response_400nm.cfg
+python3 tools/derive_full_optical_response.py \
+  run_logs/sii_full_optics/lact2_measured_400nm_hits.csv \
+  configs/optics/lact2_measured_full_response_400nm.csv \
+  --input-photons 1000000 \
+  --provenance-json configs/optics/lact2_measured_full_response_400nm.provenance.json \
+  --source-config configs/optics/lact2_measured_full_response_400nm.cfg
+```
+
+生成后 `Instrument.from_repository()` 会自动优先使用该完整响应；没有生成时才回退到
+旧的轴上理想误差时间核。光学响应决定探测概率、像素接收、PSF 和到达时间分布，
+但 HBT 相关性仍必须在两台望远镜的入射热光统计中产生。线性被动光学不会凭空生成
+两镜相关，也不会移动 UV 坐标；它改变 UV 点的误差和权重。
+
 ## Photon CSV
 
 运行仓库示例：

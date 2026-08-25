@@ -55,11 +55,12 @@ nb["cells"] = [
         REPO_ROOT = REPO_ROOT.parent
     sys.path.insert(0, str(REPO_ROOT / "python"))
     from sii_unified import (
-        Instrument, detected_star_rate_hz, hbt_correlated_pair_rate_hz,
+        BinarySource, Instrument, Observation, detected_star_rate_hz,
+        generate_uvw, hbt_correlated_pair_rate_hz,
         load_measured_spe_template, load_optical_timing_mixture,
         optical_timing_transfer_efficiency, render_pe_waveform,
         sample_optical_delays_ns,
-        simulate_hbt_primary_pe, unit_visibility_snr,
+        simulate_hbt_primary_pe, simulate_uv_observation, unit_visibility_snr,
         waveform_cross_correlation, write_main_primary_pe_csv,
     )
 
@@ -118,7 +119,8 @@ nb["cells"] = [
             instrument, sample_width_ns=native_sample_ns,
             template=measured_template))
 
-    view_start, view_end = 20_000.0, 20_400.0
+    # 完整记录是 200 us；这里明确画 2 us（2000 ns），不是只模拟 400 ns。
+    view_start, view_end = 20_000.0, 22_000.0
     fig, axes = plt.subplots(2, 1, figsize=(12, 5.8), sharex=True, constrained_layout=True)
     for telescope_id, (axis, waveform) in enumerate(zip(axes, waveforms_measured)):
         keep = ((waveform["sample_time_ns"] >= view_start) &
@@ -126,7 +128,7 @@ nb["cells"] = [
         axis.plot(waveform["sample_time_ns"][keep]-view_start,
                   waveform["adc_mv"][keep], lw=.8)
         axis.set(ylabel="ADC [mV]", title=f"望远镜 {telescope_id+1}：实测SPE + 4 ns + NSB + 噪声 + ADC")
-    axes[-1].set(xlabel="局部时间 [ns]")
+    axes[-1].set(xlabel="局部时间 [ns]（本图连续显示 2000 ns）")
     fig.savefig(OUTPUT_DIR/"two_measured_spe_waveforms.png", dpi=160)
     plt.show()
     print({"spe_file": instrument.spe_template_path,
@@ -367,7 +369,90 @@ nb["cells"] = [
     print("短记录 HBT SNR / 原始互相关随机峰 SNR =",
           snr_record/(raw_peak_value/raw_rms))
     """),
-    md("## 8. 可选：把同一批光子直接交给 main"),
+    md(r"""
+    ## 8. `main` 完整光学与当前时间核：哪些相同，哪些不同
+
+    当前默认时间核来自一次 `run_optical_sim` 的 590,239 条轴上 400 nm 焦面命中，
+    因而**光程到达时间分布是真实光线追迹的压缩结果**。但是旧运行使用理想误差、
+    白板焦面，没有完整保留 LACT2 实测逐镜曲率/偏转、结构遮挡、真实 1656 像素、
+    集光器和 PDE。下面的新配置会用 `main` 的完整链重新生成响应；若已经在同一仓库
+    运行并提取，provenance 会自动显示真实结果，否则明确显示“待运行”，不会拿旧核冒充。
+    """),
+    code("""
+    full_cfg = REPO_ROOT/"configs/optics/lact2_measured_full_response_400nm.cfg"
+    full_kernel = REPO_ROOT/"configs/optics/lact2_measured_full_response_400nm.csv"
+    full_provenance = REPO_ROOT/"configs/optics/lact2_measured_full_response_400nm.provenance.json"
+    old_provenance = json.loads((REPO_ROOT/"configs/optics/lact_1229_onaxis_timing_kernel.provenance.json").read_text(encoding="utf-8"))
+    optical_audit = pd.DataFrame([
+        {"项目":"逐镜几何与光程", "当前默认核":"有：main完整追迹后压缩", "新完整响应":"有"},
+        {"项目":"LACT2实测镜面/仰角形变", "当前默认核":"无：旧理想误差", "新完整响应":"有：70°实测插值"},
+        {"项目":"3D支架遮挡", "当前默认核":"无", "新完整响应":"有"},
+        {"项目":"真实相机/集光器/PDE", "当前默认核":"无", "新完整响应":"有"},
+        {"项目":"实测SPE/4 ns/ADC", "当前波形":"有", "新完整响应":"光学后由电子学独立处理"},
+        {"项目":"HBT相关性的来源", "当前与新流程":"入射热光统计", "新完整响应":"光学本身不会产生HBT"},
+    ])
+    display(optical_audit)
+    if full_provenance.exists() and full_kernel.exists():
+        full_info = json.loads(full_provenance.read_text(encoding="utf-8"))
+        display(pd.Series(full_info, name="完整main光学响应").to_frame())
+    else:
+        full_info = None
+        print("待运行：build/run_optical_sim", full_cfg)
+        print("然后运行：python tools/derive_full_optical_response.py <hits.csv> <kernel.csv> --input-photons 1000000 --provenance-json <json> --source-config", full_cfg)
+    """),
+    md(r"""
+    ## 9. 完整响应对 UV 平面的真正影响
+
+    光学和电子学**不会移动**基线的 $(u,v)$ 坐标，也不会改变源模型给出的真实
+    $|V(u,v)|^2$。它们改变的是每个 UV 点的误差、权重、系统偏差和最终能否重建。
+    下面固定同一套32镜坐标、同一随机种子和2小时观测，只替换相关器等效带宽。
+    """),
+    code("""
+    layout_path = REPO_ROOT/"configs/arrays/layout_0803_reco32_coordinates.csv"
+    uv_source = BinarySource(ab_magnitude=3.0)
+    uv_observation = Observation(hours_per_night=2.0, nights=1, segment_s=1200.0)
+    uvw_real = generate_uvw(layout_path, uv_observation, instrument)
+
+    def effective_instrument(bandwidth_hz, label):
+        # 带宽已经包含光学核、SPE、采样、加性噪声和ADC传递；关闭这些项的二次扣除。
+        return replace(instrument, electronics_bandwidth_hz=bandwidth_hz,
+                       optical_timing_kernel_path=None, spe_template_path=None,
+                       parameter_source=label)
+
+    uv_cases = [
+        ("旧200 MHz假设", assumed_200mhz_equivalent_hz),
+        ("实测SPE + 4 ns匹配", matched_4ns_hz),
+        ("实测SPE + 简单零滞后", direct_bandwidth_dc_hz),
+    ]
+    uv_results = []
+    for label, bandwidth in uv_cases:
+        measured, meta = simulate_uv_observation(
+            uvw_real, uv_source, uv_observation,
+            effective_instrument(bandwidth, label), seed=9102)
+        uv_results.append((label, measured, meta))
+
+    common_limit = max(np.quantile(np.abs(item.visibility2_measured-item.visibility2_true), .99)
+                       for _, item, _ in uv_results)
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.2), sharex=True, sharey=True,
+                             constrained_layout=True)
+    for axis, (label, measured, meta) in zip(axes, uv_results):
+        residual = measured.visibility2_measured-measured.visibility2_true
+        points = axis.scatter(measured.u_m, measured.v_m, c=residual, s=8,
+                              cmap="coolwarm", vmin=-common_limit, vmax=common_limit)
+        axis.set(title=f"{label}\\n中位σ={meta['sigma_visibility2_stat']:.3g}",
+                 xlabel="u [m]", ylabel="v [m]")
+        axis.set_aspect("equal", adjustable="box")
+    fig.colorbar(points, ax=axes, label="模拟值 - 真实 |V|²")
+    fig.savefig(OUTPUT_DIR/"uv_noise_full_response_comparison.png", dpi=160)
+    plt.show()
+    display(pd.DataFrame([{
+        "情况": label, "等效带宽_MHz": bandwidth/1e6,
+        "UV点数": meta["uv_measurements"],
+        "中位统计误差": meta["sigma_visibility2_stat"],
+        "总积分_h": meta["total_integration_hours"],
+    } for (label, bandwidth), (_, _, meta) in zip(uv_cases, uv_results)]))
+    """),
+    md("## 10. 可选：把同一批光子直接交给 main 电子学"),
     code("""
     preview = hits[(hits.time_ns >= -220) & (hits.time_ns <= 2_220)].copy()
     preview_csv = write_main_primary_pe_csv(
@@ -392,7 +477,7 @@ nb["cells"] = [
         print("当前工作区没有已编译的 main 可执行文件；上面的 CSV 和命令可在服务器 build 后直接运行。")
     """),
     md(r"""
-    ## 9. 检查与边界
+    ## 11. 检查与边界
 
     - 两镜相关对数必须服从 $R_1R_2\tau_c|V|^2$，而不是共享全部 Poisson 光子。
     - 两个独立 LACT 时间核之差的 RMS 应接近 $\sqrt{2}\times0.602$ ns。

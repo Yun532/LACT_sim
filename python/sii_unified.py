@@ -18,6 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from itertools import combinations
 from pathlib import Path
+import json
 import math
 
 import numpy as np
@@ -161,7 +162,26 @@ class Instrument:
             "microcell_columns_per_channel", "microcell_rows_per_channel"))
         recovery_ns = float(electronics.get(
             "microcell.recovery_time_ns", base.microcell_recovery_time_ns))
-        timing_path = root / "configs" / "optics" / "lact_1229_onaxis_timing_kernel.csv"
+        # 优先使用由当前 main 实测光学配置生成的完整响应；没有运行过该
+        # 校准时才回退到旧的轴上理想误差时间核，并由 notebook 明确标注。
+        full_timing_path = (root / "configs" / "optics"
+                            / "lact2_measured_full_response_400nm.csv")
+        fallback_timing_path = (root / "configs" / "optics"
+                                / "lact_1229_onaxis_timing_kernel.csv")
+        timing_path = (full_timing_path if (full_timing_path.exists()
+                                             and np.isclose(wavelength_nm, 400.0))
+                       else fallback_timing_path)
+        full_provenance_path = full_timing_path.with_suffix(".provenance.json")
+        if (full_timing_path.exists() and full_provenance_path.exists()
+                and np.isclose(wavelength_nm, 400.0)):
+            full_response = json.loads(
+                full_provenance_path.read_text(encoding="utf-8"))
+            central_effective_area = float(
+                full_response["central_pixel_effective_detection_area_m2"])
+            # 光追已包含镜面、遮挡、PSF、相机、集光器、滤光片和PDE；
+            # source_transmission_scale 只继续表示大气及未单列的上游损失。
+            throughput = (central_effective_area/effective_area
+                          * float(source_transmission_scale))
 
         values = {
             "effective_area_m2": effective_area,

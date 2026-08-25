@@ -1,7 +1,10 @@
 from pathlib import Path
+import json
+import subprocess
 import sys
 
 import numpy as np
+import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "python"))
@@ -102,6 +105,37 @@ def test_repository_instrument_follows_main_configs():
     assert np.isclose(instrument.adc_sample_rate_hz, 250e6)
     assert Path(instrument.spe_template_path).is_file()
     assert Path(instrument.microcell_device_path).is_file()
+    full = ROOT / "configs" / "optics" / "lact2_measured_full_response_400nm.csv"
+    fallback = ROOT / "configs" / "optics" / "lact_1229_onaxis_timing_kernel.csv"
+    assert Path(instrument.optical_timing_kernel_path) == (
+        full if full.exists() else fallback).resolve()
+
+
+def test_full_optical_response_uses_brightest_pixel_and_weight(tmp_path):
+    hits = pd.DataFrame({
+        "mirror_id": [1, 2, 3], "time_ns": [80.0, 82.0, 90.0],
+        "u_m": [0.0, 0.001, 0.02], "v_m": [0.0, 0.0, 0.0],
+        "hit_camera": [1, 1, 1], "accepted": [1, 1, 1],
+        "pixel_id": [7, 7, 8], "weight": [1.0, 1.0, 1.0],
+        "relative_efficiency": [0.5, 0.4, 0.1],
+    })
+    input_csv = tmp_path / "hits.csv"
+    output_csv = tmp_path / "kernel.csv"
+    provenance = tmp_path / "kernel.provenance.json"
+    hits.to_csv(input_csv, index=False)
+    subprocess.run([
+        sys.executable, str(ROOT/"tools"/"derive_full_optical_response.py"),
+        str(input_csv), str(output_csv), "--input-photons", "10",
+        "--sampling-radius-m", "1", "--provenance-json", str(provenance),
+    ], check=True)
+    kernel = pd.read_csv(output_csv)
+    info = json.loads(provenance.read_text(encoding="utf-8"))
+    assert set(kernel.mirror_id) == {1, 2}
+    assert np.isclose(kernel.weight.sum(), 1.0)
+    assert info["central_pixel_id"] == 7
+    assert np.isclose(info["central_pixel_detection_probability"], 0.09)
+    assert np.isclose(info["central_pixel_effective_detection_area_m2"],
+                      np.pi*0.09)
 
 
 def test_hbt_pair_rate_and_main_compatible_primary_stream(tmp_path):
