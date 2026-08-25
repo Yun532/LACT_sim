@@ -81,6 +81,47 @@ def test_short_waveform_accepts_optical_timing_kernel():
                       mixture["rms_spread_ns"])
 
 
+def test_two_microsecond_waveform_has_padding_for_full_spe_tail():
+    template_t = np.array([-40.0, 0.0, 170.0])
+    template_v = np.array([0.0, 1.0, 0.0])
+    record = sii.simulate_short_pair_waveforms(
+        2000.0, 100e6, 20e6, 0.5, sii.Instrument(),
+        template_t, template_v, seed=17)
+    assert len(record["sample_time_ns"]) == 1250
+    assert record["simulated_padding_each_side_ns"] >= 170.0
+    assert np.min(record["pe_times_a_ns"]) < 0.0
+    assert np.max(record["pe_times_a_ns"]) > 2000.0
+
+
+def test_repository_instrument_follows_main_configs():
+    instrument = sii.Instrument.from_repository(ROOT)
+    assert np.isclose(instrument.effective_area_m2, 24.576860)
+    assert np.isclose(instrument.throughput, 0.20, rtol=2e-4)
+    assert np.isclose(instrument.detected_nsb_rate_hz, 70.527e6, rtol=2e-4)
+    assert instrument.microcells_per_pixel == 270_336
+    assert np.isclose(instrument.adc_sample_rate_hz, 250e6)
+    assert Path(instrument.spe_template_path).is_file()
+
+
+def test_complete_pipeline_without_reconstruction():
+    layout = np.array([
+        (1, "A", 0.0, 0.0, 0.0),
+        (2, "B", 100.0, 0.0, 0.0),
+        (3, "C", 0.0, 100.0, 0.0),
+    ], dtype=[("telescope_id", "i4"), ("name", "U2"),
+              ("east_m", "f8"), ("north_m", "f8"), ("up_m", "f8")])
+    import pandas as pd
+    observation = sii.Observation(hours_per_night=1.0, segment_s=1200.0)
+    result = sii.run_sii_pipeline(
+        pd.DataFrame(layout), observation=observation,
+        instrument=sii.Instrument(), do_reconstruction=False, seed=3,
+        electronics_case="ideal")
+    assert len(result.uvw) == 3 * 3  # 3 baselines × 3 time segments
+    assert len(result.measurements) == len(result.uvw)
+    assert result.measurements.visibility2_measured.notna().all()
+    assert result.reconstruction is None
+
+
 def test_reconstruction_import_preserves_loaded_pyplot_backend():
     import importlib
     import matplotlib

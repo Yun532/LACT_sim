@@ -31,7 +31,7 @@ notebook 包括：
 3. 理论双星天图和完整理论 `(u,v)` 功率图；
 4. 任意两镜的 ENU 基线、正确 topocentric `(u,v,w)`、`w/c` 几何时延；
 5. 全阵列 6 小时地球自转覆盖；
-6. 590239条轴上光线导出的镜面到达时间核，以及170 ns实测 SPE、恢复、电子噪声和 ADC 波形诊断；
+6. 590239条轴上光线导出的镜面到达时间核，以及带完整SPE边缘缓冲的2 μs恢复、电子噪声和 ADC 波形诊断；
 7. 逐望远镜 Poisson 光子/NSB计数、共享增益/时钟/透明度误差和带协方差来源的长曝光 `|V|²` 模拟；
 8. 正值、有限支撑、平滑正则、多起点的无相位重建；
 9. 星等极限和角尺度情景；
@@ -41,6 +41,37 @@ notebook 包括：
 13. 自动物理闭合检查。
 
 输出表和图片位于 `run_logs/sii_paper_notebook/`。
+
+## 可复用的一键流程
+
+`python/sii_unified.py` 现在提供四个公开入口，notebook 不再是唯一运行方式：
+
+```python
+instrument = Instrument.from_repository(REPO_ROOT)
+uvw = generate_uvw(layout, observation, instrument)
+measurements, metadata = simulate_uv_observation(
+    uvw, source, observation, instrument, seed=1)
+image = reconstruct_uv(measurements, **reconstruction_options)
+
+# 等价的一键调用
+result = run_sii_pipeline(
+    layout, source, observation, instrument,
+    reconstruction_kwargs=reconstruction_options)
+```
+
+`generate_uvw` 只负责阵列和天球几何；`simulate_uv_observation` 生成全部基线、
+全部时间段的带噪声 `|V|²`；`reconstruct_uv` 只读取标准测量列，因此可独立用于
+模拟或真实数据。改变星等、NSB或电子学参数时可以复用UVW；改变阵列、赤纬、
+时角范围或波长时重新生成UVW。
+
+`Instrument.from_repository()` 直接读取 main 当前配置树中的有效面积、镜面反射率、
+滤光片、PDE、NSB光谱、相机像元、SPE模板、SPE电荷样本、采样间隔和微单元几何。
+main 的对应 cfg/CSV 更新后，下次调用会自动重新计算通光效率、NSB率和电子学派生量。
+尚无实测来源的电子带宽、ADC量程、电子噪声、恢复时间和标定稳定性仍保留为显式
+可覆盖参数；程序不会把工程假设伪装成 main 的实测值。
+
+快速中文教程为 `notebooks/lact_sii_pipeline_tutorial.ipynb`，使用真实32镜坐标跑完
+模型、UVW、模拟和独立重建，同时展示带SPE边缘缓冲的2 μs短波形。
 
 ## 更暗双星的盲检出边界
 

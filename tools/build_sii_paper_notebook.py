@@ -621,9 +621,9 @@ nb["cells"] = [
     display(coherence_summary.T.rename(columns={0:"value"}))
     """),
     md(r"""
-    ### 6.1 170 ns 完整电子学记录与微单元恢复
+    ### 6.1 2 μs 完整电子学记录与微单元恢复
 
-    这一节回答“完整波形有没有意义”：有，但用途是校准延迟、SPE 形状、ADC、基线噪声、饱和和恢复偏差；它不能单独承担小时级天文灵敏度。170 ns 在 625 MS/s 下只有约 106 个采样，而且单采样预期 HBT 对比度仅约 (10^{-6})，所以单帧相关曲线必然由随机噪声主导。
+    这一节回答“完整波形有没有意义”：有，但用途是校准延迟、SPE 形状、ADC、基线噪声、饱和和恢复偏差；它不能单独承担小时级天文灵敏度。实测 SPE 模板支持约170–180 ns，因此有效记录扩展为2 μs（625 MS/s 下1250个采样），并在有效窗口两侧继续生成至少一个完整模板长度的光电子，避免边缘 p.e. 长尾被截断。即便如此，单采样预期 HBT 对比度仍只有约 (10^{-6})，所以单帧相关曲线必然由随机噪声主导。
 
     输入不是人为的 1 ns 光学波形，而是每个 ADC bin 内满足正确一、二阶矩的光电子计数：两镜恒星流包含一个极小的共享 Poisson 分量，使协方差等于 (r_{\star,1}r_{\star,2}\tau_c\Delta t|V|^2)；星光余项和 NSB 独立。每个 p.e. 随机落到 270336 个微单元，电荷按
 
@@ -678,7 +678,7 @@ nb["cells"] = [
     reference_star_rate = unified_detected_star_rate_hz(
         INST.source_ab_magnitude, short_instrument)
     short_record = simulate_short_pair_waveforms(
-        duration_ns=170.0,
+        duration_ns=2000.0,
         star_rate_hz=reference_star_rate,
         nsb_rate_hz=INST.detected_nsb_rate_hz,
         visibility2=float(transit_visibility2),
@@ -696,7 +696,7 @@ nb["cells"] = [
     total_rate = reference_star_rate + INST.detected_nsb_rate_hz
     for tau_ns in [1.0, 10.0, 30.0]:
         record = simulate_short_pair_waveforms(
-            170.0, reference_star_rate, INST.detected_nsb_rate_hz,
+            2000.0, reference_star_rate, INST.detected_nsb_rate_hz,
             float(transit_visibility2), short_instrument, spe_t_ns, spe_mv,
             delay_ns=0.2, recovery_time_ns=tau_ns,
             charge_factors=empirical_charge_factors,
@@ -722,7 +722,7 @@ nb["cells"] = [
     axes[0].set(title="Measured common SPE template", xlabel="Time from peak [ns]", ylabel="Amplitude [mV]")
     axes[1].step(short_record["sample_time_ns"], short_record["adc_a_mv"], where="mid", color=BLUE, label="telescope A")
     axes[1].step(short_record["sample_time_ns"], short_record["adc_b_mv"], where="mid", color=ORANGE, alpha=.8, label="telescope B")
-    axes[1].set(title="One 170 ns digitized record", xlabel="Time [ns]", ylabel="ADC-equivalent [mV]")
+    axes[1].set(title="One 2 μs digitized record", xlabel="Time [ns]", ylabel="ADC-equivalent [mV]")
     axes[1].legend(frameon=False, fontsize=8)
     axes[2].plot(lag_ns_short, short_corr, color=BLUE)
     axes[2].axvline(0, color=GREY, linestyle="--", linewidth=1)
@@ -732,7 +732,8 @@ nb["cells"] = [
     plt.show()
 
     short_waveform_summary = pd.DataFrame([{
-        "duration_ns": 170.0,
+        "duration_ns": 2000.0,
+        "simulated_padding_each_side_ns": short_record["simulated_padding_each_side_ns"],
         "samples": len(short_record["sample_time_ns"]),
         "star_rate_MHz": reference_star_rate / 1e6,
         "nsb_rate_MHz": INST.detected_nsb_rate_hz / 1e6,
@@ -1850,7 +1851,10 @@ nb["cells"] = [
     checks["five_mag_rate_ratio"] = np.isclose(detected_star_rate_hz(5)/detected_star_rate_hz(0),0.01,rtol=1e-12)
     checks["snr_sqrt_time"] = np.isclose(
         unit_visibility_snr(2,3600)/unit_visibility_snr(2,900),2.0,rtol=1e-12)
-    checks["short_waveform_has_expected_samples"] = len(short_record["sample_time_ns"]) in (106, 107)
+    checks["short_waveform_has_expected_samples"] = len(short_record["sample_time_ns"]) == 1250
+    checks["short_waveform_has_full_spe_edge_padding"] = (
+        short_record["simulated_padding_each_side_ns"] >= np.max(np.abs(spe_t_ns))
+    )
     checks["six_hours_has_exactly_18_twenty_minute_segments"] = (
         len(hour_angles_h) == 18 and len(uv_coverage) == 18*len(lact_baselines)
     )

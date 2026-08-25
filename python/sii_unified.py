@@ -15,11 +15,13 @@ long-exposure statistic is simulated with its explicit uncertainty.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from itertools import combinations
 from pathlib import Path
 import math
 
 import numpy as np
+import pandas as pd
 
 try:
     from scipy.special import j1
@@ -50,6 +52,16 @@ class Instrument:
     spectral_shape_factor: float = 0.842
     microcells_per_pixel: int = 270_336
     microcell_recovery_time_ns: float = 10.0
+    telescope_gain_calibration_rms: float = 0.010
+    per_night_gain_rms: float = 0.005
+    baseline_zero_point_rms: float = 0.005
+    residual_timing_rms_ns: float = 0.20
+    transparency_fractional_rms: float = 0.03
+    nsb_fractional_rms: float = 0.10
+    spe_template_path: str | None = None
+    charge_samples_path: str | None = None
+    optical_timing_kernel_path: str | None = None
+    parameter_source: str = "built-in defaults"
 
     @property
     def wavelength_m(self) -> float:
@@ -73,14 +85,143 @@ class Instrument:
                 * self.wavelength_m**2
                 / (C_M_S * self.optical_width_m))
 
+    @classmethod
+    def from_repository(cls, repo_root, response_config=None,
+                        source_transmission_scale=0.7836336, **overrides):
+        """从 main 使用的 cfg/CSV 读取探测器响应，显式参数仍可覆盖。
+
+        ``source_transmission_scale`` 表示大气及尚未单列的通光损失。当前
+        取值使 400 nm 默认总效率保持约 20%；镜面、滤光片、PDE、NSB、
+        SPE、采样间隔或微单元配置在 main 中更新后会在下次调用时重新读取。
+        """
+        root = Path(repo_root).resolve()
+        if response_config is None:
+            response_config = (
+                root / "configs" / "examples"
+                / "corsika_lact_pylast_root_only_measured_waveform.cfg")
+        config_path = Path(response_config).resolve()
+        from config_io import (expand_component_config,
+                               read_key_value_config,
+                               resolve_workspace_path)
+
+        cfg, component_paths = expand_component_config(config_path)
+        base = cls()
+        wavelength_nm = float(overrides.get("wavelength_nm", base.wavelength_nm))
+
+        def workspace_path(value):
+            return resolve_workspace_path(config_path, value)
+
+        mirror_path = workspace_path(cfg["efficiency.mirror_reflectivity"])
+        filter_path = workspace_path(cfg["efficiency.filter_transmission"])
+        pde_value = cfg["sipm.pde"]
+        pde_path = workspace_path(pde_value)
+        nsb_spectrum_path = Path(cfg["nsb.spectrum_csv"])
+        effective_area = float(cfg["nsb.effective_area_m2"])
+        collector = float(cfg["nsb.collector_mean_transmission"])
+        focal_length = float(cfg.get("telescope.focal_length_m", 8.0))
+
+        camera_csv = workspace_path(cfg["camera.csv_path"])
+        camera_data = np.genfromtxt(camera_csv, delimiter=",", names=True)
+        pixel_size = float(np.atleast_1d(camera_data["size_m"])[0])
+
+        wave_mirror, mirror = _read_two_column_curve(mirror_path)
+        wave_filter, filt = _read_two_column_curve(filter_path)
+        wave_pde, pde = _read_two_column_curve(pde_path)
+        throughput = (
+            np.interp(wavelength_nm, wave_mirror, mirror)
+            * np.interp(wavelength_nm, wave_filter, filt)
+            * np.interp(wavelength_nm, wave_pde, pde)
+            * collector * float(source_transmission_scale))
+
+        wave_nsb, nsb_flux = _read_two_column_curve(nsb_spectrum_path)
+        detected_spectrum = (
+            nsb_flux
+            * np.interp(wave_nsb, wave_mirror, mirror, left=0.0, right=0.0)
+            * np.interp(wave_nsb, wave_filter, filt, left=0.0, right=0.0)
+            * np.interp(wave_nsb, wave_pde, pde, left=0.0, right=0.0))
+        # main 的诊断工具把结果写成 p.e./ns；这里的公共接口统一使用 Hz。
+        nsb_rate = (np.trapezoid(detected_spectrum, wave_nsb)
+                    * effective_area * (pixel_size/focal_length)**2 * collector)
+
+        electronics_path = component_paths["electronics"]
+        electronics = read_key_value_config(electronics_path)
+        electronics_dir = electronics_path.parent
+        template_path = electronics_dir / electronics["single_pe.template"]
+        charge_path = electronics_dir / electronics[
+            "single_pe.charge_fluctuation.samples"]
+        charge = load_empirical_charge_factors(charge_path)
+        excess_noise = float(np.sqrt(np.mean(charge**2)))
+        sample_width_ns = float(electronics.get("sampling.width_ns", 4.0))
+
+        device_path = electronics_dir / electronics["microcell.device"]
+        device = read_key_value_config(device_path)
+        microcells = math.prod(int(device[key]) for key in (
+            "channel_columns", "channel_rows",
+            "microcell_columns_per_channel", "microcell_rows_per_channel"))
+        recovery_ns = float(electronics.get(
+            "microcell.recovery_time_ns", base.microcell_recovery_time_ns))
+        timing_path = root / "configs" / "optics" / "lact_1229_onaxis_timing_kernel.csv"
+
+        values = {
+            "effective_area_m2": effective_area,
+            "throughput": float(throughput),
+            "adc_sample_rate_hz": 1.0e9/sample_width_ns,
+            "detected_nsb_rate_hz": float(nsb_rate),
+            "excess_noise_factor": excess_noise,
+            "microcells_per_pixel": microcells,
+            "microcell_recovery_time_ns": recovery_ns,
+            "spe_template_path": str(template_path.resolve()),
+            "charge_samples_path": str(charge_path.resolve()),
+            "optical_timing_kernel_path": (
+                str(timing_path.resolve()) if timing_path.exists() else None),
+            "parameter_source": str(config_path),
+        }
+        values.update(overrides)
+        return replace(base, **values)
+
 
 @dataclass(frozen=True)
 class BinarySource:
+    ab_magnitude: float = 2.0
     separation_mas: float = 0.20
     position_angle_deg: float = 35.0
     flux_ratio_secondary_to_primary: float = 0.55
     primary_diameter_mas: float = 0.060
     secondary_diameter_mas: float = 0.040
+
+
+@dataclass(frozen=True)
+class Observation:
+    """一次完整观测的几何和积分设置。"""
+
+    site_lat_deg: float = 29.36
+    source_dec_deg: float = 22.0
+    hours_per_night: float = 6.0
+    nights: int = 1
+    segment_s: float = 1200.0
+
+
+@dataclass
+class PipelineResult:
+    """一键流程的输出；重建可关闭，因此允许为 ``None``。"""
+
+    uvw: pd.DataFrame
+    measurements: pd.DataFrame
+    reconstruction: object | None
+    metadata: dict
+
+
+def _read_two_column_curve(path) -> tuple[np.ndarray, np.ndarray]:
+    """读取 main 中通用的两列光谱 CSV。"""
+    data = np.genfromtxt(path, delimiter=",", names=True)
+    names = list(data.dtype.names or ())
+    if len(names) < 2:
+        raise ValueError(f"{path} needs two numeric columns")
+    x = np.atleast_1d(np.asarray(data[names[0]], float))
+    y = np.atleast_1d(np.asarray(data[names[1]], float))
+    finite = np.isfinite(x) & np.isfinite(y)
+    order = np.argsort(x[finite])
+    return x[finite][order], y[finite][order]
 
 
 def source_direction_enu(hour_angle_rad: float, dec_rad: float,
@@ -362,6 +503,7 @@ def simulate_short_pair_waveforms(
         recovery_time_ns: float | None = None,
         charge_factors=None,
         optical_timing_mixture=None,
+        padding_ns: float | None = None,
         seed: int = 20260824) -> dict[str, np.ndarray | float]:
     """Simulate a representative two-telescope ADC record.
 
@@ -370,11 +512,24 @@ def simulate_short_pair_waveforms(
     remaining star counts are independent.  This reproduces the required
     second moment without pretending to resolve the femtosecond optical field.
     """
+    if duration_ns <= 0.0:
+        raise ValueError("duration_ns must be positive")
     rng = np.random.default_rng(seed)
     dt_ns = instrument.sample_width_ns
-    edges = np.arange(0.0, duration_ns + dt_ns, dt_ns)
-    centers = 0.5 * (edges[:-1] + edges[1:])
-    bins = len(centers)
+    sample_edges = np.arange(0.0, duration_ns + dt_ns, dt_ns)
+    centers = 0.5 * (sample_edges[:-1] + sample_edges[1:])
+    # 模板以 p.e. 到达时刻为零点。必须在有效窗口外继续生成光子，否则
+    # 靠近边界的 170 ns SPE 尾部会被人为截断。
+    template_padding = max(abs(float(np.min(template_time_ns))),
+                           abs(float(np.max(template_time_ns))))
+    timing_padding = (0.0 if optical_timing_mixture is None else
+                      5.0*float(optical_timing_mixture["rms_spread_ns"]))
+    padding = (template_padding + abs(delay_ns) + timing_padding
+               if padding_ns is None else float(padding_ns))
+    if padding < template_padding:
+        raise ValueError("padding_ns is shorter than the SPE template support")
+    event_edges = np.arange(-padding, duration_ns + padding + dt_ns, dt_ns)
+    event_bins = len(event_edges) - 1
     dt_s = dt_ns * 1.0e-9
     shared_mean = (star_rate_hz**2 * instrument.coherence_area_s * dt_s
                    * max(0.0, float(visibility2)))
@@ -382,11 +537,11 @@ def simulate_short_pair_waveforms(
     nsb_mean = nsb_rate_hz * dt_s
     if shared_mean > star_mean:
         raise ValueError("shared thermal component exceeds the star count")
-    common = rng.poisson(shared_mean, bins)
-    counts_a = common + rng.poisson(star_mean - shared_mean, bins)
-    counts_b = common + rng.poisson(star_mean - shared_mean, bins)
-    counts_a += rng.poisson(nsb_mean, bins)
-    counts_b += rng.poisson(nsb_mean, bins)
+    common = rng.poisson(shared_mean, event_bins)
+    counts_a = common + rng.poisson(star_mean - shared_mean, event_bins)
+    counts_b = common + rng.poisson(star_mean - shared_mean, event_bins)
+    counts_a += rng.poisson(nsb_mean, event_bins)
+    counts_b += rng.poisson(nsb_mean, event_bins)
 
     empirical_charge = (None if charge_factors is None
                         else np.asarray(charge_factors, dtype=float))
@@ -397,8 +552,9 @@ def simulate_short_pair_waveforms(
         raise ValueError("charge_factors must be finite and positive")
 
     def expand(counts, time_shift_ns):
-        indices = np.repeat(np.arange(bins), counts)
-        times = edges[indices] + rng.random(len(indices)) * dt_ns + time_shift_ns
+        indices = np.repeat(np.arange(event_bins), counts)
+        times = (event_edges[indices] + rng.random(len(indices))*dt_ns
+                 + time_shift_ns)
         if optical_timing_mixture is not None:
             times += sample_optical_delays_ns(
                 rng, len(times), optical_timing_mixture)
@@ -420,8 +576,10 @@ def simulate_short_pair_waveforms(
     waveform_b = convolve_pe_times(
         times_b, amplitudes_b, centers, template_time_ns,
         template_amplitude_mv)
-    waveform_a += rng.normal(0.0, instrument.electronic_noise_rms_mv, bins)
-    waveform_b += rng.normal(0.0, instrument.electronic_noise_rms_mv, bins)
+    waveform_a += rng.normal(
+        0.0, instrument.electronic_noise_rms_mv, len(centers))
+    waveform_b += rng.normal(
+        0.0, instrument.electronic_noise_rms_mv, len(centers))
     adc_a = digitize_adc(waveform_a, instrument.adc_bits,
                          instrument.adc_full_scale_mv)
     adc_b = digitize_adc(waveform_b, instrument.adc_bits,
@@ -439,6 +597,8 @@ def simulate_short_pair_waveforms(
         "charge_a": charge_a,
         "charge_b": charge_b,
         "shared_count_mean_per_bin": shared_mean,
+        "analysis_duration_ns": float(duration_ns),
+        "simulated_padding_each_side_ns": float(padding),
         "optical_timing_rms_ns": (
             0.0 if optical_timing_mixture is None
             else float(optical_timing_mixture["rms_spread_ns"])),
@@ -454,3 +614,303 @@ def normalized_cross_correlation(left, right) -> tuple[np.ndarray, np.ndarray]:
     correlation = np.correlate(left, right, mode="full") / scale
     lags = np.arange(-len(left) + 1, len(left))
     return lags, correlation
+
+
+def _load_layout(layout) -> pd.DataFrame:
+    frame = pd.read_csv(layout) if isinstance(layout, (str, Path)) else layout.copy()
+    aliases = {"position_x_m": "east_m", "position_y_m": "north_m",
+               "position_z_m": "up_m"}
+    frame = frame.rename(columns=aliases)
+    required = {"east_m", "north_m", "up_m"}
+    if not required.issubset(frame):
+        raise ValueError(f"layout is missing {sorted(required-set(frame.columns))}")
+    if "telescope_id" not in frame:
+        frame["telescope_id"] = np.arange(1, len(frame)+1)
+    if "name" not in frame:
+        frame["name"] = frame.telescope_id.map(lambda value: f"TEL.{value}")
+    if len(frame) < 2 or frame.telescope_id.duplicated().any():
+        raise ValueError("layout needs at least two unique telescopes")
+    return frame.reset_index(drop=True)
+
+
+def generate_uvw(layout, observation: Observation,
+                 instrument: Instrument = Instrument()) -> pd.DataFrame:
+    """生成一次完整观测的所有基线和时间段，而不是单个 UV 点。
+
+    对每对望远镜 ``B_ij = r_j-r_i``，使用
+    ``(u,v,w)=(B·u_hat, B·v_hat, B·s_hat)``，几何时延为 ``w/c``。
+    """
+    telescopes = _load_layout(layout)
+    if observation.hours_per_night <= 0 or observation.segment_s <= 0:
+        raise ValueError("observation duration and segment_s must be positive")
+    if observation.nights <= 0:
+        raise ValueError("nights must be positive")
+    segment_count = int(round(
+        observation.hours_per_night*3600.0/observation.segment_s))
+    if segment_count < 1:
+        raise ValueError("observation has no integration segment")
+    half_segment_h = observation.segment_s/7200.0
+    hour_angles_h = np.linspace(
+        -observation.hours_per_night/2 + half_segment_h,
+        observation.hours_per_night/2 - half_segment_h,
+        segment_count)
+    lat = math.radians(observation.site_lat_deg)
+    dec = math.radians(observation.source_dec_deg)
+    rows = []
+    for i, j in combinations(range(len(telescopes)), 2):
+        first, second = telescopes.iloc[i], telescopes.iloc[j]
+        baseline = (
+            second[["east_m", "north_m", "up_m"]].to_numpy(float)
+            - first[["east_m", "north_m", "up_m"]].to_numpy(float))
+        for segment, hour_angle_h in enumerate(hour_angles_h):
+            hour_angle = hour_angle_h*math.pi/12.0
+            u_m, v_m, w_m = uvw_from_enu(baseline, hour_angle, dec, lat)
+            rows.append({
+                "telescope_i": str(first["name"]),
+                "telescope_j": str(second["name"]),
+                "telescope_i_index": i, "telescope_j_index": j,
+                "segment": segment, "hour_angle_h": hour_angle_h,
+                "baseline_east_m": baseline[0],
+                "baseline_north_m": baseline[1],
+                "baseline_up_m": baseline[2],
+                "baseline_m": float(np.linalg.norm(baseline)),
+                "u_m": u_m, "v_m": v_m, "w_m": w_m,
+                "u_lambda": u_m/instrument.wavelength_m,
+                "v_lambda": v_m/instrument.wavelength_m,
+                "projected_baseline_m": math.hypot(u_m, v_m),
+                "geometric_delay_ns": w_m/C_M_S*1.0e9,
+            })
+    return pd.DataFrame(rows)
+
+
+def _electronics_correlation_efficiency(instrument, total_rate_hz):
+    """由主程序 SPE 模板估算加性电子噪声造成的相关效率。"""
+    if not instrument.spe_template_path:
+        return 1.0
+    template_t, template_v = load_measured_spe_template(
+        instrument.spe_template_path)
+    charge_second_moment = instrument.excess_noise_factor**2
+    shot_variance = (total_rate_hz/1.0e9 * charge_second_moment
+                     * np.trapezoid(template_v**2, template_t))
+    adc_step = instrument.adc_full_scale_mv/2**instrument.adc_bits
+    additive = instrument.electronic_noise_rms_mv**2 + adc_step**2/12.0
+    return float(shot_variance/(shot_variance+additive))
+
+
+def simulate_uv_observation(
+        uvw, source: BinarySource, observation: Observation,
+        instrument: Instrument = Instrument(), seed: int = 20260824,
+        source_case: str = "binary", nsb_multiplier: float = 1.0,
+        electronics_case: str = "reference") -> tuple[pd.DataFrame, dict]:
+    """把完整 UVW 表转换成带误差的长曝光 ``|V|²`` 测量。
+
+    每镜每段显式抽样 ``N_star~Poisson(r_star*T)`` 和
+    ``N_nsb~Poisson(r_nsb*T)``；同一台镜的计数、增益和时钟状态被它
+    参与的所有基线共享。相关器统计误差采用
+
+    ``sigma(|V|²) = 1 / [SNR_unit * eta_elec * eta_optics]``。
+    """
+    frame = uvw.copy().reset_index(drop=True)
+    required = {"u_lambda", "v_lambda", "segment",
+                "telescope_i_index", "telescope_j_index"}
+    if not required.issubset(frame):
+        raise ValueError(f"uvw is missing {sorted(required-set(frame.columns))}")
+    if nsb_multiplier < 0:
+        raise ValueError("nsb_multiplier must be non-negative")
+
+    u = frame.u_lambda.to_numpy(float)
+    v = frame.v_lambda.to_numpy(float)
+    if source_case == "binary":
+        truth = np.abs(binary_visibility(u, v, source))**2
+    elif source_case == "single_disk":
+        truth = uniform_disk_visibility(
+            np.hypot(u, v), source.primary_diameter_mas)**2
+    else:
+        raise ValueError("source_case must be binary or single_disk")
+    frame["visibility2_true"] = truth
+
+    rng = np.random.default_rng(seed)
+    row_i = frame.telescope_i_index.to_numpy(int)
+    row_j = frame.telescope_j_index.to_numpy(int)
+    row_segment = frame.segment.to_numpy(int)
+    telescope_count = int(max(row_i.max(), row_j.max())+1)
+    segment_count = int(row_segment.max()+1)
+    pairs = list(zip(row_i, row_j))
+    pair_zero = {pair: rng.normal(0.0, instrument.baseline_zero_point_rms)
+                 for pair in set(pairs)}
+    static_gain = rng.normal(
+        0.0, instrument.telescope_gain_calibration_rms, telescope_count)
+
+    def ar1_lognormal(rms, rho=0.85):
+        innovation = rng.normal(size=(segment_count, telescope_count))
+        state = np.zeros_like(innovation)
+        state[0] = innovation[0]
+        for index in range(1, segment_count):
+            state[index] = (rho*state[index]
+                            + math.sqrt(1-rho**2)*innovation[index])
+        return np.exp(rms*state-0.5*rms**2)
+
+    nsb_rate = nsb_multiplier*instrument.detected_nsb_rate_hz
+    star_rate = detected_star_rate_hz(source.ab_magnitude, instrument)
+    if electronics_case == "ideal":
+        excess_noise, electronics_efficiency = 1.0, 1.0
+    elif electronics_case == "reference":
+        excess_noise = instrument.excess_noise_factor
+        electronics_efficiency = _electronics_correlation_efficiency(
+            instrument, star_rate+nsb_rate)
+    else:
+        raise ValueError("electronics_case must be reference or ideal")
+
+    if instrument.optical_timing_kernel_path:
+        timing = load_optical_timing_mixture(
+            instrument.optical_timing_kernel_path)
+        optical_efficiency = optical_timing_transfer_efficiency(
+            timing, instrument.electronics_bandwidth_hz)
+        timing_grid = np.linspace(-3.0, 3.0, 2401)
+        timing_response = residual_delay_response(
+            timing, timing_grid, instrument.electronics_bandwidth_hz)
+    else:
+        optical_efficiency = 1.0
+        timing_grid, timing_response = np.array([-1.0, 1.0]), np.ones(2)
+
+    nightly_values, nightly_variances = [], []
+    photon_relative_rms, timing_factors, gain_factors = [], [], []
+    for _night in range(observation.nights):
+        transparency = ar1_lognormal(instrument.transparency_fractional_rms)
+        nsb_factor = ar1_lognormal(instrument.nsb_fractional_rms)
+        star_counts = rng.poisson(
+            star_rate*transparency*observation.segment_s)
+        nsb_counts = rng.poisson(
+            nsb_rate*nsb_factor*observation.segment_s)
+        observed_star = star_counts/observation.segment_s
+        observed_total = (star_counts+nsb_counts)/observation.segment_s
+        photon_relative_rms.append(float(np.median(
+            1.0/np.sqrt(np.maximum(star_counts+nsb_counts, 1)))))
+
+        nightly_gain = rng.normal(0.0, instrument.per_night_gain_rms,
+                                  telescope_count)
+        clock_ns = rng.normal(0.0, instrument.residual_timing_rms_ns,
+                              telescope_count)
+        delay_factor = np.interp(
+            clock_ns[row_i]-clock_ns[row_j], timing_grid, timing_response,
+            left=timing_response[0], right=timing_response[-1])
+        pair_gain = ((1+static_gain[row_i])*(1+nightly_gain[row_i])
+                     *(1+static_gain[row_j])*(1+nightly_gain[row_j]))
+        timing_factors.extend(delay_factor)
+        gain_factors.extend(pair_gain)
+
+        star_i = observed_star[row_segment, row_i]
+        star_j = observed_star[row_segment, row_j]
+        total_i = observed_total[row_segment, row_i]
+        total_j = observed_total[row_segment, row_j]
+        unit_snr = (
+            star_i*star_j/np.sqrt(total_i*total_j)
+            / instrument.optical_bandwidth_hz
+            * np.sqrt(instrument.electronics_bandwidth_hz
+                      * observation.segment_s/2.0)
+            / excess_noise)
+        sigma = 1.0/(unit_snr*electronics_efficiency*optical_efficiency)
+        expected = (truth*pair_gain*delay_factor
+                    + np.asarray([pair_zero[pair] for pair in pairs]))
+        nightly_values.append(expected+rng.normal(0.0, sigma))
+        nightly_variances.append(sigma**2)
+
+    inverse_variance = 1.0/np.asarray(nightly_variances)
+    summed_weight = inverse_variance.sum(axis=0)
+    measured = (np.asarray(nightly_values)*inverse_variance).sum(0)/summed_weight
+    sigma_stat = np.sqrt(1.0/summed_weight)
+    sigma_shared = np.sqrt(
+        (math.sqrt(2)*instrument.telescope_gain_calibration_rms*truth)**2
+        + instrument.baseline_zero_point_rms**2)
+    sigma_total = np.sqrt(sigma_stat**2+sigma_shared**2)
+    frame["visibility2_measured"] = measured
+    frame["sigma_visibility2_stat"] = sigma_stat
+    frame["sigma_visibility2"] = sigma_total
+
+    endpoint = observation.hours_per_night/2*math.pi/12.0
+    altitude = [math.asin(source_direction_enu(
+        sign*endpoint, math.radians(observation.source_dec_deg),
+        math.radians(observation.site_lat_deg))[2]) for sign in (-1, 1)]
+    metadata = {
+        "hours_per_night": observation.hours_per_night,
+        "nights": observation.nights,
+        "total_integration_hours": observation.hours_per_night*observation.nights,
+        "source_ab_magnitude": source.ab_magnitude,
+        "detected_star_rate_MHz": star_rate/1.0e6,
+        "source_case": source_case,
+        "nsb_multiplier": nsb_multiplier,
+        "nsb_rate_MHz": nsb_rate/1.0e6,
+        "electronics_case": electronics_case,
+        "electronics_correlation_efficiency": electronics_efficiency,
+        "optical_timing_efficiency": optical_efficiency,
+        "median_timing_attenuation": float(np.median(timing_factors)),
+        "rms_pair_gain_error": float(np.std(gain_factors)),
+        "median_photon_count_relative_rms": float(np.median(photon_relative_rms)),
+        "minimum_altitude_deg": math.degrees(min(altitude)),
+        "uv_measurements": len(frame),
+        "sigma_visibility2_stat": float(np.median(sigma_stat)),
+        "sigma_visibility2_total": float(np.median(sigma_total)),
+        "instrument_parameter_source": instrument.parameter_source,
+    }
+    frame.attrs.update(metadata)
+    return frame, metadata
+
+
+def reconstruct_uv(measurements, cell_mlambda=120.0, **kwargs):
+    """独立重建入口：只读取 ``u,v,|V|²,sigma``，不读取模拟真值。"""
+    from sii_reconstruction import UvData, reconstruct_uv_data
+
+    data = measurements.copy()
+    data["ku"] = np.round(data.u_lambda/1.0e6/cell_mlambda).astype(int)
+    data["kv"] = np.round(data.v_lambda/1.0e6/cell_mlambda).astype(int)
+    data["inverse_variance"] = 1.0/data.sigma_visibility2**2
+    data["weighted_value"] = (
+        data.visibility2_measured*data.inverse_variance)
+    grouped = data.groupby(["ku", "kv"], as_index=False).agg(
+        u_lambda=("u_lambda", "mean"), v_lambda=("v_lambda", "mean"),
+        weighted_value=("weighted_value", "sum"),
+        inverse_variance=("inverse_variance", "sum"),
+        multiplicity=("visibility2_measured", "size"))
+    grouped["visibility2"] = grouped.weighted_value/grouped.inverse_variance
+    grouped["sigma"] = np.sqrt(1.0/grouped.inverse_variance)
+    # |V(0,0)|²=1 是总流量归一化，不是虚构的长基线测量。
+    grouped = pd.concat([grouped, pd.DataFrame([{
+        "u_lambda": 0.0, "v_lambda": 0.0, "visibility2": 1.0,
+        "sigma": 0.01, "multiplicity": 1}])], ignore_index=True)
+    weight = 1.0/grouped.sigma.to_numpy(float)**2
+    weight = np.clip(weight/np.mean(weight), 0.1, 10.0)
+    weight /= weight.mean()
+    uv = UvData(
+        u_lambda=grouped.u_lambda.to_numpy(float),
+        v_lambda=grouped.v_lambda.to_numpy(float),
+        visibility_abs2=grouped.visibility2.to_numpy(float),
+        sigma=grouped.sigma.to_numpy(float), weight=weight,
+        multiplicity=grouped.multiplicity.to_numpy(int),
+        input_rows=len(data), finite_rows=len(data),
+        physical_violations=int(((grouped.visibility2 < 0)
+                                 | (grouped.visibility2 > 1)).sum()))
+    return reconstruct_uv_data(uv, **kwargs)
+
+
+def run_sii_pipeline(
+        layout, source: BinarySource = BinarySource(),
+        observation: Observation = Observation(),
+        instrument: Instrument = Instrument(), seed: int = 20260824,
+        do_reconstruction: bool = True, reconstruction_kwargs=None,
+        **simulation_kwargs) -> PipelineResult:
+    """最小的一键入口：模型 → UVW → 测量 → 可选独立重建。"""
+    uvw = generate_uvw(layout, observation, instrument)
+    measurements, metadata = simulate_uv_observation(
+        uvw, source, observation, instrument, seed=seed, **simulation_kwargs)
+    reconstruction = None
+    if do_reconstruction:
+        defaults = {
+            "grid_size": 28, "fov_mas": 0.70,
+            "support_radius_mas": 0.32, "starts": 3,
+            "max_iter": 650, "smoothness": 0.020,
+            "huber_delta": 0.15, "seed": seed+1,
+            "peak_minimum_separation_mas": 0.10,
+        }
+        defaults.update(reconstruction_kwargs or {})
+        reconstruction = reconstruct_uv(measurements, **defaults)
+    return PipelineResult(uvw, measurements, reconstruction, metadata)
