@@ -33,9 +33,11 @@ nb["cells"] = [
     SPE 波形、加性噪声与 ADC。最后只用两路波形计算互相关。
 
     执行结果：mAB=2、$|V|^2=0.5$ 的 200 µs 记录只预期0.512个相关对，本次抽到1个；
-    理论单基线 SNR 仅0.00252，因此原始互相关峰不在已知6 ns时延。DC使两镜相关对的
-    相对时间 RMS 达0.852 ns，并使所用快速SPE的峰高保留约58.2%。零滞后相关的带宽
-    最优值约243 MHz；4 ns采样相对该最优值保留约86.8% SNR。
+    原始互相关仍看不到6 ns处的HBT峰。main当前实测SPE的自相关FWHM约47.5 ns，
+    远宽于两镜DC相对展宽0.852 ns，因此DC只让实测波形相关峰高度再下降约0.5%。
+    简单零滞后的等效带宽为14.46 MHz；用实测传递函数做频域匹配后，原生4 ns数据
+    可达87.98 MHz。相比旧200 MHz矩形带宽模型，推荐匹配算法的SNR约为79.7%、
+    所需时间约为1.58倍；简单零滞后则约需9.59倍时间。
     """),
     md("## 1. 设置和 main 参数"),
     code("""
@@ -55,8 +57,8 @@ nb["cells"] = [
     from sii_unified import (
         Instrument, detected_star_rate_hz, hbt_correlated_pair_rate_hz,
         load_measured_spe_template, load_optical_timing_mixture,
-        make_fast_spe_template, optical_timing_transfer_efficiency,
-        render_pe_waveform, sample_optical_delays_ns,
+        optical_timing_transfer_efficiency, render_pe_waveform,
+        sample_optical_delays_ns,
         simulate_hbt_primary_pe, unit_visibility_snr,
         waveform_cross_correlation, write_main_primary_pe_csv,
     )
@@ -85,7 +87,6 @@ nb["cells"] = [
     visibility2 = 0.50
     geometric_delay_ns = 6.0
     duration_ns = 200_000.0       # 200 us：完整保存但仍远短于天文积分时间
-    fast_sample_ns = 0.25         # 4 GS/s 快速读出
     star_rate_hz = detected_star_rate_hz(magnitude, instrument)
     nsb_rate_hz = instrument.detected_nsb_rate_hz
     pair_rate_hz = hbt_correlated_pair_rate_hz(
@@ -106,30 +107,33 @@ nb["cells"] = [
     对当前 $m_{AB}=2$、$|V|^2=0.5$，200 µs 中预期的 HBT 对仍远少于随机恒星和
     NSB 光子。因此下面两条完整波形看起来几乎独立，这是天文强度干涉的正常尺度。
     """),
-    md("## 3. 两台望远镜的完整快速电子学波形"),
+    md("## 3. 两台望远镜：main 当前实测 SPE 与原生 4 ns 波形"),
     code("""
-    fast_t, fast_v = make_fast_spe_template(rise_ns=0.15, fall_ns=0.80)
-    fast_v *= measured_template[1].max()  # 只固定峰值增益；真实前端可替换此模板
-    fast_instrument = replace(instrument, adc_sample_rate_hz=1e9/fast_sample_ns)
-    waveforms_fast = []
+    native_sample_ns = instrument.sample_width_ns
+    waveforms_measured = []
     for telescope_id in (0, 1):
         times = hits.loc[hits.telescope_id == telescope_id, "time_ns"].to_numpy()
-        waveforms_fast.append(render_pe_waveform(
+        waveforms_measured.append(render_pe_waveform(
             np.random.default_rng(3100+telescope_id), times, duration_ns,
-            fast_instrument, sample_width_ns=fast_sample_ns,
-            template=(fast_t, fast_v)))
+            instrument, sample_width_ns=native_sample_ns,
+            template=measured_template))
 
-    view_start, view_end = 20_000.0, 20_120.0
+    view_start, view_end = 20_000.0, 20_400.0
     fig, axes = plt.subplots(2, 1, figsize=(12, 5.8), sharex=True, constrained_layout=True)
-    for telescope_id, (axis, waveform) in enumerate(zip(axes, waveforms_fast)):
+    for telescope_id, (axis, waveform) in enumerate(zip(axes, waveforms_measured)):
         keep = ((waveform["sample_time_ns"] >= view_start) &
                 (waveform["sample_time_ns"] <= view_end))
         axis.plot(waveform["sample_time_ns"][keep]-view_start,
                   waveform["adc_mv"][keep], lw=.8)
-        axis.set(ylabel="ADC [mV]", title=f"望远镜 {telescope_id+1}：恒星 + NSB + SiPM + 快速SPE + 噪声")
+        axis.set(ylabel="ADC [mV]", title=f"望远镜 {telescope_id+1}：实测SPE + 4 ns + NSB + 噪声 + ADC")
     axes[-1].set(xlabel="局部时间 [ns]")
-    fig.savefig(OUTPUT_DIR/"two_fast_waveforms.png", dpi=160)
+    fig.savefig(OUTPUT_DIR/"two_measured_spe_waveforms.png", dpi=160)
     plt.show()
+    print({"spe_file": instrument.spe_template_path,
+           "spe_support_ns": [measured_template[0].min(), measured_template[0].max()],
+           "spe_peak_mv": measured_template[1].max(),
+           "spe_area_mv_ns": np.trapezoid(measured_template[1], measured_template[0]),
+           "native_sample_ns": native_sample_ns})
     """),
     md(r"""
     ## 4. 只从两路波形计算互相关
@@ -139,19 +143,20 @@ nb["cells"] = [
     统计噪声远大于 HBT 超额相关，所以不能把最高的随机尖峰误认成天文信号。
     """),
     code("""
-    lag_fast, corr_fast = waveform_cross_correlation(
-        waveforms_fast[1]["adc_mv"], waveforms_fast[0]["adc_mv"],
-        fast_sample_ns, 20.0)
-    raw_peak_lag = lag_fast[np.argmax(corr_fast)]
-    raw_peak_value = corr_fast.max()
-    raw_rms = np.std(corr_fast[np.abs(lag_fast-geometric_delay_ns) > 3.0])
+    lag_measured, corr_measured = waveform_cross_correlation(
+        waveforms_measured[1]["adc_mv"], waveforms_measured[0]["adc_mv"],
+        native_sample_ns, 200.0)
+    raw_peak_lag = lag_measured[np.argmax(corr_measured)]
+    raw_peak_value = corr_measured.max()
+    raw_rms = np.std(corr_measured[
+        np.abs(lag_measured-geometric_delay_ns) > 60.0])
     fig, ax = plt.subplots(figsize=(9, 3.7), constrained_layout=True)
-    ax.plot(lag_fast, corr_fast, lw=1)
+    ax.plot(lag_measured, corr_measured, lw=1)
     ax.axvline(geometric_delay_ns, color="crimson", ls="--", label="已知几何时延")
-    ax.set(title="200 µs 两路实际 ADC 波形互相关：仍由随机噪声主导",
+    ax.set(title="200 µs 两路实测SPE/4 ns ADC波形互相关：仍由随机噪声主导",
            xlabel="B 相对 A 的滞后 [ns]", ylabel="相关系数")
     ax.legend()
-    fig.savefig(OUTPUT_DIR/"raw_waveform_cross_correlation.png", dpi=160)
+    fig.savefig(OUTPUT_DIR/"measured_spe_raw_cross_correlation.png", dpi=160)
     plt.show()
     print({"raw_max_lag_ns": raw_peak_lag,
            "raw_max_correlation": raw_peak_value,
@@ -165,8 +170,8 @@ nb["cells"] = [
     这不是放大后的假观测，而是对微弱信号项做重要抽样。
     """),
     code("""
-    response_dt_ns = 0.02
-    response_lags = np.arange(-15.0, 15.0+response_dt_ns/2, response_dt_ns)
+    response_dt_ns = 0.05
+    response_lags = np.arange(-250.0, 250.0+response_dt_ns/2, response_dt_ns)
     rng_response = np.random.default_rng(52)
     response_pairs = 300_000
     relative_delay_dc = (geometric_delay_ns
@@ -179,7 +184,8 @@ nb["cells"] = [
                       response_lags[-1]+response_dt_ns/2]
         delay_hist = np.histogram(relative_delays, bins=edges)[0].astype(float)
         delay_hist /= delay_hist.sum()
-        pulse = np.interp(response_lags, fast_t, fast_v, left=0.0, right=0.0)
+        pulse = np.interp(response_lags, measured_template[0],
+                          measured_template[1], left=0.0, right=0.0)
         pulse_ac = correlate(pulse, pulse, mode="same", method="fft")
         # 以零滞后为中心的循环卷积；范围远大于脉冲和时间核支撑。
         return np.fft.fftshift(np.fft.ifft(
@@ -193,6 +199,10 @@ nb["cells"] = [
     expected_dc /= normalization
     dc_waveform_peak_retention = expected_dc.max()
     pair_delay_rms_ns = np.std(relative_delay_dc-geometric_delay_ns)
+    iso_half = response_lags[expected_iso >= 0.5]
+    dc_half = response_lags[expected_dc >= 0.5*expected_dc.max()]
+    measured_spe_ac_fwhm_ns = iso_half[-1]-iso_half[0]
+    measured_spe_dc_fwhm_ns = dc_half[-1]-dc_half[0]
 
     fig, axes = plt.subplots(1, 2, figsize=(11.5, 3.8), constrained_layout=True)
     axes[0].hist(relative_delay_dc-geometric_delay_ns, bins=120, density=True,
@@ -203,83 +213,157 @@ nb["cells"] = [
     axes[1].plot(response_lags, expected_iso, label="等时镜面")
     axes[1].plot(response_lags, expected_dc, label="LACT 时间核")
     axes[1].axvline(geometric_delay_ns, color='.2', ls='--')
-    axes[1].set(xlim=(1,11), title="快速 SPE 后的 HBT 期望相关峰",
+    axes[1].set(xlim=(-80,92), title="main 实测 SPE 后的 HBT 期望相关峰",
                 xlabel="B 相对 A 的滞后 [ns]", ylabel="相对协方差")
     axes[1].legend()
     fig.savefig(OUTPUT_DIR/"expected_hbt_peak_dc_comparison.png", dpi=160)
     plt.show()
     print({"single_telescope_timing_rms_ns": timing["rms_spread_ns"],
            "pair_delay_rms_ns": pair_delay_rms_ns,
-           "fast_waveform_peak_retention": dc_waveform_peak_retention})
+           "measured_SPE_peak_retention_after_DC": dc_waveform_peak_retention,
+           "SPE_autocorrelation_FWHM_ns": measured_spe_ac_fwhm_ns,
+           "SPE_plus_DC_FWHM_ns": measured_spe_dc_fwhm_ns})
     """),
     md(r"""
-    相关峰被展开后，若积分整个峰面积并正确标定，$|V|^2$ 仍然无偏；若只取零延迟
-    单个采样点，峰高会损失。校准可以恢复平均值，但不能恢复已经损失的信噪比。
+    实测SPE的自相关本身约几十ns宽，已经远宽于0.852 ns两镜光学展宽。因此在这条
+    实测波形上，DC只造成很小的额外峰高损失。这个结果不表示DC没有影响，而是说明
+    当前电子脉冲响应比DC更慢，系统的有效相关带宽主要由SPE与相关算法决定。
     """),
-    md("## 6. 快速电子学与 4 ns：哪个更合理？"),
+    md("## 6. 实测 SPE 的有效带宽：简单零滞后与匹配相关"),
     code("""
-    bandwidths_hz = np.geomspace(20e6, 2e9, 180)
-    timing_efficiency = np.array([
-        optical_timing_transfer_efficiency(timing, bandwidth)
-        for bandwidth in bandwidths_hz])
-    zero_lag_snr_metric = timing_efficiency*np.sqrt(bandwidths_hz)
-    best_index = np.argmax(zero_lag_snr_metric)
-    best_bandwidth_hz = bandwidths_hz[best_index]
-    cases = pd.DataFrame([
-        {"case":"main 4 ns", "bandwidth_MHz":125.0},
-        {"case":"当前长曝光假设", "bandwidth_MHz":200.0},
-        {"case":"时间核下的零滞后最优", "bandwidth_MHz":best_bandwidth_hz/1e6},
-        {"case":"0.25 ns Nyquist", "bandwidth_MHz":2000.0},
-    ])
-    cases["DC_efficiency"] = [optical_timing_transfer_efficiency(
-        timing, value*1e6) for value in cases.bandwidth_MHz]
-    cases["relative_zero_lag_SNR"] = (
-        cases.DC_efficiency*np.sqrt(cases.bandwidth_MHz))
-    cases["relative_zero_lag_SNR"] /= cases.relative_zero_lag_SNR.max()
-    display(cases)
+    fine_dt_ns = 0.01
+    fine_time_ns = np.arange(measured_template[0].min(),
+                             measured_template[0].max()+fine_dt_ns/2,
+                             fine_dt_ns)
+    fine_pulse = np.interp(fine_time_ns, measured_template[0],
+                           measured_template[1])
+    fine_dt_s = fine_dt_ns*1e-9
+    # 零填充只提高频率插值精度，不改变脉冲或带宽积分。
+    fft_length = 1 << int(np.ceil(np.log2(len(fine_pulse)*16)))
+    full_frequency_hz = np.fft.rfftfreq(fft_length, fine_dt_s)
+    full_pulse_spectrum = np.fft.rfft(
+        fine_pulse, n=fft_length)*fine_dt_s
+    relevant_frequency = full_frequency_hz <= 2.5e9
+    frequency_hz = full_frequency_hz[relevant_frequency]
+    pulse_spectrum = full_pulse_spectrum[relevant_frequency]
 
-    fig, ax1 = plt.subplots(figsize=(9, 4), constrained_layout=True)
-    ax1.semilogx(bandwidths_hz/1e6, timing_efficiency, label="DC 保留效率")
-    ax1.set(xlabel="相关带宽 [MHz]", ylabel="DC 保留效率", ylim=(0,1.03))
-    ax2 = ax1.twinx()
-    ax2.semilogx(bandwidths_hz/1e6,
-                 zero_lag_snr_metric/zero_lag_snr_metric.max(),
-                 color="darkorange", label="相对零滞后 SNR")
-    ax2.set(ylabel="相对 SNR")
-    ax1.axvline(125, color='.4', ls=':', label="4 ns Nyquist")
-    ax1.axvline(best_bandwidth_hz/1e6, color='crimson', ls='--', label="最优点")
-    lines = ax1.get_lines()+ax2.get_lines()
-    ax1.legend(lines, [line.get_label() for line in lines], loc="center right")
-    ax1.set_title("更快并非无限更好：DC 时间核限制有效带宽")
-    fig.savefig(OUTPUT_DIR/"bandwidth_dc_tradeoff.png", dpi=160)
+    weights = np.asarray(timing["weights"])
+    means = np.asarray(timing["mean_delay_ns"])
+    sigmas = np.asarray(timing["std_delay_ns"])
+    optical_transfer = (
+        np.exp(-2j*np.pi*(frequency_hz*1e-9)[:,None]*means[None,:])
+        * np.exp(-2*np.pi**2*(frequency_hz*1e-9)[:,None]**2
+                 * sigmas[None,:]**2)) @ weights
+    optical_power = np.abs(optical_transfer)**2
+
+    pulse_power = np.abs(pulse_spectrum)**2
+    direct_noise_integral = np.trapezoid(pulse_power**2, frequency_hz)
+    direct_signal_no_dc = np.trapezoid(pulse_power, frequency_hz)
+    direct_signal_dc = np.trapezoid(
+        pulse_power*optical_power, frequency_hz)
+    direct_bandwidth_no_dc_hz = (
+        direct_signal_no_dc**2/direct_noise_integral)
+    direct_bandwidth_dc_hz = direct_signal_dc**2/direct_noise_integral
+
+    adc_step_mv = instrument.adc_full_scale_mv/(2**instrument.adc_bits)
+    sample_noise_variance_mv2 = (
+        instrument.electronic_noise_rms_mv**2 + adc_step_mv**2/12)
+    total_rate_hz = star_rate_hz+nsb_rate_hz
+
+    def matched_bandwidth(sample_width_ns):
+        sample_rate_hz = 1e9/sample_width_ns
+        # main每个样点保存采样窗内平均电压，故有sinc采样窗传递函数。
+        sampled_pulse = pulse_spectrum*np.sinc(frequency_hz/sample_rate_hz)
+        shot_psd = (2*total_rate_hz*instrument.excess_noise_factor**2
+                    * np.abs(sampled_pulse)**2)
+        white_noise_psd = 2*sample_noise_variance_mv2/sample_rate_hz
+        shot_fraction = shot_psd/(shot_psd+white_noise_psd)
+        keep = frequency_hz <= sample_rate_hz/2
+        return np.trapezoid(
+            optical_power[keep]**2*shot_fraction[keep]**2,
+            frequency_hz[keep])
+
+    matched_4ns_hz = matched_bandwidth(native_sample_ns)
+    matched_1p6ns_hz = matched_bandwidth(1.6)
+    matched_0p25ns_hz = matched_bandwidth(0.25)
+    assumed_200mhz_equivalent_hz = (
+        200e6*optical_timing_transfer_efficiency(timing, 200e6)**2)
+    bandwidth_table = pd.DataFrame([
+        {"estimator":"实测SPE，简单零滞后", "effective_bandwidth_MHz":direct_bandwidth_dc_hz/1e6},
+        {"estimator":"实测SPE，4 ns匹配频谱", "effective_bandwidth_MHz":matched_4ns_hz/1e6},
+        {"estimator":"实测SPE，1.6 ns匹配频谱", "effective_bandwidth_MHz":matched_1p6ns_hz/1e6},
+        {"estimator":"实测SPE，0.25 ns匹配频谱", "effective_bandwidth_MHz":matched_0p25ns_hz/1e6},
+        {"estimator":"旧模型：200 MHz矩形带宽+DC", "effective_bandwidth_MHz":assumed_200mhz_equivalent_hz/1e6},
+    ])
+    bandwidth_table["SNR_relative_to_old_model"] = np.sqrt(
+        bandwidth_table.effective_bandwidth_MHz
+        /(assumed_200mhz_equivalent_hz/1e6))
+    bandwidth_table["time_factor_vs_old_model"] = (
+        1/bandwidth_table.SNR_relative_to_old_model**2)
+    display(bandwidth_table)
+
+    half_power_index = np.flatnonzero(
+        pulse_power/pulse_power[0] <= 0.5)[0]
+    spe_half_power_mhz = frequency_hz[half_power_index]/1e6
+    fig, axes = plt.subplots(1, 2, figsize=(11.5, 3.9), constrained_layout=True)
+    axes[0].plot(measured_template[0], measured_template[1])
+    axes[0].set(title="main 当前实测单p.e.波形", xlabel="相对到达时间 [ns]",
+                ylabel="幅度 [mV]")
+    axes[1].semilogx(frequency_hz[1:]/1e6,
+                     pulse_power[1:]/pulse_power[0], label="|P(f)|²")
+    axes[1].axvline(spe_half_power_mhz, color='crimson', ls='--',
+                    label=f"半功率 {spe_half_power_mhz:.1f} MHz")
+    axes[1].axvline(125, color='.4', ls=':', label="4 ns Nyquist")
+    axes[1].set(xlim=(1,500), ylim=(1e-5,1.2), yscale='log',
+                title="实测SPE功率频谱", xlabel="频率 [MHz]", ylabel="归一功率")
+    axes[1].legend()
+    fig.savefig(OUTPUT_DIR/"measured_spe_and_bandwidth.png", dpi=160)
     plt.show()
     """),
     md(r"""
-    4 ns 不会消灭相关性，但其 Nyquist 带宽只有 125 MHz；0.25 ns 采样可以完整描述
-    DC 展宽后的峰，却不能让 2 GHz 高频重新出现。对于只取零滞后的简单相关器，过宽
-    带宽还会加入几乎没有 HBT 信号的高频噪声。实际应使用实测两镜传递函数做匹配滤波。
+    这解释了为什么“170 ns长尾”和“4 ns采样”不能只看一个数字：直接取零滞后时，
+    实测SPE只给出十几MHz量级的等效带宽；若在频域用实测传递函数对白噪声和光子
+    shot noise做匹配加权，可以恢复到接近百MHz。后者是建议的真实相关器算法，但其
+    数值仍依赖当前尚未实测的0.35 mV白噪声假设和ADC模型。
     """),
     md("## 7. 为什么短波形看不见：理论 SNR 对照"),
     code("""
-    def baseline_snr(integration_s, bandwidth_hz):
-        trial = replace(instrument, electronics_bandwidth_hz=bandwidth_hz)
-        return (unit_visibility_snr(magnitude, integration_s, trial)
-                * visibility2
-                * optical_timing_transfer_efficiency(timing, bandwidth_hz))
+    def baseline_snr(integration_s, effective_bandwidth_hz, magnitude_value=magnitude):
+        trial = replace(
+            instrument, electronics_bandwidth_hz=effective_bandwidth_hz)
+        return (unit_visibility_snr(magnitude_value, integration_s, trial)
+                * visibility2)
 
-    snr_record = baseline_snr(duration_ns*1e-9, best_bandwidth_hz)
-    seconds_for_5sigma = (5.0/baseline_snr(1.0, best_bandwidth_hz))**2
+    # effective bandwidth已经包含DC、SPE、采样、电子噪声和ADC传递损失。
+    def five_sigma_time(effective_bandwidth_hz, magnitude_value):
+        return (5.0/baseline_snr(
+            1.0, effective_bandwidth_hz, magnitude_value))**2
+
+    snr_record = baseline_snr(
+        duration_ns*1e-9, matched_4ns_hz)
     snr_table = pd.DataFrame([
-        {"integration":"本 notebook 200 us", "seconds":duration_ns*1e-9,
-         "one_baseline_SNR":snr_record},
-        {"integration":"1 s", "seconds":1.0,
-         "one_baseline_SNR":baseline_snr(1.0, best_bandwidth_hz)},
-        {"integration":"达到 5 sigma", "seconds":seconds_for_5sigma,
-         "one_baseline_SNR":5.0},
-        {"integration":"2 h", "seconds":7200.0,
-         "one_baseline_SNR":baseline_snr(7200.0, best_bandwidth_hz)},
+        {"mAB":mag, "estimator":"简单零滞后",
+         "effective_bandwidth_MHz":direct_bandwidth_dc_hz/1e6,
+         "hours_for_5sigma":five_sigma_time(direct_bandwidth_dc_hz, mag)/3600}
+        for mag in (2.0, 3.0)
+    ] + [
+        {"mAB":mag, "estimator":"4 ns匹配频谱",
+         "effective_bandwidth_MHz":matched_4ns_hz/1e6,
+         "hours_for_5sigma":five_sigma_time(matched_4ns_hz, mag)/3600}
+        for mag in (2.0, 3.0)
+    ] + [
+        {"mAB":mag, "estimator":"旧200 MHz模型",
+         "effective_bandwidth_MHz":assumed_200mhz_equivalent_hz/1e6,
+         "hours_for_5sigma":five_sigma_time(
+             assumed_200mhz_equivalent_hz, mag)/3600}
+        for mag in (2.0, 3.0)
     ])
     display(snr_table)
+    print({"200us_matched_SNR": snr_record,
+           "4ns_matched_vs_old_SNR": np.sqrt(
+               matched_4ns_hz/assumed_200mhz_equivalent_hz),
+           "4ns_matched_time_factor_vs_old":
+               assumed_200mhz_equivalent_hz/matched_4ns_hz})
     print("短记录 HBT SNR / 原始互相关随机峰 SNR =",
           snr_record/(raw_peak_value/raw_rms))
     """),
@@ -294,19 +378,11 @@ nb["cells"] = [
     executable = next((path for path in executable_candidates if path.exists()), None)
     main_output = OUTPUT_DIR/"main_electronics_preview"
     main_config = Path(instrument.parameter_source)
-    raw_fast = (np.exp(-fast_t/0.80)-np.exp(-fast_t/0.15))
-    main_fast_amplitude_scale = measured_template[1].max()/raw_fast.max()
     command = ([str(executable)] if executable else ["build/run_camera_electronics"])
     command += [str(main_config), str(preview_csv), str(main_output),
                 "-C", "electronics.n_pixels=1",
-                "-C", "electronics.sampling.width_ns=0.25",
                 "-C", "electronics.sampling.start_ns=0",
-                "-C", "electronics.sampling.end_ns=2000",
-                "-C", "electronics.single_pe.model=analytic",
-                "-C", "electronics.single_pe.rise_ns=0.15",
-                "-C", "electronics.single_pe.fall_ns=0.80",
-                "-C", "electronics.single_pe.support_ns=8.0",
-                "-C", f"electronics.single_pe.amplitude_scale={main_fast_amplitude_scale}"]
+                "-C", "electronics.sampling.end_ns=2000"]
     print(" ".join(command))
     if executable:
         completed = subprocess.run(command, cwd=REPO_ROOT, check=True,
@@ -322,6 +398,8 @@ nb["cells"] = [
     - 两个独立 LACT 时间核之差的 RMS 应接近 $\sqrt{2}\times0.602$ ns。
     - 200 µs 原始波形不应显著探测到天文 HBT；否则很可能把同源噪声或模拟器共享随机数
       误当成了恒星相关。
+    - 本 notebook 确实读取 main 当前 `single_pe.template` 指向的实测CSV；频域匹配结果
+      使用0.35 mV独立白噪声和8-bit均匀量化假设，这两项尚不是实测噪声功率谱。
     - 当前时间核仅为 400 nm、轴上、理想误差配置。论文级性能仍需要逐镜、随仰角/离轴角
       的实测时间核，以及实测快速前端传递函数与跨镜时钟稳定性。
 
@@ -336,10 +414,17 @@ nb["cells"] = [
         "pair_delay_rms_is_sqrt2_single": np.isclose(
             pair_delay_rms_ns, np.sqrt(2)*timing["rms_spread_ns"], rtol=.02),
         "short_raw_record_is_below_one_sigma": snr_record < 1.0,
-        "dc_reduces_fast_peak": 0.0 < dc_waveform_peak_retention < 1.0,
+        "measured_spe_is_current_main_file": (
+            Path(instrument.spe_template_path).name == "spe_template_measured.csv"),
+        "measured_spe_dc_peak_is_physical": (
+            0.0 < dc_waveform_peak_retention < 1.0),
+        "matched_bandwidth_exceeds_raw_zero_lag": (
+            matched_4ns_hz > direct_bandwidth_dc_hz),
+        "old_model_is_more_optimistic_than_measured_4ns": (
+            assumed_200mhz_equivalent_hz > matched_4ns_hz),
         "main_csv_exists": primary_csv.exists(),
         "waveforms_are_finite": all(np.isfinite(w["adc_mv"]).all()
-                                     for w in waveforms_fast),
+                                     for w in waveforms_measured),
     }
     display(pd.Series(checks, name="passed").to_frame())
     assert all(checks.values())
