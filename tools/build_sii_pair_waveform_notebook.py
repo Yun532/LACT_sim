@@ -32,12 +32,17 @@ nb["cells"] = [
     再依次通过 LACT 光线追迹得到的时间核、S17351 微单元恢复、实测单 p.e. 电荷、
     SPE 波形、加性噪声与 ADC。最后只用两路波形计算互相关。
 
-    执行结果：mAB=2、$|V|^2=0.5$ 的 200 µs 记录只预期0.512个相关对，本次抽到1个；
-    原始互相关仍看不到6 ns处的HBT峰。main当前实测SPE的自相关FWHM约47.5 ns，
-    远宽于两镜DC相对展宽0.852 ns，因此DC只让实测波形相关峰高度再下降约0.5%。
-    简单零滞后的等效带宽为14.46 MHz；用实测传递函数做频域匹配后，原生4 ns数据
-    可达87.98 MHz。相比旧200 MHz矩形带宽模型，推荐匹配算法的SNR约为79.7%、
-    所需时间约为1.58倍；简单零滞后则约需9.59倍时间。
+    本次执行优先读取由当前 `main` 的LACT2实测镜面、结构遮挡、真实相机、集光器
+    和PDE生成的完整响应。下方表格直接给出中央像素有效面积、时间展宽、200 µs
+    相关对数、等效带宽、UV误差和重建；如果完整响应文件不存在，notebook会明确
+    标注回退到旧理想时间核，绝不把回退结果称为完整光学结果。
+
+    本次完整运行结果：100万入射光子中，结构遮挡后输出面有效面积为24.572 m²；
+    PSF跨4个像素，最强807号像素的等效探测面积只有1.791 m²。因而$m_{AB}=2$
+    的单像素恒星率从旧参数的213.45 MHz降为60.94 MHz。光学到达时间RMS为
+    0.554 ns，略好于旧核0.602 ns；主要损失来自跨像素，而不是时间展宽。
+    实测SPE+4 ns匹配相关的等效带宽为79.12 MHz；单基线5σ约需12.76 h（mAB=2）
+    或264 h（mAB=3）。mAB=3、2 h的32镜重建失败，不能再得到可信双星参数。
     """),
     md("## 1. 设置和 main 参数"),
     code("""
@@ -227,8 +232,8 @@ nb["cells"] = [
            "SPE_plus_DC_FWHM_ns": measured_spe_dc_fwhm_ns})
     """),
     md(r"""
-    实测SPE的自相关本身约几十ns宽，已经远宽于0.852 ns两镜光学展宽。因此在这条
-    实测波形上，DC只造成很小的额外峰高损失。这个结果不表示DC没有影响，而是说明
+    实测SPE的自相关本身约几十ns宽，远宽于下表给出的两镜光学展宽。因此在这条
+    实测波形上，光学非等时性只造成较小的额外峰高损失。这个结果不表示光学没有影响，而是说明
     当前电子脉冲响应比DC更慢，系统的有效相关带宽主要由SPE与相关算法决定。
     """),
     md("## 6. 实测 SPE 的有效带宽：简单零滞后与匹配相关"),
@@ -372,27 +377,26 @@ nb["cells"] = [
     md(r"""
     ## 8. `main` 完整光学与当前时间核：哪些相同，哪些不同
 
-    当前默认时间核来自一次 `run_optical_sim` 的 590,239 条轴上 400 nm 焦面命中，
-    因而**光程到达时间分布是真实光线追迹的压缩结果**。但是旧运行使用理想误差、
-    白板焦面，没有完整保留 LACT2 实测逐镜曲率/偏转、结构遮挡、真实 1656 像素、
-    集光器和 PDE。下面的新配置会用 `main` 的完整链重新生成响应；若已经在同一仓库
-    运行并提取，provenance 会自动显示真实结果，否则明确显示“待运行”，不会拿旧核冒充。
+    `Instrument.from_repository()` 优先读取当前 `main` 完整光学响应；只有响应文件
+    不存在时才回退到旧的590,239条理想白板命中时间核。provenance记录输入光线数、
+    SHA-256、遮挡/PSF后的中央像素有效面积和到达时间RMS。
     """),
     code("""
     full_cfg = REPO_ROOT/"configs/optics/lact2_measured_full_response_400nm.cfg"
     full_kernel = REPO_ROOT/"configs/optics/lact2_measured_full_response_400nm.csv"
     full_provenance = REPO_ROOT/"configs/optics/lact2_measured_full_response_400nm.provenance.json"
-    old_provenance = json.loads((REPO_ROOT/"configs/optics/lact_1229_onaxis_timing_kernel.provenance.json").read_text(encoding="utf-8"))
+    full_ready = full_provenance.exists() and full_kernel.exists()
+    active_kernel = Path(instrument.optical_timing_kernel_path).name
     optical_audit = pd.DataFrame([
-        {"项目":"逐镜几何与光程", "当前默认核":"有：main完整追迹后压缩", "新完整响应":"有"},
-        {"项目":"LACT2实测镜面/仰角形变", "当前默认核":"无：旧理想误差", "新完整响应":"有：70°实测插值"},
-        {"项目":"3D支架遮挡", "当前默认核":"无", "新完整响应":"有"},
-        {"项目":"真实相机/集光器/PDE", "当前默认核":"无", "新完整响应":"有"},
-        {"项目":"实测SPE/4 ns/ADC", "当前波形":"有", "新完整响应":"光学后由电子学独立处理"},
-        {"项目":"HBT相关性的来源", "当前与新流程":"入射热光统计", "新完整响应":"光学本身不会产生HBT"},
+        {"项目":"当前活动响应核", "本次执行":active_kernel},
+        {"项目":"LACT2实测镜面/70°仰角", "本次执行":"有" if full_ready else "无：回退旧核"},
+        {"项目":"3D支架遮挡", "本次执行":"有" if full_ready else "无：回退旧核"},
+        {"项目":"真实相机/集光器/PDE", "本次执行":"有" if full_ready else "无：回退旧核"},
+        {"项目":"实测SPE/4 ns/ADC", "本次执行":"有"},
+        {"项目":"HBT相关性的来源", "本次执行":"入射热光统计；光学本身不产生HBT"},
     ])
     display(optical_audit)
-    if full_provenance.exists() and full_kernel.exists():
+    if full_ready:
         full_info = json.loads(full_provenance.read_text(encoding="utf-8"))
         display(pd.Series(full_info, name="完整main光学响应").to_frame())
     else:
@@ -469,18 +473,31 @@ nb["cells"] = [
         axis.set(title=label, xlabel="角位置 [mas]", ylabel="角位置 [mas]")
     fig.savefig(OUTPUT_DIR/"reconstruction_electronics_comparison.png", dpi=160)
     plt.show()
-    display(pd.DataFrame([{
-        "情况": label,
-        "重建双峰间距_mas": result.metrics.get("two_peak_separation_mas"),
-        "重建位置角_deg": result.metrics.get("two_peak_position_angle_deg"),
-        "加权拟合RMSE": result.metrics["weighted_fit_rmse"],
-    } for label, result in reconstructions]))
+    reconstruction_rows = []
+    for label, result in reconstructions:
+        separation = result.metrics.get("two_peak_separation_mas")
+        angle = result.metrics.get("two_peak_position_angle_deg")
+        separation_error = abs(separation-uv_source.separation_mas)
+        direct_angle_error = abs(angle-uv_source.position_angle_deg)
+        angle_error = min(direct_angle_error, 180-direct_angle_error)
+        reconstruction_rows.append({
+            "情况": label, "重建双峰间距_mas": separation,
+            "间距误差_mas": separation_error,
+            "重建位置角_deg": angle, "位置角误差_deg": angle_error,
+            "加权拟合RMSE": result.metrics["weighted_fit_rmse"],
+            "重建可信": separation_error < 0.05 and angle_error < 10.0,
+        })
+    reconstruction_table = pd.DataFrame(reconstruction_rows)
+    display(reconstruction_table)
+    print("mAB=3、2 h：", "可信" if reconstruction_table["重建可信"].any()
+          else "三种电子学情景均不能可信恢复双星")
     """),
-    md("## 10. 可选：把同一批光子直接交给 main 电子学"),
+    md("## 10. 当前 main C++ 电子学：两台望远镜各2000 ns"),
     code("""
     preview = hits[(hits.time_ns >= -220) & (hits.time_ns <= 2_220)].copy()
     preview_csv = write_main_primary_pe_csv(
         preview, OUTPUT_DIR/"two_telescope_primary_pe_main_preview.csv")
+    saved_main_output = REPO_ROOT/"validation/sii_full_optics/main_electronics_2us"
     executable_candidates = [
         REPO_ROOT/"build"/"run_camera_electronics",
         REPO_ROOT/"build"/"run_camera_electronics.exe"]
@@ -491,26 +508,55 @@ nb["cells"] = [
     command += [str(main_config), str(preview_csv), str(main_output),
                 "-C", "electronics.n_pixels=1",
                 "-C", "electronics.sampling.start_ns=0",
-                "-C", "electronics.sampling.end_ns=2000"]
-    print(" ".join(command))
-    if executable:
+                "-C", "electronics.sampling.end_ns=2000",
+                "-C", "nsb.enabled=false",
+                "-C", "electronics.nsb.enabled=false"]
+    if saved_main_output.exists():
+        main_waves, main_metadata = [], []
+        for telescope_id in (0, 1):
+            directory = saved_main_output/f"event_1_tel_{telescope_id}"
+            main_waves.append(pd.read_csv(directory/"waveform.csv"))
+            main_metadata.append(json.loads(
+                (directory/"metadata.json").read_text(encoding="utf-8")))
+        fig, axes = plt.subplots(2, 1, figsize=(12, 5.8), sharex=True,
+                                 constrained_layout=True)
+        for telescope_id, (axis, waveform) in enumerate(zip(axes, main_waves)):
+            axis.plot(waveform.time_center_ns, waveform.sample_value, lw=.8)
+            axis.set(ylabel="main输出 [mV]",
+                     title=f"望远镜{telescope_id+1}：C++ DetectorPipeline完整2000 ns")
+        axes[-1].set(xlabel="时间 [ns]")
+        fig.savefig(OUTPUT_DIR/"main_cpp_two_telescope_2us.png", dpi=160)
+        plt.show()
+        main_lag, main_corr = waveform_cross_correlation(
+            main_waves[1].sample_value, main_waves[0].sample_value,
+            main_metadata[0]["sample_width_ns"], 200.0)
+        display(pd.DataFrame(main_metadata))
+        print({"main_cpp_peak_lag_ns": main_lag[np.argmax(main_corr)],
+               "main_cpp_peak_correlation": main_corr.max(),
+               "main_cpp_contains_additive_noise": False,
+               "note": "main当前cfg没有实测加性噪声PSD或ADC量化；0.35mV/8-bit仅在性能情景中显式假设"})
+        main_cpp_available = True
+    elif executable:
         completed = subprocess.run(command, cwd=REPO_ROOT, check=True,
                                    text=True, capture_output=True)
         print(completed.stdout)
+        main_cpp_available = True
     else:
+        print("复现命令：", " ".join(command))
         print("当前工作区没有已编译的 main 可执行文件；上面的 CSV 和命令可在服务器 build 后直接运行。")
+        main_cpp_available = False
     """),
     md(r"""
     ## 11. 检查与边界
 
     - 两镜相关对数必须服从 $R_1R_2\tau_c|V|^2$，而不是共享全部 Poisson 光子。
-    - 两个独立 LACT 时间核之差的 RMS 应接近 $\sqrt{2}\times0.602$ ns。
+    - 两个独立 LACT 时间核之差的 RMS 应接近 $\sqrt{2}$ 倍单镜RMS。
     - 200 µs 原始波形不应显著探测到天文 HBT；否则很可能把同源噪声或模拟器共享随机数
       误当成了恒星相关。
     - 本 notebook 确实读取 main 当前 `single_pe.template` 指向的实测CSV；频域匹配结果
       使用0.35 mV独立白噪声和8-bit均匀量化假设，这两项尚不是实测噪声功率谱。
-    - 当前时间核仅为 400 nm、轴上、理想误差配置。论文级性能仍需要逐镜、随仰角/离轴角
-      的实测时间核，以及实测快速前端传递函数与跨镜时钟稳定性。
+    - 当前完整响应为400 nm、轴上、70°仰角、LACT2实测镜面配置。论文级性能仍应建立
+      波长/仰角/离轴角响应网格，并补充实测快速前端噪声谱与跨镜时钟稳定性。
 
     方法依据：[H.E.S.S. 两镜实测与相干时间定义](https://academic.oup.com/mnras/article/527/4/12243/7455900)、
     [时间分辨率、光子率和 IACT 非等时性的比较](https://academic.oup.com/mnras/article/512/2/1722/6534919)、
@@ -532,6 +578,7 @@ nb["cells"] = [
         "old_model_is_more_optimistic_than_measured_4ns": (
             assumed_200mhz_equivalent_hz > matched_4ns_hz),
         "main_csv_exists": primary_csv.exists(),
+        "main_cpp_2us_outputs_exist": main_cpp_available,
         "waveforms_are_finite": all(np.isfinite(w["adc_mv"]).all()
                                      for w in waveforms_measured),
     }

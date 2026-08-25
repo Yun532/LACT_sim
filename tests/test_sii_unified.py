@@ -99,7 +99,6 @@ def test_two_microsecond_waveform_has_padding_for_full_spe_tail():
 def test_repository_instrument_follows_main_configs():
     instrument = sii.Instrument.from_repository(ROOT)
     assert np.isclose(instrument.effective_area_m2, 24.576860)
-    assert np.isclose(instrument.throughput, 0.20, rtol=2e-4)
     assert np.isclose(instrument.detected_nsb_rate_hz, 70.527e6, rtol=2e-4)
     assert instrument.microcells_per_pixel == 270_336
     assert np.isclose(instrument.adc_sample_rate_hz, 250e6)
@@ -107,6 +106,19 @@ def test_repository_instrument_follows_main_configs():
     assert Path(instrument.microcell_device_path).is_file()
     full = ROOT / "configs" / "optics" / "lact2_measured_full_response_400nm.csv"
     fallback = ROOT / "configs" / "optics" / "lact_1229_onaxis_timing_kernel.csv"
+    if full.exists():
+        provenance = json.loads(
+            full.with_suffix(".provenance.json").read_text(encoding="utf-8"))
+        expected_throughput = (
+            provenance["central_pixel_effective_detection_area_m2"]
+            / instrument.effective_area_m2 * 0.7836336)
+        assert np.isclose(instrument.throughput, expected_throughput)
+        assert provenance["input_photons"] == 1_000_000
+        assert provenance["illuminated_pixel_count"] == 4
+        assert np.isclose(sum(provenance["pixel_signal_fractions"].values()), 1.0)
+        assert np.isclose(pd.read_csv(full).weight.sum(), 1.0)
+    else:
+        assert np.isclose(instrument.throughput, 0.20, rtol=2e-4)
     assert Path(instrument.optical_timing_kernel_path) == (
         full if full.exists() else fallback).resolve()
 

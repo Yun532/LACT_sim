@@ -40,7 +40,9 @@ def main() -> None:
     if detected.empty:
         raise ValueError("main output contains no detected camera response")
 
-    central_pixel = int(detected.groupby("pixel_id").signal_weight.sum().idxmax())
+    pixel_signal = detected.groupby("pixel_id").signal_weight.sum().sort_values(
+        ascending=False)
+    central_pixel = int(pixel_signal.index[0])
     selected = detected.loc[detected.pixel_id == central_pixel].copy()
     grouped = selected.groupby("mirror_id", sort=True)
     rows = []
@@ -79,6 +81,11 @@ def main() -> None:
         "total_detection_probability_all_pixels": float(
             all_detected_weight/args.input_photons),
         "central_pixel_id": central_pixel,
+        "illuminated_pixel_count": int(len(pixel_signal)),
+        "pixel_signal_fractions": {
+            str(int(pixel)): float(value/pixel_signal.sum())
+            for pixel, value in pixel_signal.items()
+        },
         "central_pixel_detection_probability": float(central_weight/args.input_photons),
         "source_sampling_radius_m": args.sampling_radius_m,
         "source_sampling_area_m2": sampling_area,
