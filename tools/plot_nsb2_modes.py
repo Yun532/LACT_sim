@@ -31,7 +31,7 @@ def calibrate_full_waveform(root_file: Path, baseline_samples: int):
         source.subarray,
         config_str=json.dumps({"image_extractor_type": "FullWaveFormExtractor"}),
     )(event)
-    tel_id = source.get_readout_tels(event)[0]
+    tel_id = source.get_readout_tels(event.event_id)[0]
     image = np.asarray(event.dl0.tels[tel_id].image, dtype=float)
     return source, event, tel_id, image
 
