@@ -396,7 +396,6 @@ int main(int argc, char** argv) {
         if (source_runtime_cfg.use_photon_csv) {
             auto csv_cfg = buildPhotonCsvConfig(cfg, source_cfg, source_runtime_cfg);
             auto csv_source = std::make_unique<PhotonCsvSource>(csv_cfg);
-            reserve_hits = csv_source->size();
             source = std::move(csv_source);
         } else if (source_runtime_cfg.use_eventio) {
             throw std::runtime_error(
