@@ -1,0 +1,57 @@
+name: NSB2 two-mode plots
+
+on:
+  push:
+    branches:
+      - nsb2-interface
+    paths:
+      - .github/workflows/nsb2-demo.yml
+
+jobs:
+  render:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    container: rootproject/root:6.32.02-ubuntu22.04
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y cmake g++ git libhdf5-dev make python3-pip zlib1g-dev
+          python3 -m pip install --no-cache-dir astropy matplotlib nanobind numpy scikit-build-core typing_extensions
+      - name: Checkout LACT_sim
+        uses: actions/checkout@v4
+      - name: Build LACT_sim
+        run: |
+          bash tools/build_hessio.sh
+          cmake -S . -B build -DHESSIO_ROOT="$GITHUB_WORKSPACE/external/hessioxxx/source" -DLACT_ENABLE_HDF5=ON -DLACT_ENABLE_ROOT=ON
+          cmake --build build -j 2
+      - name: Generate both PhotonCsv modes
+        run: |
+          python3 tools/nsb2_photoncsv.py --rate-cube validation/nsb2/crab_rate_cube_nsb2_0p2p0.npz --output-dir run_logs/nsb2_crab --mode expectation --exposure-ns 1000000000 --rays 300000
+          python3 tools/nsb2_photoncsv.py --rate-cube validation/nsb2/crab_rate_cube_nsb2_0p2p0.npz --output-dir run_logs/nsb2_crab --mode timed --integration-start-ns 0 --integration-end-ns 128 --guard-pre-ns 180 --guard-post-ns 72
+      - name: Run optical and waveform simulations
+        run: |
+          build/run_corsika_trace configs/examples/crab_nsb2_expectation_root.cfg
+          build/run_corsika_trace configs/examples/crab_nsb2_waveform_demo_root.cfg
+      - name: Install pyLAST nsb2 interface
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: "2"
+        run: |
+          git clone --depth 1 --branch nsb2-interface https://github.com/Yun532/pylast.git /tmp/pylast-nsb2
+          python3 -m pip install --no-build-isolation --no-deps /tmp/pylast-nsb2
+      - name: Plot with pyLAST
+        env:
+          MPLBACKEND: Agg
+        run: |
+          python3 tools/plot_nsb2_modes.py --expectation-root run_logs/nsb2_crab/lact_nsb2_expectation.root --waveform-root run_logs/nsb2_crab/lact_nsb2_waveform_demo.root --output-dir run_logs/nsb2_crab/plots --baseline-samples 16
+      - name: Upload plots and ROOT files
+        uses: actions/upload-artifact@v4
+        with:
+          name: nsb2-two-mode-plots
+          path: |
+            run_logs/nsb2_crab/plots
+            run_logs/nsb2_crab/lact_nsb2_expectation.root
+            run_logs/nsb2_crab/lact_nsb2_waveform_demo.root
+            run_logs/nsb2_crab/*manifest.json
+          if-no-files-found: error
+
