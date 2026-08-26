@@ -24,7 +24,9 @@ def calibrate_full_waveform(root_file: Path, baseline_samples: int):
     """Return one pyLAST-calibrated event and its integrated camera image."""
 
     source = LactEventSource(
-        str(root_file), baseline_samples=int(baseline_samples)
+        str(root_file),
+        baseline_samples=int(baseline_samples),
+        read_untriggered=True,
     )
     event = source[0]
     Calibrator(
