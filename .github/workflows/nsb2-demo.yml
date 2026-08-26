@@ -6,6 +6,7 @@ on:
       - nsb2-interface
     paths:
       - .github/workflows/nsb2-demo.yml
+      - tools/plot_nsb2_modes.py
 
 jobs:
   render:
@@ -54,4 +55,3 @@ jobs:
             run_logs/nsb2_crab/lact_nsb2_waveform_demo.root
             run_logs/nsb2_crab/*manifest.json
           if-no-files-found: error
-

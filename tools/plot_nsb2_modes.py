@@ -7,9 +7,56 @@ import argparse
 import json
 from pathlib import Path
 
+import matplotlib.pyplot as plt
+from matplotlib.colors import TwoSlopeNorm
 import numpy as np
 
-from pylast.visualize import plot_event_quicklook, plot_lact_waveforms
+from pylast.helper import Calibrator, LactEventSource
+from pylast.visualize import (
+    EventVisualizer,
+    plot_event_cameras,
+    plot_event_quicklook,
+    plot_lact_waveforms,
+)
+
+
+def calibrate_full_waveform(root_file: Path, baseline_samples: int):
+    """Return one pyLAST-calibrated event and its integrated camera image."""
+
+    source = LactEventSource(
+        str(root_file), baseline_samples=int(baseline_samples)
+    )
+    event = source[0]
+    Calibrator(
+        source.subarray,
+        config_str=json.dumps({"image_extractor_type": "FullWaveFormExtractor"}),
+    )(event)
+    tel_id = source.get_readout_tels(event)[0]
+    image = np.asarray(event.dl0.tels[tel_id].image, dtype=float)
+    return source, event, tel_id, image
+
+
+def plot_signed_camera(source, tel_id: int, image: np.ndarray, output_path: Path):
+    """Draw a baseline-subtracted camera while preserving signed residuals."""
+
+    visualizer = EventVisualizer(source, enable_secondary_axes=True)
+    scale = max(float(np.max(np.abs(image))), 1.0e-12)
+    norm = TwoSlopeNorm(vmin=-scale, vcenter=0.0, vmax=scale)
+    figure, axis = plt.subplots(figsize=(7.2, 6.2))
+    visualizer._draw_camera_image(
+        axis,
+        visualizer.tel_geoms[tel_id],
+        image,
+        norm,
+        plt.get_cmap("RdBu_r"),
+    )
+    axis.set_title(
+        "Mode B: pyLAST FullWaveFormExtractor\n"
+        "per-pixel baseline subtracted; signed residual"
+    )
+    figure.tight_layout()
+    figure.savefig(output_path, dpi=160, bbox_inches="tight")
+    plt.close(figure)
 
 
 def main() -> None:
@@ -59,6 +106,29 @@ def main() -> None:
         show=False,
     )
 
+    source_b, event_b, tel_b, image_b = calibrate_full_waveform(
+        args.waveform_root, baseline_samples=0
+    )
+    plot_event_cameras(
+        event_b,
+        source=source_b,
+        image_level="dl0",
+        output_path=args.output_dir / "mode_b_camera_integrated_pe.png",
+        include_non_triggered=True,
+        show=False,
+    )
+    source_b_corrected, _, tel_b_corrected, image_b_corrected = (
+        calibrate_full_waveform(
+            args.waveform_root, baseline_samples=args.baseline_samples
+        )
+    )
+    plot_signed_camera(
+        source_b_corrected,
+        tel_b_corrected,
+        image_b_corrected,
+        args.output_dir / "mode_b_camera_baseline_subtracted_residual_pe.png",
+    )
+
     count = min(args.baseline_samples, raw["waveform"].shape[1])
     raw_baselines = raw["waveform"][:, :count].mean(axis=1)
     r1_baselines = r1["waveform"][:, :count].mean(axis=1)
@@ -81,6 +151,15 @@ def main() -> None:
             "r1_baseline_abs_max_pe_per_bin_after": float(
                 np.abs(corrected_baselines).max()
             ),
+            "camera_total_integrated_pe_before": float(image_b.sum()),
+            "camera_mean_integrated_pe_per_pixel_before": float(image_b.mean()),
+            "camera_total_residual_pe_after": float(image_b_corrected.sum()),
+            "camera_mean_residual_pe_per_pixel_after": float(
+                image_b_corrected.mean()
+            ),
+            "camera_residual_rms_pe_after": float(image_b_corrected.std()),
+            "camera_residual_min_pe_after": float(image_b_corrected.min()),
+            "camera_residual_max_pe_after": float(image_b_corrected.max()),
             "plotted_pixel_indices": pixels,
         },
     }
@@ -92,4 +171,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
