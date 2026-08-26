@@ -1,0 +1,25 @@
+name: NSB2 interface CI
+
+on:
+  push:
+    branches:
+      - nsb2-interface
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    container: rootproject/root:6.34.08-ubuntu22.04
+    steps:
+      - name: Install build dependencies
+        run: apt-get update && apt-get install -y cmake g++ git libhdf5-dev make
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DLACT_ENABLE_HESSIO=OFF -DLACT_ENABLE_HDF5=ON -DLACT_ENABLE_ROOT=ON
+      - name: Build
+        run: cmake --build build -j 2
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Check NSB2 adapter syntax
+        run: python3 -m py_compile tools/nsb2_photoncsv.py
