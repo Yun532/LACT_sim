@@ -8,6 +8,7 @@
 #include <random>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace lact::electronics {
@@ -482,9 +483,23 @@ void validateDetectorPipelineConfig(const DetectorPipelineConfig& config)
         throw std::runtime_error(
             "detector sampling interval must be an integer multiple of width_ns");
     }
-    if (config.microcell.model != "explicit_no_recovery") {
+    if (!(config.microcell.model == "explicit_no_recovery" ||
+          config.microcell.model == "explicit_exponential_recovery")) {
         throw std::runtime_error(
-            "only microcell.model=explicit_no_recovery is supported");
+            "microcell.model must be explicit_no_recovery or "
+            "explicit_exponential_recovery");
+    }
+    if (config.microcell.recovery_enabled !=
+        (config.microcell.model == "explicit_exponential_recovery")) {
+        throw std::runtime_error(
+            "microcell.recovery_enabled and microcell.model are inconsistent");
+    }
+    if (config.microcell.recovery_enabled &&
+        (!std::isfinite(config.microcell.recovery_time_ns) ||
+         !(config.microcell.recovery_time_ns > 0.0))) {
+        throw std::runtime_error(
+            "microcell.recovery_time_ns must be finite and > 0 when "
+            "recovery is enabled");
     }
     if (!(config.microcell.layout == "uniform_interleaved" ||
           config.microcell.layout == "s17351_tiled_2x4")) {
@@ -682,6 +697,8 @@ DetectorPipelineResult runDetectorPipeline(
         static_cast<std::uint64_t>(config.microcell.grid_rows);
     std::unordered_set<std::uint64_t> occupied;
     occupied.reserve(input_hits.size());
+    std::unordered_map<std::uint64_t, double> last_fire_time_ns;
+    last_fire_time_ns.reserve(input_hits.size());
 
     for (std::size_t ordered_index : order) {
         const auto& hit = input_hits[ordered_index];
@@ -764,9 +781,26 @@ DetectorPipelineResult runDetectorPipeline(
             static_cast<std::uint64_t>(hit.pixel_id) * cells_per_pixel +
             cell_in_pixel;
         for (int repetition = 0; repetition < repetitions; ++repetition) {
-            const bool fired =
-                !config.microcell.saturation_enabled ||
-                occupied.insert(occupancy_key).second;
+            double recovered_fraction = 1.0;
+            bool fired = true;
+            if (config.microcell.saturation_enabled) {
+                if (config.microcell.recovery_enabled) {
+                    const auto previous = last_fire_time_ns.find(occupancy_key);
+                    if (previous != last_fire_time_ns.end()) {
+                        const double elapsed_ns =
+                            std::max(0.0, hit.time_ns - previous->second);
+                        recovered_fraction = -std::expm1(
+                            -elapsed_ns / config.microcell.recovery_time_ns);
+                        fired = recovered_fraction > 0.0;
+                    }
+                    if (fired) {
+                        last_fire_time_ns[occupancy_key] = hit.time_ns;
+                    }
+                } else {
+                    fired = occupied.insert(occupancy_key).second;
+                    recovered_fraction = fired ? 1.0 : 0.0;
+                }
+            }
             if (config.save_microcell_decisions) {
                 out.microcell_decisions.push_back({
                     ordered_index,
@@ -789,11 +823,14 @@ DetectorPipelineResult runDetectorPipeline(
             if (fired) {
                 out.fired_hits.push_back({
                     hit.event_id, hit.telescope_id, hit.pixel_id, hit.time_ns,
-                    address.channel_id, address.microcell_id, 1.0, hit.origin,
+                    address.channel_id, address.microcell_id,
+                    recovered_fraction, hit.origin,
                     1.0, 0.0, hit.count_in_integrated_image});
                 if (hit.count_in_integrated_image) {
                     addFired(out.pixels[static_cast<std::size_t>(hit.pixel_id)],
-                             hit.origin, 1.0);
+                             hit.origin, recovered_fraction);
+                    out.pixels[static_cast<std::size_t>(hit.pixel_id)]
+                        .saturation_lost_pe += 1.0 - recovered_fraction;
                 }
             } else {
                 if (hit.count_in_integrated_image) {

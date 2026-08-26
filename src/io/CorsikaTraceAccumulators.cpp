@@ -60,12 +60,18 @@ void accumulateWaveformHit(std::map<WaveformKey, WaveformPixelAccumulator>& wave
                            bool capture_detector_hit,
                            int event_id,
                            int telescope_id,
-                           const OpticalSurfaceHit& hit)
+                           const OpticalSurfaceHit& hit,
+                           PhotonOrigin origin)
 {
     if (!hit.hit_camera || hit.pixel_id < 0) {
         return;
     }
     const double pe = hit.weight * hit.relative_efficiency;
+    const auto hit_origin = origin == PhotonOrigin::Nsb
+                                ? electronics::HitOrigin::Nsb
+                                : (origin == PhotonOrigin::Dark
+                                       ? electronics::HitOrigin::Dark
+                                       : electronics::HitOrigin::Cherenkov);
     if (capture_detector_hit) {
         raw_waveform_hits.push_back(RawWaveformHit{
             event_id,
@@ -77,7 +83,7 @@ void accumulateWaveformHit(std::map<WaveformKey, WaveformPixelAccumulator>& wave
             hit.collector_exit_x_m,
             hit.collector_exit_y_m,
             hit.wavelength_nm,
-            electronics::HitOrigin::Cherenkov,
+            hit_origin,
         });
     }
     if (!cfg.enabled) {
@@ -95,7 +101,7 @@ void accumulateWaveformHit(std::map<WaveformKey, WaveformPixelAccumulator>& wave
                 hit.collector_exit_x_m,
                 hit.collector_exit_y_m,
                 hit.wavelength_nm,
-                electronics::HitOrigin::Cherenkov,
+                hit_origin,
             });
         }
         return;
@@ -111,6 +117,13 @@ void accumulateWaveformHit(std::map<WaveformKey, WaveformPixelAccumulator>& wave
     acc.time_bin = bin;
     acc.photon_count += 1;
     acc.pe += pe;
+    if (origin == PhotonOrigin::Nsb) {
+        acc.nsb_pe += pe;
+    } else if (origin == PhotonOrigin::Dark) {
+        acc.dark_pe += pe;
+    } else {
+        acc.cherenkov_pe += pe;
+    }
 }
 
 void appendCollectorDebugPhoton(std::vector<CollectorDebugPhotonRow>& rows,

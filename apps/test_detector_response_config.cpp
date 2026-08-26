@@ -165,6 +165,40 @@ int main()
     ok &= check(selected_events.selected_event_ids ==
                     std::vector<int>({201, 402, 603}),
                 "multiple source event filters are retained");
+    const auto timed_source = buildSourceRuntimeConfig({
+        {"source.integration_start_ns", "0"},
+        {"source.integration_end_ns", "1000"},
+        {"source.generated_time_start_ns", "-250"},
+        {"source.generated_time_end_ns", "1250"},
+    });
+    ok &= check(timed_source.integration_gate_enabled &&
+                    timed_source.integration_start_ns == 0.0 &&
+                    timed_source.integration_end_ns == 1000.0,
+                "external photon integration gate is retained");
+    ok &= check(timed_source.generated_time_window_enabled &&
+                    timed_source.generated_time_start_ns == -250.0 &&
+                    timed_source.generated_time_end_ns == 1250.0,
+                "external photon generation window metadata is retained");
+    OpticalSurfaceHit nsb_hit;
+    nsb_hit.hit_camera = true;
+    nsb_hit.pixel_id = 4;
+    nsb_hit.weight = 2.0;
+    nsb_hit.relative_efficiency = 0.25;
+    std::map<PixelKey, PixelAccumulator> origin_pixels;
+    accumulatePixelHit(origin_pixels, 7, 3, nsb_hit, PhotonOrigin::Nsb);
+    const auto& origin_pixel = origin_pixels.at({7, 3, 4});
+    ok &= check(std::abs(origin_pixel.pe - 0.5) < 1e-12 &&
+                    origin_pixel.cherenkov_pe == 0.0 &&
+                    std::abs(origin_pixel.nsb_pe - 0.5) < 1e-12,
+                "optical image accumulator preserves NSB origin");
+    try {
+        (void)buildSourceRuntimeConfig({
+            {"source.integration_start_ns", "0"},
+        });
+        std::cerr << "expected incomplete source integration window\n";
+        ok = false;
+    } catch (...) {
+    }
     try {
         (void)buildSourceRuntimeConfig({
             {"source.filter_event_id", "201"},

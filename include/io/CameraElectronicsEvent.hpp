@@ -43,6 +43,7 @@ CameraElectronicsEventMap buildCameraElectronicsEvents(
     const electronics::DetectorPipelineConfig& detector,
     const WaveformOutputConfig& waveform,
     const NsbConfig& nsb,
+    const SourceRuntimeConfig& source,
     const std::vector<int>& pixel_id_axis,
     const std::map<SummaryKey, TraceSummary>& summaries,
     const std::vector<RawWaveformHit>& raw_hits);

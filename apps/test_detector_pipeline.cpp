@@ -98,6 +98,54 @@ int main(int argc, char** argv)
                 std::abs(result.camera_trigger.trigger_time_ns - 6.0) < 1.0e-12,
             "camera trigger time must be the causal window-end sample");
 
+    DetectorPipelineConfig recovery_config = config;
+    recovery_config.microcell.recovery_enabled = true;
+    recovery_config.microcell.model = "explicit_exponential_recovery";
+    recovery_config.microcell.recovery_time_ns = 10.0;
+    recovery_config.camera_trigger.enabled = false;
+    std::vector<PrimaryPeHit> recovery_hits = {
+        {9, 2, 0, 0.0, 0.0, 0.0, 420.0, 1.0,
+         HitOrigin::Cherenkov},
+        {9, 2, 0, 0.0, 0.0, 0.0, 420.0, 1.0,
+         HitOrigin::Cherenkov},
+        {9, 2, 0, 10.0, 0.0, 0.0, 420.0, 1.0,
+         HitOrigin::Cherenkov},
+    };
+    const auto recovery_result =
+        runDetectorPipeline(recovery_config, 1, recovery_hits);
+    const double one_tau_fraction = 1.0 - std::exp(-1.0);
+    require(recovery_result.fired_hits.size() == 2,
+            "zero-delay repeat must be rejected but a recovered cell must fire");
+    require(std::abs(recovery_result.fired_hits[1].fired_pe -
+                     one_tau_fraction) < 1.0e-12,
+            "one-time-constant hit must carry exponential recovery charge");
+
+    lact::SourceRuntimeConfig gated_source;
+    gated_source.integration_gate_enabled = true;
+    gated_source.integration_start_ns = 0.0;
+    gated_source.integration_end_ns = 10.0;
+    DetectorPipelineConfig gated_config;
+    gated_config.enabled = true;
+    gated_config.microcell.enabled = false;
+    gated_config.camera_trigger.enabled = false;
+    gated_config.sampling.start_ns = 0.0;
+    gated_config.sampling.end_ns = 10.0;
+    gated_config.sampling.width_ns = 1.0;
+    std::vector<lact::RawWaveformHit> gated_hits = {
+        {11, 3, 0, -1.0, 1, 1.0, 0.0, 0.0, 420.0,
+         HitOrigin::Nsb},
+        {11, 3, 0, 5.0, 1, 1.0, 0.0, 0.0, 420.0,
+         HitOrigin::Nsb},
+    };
+    const auto gated_events = lact::buildCameraElectronicsEvents(
+        gated_config, lact::WaveformOutputConfig{}, lact::NsbConfig{},
+        gated_source, {0}, {}, gated_hits);
+    const auto& gated_result = gated_events.at({11, 3}).detector;
+    require(gated_result.primary_hits.size() == 2,
+            "guard hit must remain in detector input");
+    require(gated_result.pixels[0].primary_nsb_pe == 1.0,
+            "guard hit must not enter the integrated image");
+
     DetectorPipelineResult empty_result;
     empty_result.pixels.resize(2);
     empty_result.pixels[0].primary_cherenkov_pe = 3.0;

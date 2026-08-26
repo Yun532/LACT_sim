@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <cstdint>
 #include <cmath>
+#include <vector>
 
 namespace {
 
@@ -106,53 +107,65 @@ PhotonCsvSource::PhotonCsvSource(const PhotonCsvConfig& cfg)
     if (cfg_.csv_path.empty()) {
         throw std::runtime_error("PhotonCsvSource: csv_path is required");
     }
-    load();
+    openAndPrime();
 }
 
 void PhotonCsvSource::reset() {
-    index_ = 0;
+    openAndPrime();
 }
 
 bool PhotonCsvSource::next(PhotonBunch& out) {
-    if (index_ >= rows_.size()) {
-        return false;
+    if (buffered_) {
+        out = std::move(*buffered_);
+        buffered_.reset();
+        return true;
     }
-    out = rows_[index_++];
-    return true;
+    return readNext(out);
 }
 
-void PhotonCsvSource::load() {
-    std::ifstream ifs(cfg_.csv_path);
-    if (!ifs) {
+void PhotonCsvSource::openAndPrime() {
+    buffered_.reset();
+    input_.close();
+    input_.clear();
+    input_.open(cfg_.csv_path);
+    if (!input_) {
         throw std::runtime_error("failed to open photon CSV: " + cfg_.csv_path);
     }
 
     std::string line;
-    if (!std::getline(ifs, line)) {
+    if (!std::getline(input_, line)) {
         throw std::runtime_error("photon CSV is empty: " + cfg_.csv_path);
     }
     auto header_cells = splitCsv(line);
-    std::map<std::string, int> header;
+    header_.clear();
     for (int i = 0; i < static_cast<int>(header_cells.size()); ++i) {
-        header[lowerCopy(header_cells[i])] = i;
+        header_[lowerCopy(header_cells[i])] = i;
     }
+    line_no_ = 1;
+    PhotonBunch first;
+    if (!readNext(first)) {
+        throw std::runtime_error("photon CSV has no data rows: " + cfg_.csv_path);
+    }
+    buffered_ = std::move(first);
+}
 
-    int line_no = 1;
-    while (std::getline(ifs, line)) {
-        ++line_no;
+bool PhotonCsvSource::readNext(PhotonBunch& out) {
+    std::string line;
+    while (std::getline(input_, line)) {
+        ++line_no_;
         if (trim(line).empty()) continue;
 
         auto cells = splitCsv(line);
         PhotonBunch bunch;
         bunch.photon.pos = {
-            std::stod(requiredCell(cells, header, "x_m", line_no)),
-            std::stod(requiredCell(cells, header, "y_m", line_no)),
-            std::stod(requiredCell(cells, header, "z_m", line_no))
+            std::stod(requiredCell(cells, header_, "x_m", line_no_)),
+            std::stod(requiredCell(cells, header_, "y_m", line_no_)),
+            std::stod(requiredCell(cells, header_, "z_m", line_no_))
         };
         bunch.photon.dir = {
-            std::stod(requiredCell(cells, header, "dir_x", line_no)),
-            std::stod(requiredCell(cells, header, "dir_y", line_no)),
-            std::stod(requiredCell(cells, header, "dir_z", line_no))
+            std::stod(requiredCell(cells, header_, "dir_x", line_no_)),
+            std::stod(requiredCell(cells, header_, "dir_y", line_no_)),
+            std::stod(requiredCell(cells, header_, "dir_z", line_no_))
         };
         const auto finiteVec = [](const Vec3& value) {
             return std::isfinite(value.x) &&
@@ -161,81 +174,93 @@ void PhotonCsvSource::load() {
         };
         if (!finiteVec(bunch.photon.pos)) {
             throw std::runtime_error(
-                "PhotonCsvSource line " + std::to_string(line_no) +
+                "PhotonCsvSource line " + std::to_string(line_no_) +
                 " has a non-finite position");
         }
         if (!finiteVec(bunch.photon.dir) ||
             !std::isfinite(bunch.photon.dir.norm2()) ||
             bunch.photon.dir.norm2() <= 1.0e-30) {
             throw std::runtime_error(
-                "PhotonCsvSource line " + std::to_string(line_no) +
+                "PhotonCsvSource line " + std::to_string(line_no_) +
                 " has a non-finite or zero direction");
         }
         bunch.photon.normalizeDirection();
         bunch.photon.time_ns =
-            optionalDouble(cells, header, "time_ns", cfg_.default_time_ns);
+            optionalDouble(cells, header_, "time_ns", cfg_.default_time_ns);
         bunch.photon.wavelength_nm =
-            optionalDouble(cells, header, "wavelength_nm", cfg_.default_wavelength_nm);
+            optionalDouble(cells, header_, "wavelength_nm", cfg_.default_wavelength_nm);
         bunch.raw_wavelength_nm =
-            optionalDouble(cells, header, "raw_wavelength_nm",
+            optionalDouble(cells, header_, "raw_wavelength_nm",
                            bunch.photon.wavelength_nm);
         bunch.photon.weight =
-            optionalDouble(cells, header, "weight", cfg_.default_weight);
+            optionalDouble(cells, header_, "weight", cfg_.default_weight);
         bunch.photon.optical_efficiency_preapplied =
-            optionalBool(cells, header, "optical_efficiency_preapplied", false);
+            optionalBool(cells, header_, "optical_efficiency_preapplied", false);
         bunch.multiplicity =
-            optionalDouble(cells, header, "multiplicity", cfg_.default_multiplicity);
+            optionalDouble(cells, header_, "multiplicity", cfg_.default_multiplicity);
         bunch.event_id =
-            optionalInt(cells, header, "event_id", cfg_.default_event_id);
+            optionalInt(cells, header_, "event_id", cfg_.default_event_id);
         bunch.telescope_id =
-            optionalInt(cells, header, "telescope_id", cfg_.default_telescope_id);
+            optionalInt(cells, header_, "telescope_id", cfg_.default_telescope_id);
         bunch.shower_event_id =
-            optionalInt(cells, header, "shower_event_id", bunch.event_id);
+            optionalInt(cells, header_, "shower_event_id", bunch.event_id);
         bunch.array_id =
-            optionalInt(cells, header, "array_id", 0);
+            optionalInt(cells, header_, "array_id", 0);
         bunch.source_bunch_index =
-            optionalUInt64(cells, header, "source_bunch_index",
-                           static_cast<std::uint64_t>(line_no - 2));
+            optionalUInt64(cells, header_, "source_bunch_index",
+                           static_cast<std::uint64_t>(line_no_ - 2));
         bunch.eventio_2d =
-            optionalBool(cells, header, "eventio_2d", cfg_.default_eventio_2d);
+            optionalBool(cells, header_, "eventio_2d", cfg_.default_eventio_2d);
         bunch.emission_altitude_km =
-            optionalDouble(cells, header, "emission_altitude_km",
+            optionalDouble(cells, header_, "emission_altitude_km",
                            bunch.emission_altitude_km);
+        const std::string origin = lowerCopy(optionalCell(cells, header_, "origin"));
+        if (origin.empty() || origin == "cherenkov") {
+            bunch.origin = PhotonOrigin::Cherenkov;
+        } else if (origin == "nsb") {
+            bunch.origin = PhotonOrigin::Nsb;
+        } else if (origin == "dark") {
+            bunch.origin = PhotonOrigin::Dark;
+        } else {
+            throw std::runtime_error(
+                "PhotonCsvSource line " + std::to_string(line_no_) +
+                " origin must be cherenkov, nsb, or dark");
+        }
 
         if (!std::isfinite(bunch.photon.time_ns)) {
             throw std::runtime_error(
-                "PhotonCsvSource line " + std::to_string(line_no) +
+                "PhotonCsvSource line " + std::to_string(line_no_) +
                 " has a non-finite time_ns");
         }
         if (!std::isfinite(bunch.photon.wavelength_nm) ||
             bunch.photon.wavelength_nm <= 0.0) {
             throw std::runtime_error(
-                "PhotonCsvSource line " + std::to_string(line_no) +
+                "PhotonCsvSource line " + std::to_string(line_no_) +
                 " requires a finite, positive wavelength_nm");
         }
         if (!std::isfinite(bunch.raw_wavelength_nm)) {
             throw std::runtime_error(
-                "PhotonCsvSource line " + std::to_string(line_no) +
+                "PhotonCsvSource line " + std::to_string(line_no_) +
                 " has a non-finite raw_wavelength_nm");
         }
         if (!std::isfinite(bunch.photon.weight) ||
             bunch.photon.weight < 0.0) {
             throw std::runtime_error(
-                "PhotonCsvSource line " + std::to_string(line_no) +
+                "PhotonCsvSource line " + std::to_string(line_no_) +
                 " requires a finite, non-negative weight");
         }
         if (!std::isfinite(bunch.multiplicity) ||
             bunch.multiplicity < 0.0) {
             throw std::runtime_error(
-                "PhotonCsvSource line " + std::to_string(line_no) +
+                "PhotonCsvSource line " + std::to_string(line_no_) +
                 " requires a finite, non-negative multiplicity");
         }
         const std::string emission_altitude_text =
-            optionalCell(cells, header, "emission_altitude_km");
+            optionalCell(cells, header_, "emission_altitude_km");
         if (!emission_altitude_text.empty() &&
             !std::isfinite(bunch.emission_altitude_km)) {
             throw std::runtime_error(
-                "PhotonCsvSource line " + std::to_string(line_no) +
+                "PhotonCsvSource line " + std::to_string(line_no_) +
                 " has a non-finite emission_altitude_km");
         }
 
@@ -248,10 +273,8 @@ void PhotonCsvSource::load() {
             continue;
         }
 
-        rows_.push_back(bunch);
+        out = std::move(bunch);
+        return true;
     }
-
-    if (rows_.empty()) {
-        throw std::runtime_error("photon CSV has no data rows: " + cfg_.csv_path);
-    }
+    return false;
 }

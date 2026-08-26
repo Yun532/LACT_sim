@@ -1,7 +1,9 @@
 #pragma once
 #include <cstddef>
+#include <fstream>
+#include <map>
+#include <optional>
 #include <string>
-#include <vector>
 #include "io/PhotonSource.hpp"
 
 struct PhotonCsvConfig {
@@ -27,13 +29,15 @@ public:
     bool next(PhotonBunch& out) override;
     void reset() override;
 
-    std::size_t size() const { return rows_.size(); }
     bool localTelescopeFrame() const { return cfg_.local_telescope_frame; }
 
 private:
     PhotonCsvConfig cfg_;
-    std::size_t index_ = 0;
-    std::vector<PhotonBunch> rows_;
+    std::ifstream input_;
+    std::map<std::string, int> header_;
+    std::optional<PhotonBunch> buffered_;
+    int line_no_ = 0;
 
-    void load();
+    void openAndPrime();
+    bool readNext(PhotonBunch& out);
 };

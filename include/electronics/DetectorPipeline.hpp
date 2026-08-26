@@ -39,6 +39,8 @@ struct PrimaryPeHit {
 struct MicrocellConfig {
     bool enabled = false;
     bool saturation_enabled = true;
+    bool recovery_enabled = false;
+    double recovery_time_ns = 10.0;
     std::string model = "explicit_no_recovery";
     std::string layout = "uniform_interleaved";
     double sensor_size_x_m = 0.0130;

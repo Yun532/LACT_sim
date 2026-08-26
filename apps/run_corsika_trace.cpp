@@ -415,6 +415,7 @@ int main(int argc, char** argv) {
                 detector_pipeline_cfg,
                 waveform_cfg,
                 nsb_cfg,
+                source_runtime_cfg,
                 camera_pixel_id_axis,
                 event_summaries,
                 event_raw_waveform_hits);
@@ -808,14 +809,15 @@ int main(int argc, char** argv) {
                     t_accumulate = std::chrono::steady_clock::now();
                 }
                 accumulatePixelHit(pixels, bunch.event_id, bunch.telescope_id,
-                                   hit);
+                                   hit, bunch.origin);
                 accumulateWaveformHit(waveforms,
                                       raw_waveform_hits,
                                       waveform_cfg,
                                       detector_pipeline_cfg.enabled,
                                       bunch.event_id,
                                       bunch.telescope_id,
-                                      hit);
+                                      hit,
+                                      bunch.origin);
                 if (profile_cfg.enabled) {
                     addElapsed(profile_stats,
                                &ProfileStats::camera_accumulate_s,

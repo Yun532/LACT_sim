@@ -225,7 +225,7 @@ struct LactRootWaveform {
     int n_time_bins = 0;
     double reference_time_ns = 0.0;
     std::vector<int> pixel_id;
-    std::vector<unsigned short> time_bin;
+    std::vector<unsigned int> time_bin;
     std::vector<float> sample_value;
 };
 
@@ -643,6 +643,7 @@ LactRootPreparedData prepareLactRootObservations(
                                        double pe,
                                        double cherenkov_pe,
                                        double nsb_pe,
+                                       double dark_pe,
                                        bool add_to_image = true) {
                 if (col >= n_pixels || bin >= n_bins || pe == 0.0) {
                     return;
@@ -653,6 +654,7 @@ LactRootPreparedData prepareLactRootObservations(
                     image_pe_by_col[col] += pe;
                     image_cherenkov_pe_by_col[col] += cherenkov_pe;
                     image_nsb_pe_by_col[col] += nsb_pe;
+                    image_primary_dark_pe_by_col[col] += dark_pe;
                 }
                 camera_time_series[bin] += pe;
             };
@@ -668,8 +670,12 @@ LactRootPreparedData prepareLactRootObservations(
                     add_waveform_pe(col_it->second,
                                     static_cast<std::size_t>(bin),
                                     hit.pe,
-                                    hit.pe,
-                                    0.0);
+                                    hit.origin == electronics::HitOrigin::Cherenkov
+                                        ? hit.pe : 0.0,
+                                    hit.origin == electronics::HitOrigin::Nsb
+                                        ? hit.pe : 0.0,
+                                    hit.origin == electronics::HitOrigin::Dark
+                                        ? hit.pe : 0.0);
                 }
             } else {
                 const WaveformKey begin_key{
@@ -690,8 +696,9 @@ LactRootPreparedData prepareLactRootObservations(
                     add_waveform_pe(col_it->second,
                                     static_cast<std::size_t>(w.time_bin),
                                     w.pe,
-                                    w.pe,
-                                    0.0);
+                                    w.cherenkov_pe,
+                                    w.nsb_pe,
+                                    w.dark_pe);
                 }
             }
 
@@ -711,7 +718,7 @@ LactRootPreparedData prepareLactRootObservations(
                 n_bins,
                 [&](std::size_t col, std::size_t bin, float nsb_pe) {
                     add_waveform_pe(
-                        col, bin, nsb_pe, 0.0, nsb_pe,
+                        col, bin, nsb_pe, 0.0, nsb_pe, 0.0,
                         nsbTimeInImageWindow(
                             nsb_cfg, prepared.time_centers_ns[bin]));
                 });
@@ -765,7 +772,12 @@ LactRootPreparedData prepareLactRootObservations(
                 if (col_it == pixel_to_col.end()) continue;
                 const std::size_t col = col_it->second;
                 image_pe_by_col[col] = p.pe;
-                image_cherenkov_pe_by_col[col] = p.pe;
+                image_cherenkov_pe_by_col[col] = p.cherenkov_pe;
+                image_nsb_pe_by_col[col] = p.nsb_pe;
+                image_primary_dark_pe_by_col[col] = p.dark_pe;
+                image_fired_cherenkov_pe_by_col[col] = p.cherenkov_pe;
+                image_fired_nsb_pe_by_col[col] = p.nsb_pe;
+                image_fired_dark_pe_by_col[col] = p.dark_pe;
             }
             generateIntegratedNsbPe(
                 nsb_cfg,
@@ -872,7 +884,7 @@ LactRootPreparedData prepareLactRootObservations(
                 const std::size_t col = index / n_bins;
                 const std::size_t bin = index % n_bins;
                 wf.pixel_id.push_back(prepared.pixel_axis[col]);
-                wf.time_bin.push_back(static_cast<unsigned short>(bin));
+                wf.time_bin.push_back(static_cast<unsigned int>(bin));
                 wf.sample_value.push_back(static_cast<float>(pe));
             }
             candidate.waveform = std::move(wf);
@@ -1064,6 +1076,7 @@ struct LactEventRootStreamWriter::Impl {
     double wf_reference_time_ns = 0.0;
     std::vector<int> wf_pixel_id;
     std::vector<unsigned short> wf_time_bin;
+    std::vector<unsigned int> wf_time_bin_u32;
     std::vector<float> wf_sample_value;
 
     LactRootPrimaryHit primary_hit_row;
@@ -1122,6 +1135,25 @@ struct LactEventRootStreamWriter::Impl {
       std::string coordinate_convention =
           "CORSIKA IACT NWU; azimuth North-to-East";
       std::string event_id_mode = source_runtime_cfg.event_id_mode;
+      std::string response_mode = lowerCopy(
+          getString(cfg, "response.mode", "stochastic_pe"));
+      std::string image_quantity = response_mode == "expectation"
+          ? "expected_pe" : "integrated_pe";
+      const double missing_time = std::numeric_limits<double>::quiet_NaN();
+      double integration_start_ns = source_runtime_cfg.integration_gate_enabled
+          ? source_runtime_cfg.integration_start_ns : missing_time;
+      double integration_end_ns = source_runtime_cfg.integration_gate_enabled
+          ? source_runtime_cfg.integration_end_ns : missing_time;
+      double integration_time_ns = source_runtime_cfg.integration_gate_enabled
+          ? source_runtime_cfg.integration_end_ns -
+                source_runtime_cfg.integration_start_ns
+          : missing_time;
+      double generated_time_start_ns =
+          source_runtime_cfg.generated_time_window_enabled
+              ? source_runtime_cfg.generated_time_start_ns : missing_time;
+      double generated_time_end_ns =
+          source_runtime_cfg.generated_time_window_enabled
+              ? source_runtime_cfg.generated_time_end_ns : missing_time;
       std::string config_text = lactRootReadTextIfExists(main_config_path);
       std::ostringstream expanded;
       for (const auto &kv : cfg)
@@ -1140,6 +1172,13 @@ struct LactEventRootStreamWriter::Impl {
       config_tree.Branch("run_id", &run_id);
       config_tree.Branch("coordinate_convention", &coordinate_convention);
       config_tree.Branch("event_id_mode", &event_id_mode);
+      config_tree.Branch("response_mode", &response_mode);
+      config_tree.Branch("image_quantity", &image_quantity);
+      config_tree.Branch("integration_start_ns", &integration_start_ns);
+      config_tree.Branch("integration_end_ns", &integration_end_ns);
+      config_tree.Branch("integration_time_ns", &integration_time_ns);
+      config_tree.Branch("generated_time_start_ns", &generated_time_start_ns);
+      config_tree.Branch("generated_time_end_ns", &generated_time_end_ns);
       config_tree.Branch("config_text", &config_text);
       config_tree.Branch("expanded_config_text", &expanded_config_text);
       config_tree.Fill();
@@ -1327,7 +1366,10 @@ struct LactEventRootStreamWriter::Impl {
         waveform_tree->Branch("n_time_bins", &wf_n_time_bins);
         waveform_tree->Branch("reference_time_ns", &wf_reference_time_ns);
         waveform_tree->Branch("pixel_id", &wf_pixel_id);
+        // Keep the legacy branch for short-waveform readers and add the
+        // canonical 32-bit branch for long NSB acquisitions.
         waveform_tree->Branch("time_bin", &wf_time_bin);
+        waveform_tree->Branch("time_bin_u32", &wf_time_bin_u32);
         waveform_tree->Branch("sample_value", &wf_sample_value);
         configureRootTreeAutoFlush(waveform_tree.get(),
                                    output_cfg.lact_root_auto_flush_mb);
@@ -1615,7 +1657,12 @@ struct LactEventRootStreamWriter::Impl {
         wf_n_time_bins = wf.n_time_bins;
         wf_reference_time_ns = wf.reference_time_ns;
         wf_pixel_id = wf.pixel_id;
-        wf_time_bin = wf.time_bin;
+        wf_time_bin_u32 = wf.time_bin;
+        wf_time_bin.resize(wf.time_bin.size());
+        std::transform(wf.time_bin.begin(), wf.time_bin.end(),
+                       wf_time_bin.begin(), [](unsigned int bin) {
+                           return static_cast<unsigned short>(bin);
+                       });
         wf_sample_value = wf.sample_value;
         if (waveform_tree->Fill() < 0) {
             throw std::runtime_error("failed to fill ROOT waveforms tree");
@@ -1838,7 +1885,7 @@ void writeLactEventRoot(const CorsikaTraceOutputConfig& output_cfg,
     std::sort(pixel_id_axis.begin(), pixel_id_axis.end());
     const auto detector_cfg = buildDetectorPipelineConfig(cfg);
     const auto electronics_events = buildCameraElectronicsEvents(
-        detector_cfg, waveform_cfg, nsb_cfg, pixel_id_axis,
+        detector_cfg, waveform_cfg, nsb_cfg, source_runtime_cfg, pixel_id_axis,
         summaries, raw_waveform_hits);
     writer.writeEvent(summaries, pixels, waveforms, raw_waveform_hits,
                       electronics_events);

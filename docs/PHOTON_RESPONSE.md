@@ -12,6 +12,12 @@ Set `response.seed` to make stochastic output reproducible. Stochastic mode
 requires the source photon weight to be one; bunch multiplicity remains the
 only represented-photon count.
 
+For time-resolved PhotonCsv backgrounds, repeated photons from one weighted
+row share the same input geometry and time. Use independently sampled rows
+with `weight=1,multiplicity=1` when waveform timing, microcell occupancy, or
+trigger correlations matter. Weighted rows remain appropriate for
+`expectation` images over arbitrarily long exposures.
+
 For speed, wavelength-only factors (atmosphere, mirror/filter curves and PDE)
 are sampled before ray tracing. This is statistically equivalent for the
 camera p.e. result because those factors do not depend on the ray geometry.

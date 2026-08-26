@@ -279,6 +279,17 @@ struct SourceRuntimeConfig {
     bool filter_shower_event_id = false;
     int selected_shower_event_id = 0;
     int max_shower_events = 0;
+    // Optional detector-arrival-time gate for external PhotonCsv photons.
+    // Hits outside it may shape the waveform and microcell state, but are not
+    // counted in the stored integrated image.
+    bool integration_gate_enabled = false;
+    double integration_start_ns = 0.0;
+    double integration_end_ns = 0.0;
+    // Aperture-time interval represented by the PhotonCsv.  This is metadata
+    // only because optical propagation moves its bounds at the camera.
+    bool generated_time_window_enabled = false;
+    double generated_time_start_ns = 0.0;
+    double generated_time_end_ns = 0.0;
 };
 
 struct CollectorTraceResult {
@@ -297,6 +308,9 @@ struct PixelAccumulator {
     int pixel_id = -1;
     std::uint64_t photon_count = 0;
     double pe = 0.0;
+    double cherenkov_pe = 0.0;
+    double nsb_pe = 0.0;
+    double dark_pe = 0.0;
     double signal = 0.0;
     double time_sum = 0.0;
     double time2_sum = 0.0;
@@ -446,7 +460,8 @@ void applyCameraResponse(const CameraGeometry& camera,
 void accumulatePixelHit(std::map<PixelKey, PixelAccumulator>& pixels,
                         int event_id,
                         int telescope_id,
-                        const OpticalSurfaceHit& hit);
+                        const OpticalSurfaceHit& hit,
+                        PhotonOrigin origin = PhotonOrigin::Cherenkov);
 void writePixelCsv(const std::string& path,
                    const std::map<PixelKey, PixelAccumulator>& pixels);
 TelescopeConfig buildTelescopeConfig(const std::map<std::string, std::string>& cfg);

@@ -17,7 +17,7 @@ x_m,y_m,z_m,dir_x,dir_y,dir_z
 ## Optional Columns
 
 ```text
-time_ns,wavelength_nm,weight,multiplicity,event_id,telescope_id,emission_altitude_km
+time_ns,wavelength_nm,weight,multiplicity,event_id,telescope_id,origin,emission_altitude_km
 ```
 
 If an optional column is absent, the source config supplies the default value:
@@ -32,9 +32,26 @@ telescope_id=0
 ```
 
 `weight * multiplicity` is applied to the photon before optical propagation.
+`origin` may be `cherenkov`, `nsb`, or `dark`; it defaults to `cherenkov`.
+The origin is retained in integrated-image and electronics component truth.
 `emission_altitude_km` is used by MODTRAN tau atmosphere tables; omit it when
 atmosphere modeling is disabled or when the atmosphere config supplies an
 explicit default emission altitude.
+
+External time-resolved backgrounds may define an image gate independently of
+their generated photon interval:
+
+```ini
+source.integration_start_ns=0
+source.integration_end_ns=2000
+source.generated_time_start_ns=-250
+source.generated_time_end_ns=2250
+```
+
+Photons outside the integration gate still affect waveform convolution and
+microcell state, but are excluded from the stored integrated image. The
+generated interval is aperture-time provenance metadata; the integration gate
+is evaluated from the final camera-arrival time.
 
 `eventio_2d` is also optional. For a six-column file cut from CORSIKA 2D
 bunches, prefer keeping the CSV minimal and setting `source.eventio_2d=true`

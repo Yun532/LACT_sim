@@ -288,7 +288,9 @@ void writeHdf5Waveforms(
             const float pe = static_cast<float>(value.pe);
             addSample(image->second, pixel->second,
                       static_cast<std::size_t>(value.time_bin),
-                      0, pe, pe, 0.0f);
+                      0, pe,
+                      static_cast<float>(value.cherenkov_pe),
+                      static_cast<float>(value.nsb_pe));
         }
     }
     if (!electronics_source && usesImageReference(waveform)) {
@@ -311,7 +313,11 @@ void writeHdf5Waveforms(
                 const float pe = static_cast<float>(hit.pe);
                 addSample(image->second, pixel->second,
                           static_cast<std::size_t>(bin),
-                          0, pe, pe, 0.0f);
+                          0, pe,
+                          hit.origin == electronics::HitOrigin::Cherenkov
+                              ? pe : 0.0f,
+                          hit.origin == electronics::HitOrigin::Nsb
+                              ? pe : 0.0f);
             }
         }
     }

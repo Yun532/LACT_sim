@@ -2188,6 +2188,51 @@ SourceRuntimeConfig buildSourceRuntimeConfig(const std::map<std::string, std::st
         runtime.coordinate_frame = "telescope_local";
     }
     runtime.eventio_coordinate_frame = runtime.coordinate_frame;
+    const bool has_integration_start =
+        cfg.find("source.integration_start_ns") != cfg.end();
+    const bool has_integration_end =
+        cfg.find("source.integration_end_ns") != cfg.end();
+    if (has_integration_start != has_integration_end) {
+        throw std::runtime_error(
+            "source.integration_start_ns and source.integration_end_ns "
+            "must be set together");
+    }
+    if (has_integration_start) {
+        runtime.integration_gate_enabled = true;
+        runtime.integration_start_ns = getDouble(
+            cfg, "source.integration_start_ns", 0.0);
+        runtime.integration_end_ns = getDouble(
+            cfg, "source.integration_end_ns", 0.0);
+        if (!std::isfinite(runtime.integration_start_ns) ||
+            !std::isfinite(runtime.integration_end_ns) ||
+            !(runtime.integration_end_ns > runtime.integration_start_ns)) {
+            throw std::runtime_error(
+                "source integration window must be finite and have end > start");
+        }
+    }
+    const bool has_generated_start =
+        cfg.find("source.generated_time_start_ns") != cfg.end();
+    const bool has_generated_end =
+        cfg.find("source.generated_time_end_ns") != cfg.end();
+    if (has_generated_start != has_generated_end) {
+        throw std::runtime_error(
+            "source.generated_time_start_ns and "
+            "source.generated_time_end_ns must be set together");
+    }
+    if (has_generated_start) {
+        runtime.generated_time_window_enabled = true;
+        runtime.generated_time_start_ns = getDouble(
+            cfg, "source.generated_time_start_ns", 0.0);
+        runtime.generated_time_end_ns = getDouble(
+            cfg, "source.generated_time_end_ns", 0.0);
+        if (!std::isfinite(runtime.generated_time_start_ns) ||
+            !std::isfinite(runtime.generated_time_end_ns) ||
+            !(runtime.generated_time_end_ns >
+              runtime.generated_time_start_ns)) {
+            throw std::runtime_error(
+                "source generated-time window must be finite and have end > start");
+        }
+    }
     const auto rotation_center = cfg.find("telescope.rotation_center_local_m");
     const auto reference_z = cfg.find("source.eventio_reference_z_m");
     const auto legacy_2d_z = cfg.find("source.eventio_2d_input_plane_z_m");
@@ -2785,11 +2830,12 @@ electronics::DetectorPipelineConfig buildDetectorPipelineConfig(
     out.microcell.pde_includes_inter_channel_gaps = getBool(
         cfg, "electronics.microcell.pde_includes_inter_channel_gaps",
         out.microcell.pde_includes_inter_channel_gaps);
-    if (getBool(cfg, "electronics.microcell.recovery_enabled", false)) {
-        throw std::runtime_error(
-            "microcell recovery is not available; use "
-            "electronics.microcell.recovery_enabled=false");
-    }
+    out.microcell.recovery_enabled = getBool(
+        cfg, "electronics.microcell.recovery_enabled",
+        out.microcell.recovery_enabled);
+    out.microcell.recovery_time_ns = getDouble(
+        cfg, "electronics.microcell.recovery_time_ns",
+        out.microcell.recovery_time_ns);
     out.single_pe.enabled = getBool(
         cfg, "electronics.single_pe.enabled", out.single_pe.enabled);
     out.single_pe.model = lowerCopy(trim(getString(
@@ -3468,7 +3514,8 @@ void applyCameraResponse(const CameraGeometry& camera,
 void accumulatePixelHit(std::map<PixelKey, PixelAccumulator>& pixels,
                         int event_id,
                         int telescope_id,
-                        const OpticalSurfaceHit& hit)
+                        const OpticalSurfaceHit& hit,
+                        PhotonOrigin origin)
 {
     if (!hit.hit_camera || hit.pixel_id < 0) {
         return;
@@ -3480,6 +3527,13 @@ void accumulatePixelHit(std::map<PixelKey, PixelAccumulator>& pixels,
     acc.pixel_id = hit.pixel_id;
     acc.photon_count += 1;
     acc.pe += signal;
+    if (origin == PhotonOrigin::Nsb) {
+        acc.nsb_pe += signal;
+    } else if (origin == PhotonOrigin::Dark) {
+        acc.dark_pe += signal;
+    } else {
+        acc.cherenkov_pe += signal;
+    }
     acc.signal += signal;
     acc.time_sum += signal * hit.time_ns;
     acc.time2_sum += signal * hit.time_ns * hit.time_ns;

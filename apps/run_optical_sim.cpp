@@ -506,7 +506,8 @@ int main(int argc, char** argv) {
                         ++n_accepted;
                     }
                     if (save_pixel_csv) {
-                        accumulatePixelHit(pixels, bunch.event_id, bunch.telescope_id, hit);
+                        accumulatePixelHit(pixels, bunch.event_id, bunch.telescope_id,
+                                           hit, bunch.origin);
                     }
                 }
                 if (physically_reaches_output) {

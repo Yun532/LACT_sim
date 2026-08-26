@@ -39,6 +39,7 @@ CameraElectronicsEventMap buildCameraElectronicsEvents(
     const electronics::DetectorPipelineConfig& detector,
     const WaveformOutputConfig& waveform,
     const NsbConfig& nsb,
+    const SourceRuntimeConfig& source,
     const std::vector<int>& pixel_id_axis,
     const std::map<SummaryKey, TraceSummary>& summaries,
     const std::vector<RawWaveformHit>& raw_hits)
@@ -101,6 +102,9 @@ CameraElectronicsEventMap buildCameraElectronicsEvents(
                 hit.wavelength_nm,
                 hit.pe,
                 hit.origin,
+                !source.integration_gate_enabled ||
+                    (hit.time_ns >= source.integration_start_ns &&
+                     hit.time_ns < source.integration_end_ns),
             });
         }
 

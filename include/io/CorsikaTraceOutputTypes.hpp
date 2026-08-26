@@ -78,6 +78,9 @@ struct WaveformPixelAccumulator {
     int time_bin = -1;
     std::uint64_t photon_count = 0;
     double pe = 0.0;
+    double cherenkov_pe = 0.0;
+    double nsb_pe = 0.0;
+    double dark_pe = 0.0;
 };
 
 struct RawWaveformHit {

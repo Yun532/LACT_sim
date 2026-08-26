@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "app/OpticalSimCommon.hpp"
+#include "core/PhotonBunch.hpp"
 #include "io/CorsikaTraceStats.hpp"
 
 namespace lact {
@@ -31,7 +32,8 @@ void accumulateWaveformHit(std::map<WaveformKey, WaveformPixelAccumulator>& wave
                            bool capture_detector_hit,
                            int event_id,
                            int telescope_id,
-                           const OpticalSurfaceHit& hit);
+                           const OpticalSurfaceHit& hit,
+                           PhotonOrigin origin = PhotonOrigin::Cherenkov);
 
 void appendCollectorDebugPhoton(std::vector<CollectorDebugPhotonRow>& rows,
                                 const CollectorDebugConfig& cfg,

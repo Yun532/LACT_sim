@@ -169,9 +169,9 @@ bool checkPhotonCsvRowIndex() {
         std::filesystem::temp_directory_path() / "lact_photon_csv_row_index.csv";
     {
         std::ofstream output(path);
-        output << "x_m,y_m,z_m,dir_x,dir_y,dir_z\n"
-               << "0,0,1,0,0,-1\n"
-               << "1,0,1,0,0,-1\n";
+        output << "x_m,y_m,z_m,dir_x,dir_y,dir_z,origin\n"
+               << "0,0,1,0,0,-1,nsb\n"
+               << "1,0,1,0,0,-1,cherenkov\n";
     }
 
     PhotonCsvConfig cfg;
@@ -191,6 +191,15 @@ bool checkPhotonCsvRowIndex() {
                 "PhotonCsv second implicit random-stream index");
     ok &= check(first.eventio_2d && second.eventio_2d,
                 "PhotonCsv applies configured default 2D line semantics");
+    ok &= check(first.origin == PhotonOrigin::Nsb &&
+                    second.origin == PhotonOrigin::Cherenkov,
+                "PhotonCsv preserves photon origin");
+    source.reset();
+    PhotonBunch repeated_first;
+    ok &= check(source.next(repeated_first) &&
+                    repeated_first.source_bunch_index == 0 &&
+                    repeated_first.origin == PhotonOrigin::Nsb,
+                "streaming PhotonCsv reset returns to the first row");
     return ok;
 }
 
