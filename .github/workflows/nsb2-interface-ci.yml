@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    container: rootproject/root:6.34.08-ubuntu22.04
+    container: rootproject/root:6.32.02-ubuntu22.04
     steps:
       - name: Install build dependencies
         run: apt-get update && apt-get install -y cmake g++ git libhdf5-dev make
