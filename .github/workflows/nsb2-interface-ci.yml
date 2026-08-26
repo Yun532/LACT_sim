@@ -12,11 +12,13 @@ jobs:
     container: rootproject/root:6.32.02-ubuntu22.04
     steps:
       - name: Install build dependencies
-        run: apt-get update && apt-get install -y cmake g++ git libhdf5-dev make
+        run: apt-get update && apt-get install -y cmake g++ git libhdf5-dev make zlib1g-dev
       - name: Checkout code
         uses: actions/checkout@v4
+      - name: Build vendored hessio
+        run: bash tools/build_hessio.sh
       - name: Configure
-        run: cmake -S . -B build -DLACT_ENABLE_HESSIO=OFF -DLACT_ENABLE_HDF5=ON -DLACT_ENABLE_ROOT=ON
+        run: cmake -S . -B build -DHESSIO_ROOT="$GITHUB_WORKSPACE/external/hessioxxx/source" -DLACT_ENABLE_HDF5=ON -DLACT_ENABLE_ROOT=ON
       - name: Build
         run: cmake --build build -j 2
       - name: Test
