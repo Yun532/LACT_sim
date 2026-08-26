@@ -182,7 +182,6 @@ bool checkPhotonCsvRowIndex() {
     PhotonBunch second;
     const bool have_first = source.next(first);
     const bool have_second = source.next(second);
-    std::filesystem::remove(path);
 
     bool ok = check(have_first && have_second, "PhotonCsv produces two rows");
     ok &= check(first.source_bunch_index == 0,
@@ -200,6 +199,7 @@ bool checkPhotonCsvRowIndex() {
                     repeated_first.source_bunch_index == 0 &&
                     repeated_first.origin == PhotonOrigin::Nsb,
                 "streaming PhotonCsv reset returns to the first row");
+    std::filesystem::remove(path);
     return ok;
 }
 
