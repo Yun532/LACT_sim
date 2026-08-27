@@ -271,11 +271,28 @@ configs/official_tests/corsika_obstruction_nsb_trigger_camera.cfg
 ```bash
 build/compute_nsb_rate configs/nsb/spectral_rate_check_with_obstruction.cfg
 
-MPLBACKEND=Agg python3 python/plot_nsb_spectral_rate.py \
-  --effective-area-m2 24.576860 \
-  --output run_logs/manual_checks/nsb_spectrum_from_notebook/nsb_spectral_response_with_poisson.png \
-  --diagnostic-csv run_logs/manual_checks/nsb_spectrum_from_notebook/diagnostic_from_script.csv \
-  --summary run_logs/manual_checks/nsb_spectrum_from_notebook/summary_from_script.txt
+python3 python/plot_nsb_spectral_rate.py
+```
+
+画图脚本默认展开
+`configs/nsb/spectral_rate_check_with_obstruction.cfg`，直接读取其中引用的
+LoNS、镜面反射率、滤光片透过率、SiPM PDE、相机像素尺寸和望远镜焦距。
+默认按 `30 ns` 计算，并将图片保存到：
+
+```text
+run_logs/manual_checks/nsb_spectral/lons_instrument_cherenkov_30ns.png
+```
+
+图中的 `20°` 和 `60°` Cherenkov 曲线是使用仓库 MODTRAN 大气表计算的
+峰值归一化代表性谱形；它们用于比较光谱形状，不参与 NSB rate 积分。
+
+需要另存图片或同时输出逐波长诊断表时，可使用：
+
+```bash
+python3 python/plot_nsb_spectral_rate.py \
+  --output path/to/figure.png \
+  --diagnostic-csv path/to/diagnostic.csv \
+  --summary path/to/summary.txt
 ```
 
 建议输出：
