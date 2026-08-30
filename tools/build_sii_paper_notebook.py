@@ -27,16 +27,21 @@ nb["metadata"] = {
 
 nb["cells"] = [
     md(r"""
-    # LACT 恒星强度干涉：从天图、(uv) 测量到无相位成像
+    # LACT 单像素恒星强度干涉：从两路波形到无相位成像
 
-    **目的。** 这是一条可执行、可审计的论文级闭环：输入天体亮度分布，生成理论复可见度和完整 (uv) 功率面；用 LACT 本地 ENU 阵列与地球自转生成每一对望远镜的 (u,v,w) 和几何时延；按 Hanbury Brown 灵敏度关系生成带不确定度的 (|V|^2)；最后仅用模拟观测值做正值、有限支撑、平滑正则的无相位图像重建。
+    **目的。** 这是一条可执行、可审计的论文级闭环：每台望远镜只读出一个
+    居中的真实尺寸像素。输入天体亮度分布，生成理论复可见度和完整 (uv) 功率面；
+    用 LACT 本地 ENU 阵列与地球自转生成每一对望远镜的 (u,v,w) 和几何时延；
+    用单像素光学、SiPM和电子学响应生成带不确定度的 (|V|^2)；最后仅用模拟
+    观测值做参数拟合和无相位图像重建。
 
     ## tl;dr
 
     - 统一实现保留旧 v1 的多源模型、全阵列相干矩阵思想和不确定度加权重建，并吸收旧 v2 对飞秒光学相干、纳秒电子学及小时级积分必须分层处理的修正。
     - notebook 同时计算仓库 7 镜验证阵列和历史 `layout_0803` 生产输入的 **TEL.1–TEL.32 实际模拟坐标**；不再使用理想化 grouped layout。
     - 默认科学案例是 (m_{AB}=2)、分离 (0.20\,\mathrm{mas}) 的不等亮双星；重建器看不到真值相位，真值只在优化结束后用于平移/180°镜像歧义下的验证。
-    - 星等极限和角分辨率是**假设驱动的预测**，不是 LACT 已实测性能；结果表明确列出通光效率、NSB、电子带宽、观测时间和光谱复用数。
+    - 星等极限和角分辨率是**单像素、假设驱动的预测**，不是 LACT 已实测性能；
+      结果表明确列出通光效率、NSB、电子带宽和观测时间。
     """),
     md(r"""
     ## 1. Context & Methods
@@ -78,11 +83,11 @@ nb["cells"] = [
     | 双星/均匀圆盘/点源复可见度 | 完整 | 仅均匀圆盘为主 | **完整**；点源由零直径圆盘表示，双星进入全部基线 |
     | 肢暗圆盘及更一般源模型库 | 有 | 无 | **部分**；当前论文 notebook 尚未暴露肢暗参数 |
     | 全阵列所有望远镜对 | N 镜相干矩阵 | 主要为两镜 | **完整到逐基线层**；32镜496对，但未另存显式32×32矩阵 |
-    | 地球自转与站点纬度 | 有 | ENU公式缺纬度 | **完整且已修正** topocentric ENU `(u,v,w)` |
+    | 地球自转与站点纬度 | 有 | ENU公式缺纬度 | **完整且已修正** 固定 RA/Dec 天球切平面 `(u,v,w)` |
     | 飞秒相干—纳秒波形—小时积分分层 | 较弱 | 核心优势 | **完整** |
-    | SPE、NSB、恢复、电子噪声、ADC短波形 | 简化 | 较完整但多为假设 | **增强整合**；使用main实测SPE/NSB/微单元，ADC仍为工程假设 |
+    | SPE、NSB、恢复、电子噪声、ADC短波形 | 简化 | 较完整但多为假设 | **增强整合**；使用main实测SPE/NSB/微单元，缺少项接口为零 |
     | 分通道/分光探测器的六路相关器 | 无 | 有四通道示例 | **尚未完整继承**；当前科学量为每镜合并后的像素相关 |
-    | 几何、线缆与时钟延迟 | 几何为主 | 几何+线缆假设 | **部分**；几何时延完整，0.2 ns残差示意，未加入实测时钟漂移 |
+    | 几何、线缆与时钟延迟 | 几何为主 | 几何+线缆假设 | **部分**；几何时延完整，未提供的时钟残差接口为零 |
     | 长曝光HBT灵敏度与NSB误差 | 有 | 核心优势 | **完整并扩展**到多夜、NSB、电子学受控情景 |
     | 无相位非参数图像重建 | 核心优势 | 无 | **完整**；正值、有限支撑、平滑正则、多起点、误差加权 |
     | 旧版专用C++恒星干涉入口 | 有 | 有 | **未原样保留**；统一研究入口为Python模块和可执行notebook，C++ main只补入微单元恢复 |
@@ -92,6 +97,7 @@ nb["cells"] = [
     code(r"""
     from __future__ import annotations
 
+    import json
     import math
     import os
     import platform
@@ -100,9 +106,11 @@ nb["cells"] = [
     from pathlib import Path
     from itertools import combinations
 
-    import matplotlib
     os.environ.setdefault("MPLCONFIGDIR", str(Path.cwd() / ".mplconfig"))
+    import matplotlib
+    matplotlib.use("module://matplotlib_inline.backend_inline", force=True)
     import matplotlib.pyplot as plt
+    from matplotlib_inline.backend_inline import set_matplotlib_formats
     import numpy as np
     import pandas as pd
     import scipy
@@ -111,6 +119,8 @@ nb["cells"] = [
     from scipy.special import j1
     from scipy.stats import beta
     from IPython.display import display, Markdown
+
+    set_matplotlib_formats("png")
 
     REPO_ROOT = Path.cwd().resolve()
     if not (REPO_ROOT / "python" / "sii_reconstruction.py").exists():
@@ -156,7 +166,11 @@ nb["cells"] = [
     md(r"""
     ### 1.2 可见的参数和假设
 
-    默认采用 400 nm、2 nm 光学带宽、200 MHz 电子相关带宽、主程序给出的 24.576860 m² 遮挡后有效面积、20% 总通光/探测效率和 70.527 MHz/pixel 暗天 NSB 预测。实测 SPE 电荷样本给出 RMS 因子 1.016142。站点纬度使用仓库验证配置的 (29.36^\circ)。10 ns 微单元恢复时间、ADC 和电子噪声是待标定工程假设，下面单独标识。
+    默认采用 400 nm、2 nm 光学带宽。单像素有效探测面积和到达时间核必须来自
+    `main` 的100万光线单像素标定；暗天NSB、实测SPE、电荷分布、微单元和4 ns
+    采样从同一套仓库配置读取。站点纬度为 (29.36^\circ)，微单元恢复时间固定为
+    10 ns。main 没有提供的电子噪声、ADC量化、串扰、后脉冲、暗计数、时钟残差、
+    增益/透明度涨落和滤光片角响应均保留接口并设为零或关闭。
     """),
     code(r"""
     @dataclass(frozen=True)
@@ -166,24 +180,28 @@ nb["cells"] = [
         telescope_diameter_m: float = 6.0
         effective_area_m2: float = 24.576860
         throughput: float = 0.20
-        electronics_bandwidth_hz: float = 200e6
-        adc_sample_rate_hz: float = 625e6
+        electronics_bandwidth_hz: float = 125e6
+        adc_sample_rate_hz: float = 250e6
         detected_nsb_rate_hz: float = 70.527e6
         excess_noise_factor: float = 1.016142
         microcells_per_pixel: int = 270336
         microcell_recovery_time_ns: float = 10.0
-        electronic_noise_rms_mv: float = 0.35
-        adc_bits: int = 8
-        adc_full_scale_mv: float = 200.0
+        electronic_noise_rms_mv: float = 0.0
+        adc_bits: int = 0
+        adc_full_scale_mv: float = 0.0
         polarization_factor: float = 0.5
         spectral_shape_factor: float = 0.842
-        calibration_floor_visibility2: float = 0.015
-        telescope_gain_calibration_rms: float = 0.010
-        per_night_gain_rms: float = 0.005
-        baseline_zero_point_rms: float = 0.005
-        residual_timing_rms_ns: float = 0.20
-        transparency_fractional_rms: float = 0.03
-        nsb_fractional_rms: float = 0.10
+        calibration_floor_visibility2: float = 0.0
+        telescope_gain_calibration_rms: float = 0.0
+        per_night_gain_rms: float = 0.0
+        baseline_zero_point_rms: float = 0.0
+        residual_timing_rms_ns: float = 0.0
+        transparency_fractional_rms: float = 0.0
+        nsb_fractional_rms: float = 0.0
+        sipm_crosstalk_probability: float = 0.0
+        sipm_afterpulse_probability: float = 0.0
+        dark_count_rate_hz: float = 0.0
+        filter_angular_response_path: str | None = None
         site_lat_deg: float = 29.36
         source_dec_deg: float = 22.0
         observing_hours: float = 6.0
@@ -216,6 +234,29 @@ nb["cells"] = [
 
     INST = Instrument()
     SOURCE = BinarySource()
+    from sii_unified import Instrument as RepositoryInstrument
+    REPOSITORY_INSTRUMENT = RepositoryInstrument.from_repository(REPO_ROOT)
+    expected_kernel_name = "lact2_measured_single_pixel_400nm.csv"
+    active_kernel_name = Path(
+        REPOSITORY_INSTRUMENT.optical_timing_kernel_path or "").name
+    if active_kernel_name != expected_kernel_name:
+        raise RuntimeError(
+            "论文结果要求先运行单像素100万光线标定；当前活动响应为 "
+            f"{active_kernel_name or 'none'}，期望 {expected_kernel_name}")
+    INST = replace(
+        INST,
+        effective_area_m2=REPOSITORY_INSTRUMENT.effective_area_m2,
+        throughput=REPOSITORY_INSTRUMENT.throughput,
+        electronics_bandwidth_hz=REPOSITORY_INSTRUMENT.electronics_bandwidth_hz,
+        adc_sample_rate_hz=REPOSITORY_INSTRUMENT.adc_sample_rate_hz,
+        detected_nsb_rate_hz=REPOSITORY_INSTRUMENT.detected_nsb_rate_hz,
+        excess_noise_factor=REPOSITORY_INSTRUMENT.excess_noise_factor,
+        microcells_per_pixel=REPOSITORY_INSTRUMENT.microcells_per_pixel,
+        microcell_recovery_time_ns=REPOSITORY_INSTRUMENT.microcell_recovery_time_ns,
+        electronic_noise_rms_mv=REPOSITORY_INSTRUMENT.electronic_noise_rms_mv,
+        adc_bits=REPOSITORY_INSTRUMENT.adc_bits,
+        adc_full_scale_mv=REPOSITORY_INSTRUMENT.adc_full_scale_mv,
+    )
     display(pd.DataFrame([asdict(INST)]).T.rename(columns={0: "value"}))
     display(pd.DataFrame([asdict(SOURCE)]).T.rename(columns={0: "value"}))
     """),
@@ -223,23 +264,84 @@ nb["cells"] = [
     parameter_status = pd.DataFrame([
         ["32 telescope coordinates", "available", "layout_0803 run-card export", "used directly"],
         ["mirror area after obstruction", "available", "main NSB model: 24.576860 m²", "used directly"],
-        ["mirror/filter/PDE curves", "available", "main configs/efficiency", "collapsed to 20% reference throughput"],
+        ["single-pixel effective area", "ray-trace calibrated", "one centered 24.4 mm pixel; 1M rays", "used directly"],
+        ["mirror/filter/PDE curves", "available", "main configs/efficiency", "included in single-pixel response"],
         ["measured SPE template", "available", "537 clean pulses; 84.0349557 mV ns/PE", "used in short waveform"],
         ["SPE charge dispersion", "available", "537 empirical factors; RMS factor 1.016142", "sampled per PE and used in long-exposure ENF"],
         ["dark-sky NSB", "model estimate", "70.527 MHz/pixel under documented SkyCalc conditions", "scenario input"],
         ["S17351 microcell geometry", "available", "8 channels, 270336 cells/pixel, 25 µm pitch", "used directly"],
         ["S17351 recovery time", "not publicly specified", "10 ns provisional; Hamamatsu generic scale ~15 ns", "scan 1/10/30 ns"],
-        ["ADC sample rate/full scale/bits", "engineering assumption", "625 MS/s, 200 mV, 8 bit from old v2", "short waveform plus approximate long-exposure penalty"],
-        ["electronic noise", "engineering assumption", "0.35 mV RMS from old v2", "short waveform plus approximate long-exposure penalty"],
-        ["electronics correlation bandwidth", "engineering assumption", "200 MHz", "sensitivity scenario"],
-        ["crosstalk/afterpulse/dark rate", "missing", "requires temperature/overvoltage calibration", "not enabled"],
-        ["on-axis optical arrival-time spread", "ray-trace derived", "590239 accepted rays; compact 54-facet mixture", "used in short waveform and long-exposure transfer"],
-        ["clock drift/residual delay", "engineering assumption", "0.2 ns RMS per telescope; requires timing calibration runs", "shared telescope nuisance"],
-        ["gain/NSB/transparency stability", "engineering assumption", "1% static gain, 0.5% nightly gain, 10% NSB and 3% transparency RMS", "shared telescope sensitivity scan"],
-        ["narrow-band filter angular response", "missing", "2 nm top-hat approximation", "systematic caveat"],
+        ["ADC sampling", "available", "4 ns from current main electronics config", "used directly"],
+        ["ADC full scale/bits", "not supplied by main", "0 disables quantization; interface retained", "analog waveform is kept"],
+        ["electronic noise", "not supplied by main", "0 mV RMS; interface retained", "disabled until measured"],
+        ["electronics correlation bandwidth", "derived", "measured SPE + 4 ns + optical timing matched spectrum", "computed in notebook"],
+        ["crosstalk/afterpulse/dark rate", "not supplied by main", "all zero; interfaces retained", "disabled until measured"],
+        ["on-axis optical arrival-time spread", "ray-trace derived", "1M-ray centred single-pixel response", "used in short waveform and matched bandwidth"],
+        ["clock drift/residual delay", "not supplied by main", "0 ns RMS; interface retained", "disabled until measured"],
+        ["gain/NSB/transparency stability", "not supplied by main", "all fractional RMS values zero", "disabled until measured"],
+        ["narrow-band filter angular response", "not supplied by main", "path interface is empty", "on-axis response only"],
     ], columns=["parameter", "status", "source_or_value", "treatment"])
     display(parameter_status)
     parameter_status.to_csv(OUTPUT_DIR / "parameter_availability.csv", index=False)
+    """),
+    md(r"""
+    ### 1.3 单像素光学响应的来源
+
+    强度干涉探测端只有一个像素。恒星像通过跟踪保持在24.4 mm方形入口中心；
+    光追仍保留完整反射镜、结构遮挡、光学误差和集光器。下表来自100万条400 nm
+    平行光线的响应文件，给出进入这一个像素并最终产生p.e.的有效面积和时间分布。
+    """),
+    code(r"""
+    optical_timing_path = Path(
+        REPOSITORY_INSTRUMENT.optical_timing_kernel_path)
+    single_pixel_provenance_path = optical_timing_path.with_suffix(
+        ".provenance.json")
+    single_pixel_provenance = json.loads(
+        single_pixel_provenance_path.read_text(encoding="utf-8"))
+    assert single_pixel_provenance["illuminated_pixel_count"] == 1
+    single_pixel_summary = pd.DataFrame([{
+        "input_photons": single_pixel_provenance["input_photons"],
+        "pixel_id": single_pixel_provenance["central_pixel_id"],
+        "pixel_entrance_size_mm": 24.4,
+        "effective_detection_area_m2": single_pixel_provenance[
+            "central_pixel_effective_detection_area_m2"],
+        "detection_probability": single_pixel_provenance[
+            "central_pixel_detection_probability"],
+        "arrival_time_rms_ns": single_pixel_provenance[
+            "arrival_time_rms_ns"],
+        "detected_ray_rms_position_mm": 1000*single_pixel_provenance[
+            "psf_rms_m"],
+        "response_config": single_pixel_provenance.get("source_config", ""),
+        "response_sha256": single_pixel_provenance.get(
+            "source_hits_sha256", ""),
+    }])
+    display(single_pixel_summary.T.rename(columns={0:"value"}))
+    single_pixel_summary.to_csv(
+        OUTPUT_DIR/"single_pixel_optical_response.csv", index=False)
+
+    fig, axis = plt.subplots(figsize=(4.6, 4.2))
+    half_pixel_mm = 12.2
+    pixel_outline = plt.Rectangle(
+        (-half_pixel_mm, -half_pixel_mm), 2*half_pixel_mm, 2*half_pixel_mm,
+        facecolor="#2463A820", edgecolor=BLUE, linewidth=2,
+        label="24.4 mm pixel entrance")
+    axis.add_patch(pixel_outline)
+    rms_mm = single_pixel_summary.detected_ray_rms_position_mm.iloc[0]
+    rms_circle = plt.Circle(
+        (0, 0), rms_mm, facecolor="none", edgecolor=ORANGE,
+        linestyle="--", linewidth=2,
+        label="detected-ray RMS radius")
+    axis.add_patch(rms_circle)
+    axis.scatter([0], [0], marker="+", s=90, color=INK,
+                 label="tracked stellar image centre")
+    axis.set(xlim=(-15, 15), ylim=(-15, 15), aspect="equal",
+             title="Single-pixel SII focal-plane geometry",
+             xlabel="Focal-plane x [mm]", ylabel="Focal-plane y [mm]")
+    axis.legend(frameon=False, fontsize=8, loc="upper right")
+    axis.grid(alpha=.15)
+    fig.tight_layout()
+    fig.savefig(OUTPUT_DIR/"single_pixel_geometry.png", bbox_inches="tight")
+    plt.show()
     """),
     md(r"""
     ## 2. Array data: 仓库阵列与 layout_0803 实际 32 镜坐标
@@ -422,7 +524,8 @@ nb["cells"] = [
     \sin\delta\sin\phi+\cos\delta\cos H\cos\phi).
     \]
 
-    再定义天球东向 \(\hat u\propto \hat z\times\hat s\)、天球北向 \(\hat v=\hat s\times\hat u\)，得到
+    不能用当地天顶与源方向叉乘来定义 \(u\)：那会随视差角旋转。这里用
+    源方向对时角和赤纬的导数构造固定 RA/Dec 切平面，得到
 
     \[
     (u,v,w)=(\mathbf B\cdot\hat u,\mathbf B\cdot\hat v,\mathbf B\cdot\hat s),
@@ -439,16 +542,24 @@ nb["cells"] = [
             np.sin(dec_rad) * np.sin(lat_rad) + np.cos(dec_rad) * np.cos(hour_angle_rad) * np.cos(lat_rad),
         ])
 
-    def uvw_from_enu(baseline_enu_m, hour_angle_rad, dec_rad, lat_rad):
+    def celestial_tangent_axes_enu(hour_angle_rad, dec_rad, lat_rad):
+        sh, ch = np.sin(hour_angle_rad), np.cos(hour_angle_rad)
+        sd, cd = np.sin(dec_rad), np.cos(dec_rad)
+        sl, cl = np.sin(lat_rad), np.cos(lat_rad)
         source = source_direction_enu(hour_angle_rad, dec_rad, lat_rad)
-        source = source / np.linalg.norm(source)
-        up = np.array([0.0, 0.0, 1.0])
-        u_axis = np.cross(up, source)
-        if np.linalg.norm(u_axis) < 1e-12:
-            u_axis = np.array([1.0, 0.0, 0.0])
-        else:
-            u_axis /= np.linalg.norm(u_axis)
-        v_axis = np.cross(source, u_axis)
+        u_axis = np.array([ch, sl*sh, -cl*sh], dtype=float)
+        v_axis = np.array([
+            -sd*sh,
+            cd*cl + sd*ch*sl,
+            cd*sl - sd*ch*cl,
+        ], dtype=float)
+        u_axis /= np.linalg.norm(u_axis)
+        v_axis /= np.linalg.norm(v_axis)
+        return u_axis, v_axis, source
+
+    def uvw_from_enu(baseline_enu_m, hour_angle_rad, dec_rad, lat_rad):
+        u_axis, v_axis, source = celestial_tangent_axes_enu(
+            hour_angle_rad, dec_rad, lat_rad)
         baseline = np.asarray(baseline_enu_m, float)
         return np.array([baseline @ u_axis, baseline @ v_axis, baseline @ source])
 
@@ -521,7 +632,7 @@ nb["cells"] = [
     md(r"""
     ## 5. Results: 全阵列理论 (uv) 覆盖
 
-    下图把所有 (N(N-1)/2=496) 条物理基线在 6 小时内的地球自转轨迹叠加到理论功率面。图中同时画出共轭点 ((-u,-v))；这不是额外的独立测量，而是实天图傅里叶功率的厄米对称性。
+    下图把所有 (N(N-1)/2=496) 条物理基线在 6 小时内的地球自转轨迹叠加到理论功率面。图中用相同颜色、点大小和透明度画出共轭点 ((-u,-v))；这不是额外的独立测量，而是实天图傅里叶功率的厄米对称性。
     """),
     code(r"""
     def make_uv_coverage(layout, hour_angles_rad, instrument=INST):
@@ -553,7 +664,7 @@ nb["cells"] = [
     sc = axis.scatter(uv_coverage.u_lambda/1e6, uv_coverage.v_lambda/1e6,
                       c=uv_coverage.hour_angle_h, cmap="coolwarm", s=5, alpha=0.65, linewidth=0)
     axis.scatter(-uv_coverage.u_lambda/1e6, -uv_coverage.v_lambda/1e6,
-                 c=uv_coverage.hour_angle_h, cmap="coolwarm", s=3, alpha=0.25, linewidth=0)
+                 c=uv_coverage.hour_angle_h, cmap="coolwarm", s=5, alpha=0.65, linewidth=0)
     axis.set(title="layout_0803 reco32 earth-rotation uv coverage",
              xlabel=r"$u$ [M$\lambda$]", ylabel=r"$v$ [M$\lambda$]")
     axis.set_aspect("equal", adjustable="box")
@@ -571,6 +682,228 @@ nb["cells"] = [
     }]).to_csv(OUTPUT_DIR / "uv_coverage_summary.csv", index=False)
     """),
     md(r"""
+    ### 5.1 不同时角的瞬时 (uv) 平面
+
+    每个面板是一段20分钟积分的中点快照，包含496条物理基线。正负基线使用
+    相同的蓝色实心点显示；共轭位置 ((-u,-v)) 不作为第二次独立测量。所有面板使用完全相同的
+    坐标范围，因此可以直接比较地球自转怎样移动采样位置。
+    """),
+    code(r"""
+    snapshot_targets_h = np.array([-2.83, -1.50, -0.17, 1.50, 2.83])
+    available_hours = np.sort(uv_coverage.hour_angle_h.unique())
+    snapshot_hours_h = np.array([
+        available_hours[np.argmin(np.abs(available_hours-target))]
+        for target in snapshot_targets_h])
+    uv_axis_limit_mlambda = 1.05*np.max(np.hypot(
+        uv_coverage.u_lambda, uv_coverage.v_lambda))/1e6
+
+    fig, axes = plt.subplots(1, 5, figsize=(16.5, 3.5),
+                             sharex=True, sharey=True,
+                             constrained_layout=True)
+    for axis, hour in zip(axes, snapshot_hours_h):
+        frame = uv_coverage[np.isclose(uv_coverage.hour_angle_h, hour)]
+        axis.scatter(frame.u_lambda/1e6, frame.v_lambda/1e6,
+                     s=7, color=BLUE, alpha=.75, linewidth=0)
+        axis.scatter(-frame.u_lambda/1e6, -frame.v_lambda/1e6,
+                     s=7, color=BLUE, alpha=.75, linewidth=0)
+        axis.set(title=f"HA = {hour:+.2f} h", xlabel=r"$u$ [M$\lambda$]")
+        axis.set_aspect("equal", adjustable="box")
+        axis.set_xlim(-uv_axis_limit_mlambda, uv_axis_limit_mlambda)
+        axis.set_ylim(-uv_axis_limit_mlambda, uv_axis_limit_mlambda)
+        axis.grid(alpha=.12)
+    axes[0].set_ylabel(r"$v$ [M$\lambda$]")
+    fig.suptitle("Instantaneous 20-minute uv snapshots: 496 physical baselines")
+    fig.savefig(OUTPUT_DIR/"uv_snapshots_by_hour_angle.png", bbox_inches="tight")
+    plt.show()
+    """),
+    md(r"""
+    ### 5.2 观测时间增加时的累计 (uv) 覆盖
+
+    下图从过中天附近开始累计20分钟积分段。增加时间同时增加测量数和覆盖方向，
+    但不同时间段仍有相关的望远镜级标定误差；不能简单把点数增加等同于同倍数
+    的独立信息增益。
+    """),
+    code(r"""
+    cumulative_segment_counts = [1, 3, 6, 12, 18]
+    cumulative_rows = []
+    fig, axes = plt.subplots(1, 5, figsize=(16.5, 3.5),
+                             sharex=True, sharey=True,
+                             constrained_layout=True)
+    for axis, segment_count in zip(axes, cumulative_segment_counts):
+        chosen_hours = available_hours[
+            np.argsort(np.abs(available_hours))[:segment_count]]
+        frame = uv_coverage[
+            uv_coverage.hour_angle_h.isin(chosen_hours)]
+        duration_h = segment_count*INST.segment_s/3600
+        axis.scatter(frame.u_lambda/1e6, frame.v_lambda/1e6,
+                     s=3.5, color=BLUE, alpha=.50, linewidth=0)
+        axis.scatter(-frame.u_lambda/1e6, -frame.v_lambda/1e6,
+                     s=3.5, color=BLUE, alpha=.50, linewidth=0)
+        axis.set(title=f"{duration_h:.2f} h\n{len(frame):,} measurements",
+                 xlabel=r"$u$ [M$\lambda$]")
+        axis.set_aspect("equal", adjustable="box")
+        axis.set_xlim(-uv_axis_limit_mlambda, uv_axis_limit_mlambda)
+        axis.set_ylim(-uv_axis_limit_mlambda, uv_axis_limit_mlambda)
+        axis.grid(alpha=.12)
+        cumulative_rows.append({
+            "integration_hours": duration_h,
+            "time_segments": segment_count,
+            "physical_baselines": 496,
+            "independent_measurement_rows": len(frame),
+        })
+    axes[0].set_ylabel(r"$v$ [M$\lambda$]")
+    fig.suptitle("Cumulative uv coverage centred on transit")
+    fig.savefig(OUTPUT_DIR/"uv_coverage_cumulative_time.png", bbox_inches="tight")
+    plt.show()
+    cumulative_uv_table = pd.DataFrame(cumulative_rows)
+    display(cumulative_uv_table)
+    cumulative_uv_table.to_csv(
+        OUTPUT_DIR/"uv_coverage_by_integration_time.csv", index=False)
+    """),
+    md(r"""
+    ### 5.3 2、6、10小时单夜窗口的 (uv) 覆盖
+
+    这里把后续受控情景使用的三个单夜窗口直接画出来。2小时只覆盖中天附近，
+    6小时是默认可靠窗口；10小时把轨迹延伸到更大时角，但窗口端高度约23°。
+    因本版尚未加入随高度变化的大气消光、PSF和NSB，10小时面板只能说明几何
+    上新增了哪些 (uv) 点，不能直接当作同质量灵敏度增益。重复多夜不会改变
+    这些坐标，只会在相同坐标上积累统计量。
+    """),
+    code(r"""
+    window_uv = {}
+    window_rows = []
+    for observing_hours in [2, 6, 10]:
+        count = int(round(observing_hours*3600/INST.segment_s))
+        segment_hours_local = INST.segment_s/3600
+        hours_local = np.linspace(
+            -observing_hours/2 + segment_hours_local/2,
+            observing_hours/2 - segment_hours_local/2,
+            count)
+        coverage_local = make_uv_coverage(
+            LACT32, hours_local*np.pi/12.0)
+        window_uv[observing_hours] = coverage_local
+        endpoint_altitudes = [np.rad2deg(np.arcsin(
+            source_direction_enu(hour*np.pi/12.0, dec, lat)[2]))
+            for hour in [hours_local[0], hours_local[-1]]]
+        window_rows.append({
+            "single_night_hours": observing_hours,
+            "segments": count,
+            "physical_baselines": len(lact_baselines),
+            "independent_measurement_rows": len(coverage_local),
+            "minimum_segment_midpoint_altitude_deg": min(endpoint_altitudes),
+            "new_uv_coordinates_on_repeated_nights": 0,
+        })
+
+    all_window_limit_mlambda = 1.05*max(
+        np.max(np.hypot(frame.u_lambda, frame.v_lambda))/1e6
+        for frame in window_uv.values())
+    fig, axes = plt.subplots(1, 3, figsize=(12.2, 3.9),
+                             sharex=True, sharey=True,
+                             constrained_layout=True)
+    for axis, observing_hours in zip(axes, [2, 6, 10]):
+        frame = window_uv[observing_hours]
+        artist = axis.scatter(
+            frame.u_lambda/1e6, frame.v_lambda/1e6,
+            c=frame.hour_angle_h, cmap="coolwarm", s=4.2,
+            alpha=.58, linewidth=0,
+            vmin=-5, vmax=5)
+        axis.scatter(-frame.u_lambda/1e6, -frame.v_lambda/1e6,
+                     c=frame.hour_angle_h, cmap="coolwarm", s=4.2,
+                     alpha=.58, linewidth=0,
+                     vmin=-5, vmax=5)
+        altitude = next(row[
+            "minimum_segment_midpoint_altitude_deg"] for row in window_rows
+            if row["single_night_hours"] == observing_hours)
+        caveat = " (optimistic)" if altitude < 30 else ""
+        axis.set(title=(f"{observing_hours} h: {len(frame):,} rows\n"
+                        f"min altitude {altitude:.1f}°{caveat}"),
+                 xlabel=r"$u$ [M$\lambda$]")
+        axis.set_aspect("equal", adjustable="box")
+        axis.set_xlim(-all_window_limit_mlambda, all_window_limit_mlambda)
+        axis.set_ylim(-all_window_limit_mlambda, all_window_limit_mlambda)
+        axis.grid(alpha=.12)
+    axes[0].set_ylabel(r"$v$ [M$\lambda$]")
+    fig.colorbar(artist, ax=axes, label="Hour angle [h]", shrink=.84)
+    fig.suptitle("Single-night uv coverage versus observing window")
+    fig.savefig(OUTPUT_DIR/"uv_coverage_2h_6h_10h.png",
+                bbox_inches="tight")
+    plt.show()
+    observing_window_uv_table = pd.DataFrame(window_rows)
+    display(observing_window_uv_table.round(3))
+    observing_window_uv_table.to_csv(
+        OUTPUT_DIR/"uv_coverage_2h_6h_10h.csv", index=False)
+    """),
+    md(r"""
+    ### 5.4 固定天体的长期理论极限 (uv) 覆盖
+
+    对同一个赤纬固定的天体，阵列几何在一个恒星日后重复；连续观测很多夜会增加
+    每个采样点的积分时间，但不会继续创造新的 (uv) 轨迹。下图用5分钟步长画出
+    32台望远镜、496条物理基线在完整24恒星时内的纯几何采样，并单独给出仰角
+    不低于20°时实际可观测的最大子集。这里只统计采样位置，不计算相关性、
+    (|V|^2)、NSB、误差或灵敏度；正负基线以相同显著度显示，共轭位置仍不算独立测量。
+    """),
+    code(r"""
+    long_term_step_minutes = 5
+    long_term_hour_angles_h = np.arange(
+        -12.0, 12.0, long_term_step_minutes/60.0)
+    long_term_altitude_deg = np.rad2deg(np.arcsin([
+        source_direction_enu(hour*np.pi/12.0, dec, lat)[2]
+        for hour in long_term_hour_angles_h
+    ]))
+    long_term_uv = make_uv_coverage(
+        LACT32, long_term_hour_angles_h*np.pi/12.0)
+    long_term_uv["altitude_deg"] = np.tile(
+        long_term_altitude_deg, len(lact_baselines))
+    observable_long_term_uv = long_term_uv.loc[
+        long_term_uv.altitude_deg >= 20.0]
+    long_term_limit_mlambda = 1.05*np.max(np.hypot(
+        long_term_uv.u_lambda, long_term_uv.v_lambda))/1e6
+
+    fig, axes = plt.subplots(1, 2, figsize=(11.8, 5.3),
+                             sharex=True, sharey=True,
+                             constrained_layout=True)
+    for axis, frame, title in [
+        (axes[0], long_term_uv,
+         "Full 24 sidereal hours (mathematical locus)"),
+        (axes[1], observable_long_term_uv,
+         r"Observable subset: altitude $\geq20^\circ$"),
+    ]:
+        axis.scatter(frame.u_lambda/1e6, frame.v_lambda/1e6,
+                     s=.45, color=BLUE, alpha=.22, linewidth=0,
+                     rasterized=True)
+        axis.scatter(-frame.u_lambda/1e6, -frame.v_lambda/1e6,
+                     s=.45, color=BLUE, alpha=.22, linewidth=0,
+                     rasterized=True)
+        axis.set(title=f"{title}\n{len(frame):,} physical samples",
+                 xlabel=r"$u$ [M$\lambda$]")
+        axis.set_xlim(-long_term_limit_mlambda, long_term_limit_mlambda)
+        axis.set_ylim(-long_term_limit_mlambda, long_term_limit_mlambda)
+        axis.set_aspect("equal", adjustable="box")
+        axis.grid(alpha=.10)
+    axes[0].set_ylabel(r"$v$ [M$\lambda$]")
+    fig.suptitle(
+        "Long-term geometric uv coverage of 32 telescopes (5-minute sampling)")
+    fig.savefig(OUTPUT_DIR/"uv_coverage_long_term_theoretical.png",
+                bbox_inches="tight")
+    plt.show()
+
+    long_term_uv_summary = pd.DataFrame([{
+        "time_step_minutes": long_term_step_minutes,
+        "full_sidereal_hours": 24,
+        "full_time_samples": len(long_term_hour_angles_h),
+        "physical_baselines": len(lact_baselines),
+        "full_geometric_uv_rows": len(long_term_uv),
+        "minimum_observable_altitude_deg": 20.0,
+        "observable_time_samples": int(
+            np.sum(long_term_altitude_deg >= 20.0)),
+        "observable_uv_rows": len(observable_long_term_uv),
+        "new_uv_coordinates_from_repeating_same_sidereal_track": 0,
+    }])
+    display(long_term_uv_summary.T.rename(columns={0:"value"}))
+    long_term_uv_summary.to_csv(
+        OUTPUT_DIR/"uv_coverage_long_term_theoretical.csv", index=False)
+    """),
+    md(r"""
     ## 6. 从光学相干到电子相关峰
 
     对非偏振、近似带宽为 (Delta\lambda) 的通带，未分辨相关峰的面积尺度为
@@ -579,7 +912,9 @@ nb["cells"] = [
     \tau_{c,\mathrm{area}}=p\,s_{\rm band}\frac{\lambda^2}{c\,\Delta\lambda}.
     \]
 
-    它是飞秒量级，远小于 625 MS/s 的 1.6 ns 采样。电子学看到的零时延峰高度因此被稀释约 (	au_c/\Delta t)，而不是把相干时间人为设成 1 ns。下图用归一化电子相关核画出这条基线在过中天时的理论峰，并展示几何时延校正前后的峰位。
+    它是飞秒量级，远小于当前4 ns采样。电子学看到的零时延峰高度因此被稀释约
+    (\tau_c/\Delta t)，而不是把相干时间人为设成1 ns。下图用归一化电子相关核
+    画出这条基线在过中天时的理论峰，并展示几何时延校正前后的峰位。
     """),
     code(r"""
     coherence_fs = INST.coherence_area_s * 1e15
@@ -621,9 +956,14 @@ nb["cells"] = [
     display(coherence_summary.T.rename(columns={0:"value"}))
     """),
     md(r"""
-    ### 6.1 2 μs 完整电子学记录与微单元恢复
+    ### 6.1 2 μs 单像素完整电子学记录与微单元恢复
 
-    这一节回答“完整波形有没有意义”：有，但用途是校准延迟、SPE 形状、ADC、基线噪声、饱和和恢复偏差；它不能单独承担小时级天文灵敏度。实测 SPE 模板支持约170–180 ns，因此有效记录扩展为2 μs（625 MS/s 下1250个采样），并在有效窗口两侧继续生成至少一个完整模板长度的光电子，避免边缘 p.e. 长尾被截断。即便如此，单采样预期 HBT 对比度仍只有约 (10^{-6})，所以单帧相关曲线必然由随机噪声主导。
+    这一节回答“完整波形有没有意义”：有，但用途是校准延迟、SPE 形状、ADC、
+    基线噪声、饱和和恢复偏差；它不能单独承担小时级天文灵敏度。实测 SPE 模板
+    支持约170–180 ns，因此有效记录扩展为2 μs（当前main为4 ns采样，共500点），
+    并在有效窗口两侧继续生成至少一个完整模板长度的光电子，避免边缘 p.e. 长尾
+    被截断。即便如此，单采样预期HBT对比度仍只有约 (10^{-6})，所以单帧相关
+    曲线必然由随机噪声主导。
 
     输入不是人为的 1 ns 光学波形，而是每个 ADC bin 内满足正确一、二阶矩的光电子计数：两镜恒星流包含一个极小的共享 Poisson 分量，使协方差等于 (r_{\star,1}r_{\star,2}\tau_c\Delta t|V|^2)；星光余项和 NSB 独立。每个 p.e. 随机落到 270336 个微单元，电荷按
 
@@ -631,7 +971,10 @@ nb["cells"] = [
     q(\Delta t)=1-\exp(-\Delta t/\tau_{\rm rec})
     \]
 
-    恢复，并从 537 个实测单 PE 相对电荷中逐次抽样。每个 p.e. 还从正式1229分片镜面、590239条轴上400 nm光追得到的到达时间混合分布中抽取光路延迟，然后才叠加实测 SPE 模板、0.35 mV 假设电子噪声并做 8-bit/200 mV ADC 量化。几何时延 (w/c) 先由上节计算并用数字缓冲粗校正；这里保留 0.2 ns RMS 的待标定残差。
+    恢复，并从537个实测单PE相对电荷中逐次抽样。每个p.e.还从单像素100万光线
+    标定得到的到达时间混合分布中抽取光路延迟，然后叠加实测SPE模板。main
+    没有提供电子噪声、ADC位数/满量程和残余时钟误差，因此当前分别设为
+    0（不额外加噪声、不量化、不加残差），接口保留给后续实测标定。
     """),
     code(r"""
     from sii_unified import (
@@ -647,36 +990,94 @@ nb["cells"] = [
         simulate_short_pair_waveforms,
     )
 
-    short_instrument = ShortWaveformInstrument(
-        wavelength_nm=INST.wavelength_nm,
-        optical_width_nm=INST.optical_width_nm,
-        effective_area_m2=INST.effective_area_m2,
-        throughput=INST.throughput,
-        electronics_bandwidth_hz=INST.electronics_bandwidth_hz,
-        adc_sample_rate_hz=INST.adc_sample_rate_hz,
-        adc_bits=INST.adc_bits,
-        adc_full_scale_mv=INST.adc_full_scale_mv,
-        detected_nsb_rate_hz=INST.detected_nsb_rate_hz,
-        electronic_noise_rms_mv=INST.electronic_noise_rms_mv,
-        excess_noise_factor=INST.excess_noise_factor,
-        polarization_factor=INST.polarization_factor,
-        spectral_shape_factor=INST.spectral_shape_factor,
-        microcells_per_pixel=INST.microcells_per_pixel,
-        microcell_recovery_time_ns=INST.microcell_recovery_time_ns,
-    )
+    short_instrument = REPOSITORY_INSTRUMENT
     spe_t_ns, spe_mv = load_measured_spe_template(
-        REPO_ROOT / "configs" / "electronics" / "parameters" / "spe_template_measured.csv"
-    )
+        short_instrument.spe_template_path)
     empirical_charge_factors = load_empirical_charge_factors(
-        REPO_ROOT / "configs" / "electronics" / "parameters" / "spe_charge_samples_measured.csv"
-    )
-    optical_timing = load_optical_timing_mixture(
-        REPO_ROOT / "configs" / "optics" / "lact_1229_onaxis_timing_kernel.csv"
-    )
-    optical_timing_efficiency = optical_timing_transfer_efficiency(
-        optical_timing, INST.electronics_bandwidth_hz)
+        short_instrument.charge_samples_path)
+    optical_timing_path = Path(short_instrument.optical_timing_kernel_path)
+    optical_timing = load_optical_timing_mixture(optical_timing_path)
+    timing_kernel_frame = pd.read_csv(optical_timing_path)
+    rectangular_optical_efficiency = optical_timing_transfer_efficiency(
+        optical_timing, min(INST.electronics_bandwidth_hz,
+                            short_instrument.adc_sample_rate_hz/2))
     reference_star_rate = unified_detected_star_rate_hz(
         INST.source_ab_magnitude, short_instrument)
+
+    # 用实测SPE、4 ns采样、光学时间核、电子噪声和ADC量化统一计算匹配相关器
+    # 的等效带宽。后续长曝光只使用这个充分统计量，不再重复扣除同一传递损失。
+    fine_dt_ns = 0.01
+    fine_time_ns = np.arange(spe_t_ns.min(), spe_t_ns.max()+fine_dt_ns/2,
+                             fine_dt_ns)
+    fine_pulse = np.interp(fine_time_ns, spe_t_ns, spe_mv)
+    fft_length = 1 << int(np.ceil(np.log2(len(fine_pulse)*16)))
+    full_frequency_hz = np.fft.rfftfreq(fft_length, fine_dt_ns*1e-9)
+    full_pulse_spectrum = np.fft.rfft(fine_pulse, n=fft_length)*fine_dt_ns*1e-9
+    keep_frequency = full_frequency_hz <= short_instrument.adc_sample_rate_hz/2
+    matched_frequency_hz = full_frequency_hz[keep_frequency]
+    sampled_pulse = (
+        full_pulse_spectrum[keep_frequency]
+        * np.sinc(matched_frequency_hz/short_instrument.adc_sample_rate_hz))
+    timing_weights = np.asarray(optical_timing["weights"])
+    timing_means = np.asarray(optical_timing["mean_delay_ns"])
+    timing_sigmas = np.asarray(optical_timing["std_delay_ns"])
+    optical_transfer = (
+        np.exp(-2j*np.pi*(matched_frequency_hz*1e-9)[:,None]
+               * timing_means[None,:])
+        * np.exp(-2*np.pi**2*(matched_frequency_hz*1e-9)[:,None]**2
+                 * timing_sigmas[None,:]**2)) @ timing_weights
+    optical_power = np.abs(optical_transfer)**2
+    total_rate_hz = reference_star_rate + INST.detected_nsb_rate_hz
+    shot_psd = (2*total_rate_hz*INST.excess_noise_factor**2
+                * np.abs(sampled_pulse)**2)
+    adc_step_mv = (0.0 if INST.adc_bits <= 0
+                   else INST.adc_full_scale_mv/2**INST.adc_bits)
+    sample_noise_variance_mv2 = (
+        INST.electronic_noise_rms_mv**2 + adc_step_mv**2/12)
+    white_noise_psd = (
+        2*sample_noise_variance_mv2/short_instrument.adc_sample_rate_hz)
+    shot_fraction = np.divide(
+        shot_psd, shot_psd + white_noise_psd,
+        out=np.zeros_like(shot_psd),
+        where=(shot_psd + white_noise_psd) > 0.0)
+    matched_spectral_weight = optical_power**2*shot_fraction**2
+    matched_effective_bandwidth_hz = np.trapezoid(
+        matched_spectral_weight, matched_frequency_hz)
+    ideal_effective_bandwidth_hz = np.trapezoid(
+        optical_power**2, matched_frequency_hz)
+    if matched_effective_bandwidth_hz <= 0:
+        raise RuntimeError("matched correlator bandwidth is not positive")
+
+    def matched_delay_response(delay_ns):
+        delays = np.asarray(delay_ns, float)
+        normalization = np.trapezoid(
+            matched_spectral_weight, matched_frequency_hz)
+        return np.array([
+            np.trapezoid(
+                matched_spectral_weight*np.cos(
+                    2*np.pi*matched_frequency_hz*delay*1e-9),
+                matched_frequency_hz)/normalization
+            for delay in delays.ravel()
+        ]).reshape(delays.shape)
+
+    INST = replace(
+        INST, electronics_bandwidth_hz=matched_effective_bandwidth_hz)
+    short_instrument = replace(
+        short_instrument,
+        electronics_bandwidth_hz=matched_effective_bandwidth_hz)
+    # 光学、SPE、采样、噪声和ADC已经一起折算进B_eff，不能再次乘效率。
+    optical_timing_efficiency = 1.0
+    bandwidth_table = pd.DataFrame([{
+        "case":"single-pixel measured chain",
+        "sample_width_ns":short_instrument.sample_width_ns,
+        "nyquist_bandwidth_MHz":short_instrument.adc_sample_rate_hz/2e6,
+        "matched_effective_bandwidth_MHz":matched_effective_bandwidth_hz/1e6,
+        "ideal_noise_free_bandwidth_MHz":ideal_effective_bandwidth_hz/1e6,
+        "rectangular_optical_retention":rectangular_optical_efficiency,
+    }])
+    display(bandwidth_table.T.rename(columns={0:"value"}))
+    bandwidth_table.to_csv(
+        OUTPUT_DIR/"single_pixel_effective_bandwidth.csv", index=False)
     short_record = simulate_short_pair_waveforms(
         duration_ns=2000.0,
         star_rate_hz=reference_star_rate,
@@ -731,6 +1132,10 @@ nb["cells"] = [
     fig.savefig(OUTPUT_DIR / "short_waveform_and_recovery.png", bbox_inches="tight")
     plt.show()
 
+    adc_clipped_fraction = (0.0 if INST.adc_bits <= 0
+                            else np.mean(np.abs(short_record["adc_a_mv"])
+                                         >= INST.adc_full_scale_mv/2
+                                         - INST.adc_full_scale_mv/2**INST.adc_bits))
     short_waveform_summary = pd.DataFrame([{
         "duration_ns": 2000.0,
         "simulated_padding_each_side_ns": short_record["simulated_padding_each_side_ns"],
@@ -739,21 +1144,23 @@ nb["cells"] = [
         "nsb_rate_MHz": INST.detected_nsb_rate_hz / 1e6,
         "expected_sample_contrast": short_record["expected_sample_contrast"],
         "optical_arrival_rms_ns": optical_timing["rms_spread_ns"],
-        "optical_peak_to_peak_ns": 1.7323132,
-        "optical_timing_efficiency_at_200MHz": optical_timing_efficiency,
+        "optical_peak_to_peak_ns": (
+            timing_kernel_frame.max_time_ns.max()
+            - timing_kernel_frame.min_time_ns.min()),
+        "combined_matched_effective_bandwidth_MHz": (
+            matched_effective_bandwidth_hz/1e6),
+        "rectangular_optical_retention": rectangular_optical_efficiency,
         "shared_correlated_counts_expected_in_record": (
             short_record["shared_count_mean_per_bin"] * len(short_record["sample_time_ns"])),
         "empirical_charge_samples": len(empirical_charge_factors),
         "sampled_charge_mean_A": np.mean(short_record["charge_a"]),
         "sampled_charge_rms_A": np.sqrt(np.mean(short_record["charge_a"]**2)),
-        "adc_clipped_fraction_A": np.mean(np.abs(short_record["adc_a_mv"]) >= INST.adc_full_scale_mv/2 - INST.adc_full_scale_mv/2**INST.adc_bits),
+        "adc_clipped_fraction_A": adc_clipped_fraction,
     }])
     display(short_waveform_summary.T.rename(columns={0:"value"}))
     short_waveform_summary.to_csv(OUTPUT_DIR / "short_waveform_summary.csv", index=False)
     """),
     code(r"""
-    timing_kernel_frame = pd.read_csv(
-        REPO_ROOT / "configs" / "optics" / "lact_1229_onaxis_timing_kernel.csv")
     timing_rng = np.random.default_rng(20260824)
     timing_component = timing_rng.choice(
         len(timing_kernel_frame), size=200000,
@@ -764,21 +1171,18 @@ nb["cells"] = [
     timing_draws -= np.average(timing_kernel_frame.mean_time_ns,
                                weights=timing_kernel_frame.weight)
     delay_scan_ns = np.linspace(-3.0, 3.0, 301)
-    delay_response = residual_delay_response(
-        optical_timing, delay_scan_ns, INST.electronics_bandwidth_hz)
+    delay_response = matched_delay_response(delay_scan_ns)
     fig, axes = plt.subplots(1, 2, figsize=(11.5, 3.8))
     axes[0].hist(timing_draws, bins=90, density=True, color=BLUE, alpha=.8)
     axes[0].set(title="Ray-traced LACT optical arrival-time kernel",
                 xlabel="Delay about weighted mean [ns]", ylabel="Density [1/ns]")
     axes[0].text(.03, .95,
                  f"RMS={optical_timing['rms_spread_ns']:.3f} ns\n"
-                 f"peak-to-peak=1.732 ns",
+                 f"peak-to-peak={timing_kernel_frame.max_time_ns.max()-timing_kernel_frame.min_time_ns.min():.3f} ns",
                  transform=axes[0].transAxes, va="top")
     axes[1].plot(delay_scan_ns, delay_response, color=ORANGE)
-    axes[1].axvline(0.2, color=INK, linestyle="--", label="0.2 ns residual")
     axes[1].set(title="Zero-lag HBT response after optical spreading",
                 xlabel="Uncorrected pair delay [ns]", ylabel="Relative response")
-    axes[1].legend(frameon=False)
     fig.tight_layout()
     fig.savefig(OUTPUT_DIR/"optical_arrival_time_response.png", bbox_inches="tight")
     plt.show()
@@ -788,16 +1192,20 @@ nb["cells"] = [
         "arrival_rms_ns": optical_timing["rms_spread_ns"],
         "arrival_peak_to_peak_ns": (
             timing_kernel_frame.max_time_ns.max()-timing_kernel_frame.min_time_ns.min()),
-        "band_averaged_contrast_retained": optical_timing_efficiency,
-        "visibility2_sigma_inflation_after_calibration": 1/optical_timing_efficiency,
-        "response_at_0p2ns_residual": float(residual_delay_response(
-            optical_timing, np.array([0.2]), INST.electronics_bandwidth_hz)[0]),
+        "combined_matched_effective_bandwidth_MHz": (
+            matched_effective_bandwidth_hz/1e6),
+        "rectangular_optical_retention": rectangular_optical_efficiency,
+        "response_at_0p2ns_residual": float(matched_delay_response(
+            np.array([0.2]))[0]),
     }]).T.rename(columns={0:"value"}))
     """),
     md(r"""
     ## 7. 模拟的 (uv) 测量：星等、NSB、电子带宽与误差
 
-    AB 星等先转成每单位频率光子谱密度 (n_\nu=F_\nu/(h\nu))，再得到已探测星光率 (r_\star=A\eta n_\nu\Delta\nu)。每个 20 min 段生成一个不裁剪的高斯近似 (|V|^2) 估计和显式 `sigma_visibility2`。这是长曝光相关器的充分统计量，不生成一整夜的 625 MS/s 原始波形。
+    AB 星等先转成每单位频率光子谱密度 (n_\nu=F_\nu/(h\nu))，再得到已探测
+    星光率 (r_\star=A\eta n_\nu\Delta\nu)。每个20 min段生成一个不裁剪的
+    高斯近似 (|V|^2) 估计和显式 `sigma_visibility2`。这是长曝光相关器的充分
+    统计量，不生成一整夜的250 MS/s原始波形。
     """),
     code(r"""
     def ab_photon_spectral_density(magnitude, wavelength_m=INST.wavelength_m):
@@ -813,15 +1221,14 @@ nb["cells"] = [
                             spectral_channels=1, nsb_rate_hz=None):
         nsb = instrument.detected_nsb_rate_hz if nsb_rate_hz is None else nsb_rate_hz
         star = detected_star_rate_hz(magnitude, instrument)
-        total = star + nsb
+        total = star + nsb + instrument.dark_count_rate_hz
         one_channel = (star**2 / (total * instrument.optical_bandwidth_hz)
                        * np.sqrt(instrument.electronics_bandwidth_hz * integration_s / 2)
                        / instrument.excess_noise_factor)
         return one_channel * np.sqrt(spectral_channels)
 
     unit_snr = unit_visibility_snr(INST.source_ab_magnitude, INST.segment_s)
-    # The ray-traced optical kernel retains only this fraction of the
-    # zero-lag HBT contrast. Correcting it back to |V|^2 inflates sigma.
+    # 光追时间核保留的只是零延迟 HBT 对比度；校正回 |V|^2 时需相应放大 sigma。
     sigma_stat = 1.0 / (unit_snr * optical_timing_efficiency)
     sigma_total = np.sqrt(sigma_stat**2 + INST.calibration_floor_visibility2**2)
     simulated_uv = uv_coverage.copy()
@@ -978,7 +1385,7 @@ nb["cells"] = [
     sc = axes[0,0].scatter(uv_data.u_lambda/1e6, uv_data.v_lambda/1e6,
                            c=uv_data.visibility_abs2, cmap="viridis", vmin=0, vmax=1, s=12)
     axes[0,0].scatter(-uv_data.u_lambda/1e6, -uv_data.v_lambda/1e6,
-                      c=uv_data.visibility_abs2, cmap="viridis", vmin=0, vmax=1, s=6, alpha=.3)
+                      c=uv_data.visibility_abs2, cmap="viridis", vmin=0, vmax=1, s=12)
     axes[0,0].set(title="Binned measured uv power", xlabel=r"$u$ [M$\lambda$]", ylabel=r"$v$ [M$\lambda$]")
     axes[0,0].set_aspect("equal", adjustable="datalim")
     fig.colorbar(sc, ax=axes[0,0], label=r"measured $|V|^2$")
@@ -1030,6 +1437,153 @@ nb["cells"] = [
         "theta_y_mas": np.repeat(result.theta_mas, len(result.theta_mas)),
         "brightness": result.image.ravel(),
     }).to_csv(OUTPUT_DIR / "reconstruction_image.csv", index=False)
+    """),
+    md(r"""
+    ### 8.1 与旧版 Fienup/HIO 的同数据独立对照
+
+    旧 `SII整理.ipynb` 的 HIO 示例使用规则满网格幅度，部分单元还依赖已知源模型；
+    这会比真实稀疏观测容易得多。下面保留 HIO 的核心思想，但只约束本次实际测得
+    的 (uv) 单元：负的带噪 (|V|^2) 在取平方根时按物理边界投影到0，未观测单元
+    不填入理论真值，初始化、多起点选择和最后的结果排序都不使用真值。它作为
+    算法交叉检查，而不是默认结果；默认结果仍是直接拟合带符号、带误差的
+    (|V|^2)，因为那样不会在低信噪比处引入平方根截断偏差。
+    """),
+    code(r"""
+    def partial_fourier_hio(data, grid_size=64, fov_mas=0.70,
+                            support_radius_mas=0.32, starts=6,
+                            hio_steps=320, er_steps=80, beta_hio=0.82,
+                            seed=20260824):
+        # 只在实际观测 Fourier 单元上施加幅度约束的 HIO/ER 基准。
+        pixel_rad = fov_mas * MAS_TO_RAD / grid_size
+        theta_mas = ((np.arange(grid_size) - grid_size//2)
+                     * pixel_rad * RAD_TO_MAS)
+        frequency = np.fft.fftshift(np.fft.fftfreq(grid_size, d=pixel_rad))
+        yy_mas, xx_mas = np.meshgrid(theta_mas, theta_mas, indexing="ij")
+        support = np.hypot(xx_mas, yy_mas) <= support_radius_mas
+
+        # 把同一 FFT 单元中的稀疏测量作逆方差平均；共轭点是同一个实像约束，
+        # 不是额外独立数据。
+        weight_grid = np.zeros((grid_size, grid_size), float)
+        power_grid = np.zeros_like(weight_grid)
+        u_obs = data.u_lambda.astype(float)
+        v_obs = data.v_lambda.astype(float)
+        value_obs = data.visibility_abs2.astype(float)
+        sigma_obs = data.sigma.astype(float)
+        obs_weight = 1.0 / np.maximum(sigma_obs, 1e-12)**2
+        iu = np.argmin(np.abs(frequency[:, None] - u_obs[None, :]), axis=0)
+        iv = np.argmin(np.abs(frequency[:, None] - v_obs[None, :]), axis=0)
+        for sign in (1, -1):
+            iu_use = iu if sign == 1 else (-iu) % grid_size
+            iv_use = iv if sign == 1 else (-iv) % grid_size
+            np.add.at(weight_grid, (iv_use, iu_use), obs_weight)
+            np.add.at(power_grid, (iv_use, iu_use), obs_weight*value_obs)
+        observed = weight_grid > 0
+        power_grid[observed] /= weight_grid[observed]
+        amplitude_grid = np.sqrt(np.maximum(power_grid, 0.0))
+        centre = grid_size//2
+        observed[centre, centre] = True
+        amplitude_grid[centre, centre] = 1.0
+
+        def forward_power(image):
+            x_rad = xx_mas.ravel()*MAS_TO_RAD
+            y_rad = yy_mas.ravel()*MAS_TO_RAD
+            flat = image.ravel()
+            predicted = np.empty(len(u_obs), float)
+            for first in range(0, len(u_obs), 256):
+                last = min(first+256, len(u_obs))
+                phase = np.exp(-2j*np.pi*(
+                    u_obs[first:last, None]*x_rad[None, :]
+                    + v_obs[first:last, None]*y_rad[None, :]))
+                predicted[first:last] = np.abs(phase @ flat)**2
+            return predicted
+
+        generator = np.random.default_rng(seed)
+        candidates = []
+        total_steps = hio_steps + er_steps
+        for start in range(starts):
+            initial_phase = generator.uniform(-np.pi, np.pi,
+                                              (grid_size, grid_size))
+            spectrum = np.zeros((grid_size, grid_size), complex)
+            spectrum[observed] = (amplitude_grid[observed]
+                                  * np.exp(1j*initial_phase[observed]))
+            image = np.fft.fftshift(np.fft.ifft2(
+                np.fft.ifftshift(spectrum))).real
+            previous = image.copy()
+            for iteration in range(total_steps):
+                spectrum = np.fft.fftshift(np.fft.fft2(
+                    np.fft.ifftshift(image)))
+                spectrum[observed] = (amplitude_grid[observed]
+                                      * np.exp(1j*np.angle(spectrum[observed])))
+                candidate = np.fft.fftshift(np.fft.ifft2(
+                    np.fft.ifftshift(spectrum))).real
+                invalid = (~support) | (candidate < 0)
+                if iteration < hio_steps:
+                    updated = candidate.copy()
+                    updated[invalid] = previous[invalid] - beta_hio*candidate[invalid]
+                else:
+                    updated = np.where(support, np.maximum(candidate, 0.0), 0.0)
+                previous, image = image, updated
+            image = np.where(support, np.maximum(image, 0.0), 0.0)
+            image /= max(image.sum(), 1e-15)
+            predicted = forward_power(image)
+            weighted_chi2 = float(np.mean(((predicted-value_obs)/sigma_obs)**2))
+            candidates.append((weighted_chi2, image, predicted))
+        candidates.sort(key=lambda item: item[0])
+        best_chi2, best_image, best_prediction = candidates[0]
+        return {
+            "theta_mas": theta_mas,
+            "image": best_image,
+            "predicted_visibility2": best_prediction,
+            "weighted_chi2_per_point": best_chi2,
+            "observed_fft_cells": int(observed.sum()),
+            "start_scores": [item[0] for item in candidates],
+        }
+
+    hio_result = partial_fourier_hio(uv_data)
+    direct_chi2_per_point = float(np.mean((
+        (result.predicted_visibility_abs2-uv_data.visibility_abs2)
+        / uv_data.sigma)**2))
+    hio_summary = pd.DataFrame([{
+        "method": "direct weighted |V|^2 fit",
+        "weighted_chi2_per_point": direct_chi2_per_point,
+        "negative_power_clipping_required": False,
+        "uses_truth_phase_or_truth_support": False,
+    }, {
+        "method": "partial-grid Fienup HIO+ER",
+        "weighted_chi2_per_point": hio_result["weighted_chi2_per_point"],
+        "negative_power_clipping_required": True,
+        "uses_truth_phase_or_truth_support": False,
+    }])
+    display(hio_summary)
+    hio_summary.to_csv(OUTPUT_DIR/"reconstruction_method_comparison.csv",
+                       index=False)
+
+    fig, axes = plt.subplots(1, 3, figsize=(12.6, 3.8),
+                             constrained_layout=True)
+    axes[0].imshow(result.image, origin="lower", extent=extent_reco,
+                   cmap="magma")
+    axes[0].set(title="Direct weighted |V|² fit",
+                xlabel="ΔRA [mas]", ylabel="ΔDec [mas]")
+    hio_extent = [hio_result["theta_mas"][0], hio_result["theta_mas"][-1],
+                  hio_result["theta_mas"][0], hio_result["theta_mas"][-1]]
+    axes[1].imshow(hio_result["image"], origin="lower", extent=hio_extent,
+                   cmap="magma")
+    axes[1].set(title="Partial-grid HIO+ER benchmark",
+                xlabel="ΔRA [mas]", ylabel="ΔDec [mas]")
+    axes[2].scatter(uv_data.visibility_abs2,
+                    hio_result["predicted_visibility2"], s=9,
+                    alpha=.38, color=GOLD, label="HIO+ER")
+    axes[2].scatter(uv_data.visibility_abs2,
+                    result.predicted_visibility_abs2, s=9,
+                    alpha=.30, color=BLUE, label="direct")
+    axes[2].plot([-0.2, 1.1], [-0.2, 1.1], color=INK, linewidth=1)
+    axes[2].set(xlim=(-.2, 1.1), ylim=(-.2, 1.1),
+                title="Same noisy uv data",
+                xlabel="Measured |V|²", ylabel="Predicted |V|²")
+    axes[2].legend(frameon=False)
+    fig.savefig(OUTPUT_DIR/"direct_vs_hio_reconstruction.png",
+                bbox_inches="tight")
+    plt.show()
     """),
     md(r"""
     ## 9. 几种情况：能看到多少星等，角分辨率是多少
@@ -1107,7 +1661,8 @@ nb["cells"] = [
     - 单夜窗口：2、6、10 h。每个 20 min 段仍是一个独立 UV 测量，所以扩大单夜窗口主要增加不同 UV 点；
     - 多夜累计：同一 ±3 h 窗口重复 5 或 10 夜，总计 30/60 h。UV 位置不变，统计误差按 (1/\sqrt{N_{night}}) 降低；
     - NSB：0、1、2 倍参考暗夜背景；
-    - 电子学：理想计数器，或实测电荷涨落加 0.35 mV 噪声和 8-bit ADC 的参考链路。
+    - 电子学：理想计数器，或实测电荷涨落链路；main 未提供的电子噪声和 ADC
+      量化当前均关闭（接口值为 0）。
 
     现实电子学的附加相关效率由实测 SPE 脉冲的 Poisson shot-noise 方差
 
@@ -1120,20 +1675,23 @@ nb["cells"] = [
     code(r"""
     charge_second_moment = float(np.mean(empirical_charge_factors**2))
     total_reference_rate_per_ns = (
-        detected_star_rate_hz(INST.source_ab_magnitude) + INST.detected_nsb_rate_hz
+        detected_star_rate_hz(INST.source_ab_magnitude)
+        + INST.detected_nsb_rate_hz + INST.dark_count_rate_hz
     ) / 1e9
     spe_energy_mv2_ns = float(np.trapezoid(spe_mv**2, spe_t_ns))
     shot_variance_mv2 = (
         total_reference_rate_per_ns * charge_second_moment * spe_energy_mv2_ns
     )
-    adc_step_mv = INST.adc_full_scale_mv / 2**INST.adc_bits
+    adc_step_mv = (0.0 if INST.adc_bits <= 0
+                   else INST.adc_full_scale_mv / 2**INST.adc_bits)
     adc_quantization_variance_mv2 = adc_step_mv**2 / 12.0
     additive_variance_mv2 = (
         INST.electronic_noise_rms_mv**2 + adc_quantization_variance_mv2
     )
-    electronics_correlation_efficiency = (
+    legacy_scalar_electronics_efficiency = (
         shot_variance_mv2 / (shot_variance_mv2 + additive_variance_mv2)
     )
+    electronics_correlation_efficiency = 1.0
     electronics_budget = pd.DataFrame([{
         "empirical_charge_second_moment": charge_second_moment,
         "spe_energy_mv2_ns": spe_energy_mv2_ns,
@@ -1141,7 +1699,8 @@ nb["cells"] = [
         "electronic_noise_variance_mv2": INST.electronic_noise_rms_mv**2,
         "adc_step_mv": adc_step_mv,
         "adc_quantization_variance_mv2": adc_quantization_variance_mv2,
-        "reference_correlation_efficiency": electronics_correlation_efficiency,
+        "legacy_scalar_efficiency_not_reapplied": legacy_scalar_electronics_efficiency,
+        "matched_effective_bandwidth_MHz": matched_effective_bandwidth_hz/1e6,
     }])
     display(electronics_budget.T.rename(columns={0:"value"}))
     electronics_budget.to_csv(OUTPUT_DIR/"electronics_noise_budget.csv", index=False)
@@ -1155,8 +1714,7 @@ nb["cells"] = [
         ]))
 
     timing_grid_ns = np.linspace(-3.0, 3.0, 2401)
-    timing_grid_response = residual_delay_response(
-        optical_timing, timing_grid_ns, INST.electronics_bandwidth_hz)
+    timing_grid_response = matched_delay_response(timing_grid_ns)
 
     def make_scenario_measurements(
             single_night_hours, nights, nsb_multiplier,
@@ -1181,7 +1739,9 @@ nb["cells"] = [
             raise ValueError(source_case)
         nsb_rate = nsb_multiplier * INST.detected_nsb_rate_hz
         if electronics_case == "ideal":
-            scenario_instrument = replace(INST, excess_noise_factor=1.0)
+            scenario_instrument = replace(
+                INST, excess_noise_factor=1.0,
+                electronics_bandwidth_hz=ideal_effective_bandwidth_hz)
             correlation_efficiency = 1.0
         elif electronics_case == "reference":
             scenario_instrument = INST
@@ -1200,8 +1760,7 @@ nb["cells"] = [
         pair_zero_point = {
             pair: local_rng.normal(0.0, INST.baseline_zero_point_rms)
             for pair in unique_pairs}
-        # Static per-telescope residuals are shared by all 31 baselines and do
-        # not average away by repeating the same calibration procedure.
+        # 每台望远镜的静态残差会被其参与的31条基线共享，重复同一标定不会使其平均掉。
         static_gain = local_rng.normal(
             0.0, INST.telescope_gain_calibration_rms, telescope_count)
         def ar1_lognormal(rms, rho=0.85):
@@ -1227,14 +1786,17 @@ nb["cells"] = [
             nsb_factor = ar1_lognormal(INST.nsb_fractional_rms)
             star_lambda = star_rate_reference*transparency*INST.segment_s
             nsb_lambda = nsb_rate*nsb_factor*INST.segment_s
-            # These are the actual per-telescope Poisson totals used by every
-            # baseline that contains that telescope in this segment.
+            # 每个包含该望远镜的基线都复用同一段逐望远镜 Poisson 计数。
             star_counts = local_rng.poisson(star_lambda)
             nsb_counts = local_rng.poisson(nsb_lambda)
             star_rate_observed = star_counts/INST.segment_s
-            total_rate_observed = (star_counts+nsb_counts)/INST.segment_s
+            total_rate_observed = (
+                star_counts + nsb_counts + INST.dark_count_rate_hz*INST.segment_s
+            )/INST.segment_s
             photon_relative_rms.append(float(np.median(
-                1.0/np.sqrt(np.maximum(star_counts+nsb_counts, 1)))))
+                1.0/np.sqrt(np.maximum(
+                    star_counts + nsb_counts
+                    + INST.dark_count_rate_hz*INST.segment_s, 1)))))
 
             nightly_gain = local_rng.normal(
                 0.0, INST.per_night_gain_rms, telescope_count)
@@ -1275,9 +1837,8 @@ nb["cells"] = [
         measured_combined = (
             (np.asarray(nightly_values)*inverse_variance).sum(axis=0)/sum_weight)
         sigma_stat = np.sqrt(1.0/sum_weight)
-        # The reconstruction accepts diagonal weights only. This term is a
-        # conservative diagonal representation; the ensemble below preserves
-        # the actual shared telescope covariance in the generated values.
+        # 重建器目前只接受对角权重；这里给出保守的对角表示，下面的 ensemble
+        # 仍在生成数据时保留真实的望远镜共享协方差。
         sigma_shared_diagonal = np.sqrt(
             (np.sqrt(2)*INST.telescope_gain_calibration_rms
              * scenario_uv.visibility2_true.to_numpy())**2
@@ -1344,9 +1905,8 @@ nb["cells"] = [
     scenario_results = []
     scenario_images = {}
     for scenario_index, definition in enumerate(scenario_definitions):
-        # Common random numbers isolate controlled changes for scenarios with
-        # the same uv sampling. Repeated-night, NSB, and electronics cases all
-        # reuse the 6 h Gaussian variates and optimizer starts.
+        # 公共随机数固定相同 UV 采样，隔离不同情景本身的变化；多夜、NSB 和电子学
+        # 情景复用6小时高斯变量和优化器初始点。
         measurement_seed = {
             2: 20260902, 6: 20260906, 10: 20260910
         }[definition["hours"]]
@@ -1415,13 +1975,14 @@ nb["cells"] = [
       **{scenario_lookup.loc['nsb_0x_6h','sigma_visibility2_stat']:.4f} /
       {scenario_lookup.loc['reference_6h','sigma_visibility2_stat']:.4f} /
       {scenario_lookup.loc['nsb_2x_6h','sigma_visibility2_stat']:.4f}**.
-    - The reference additive electronics efficiency is
-      **{electronics_correlation_efficiency:.4f}**; idealizing these electronics
+    - The reference matched effective bandwidth is
+      **{matched_effective_bandwidth_hz/1e6:.2f} MHz**; idealizing additive noise
+      gives **{ideal_effective_bandwidth_hz/1e6:.2f} MHz**. Idealizing these electronics
       changes total sigma only from
       **{scenario_lookup.loc['reference_6h','sigma_visibility2_total']:.4f}**
       to **{scenario_lookup.loc['ideal_electronics_6h','sigma_visibility2_total']:.4f}**.
-      Under this rate assumption, NSB and phase-less inversion dominate over
-      the adopted 0.35 mV/8-bit additive electronics.
+       Under this rate assumption, NSB and phase-less inversion dominate; additive
+       electronics are disabled because main does not provide a calibrated value.
     - The 6 h reference reconstruction recovers separation
       **{scenario_lookup.loc['reference_6h','recovered_separation_mas']:.3f} mas**,
       PA **{scenario_lookup.loc['reference_6h','recovered_position_angle_deg']:.2f} deg**,
@@ -1474,11 +2035,11 @@ nb["cells"] = [
     md(r"""
     ## 11. 望远镜级 Monte Carlo：共享误差、光子涨落与重建成功率
 
-    上面的单张图不能证明可靠性。本节固定天体真值，生成100次完全独立的6小时观测。每次实现都先为32台望远镜逐段生成恒星和NSB的 Poisson 总计数，再生成随时间相关的透明度/NSB过程、每镜静态与每夜增益残差、每镜时钟残差以及每条基线零点；同一台镜的同一份实现被它参与的31条基线共同使用。
+    上面的单张图不能证明可靠性。本节固定天体真值，生成100次完全独立的6小时观测。每次实现都先为32台望远镜逐段生成恒星和NSB的 Poisson 总计数；main 未提供的透明度/NSB过程、增益残差、时钟残差和基线零点接口当前均为零，因此不会偷偷加入未经标定的共享系统误差。
 
     100次均做带误差权重的双星参数拟合，用来快速量化分离、方位角和流量比的抽样分布。这里固定了两个星盘直径，因此它是“已知源族条件下”的参数精度，不等于盲成像能力。更暗目标的盲检验覆盖18个“星等×积分时间”组合：2小时、6小时、5夜30小时和10夜60小时，星等从 (m_{AB}=2) 到8（7、8等只在最长的60小时检验）；每个组合做30次双星注入和30次单星空白，共1080张盲图。优化器不知道源类型；只有“双星真阳性率高且单星假阳性率低”，才支持“看见两个结构”。预先固定的检出规则是峰间距0.10–0.32 mas且次/主峰比不低于0.25；比例同时给出 Clopper–Pearson 精确95%区间。一个星等/时长组合只有在真阳性率95%下限不低于80%、且假阳性率95%上限不高于20%时才标为“可靠检出”。当双星真阳性与单星假阳性的95%区间重叠时，额外标记为本样本量下“不可区分”；这比只看双星图是否出现两个峰更接近“看不到”的含义。
 
-    光子计数涨落没有被重复添加成任意的共享高斯噪声。对近零相关的不同基线，纯散粒噪声的交叉乘积协方差本来就极小；显著的跨基线相关主要来自望远镜级增益、时间和背景标定。本节分别保存了这些量，方便以后用实测稳定性替换当前工程假设。
+    光子计数涨落没有被重复添加成任意的共享高斯噪声。对近零相关的不同基线，纯散粒噪声的交叉乘积协方差本来就极小；未来获得实测增益、时间和背景标定后，可直接填入保留的接口重新运行。
     """),
     code(r"""
     def fit_binary_parameters(frame):
@@ -1502,12 +2063,34 @@ nb["cells"] = [
             max_nfev=250)
         return fit.x, float(np.mean(residual(fit.x)**2)), bool(fit.success)
 
+    def fit_single_disk_model(frame):
+        # 同一数据的单星零假设；总流量已由 V(0)=1 归一化。
+        q = np.hypot(frame.u_lambda.to_numpy(float),
+                     frame.v_lambda.to_numpy(float))
+        measured = frame.visibility2_measured.to_numpy(float)
+        sigma = frame.sigma_visibility2.to_numpy(float)
+
+        def residual(parameters):
+            model = uniform_disk_visibility(q, parameters[0])**2
+            return (measured-model)/sigma
+
+        fit = least_squares(residual, x0=[0.10], bounds=([0.005], [0.40]),
+                            max_nfev=160)
+        return float(fit.x[0]), float(np.sum(residual(fit.x)**2)), bool(fit.success)
+
     ensemble_rows = []
     shared_error_probe = []
     for realization in range(100):
         frame, metadata = make_scenario_measurements(
             6, 1, 1, "reference", 20263000+realization)
         fitted, reduced_chi2_proxy, fit_success = fit_binary_parameters(frame)
+        single_diameter_mas, single_chi2, single_fit_success = (
+            fit_single_disk_model(frame))
+        binary_chi2 = reduced_chi2_proxy*len(frame)
+        # 已知 sigma 的高斯 BIC；正值表示双星模型更受支持。
+        delta_bic_single_minus_binary = (
+            single_chi2 + 1*np.log(len(frame))
+            - (binary_chi2 + 3*np.log(len(frame))))
         ensemble_rows.append({
             "realization": realization,
             "separation_mas": fitted[0],
@@ -1515,6 +2098,11 @@ nb["cells"] = [
             "flux_ratio": fitted[2],
             "reduced_chi2_proxy": reduced_chi2_proxy,
             "fit_success": fit_success,
+            "single_disk_fit_success": single_fit_success,
+            "single_disk_diameter_mas": single_diameter_mas,
+            "binary_chi2": binary_chi2,
+            "single_disk_chi2": single_chi2,
+            "delta_bic_single_minus_binary": delta_bic_single_minus_binary,
             "median_photon_count_relative_rms": metadata[
                 "median_photon_count_relative_rms"],
             "median_timing_attenuation": metadata["median_timing_attenuation"],
@@ -1523,9 +2111,8 @@ nb["cells"] = [
         baseline_average = (
             frame.assign(error=frame.visibility2_measured-frame.visibility2_true)
             .groupby(["telescope_i", "telescope_j"], as_index=False).error.mean())
-        # Rows 0/1 share telescope i; the final row is disjoint from row 0.
-        # Averaging the 18 segments exposes the calibration covariance that is
-        # otherwise hidden under much larger single-segment shot noise.
+        # 第0/1行共享同一望远镜 i，最后一行与第0行不相交。平均18个时间段后，
+        # 可以显出单段巨大散粒噪声下通常被掩盖的标定协方差。
         shared_error_probe.append([
             baseline_average.loc[0, "error"],
             baseline_average.loc[1, "error"],
@@ -1548,7 +2135,22 @@ nb["cells"] = [
         ["position_angle_deg", *central_interval(ensemble_table.position_angle_deg), SOURCE.position_angle_deg],
         ["flux_ratio", *central_interval(ensemble_table.flux_ratio), SOURCE.flux_ratio_secondary_to_primary],
     ], columns=["parameter", "p2p5", "median", "p97p5", "truth"])
+    model_selection_summary = pd.DataFrame([{
+        "realizations": len(ensemble_table),
+        "both_models_converged": bool(
+            ensemble_table.fit_success.all()
+            and ensemble_table.single_disk_fit_success.all()),
+        "median_delta_BIC_single_minus_binary": float(
+            ensemble_table.delta_bic_single_minus_binary.median()),
+        "fraction_strong_binary_evidence_delta_BIC_gt_10": float(
+            np.mean(ensemble_table.delta_bic_single_minus_binary > 10.0)),
+    }])
     display(ensemble_summary)
+    display(Markdown(
+        "### 双星与单星零假设的模型比较\n\n"
+        "`ΔBIC = BIC_single - BIC_binary`；正值偏向双星，超过10通常视为强证据。"
+        "这是模型排序指标，不把边界上的非规则似然比误报成精确p值。"))
+    display(model_selection_summary.T.rename(columns={0:"value"}))
     display(pd.DataFrame([{
         "realizations": len(ensemble_table),
         "all_parametric_fits_converged": bool(ensemble_table.fit_success.all()),
@@ -1576,6 +2178,21 @@ nb["cells"] = [
     fig.tight_layout()
     fig.savefig(OUTPUT_DIR/"telescope_level_parameter_ensemble.png", bbox_inches="tight")
     plt.show()
+
+    fig, axis = plt.subplots(figsize=(6.3, 3.8))
+    axis.hist(ensemble_table.delta_bic_single_minus_binary, bins=18,
+              color=BLUE, alpha=.82)
+    axis.axvline(10.0, color=ORANGE, linestyle="--",
+                 label="strong-evidence guide: ΔBIC=10")
+    axis.axvline(0.0, color=INK, linewidth=1)
+    axis.set(title="Parametric binary-versus-single model comparison",
+             xlabel="ΔBIC = BIC(single disk) − BIC(binary)",
+             ylabel="Realizations")
+    axis.legend(frameon=False)
+    fig.tight_layout()
+    fig.savefig(OUTPUT_DIR/"binary_vs_single_model_selection.png",
+                bbox_inches="tight")
+    plt.show()
     """),
     code(r"""
     nonparametric_rows = []
@@ -1594,8 +2211,8 @@ nb["cells"] = [
         separation = reconstruction.metrics.get("two_peak_separation_mas", np.nan)
         angle = reconstruction.metrics.get("two_peak_position_angle_deg", np.nan)
         ratio = reconstruction.metrics.get("two_peak_brightness_ratio", np.nan)
-        # Pre-declared structural detection rule. Peak finding always returns
-        # two candidates, so separation alone is not a valid detection.
+        # 预先声明的结构检出规则。峰值搜索总会返回两个候选峰，所以仅有分离度
+        # 不能作为检出依据。
         detected = bool(
             np.isfinite(separation) and np.isfinite(ratio)
             and 0.10 <= separation <= 0.32 and ratio >= 0.25)
@@ -1848,19 +2465,56 @@ nb["cells"] = [
         np.abs(binary_visibility(probe_u,probe_v))**2,
         np.abs(binary_visibility(-probe_u,-probe_v))**2,atol=1e-12)
     checks["uvw_norm_invariant"] = invariant_error < 1e-6
+    check_u, check_v, check_w = celestial_tangent_axes_enu(0.37, dec, lat)
+    checks["uvw_axes_are_fixed_orthonormal"] = (
+        np.allclose(np.linalg.norm(check_u), 1.0, atol=1e-12)
+        and np.allclose(np.linalg.norm(check_v), 1.0, atol=1e-12)
+        and np.allclose(np.linalg.norm(check_w), 1.0, atol=1e-12)
+        and np.allclose([check_u @ check_v, check_u @ check_w,
+                         check_v @ check_w], 0.0, atol=1e-12)
+        and np.allclose(np.cross(check_u, check_v), check_w, atol=1e-12))
+    checks["uvw_reversed_baseline_is_central_conjugate"] = np.allclose(
+        uvw_from_enu(baseline_vec, 0.37, dec, lat),
+        -uvw_from_enu(-baseline_vec, 0.37, dec, lat), atol=1e-12)
     checks["five_mag_rate_ratio"] = np.isclose(detected_star_rate_hz(5)/detected_star_rate_hz(0),0.01,rtol=1e-12)
     checks["snr_sqrt_time"] = np.isclose(
         unit_visibility_snr(2,3600)/unit_visibility_snr(2,900),2.0,rtol=1e-12)
-    checks["short_waveform_has_expected_samples"] = len(short_record["sample_time_ns"]) == 1250
+    checks["short_waveform_has_expected_samples"] = (
+        len(short_record["sample_time_ns"])
+        == round(2000.0/REPOSITORY_INSTRUMENT.sample_width_ns))
     checks["short_waveform_has_full_spe_edge_padding"] = (
         short_record["simulated_padding_each_side_ns"] >= np.max(np.abs(spe_t_ns))
     )
     checks["six_hours_has_exactly_18_twenty_minute_segments"] = (
         len(hour_angles_h) == 18 and len(uv_coverage) == 18*len(lact_baselines)
     )
-    checks["ray_traced_optical_timing_is_applied"] = (
-        0.5 < optical_timing["rms_spread_ns"] < 0.7
-        and 0.0 < optical_timing_efficiency < 1.0
+    checks["time_resolved_uv_panels_cover_all_segments"] = (
+        cumulative_uv_table.time_segments.tolist() == [1, 3, 6, 12, 18]
+        and cumulative_uv_table.independent_measurement_rows.iloc[-1]
+            == len(uv_coverage))
+    checks["two_six_ten_hour_uv_windows_are_explicit"] = (
+        observing_window_uv_table.single_night_hours.tolist() == [2, 6, 10]
+        and observing_window_uv_table.segments.tolist() == [6, 18, 30]
+        and observing_window_uv_table.independent_measurement_rows.tolist()
+            == [6*496, 18*496, 30*496]
+    )
+    checks["long_term_uv_is_one_complete_sidereal_track"] = (
+        len(long_term_hour_angles_h) == 24*60//long_term_step_minutes
+        and len(long_term_uv) == len(long_term_hour_angles_h)*496
+        and 0 < len(observable_long_term_uv) < len(long_term_uv)
+        and long_term_uv_summary[
+            "new_uv_coordinates_from_repeating_same_sidereal_track"].iloc[0]
+            == 0
+    )
+    checks["ray_traced_timing_is_consistent_and_not_double_counted"] = (
+        np.isclose(
+            optical_timing["rms_spread_ns"],
+            single_pixel_provenance["arrival_time_rms_ns"],
+            rtol=2e-4)
+        and np.isclose(optical_timing_efficiency, 1.0)
+        and 0.0 < rectangular_optical_efficiency <= 1.0
+        and 0.0 < matched_effective_bandwidth_hz
+            <= short_instrument.adc_sample_rate_hz/2
         and short_record["optical_timing_rms_ns"] > 0.0
     )
     checks["recovery_loss_is_tiny_at_reference_rate"] = (
@@ -1895,8 +2549,17 @@ nb["cells"] = [
     checks["reconstruction_forward_closure"] = result.metrics["weighted_fit_rmse"] < 0.12
     checks["reconstruction_recovers_two_peaks"] = len(result.metrics.get("peaks",[])) == 2
     checks["truth_validation_correlation"] = truth_corr > 0.55
+    checks["hio_benchmark_used_same_observed_uv_rows"] = (
+        len(hio_result["predicted_visibility2"]) == len(uv_data.visibility_abs2)
+        and not hio_summary.uses_truth_phase_or_truth_support.any()
+    )
     checks["telescope_level_ensemble_completed"] = (
         len(ensemble_table) == 100 and ensemble_table.fit_success.all()
+        and ensemble_table.single_disk_fit_success.all()
+    )
+    checks["injected_binary_beats_single_disk_null"] = (
+        model_selection_summary[
+            "median_delta_BIC_single_minus_binary"].iloc[0] > 10.0
     )
     checks["blind_nonparametric_ensemble_completed"] = (
         len(nonparametric_table) == 1080
@@ -1917,12 +2580,15 @@ nb["cells"] = [
     md(r"""
     ## 13. Takeaways & required caveats
 
-    1. 统一版以最新 `main` 为底座，保留旧 v1 的全阵列源/相干/重建框架，并吸收旧 v2 的连续电子学时间尺度；旧 v2 把 ENU 坐标直接代入缺少站点纬度的矩阵，统一版已经用 topocentric ENU 投影替换。
+    1. 统一版以最新 `main` 为底座，保留旧 v1 的全阵列源/相干/重建框架，并吸收旧 v2 的连续电子学时间尺度；统一版使用包含站点纬度的固定 RA/Dec 天球切平面投影。
     2. 7 镜验证阵列适合标定和直径测量；`layout_0803` 的 32 镜实际模拟坐标提供公里级基线，进入约 (0.1\,\mathrm{mas}) 及以下的成像区间。表中有物理最长基线和本次时角/赤纬的投影覆盖；它仍是生产输入坐标，不应冒充最终现场测绘值。
-    3. 正式1229分片镜面的轴上光追给出约0.602 ns RMS、1.732 ns峰峰值到达时间展宽；在假设的200 MHz矩形相关带宽内，只保留约 `optical_timing_efficiency` 所示比例的零延迟相关信号。notebook 已在短波形中逐 p.e. 抽样该分布，并在长曝光误差中按标定反演传播。
-    4. 受控情景显示：多夜累计降低统计误差，NSB增加恶化统计误差；10 h 单夜窗口端高度低，未加入高度相关消光前不能当作可信增益。现在每次实现使用严格的20分钟段中点，不再把观测端点误算成额外积分段。
-    5. (|V|^2) 成像天然缺相位。100次望远镜级参数拟合给出亮目标的抽样区间；1080张盲重建给出 (m_{AB}=2–8)、2–60小时条件下的真阳性率、单星假阳性率及精确95%区间，并检查两类区间是否已经重叠，从而直接定位“可靠”“不可靠”和“不可区分”的转折。单张“好看”的重建不再作为性能证据。参数拟合固定了星盘直径，仍比完全未知天体乐观。
-    6. 微单元恢复10 ns仍是暂定值。当前光学核是轴上、理想误差配置的已保存光追样本；实测仰角形变配置没有对应逐光子时间表，因此尚未验证随仰角/视场变化的时间核。串扰、后脉冲、窄带滤光片角响应、实测时钟稳定性和标定星数据也仍缺失。以上参数替换为测量值之前，结果是带明确假设的研究预测，不是 LACT 最终性能声明。
+    3. 单像素100万光线标定给出实际有效探测面积和到达时间分布；实测SPE、4 ns采样、
+       光学展宽统一折算成 `matched_effective_bandwidth_hz`。未由main提供的电子噪声和
+       ADC量化当前为零并保留接口。notebook在短波形中逐p.e.抽样同一分布，长曝光只
+       使用这一经校准的充分统计量，避免重复扣除传递损失。
+    4. 受控情景显示：多夜累计降低统计误差，NSB增加恶化统计误差；10 h 单夜窗口端高度低，未加入高度相关消光前不能当作可信增益。固定天体的长期几何覆盖在一个恒星日后重复，多夜不会继续创造新的 UV 轨迹。现在每次实现使用严格的20分钟段中点，不再把观测端点误算成额外积分段。
+    5. (|V|^2) 成像天然缺相位。主方法直接拟合带符号、带误差的稀疏功率；旧版 Fienup/HIO 已改成只约束同一份实际观测 UV 单元、完全不使用真值相位或真值支撑的独立基准。100次望远镜级拟合同时比较双星与单星圆盘的BIC；1080张盲重建给出 (m_{AB}=2–8)、2–60小时条件下的真阳性率、单星假阳性率及精确95%区间，并检查两类区间是否已经重叠，从而直接定位“可靠”“不可靠”和“不可区分”的转折。单张“好看”的重建不再作为性能证据。参数拟合固定了星盘直径，仍比完全未知天体乐观。
+    6. 微单元恢复时间按用户要求固定为10 ns。当前光学核是轴上、理想误差配置的已保存光追样本；实测仰角形变配置没有对应逐光子时间表，因此尚未验证随仰角/视场变化的时间核。串扰、后脉冲、暗计数、窄带滤光片角响应、实测时钟稳定性和标定星数据仍缺失，接口值均为零。以上参数替换为测量值之前，结果是带明确假设的研究预测，不是 LACT 最终性能声明。
     """),
 ]
 

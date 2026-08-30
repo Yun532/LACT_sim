@@ -16,6 +16,20 @@ def test_uvw_preserves_baseline_norm():
     baseline = np.array([421.0, -317.0, 12.0])
     uvw = sii.uvw_from_enu(baseline, 0.37, 0.22, 0.51)
     assert np.isclose(uvw @ uvw, baseline @ baseline, rtol=1e-12)
+    assert np.allclose(
+        sii.uvw_from_enu(-baseline, 0.37, 0.22, 0.51), -uvw)
+
+
+def test_celestial_tangent_axes_are_orthonormal_and_right_handed():
+    u_axis, v_axis, w_axis = sii.celestial_tangent_axes_enu(0.37, 0.22, 0.51)
+    assert np.allclose([u_axis @ u_axis, v_axis @ v_axis, w_axis @ w_axis], 1.0)
+    assert np.allclose([u_axis @ v_axis, u_axis @ w_axis, v_axis @ w_axis], 0.0)
+    assert np.allclose(np.cross(u_axis, v_axis), w_axis)
+
+
+def test_zero_adc_interface_preserves_analog_waveform():
+    waveform = np.array([-1.2, 0.0, 3.4])
+    assert np.array_equal(sii.digitize_adc(waveform, 0, 0.0), waveform)
 
 
 def test_binary_visibility_is_normalized_and_power_is_even():
@@ -102,9 +116,13 @@ def test_repository_instrument_follows_main_configs():
     assert np.isclose(instrument.detected_nsb_rate_hz, 70.527e6, rtol=2e-4)
     assert instrument.microcells_per_pixel == 270_336
     assert np.isclose(instrument.adc_sample_rate_hz, 250e6)
+    assert instrument.adc_bits == 0
+    assert np.isclose(instrument.adc_full_scale_mv, 0.0)
+    assert np.isclose(instrument.electronic_noise_rms_mv, 0.0)
+    assert np.isclose(instrument.residual_timing_rms_ns, 0.0)
     assert Path(instrument.spe_template_path).is_file()
     assert Path(instrument.microcell_device_path).is_file()
-    full = ROOT / "configs" / "optics" / "lact2_measured_full_response_400nm.csv"
+    full = ROOT / "configs" / "optics" / "lact2_measured_single_pixel_400nm.csv"
     fallback = ROOT / "configs" / "optics" / "lact_1229_onaxis_timing_kernel.csv"
     if full.exists():
         provenance = json.loads(
@@ -114,7 +132,7 @@ def test_repository_instrument_follows_main_configs():
             / instrument.effective_area_m2 * 0.7836336)
         assert np.isclose(instrument.throughput, expected_throughput)
         assert provenance["input_photons"] == 1_000_000
-        assert provenance["illuminated_pixel_count"] == 4
+        assert provenance["illuminated_pixel_count"] == 1
         assert np.isclose(sum(provenance["pixel_signal_fractions"].values()), 1.0)
         assert np.isclose(pd.read_csv(full).weight.sum(), 1.0)
     else:

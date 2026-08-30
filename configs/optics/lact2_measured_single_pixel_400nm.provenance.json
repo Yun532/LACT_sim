@@ -1,0 +1,26 @@
+{
+  "description": "main full optical response for one centered SII pixel: measured LACT2 mirror, errors, obstruction, collector and spectral efficiencies",
+  "source_hits_csv": "/home/hyy/codex_tmp/lact_sii_full_optics_20260825/source/run_logs/sii_single_pixel/lact2_measured_400nm_hits.csv",
+  "source_hits_sha256": "957c24d08a3d8963d5065112c6d0ab802c77e957e96b03450089df9e1344001b",
+  "input_photons": 1000000,
+  "surface_rows": 488845,
+  "camera_rows": 463531,
+  "detected_signal_weight_all_pixels": 117829.59919618789,
+  "total_detection_probability_all_pixels": 0.11782959919618789,
+  "central_pixel_id": 0,
+  "illuminated_pixel_count": 1,
+  "pixel_signal_fractions": {
+    "0": 1.0
+  },
+  "central_pixel_detection_probability": 0.11782959919618789,
+  "source_sampling_radius_m": 4.0,
+  "source_sampling_area_m2": 50.26548245743669,
+  "effective_detection_area_all_pixels_m2": 5.922761651362778,
+  "central_pixel_effective_detection_area_m2": 5.922761651362778,
+  "mean_arrival_time_ns": 82.33840449348311,
+  "arrival_time_rms_ns": 0.5488274245955779,
+  "psf_rms_m": 0.006723170326963224,
+  "components": 54,
+  "source_config": "/home/hyy/codex_tmp/lact_sii_full_optics_20260825/source/configs/optics/lact2_measured_single_pixel_400nm.cfg",
+  "source_config_sha256": "9c899cbc85395d39ce299f914ce10a7413d7326cfbd5255c63da2876e6304ba3"
+}

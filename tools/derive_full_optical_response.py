@@ -42,8 +42,8 @@ def main() -> None:
 
     pixel_signal = detected.groupby("pixel_id").signal_weight.sum().sort_values(
         ascending=False)
-    central_pixel = int(pixel_signal.index[0])
-    selected = detected.loc[detected.pixel_id == central_pixel].copy()
+    selected_pixel = int(pixel_signal.index[0])
+    selected = detected.loc[detected.pixel_id == selected_pixel].copy()
     grouped = selected.groupby("mirror_id", sort=True)
     rows = []
     for mirror_id, group in grouped:
@@ -71,7 +71,7 @@ def main() -> None:
     mean_time = np.average(selected.time_ns, weights=weights)
     sampling_area = math.pi*args.sampling_radius_m**2
     provenance = {
-        "description": "main full optical response: measured LACT2 mirror, errors, obstruction, camera, collector and spectral efficiencies",
+        "description": "main full optical response for one centered SII pixel: measured LACT2 mirror, errors, obstruction, collector and spectral efficiencies",
         "source_hits_csv": str(args.hits_csv.resolve()),
         "source_hits_sha256": sha256(args.hits_csv),
         "input_photons": args.input_photons,
@@ -80,7 +80,7 @@ def main() -> None:
         "detected_signal_weight_all_pixels": all_detected_weight,
         "total_detection_probability_all_pixels": float(
             all_detected_weight/args.input_photons),
-        "central_pixel_id": central_pixel,
+        "central_pixel_id": selected_pixel,
         "illuminated_pixel_count": int(len(pixel_signal)),
         "pixel_signal_fractions": {
             str(int(pixel)): float(value/pixel_signal.sum())

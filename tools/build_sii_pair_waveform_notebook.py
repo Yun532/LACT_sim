@@ -32,17 +32,15 @@ nb["cells"] = [
     再依次通过 LACT 光线追迹得到的时间核、S17351 微单元恢复、实测单 p.e. 电荷、
     SPE 波形、加性噪声与 ADC。最后只用两路波形计算互相关。
 
-    本次执行优先读取由当前 `main` 的LACT2实测镜面、结构遮挡、真实相机、集光器
-    和PDE生成的完整响应。下方表格直接给出中央像素有效面积、时间展宽、200 µs
+    本次执行优先读取由当前 `main` 的LACT2实测镜面、结构遮挡、一个居中的真实尺寸
+    像素、集光器和PDE生成的完整响应。这里只读出一个像素，不实例化完整相机。
+    下方表格直接给出单像素有效面积、时间展宽、200 µs
     相关对数、等效带宽、UV误差和重建；如果完整响应文件不存在，notebook会明确
     标注回退到旧理想时间核，绝不把回退结果称为完整光学结果。
 
-    本次完整运行结果：100万入射光子中，结构遮挡后输出面有效面积为24.572 m²；
-    PSF跨4个像素，最强807号像素的等效探测面积只有1.791 m²。因而$m_{AB}=2$
-    的单像素恒星率从旧参数的213.45 MHz降为60.94 MHz。光学到达时间RMS为
-    0.554 ns，略好于旧核0.602 ns；主要损失来自跨像素，而不是时间展宽。
-    实测SPE+4 ns匹配相关的等效带宽为79.12 MHz；单基线5σ约需12.76 h（mAB=2）
-    或264 h（mAB=3）。mAB=3、2 h的32镜重建失败，不能再得到可信双星参数。
+    notebook中的数值全部来自这一个像素的重新光追结果；不会把完整相机总光量或
+    多像素求和混入单像素计数。光学到达时间展宽、实测SPE、4 ns采样和长时间
+    $|V|^2$误差均继续保留。
     """),
     md("## 1. 设置和 main 参数"),
     code("""
@@ -379,19 +377,19 @@ nb["cells"] = [
 
     `Instrument.from_repository()` 优先读取当前 `main` 完整光学响应；只有响应文件
     不存在时才回退到旧的590,239条理想白板命中时间核。provenance记录输入光线数、
-    SHA-256、遮挡/PSF后的中央像素有效面积和到达时间RMS。
+    SHA-256、遮挡/PSF后的单像素有效面积和到达时间RMS。
     """),
     code("""
-    full_cfg = REPO_ROOT/"configs/optics/lact2_measured_full_response_400nm.cfg"
-    full_kernel = REPO_ROOT/"configs/optics/lact2_measured_full_response_400nm.csv"
-    full_provenance = REPO_ROOT/"configs/optics/lact2_measured_full_response_400nm.provenance.json"
+    full_cfg = REPO_ROOT/"configs/optics/lact2_measured_single_pixel_400nm.cfg"
+    full_kernel = REPO_ROOT/"configs/optics/lact2_measured_single_pixel_400nm.csv"
+    full_provenance = REPO_ROOT/"configs/optics/lact2_measured_single_pixel_400nm.provenance.json"
     full_ready = full_provenance.exists() and full_kernel.exists()
     active_kernel = Path(instrument.optical_timing_kernel_path).name
     optical_audit = pd.DataFrame([
         {"项目":"当前活动响应核", "本次执行":active_kernel},
         {"项目":"LACT2实测镜面/70°仰角", "本次执行":"有" if full_ready else "无：回退旧核"},
         {"项目":"3D支架遮挡", "本次执行":"有" if full_ready else "无：回退旧核"},
-        {"项目":"真实相机/集光器/PDE", "本次执行":"有" if full_ready else "无：回退旧核"},
+        {"项目":"单像素/集光器/PDE", "本次执行":"有" if full_ready else "无：回退旧核"},
         {"项目":"实测SPE/4 ns/ADC", "本次执行":"有"},
         {"项目":"HBT相关性的来源", "本次执行":"入射热光统计；光学本身不产生HBT"},
     ])

@@ -124,22 +124,39 @@ build/run_optical_sim configs/official_tests/perfect_point_900m_whiteboard.cfg
 
 长时间 HBT 模拟不需要把数小时内的每个光子反复追迹，但必须先用当前 `main`
 校准单光子响应。下面的运行同时包含 LACT2 实测逐镜参数、70° 仰角插值、3D
-结构遮挡、真实相机、集光器、反射率、滤光片和 PDE：
+结构遮挡、一个居中的真实尺寸像素、集光器、反射率、滤光片和 PDE。强度干涉
+只读出这个像素，不创建完整相机，也不做多像素合并：
 
 ```bash
-build/run_optical_sim configs/optics/lact2_measured_full_response_400nm.cfg
+build/run_optical_sim configs/optics/lact2_measured_single_pixel_400nm.cfg
 python3 tools/derive_full_optical_response.py \
-  run_logs/sii_full_optics/lact2_measured_400nm_hits.csv \
-  configs/optics/lact2_measured_full_response_400nm.csv \
+  run_logs/sii_single_pixel/lact2_measured_400nm_hits.csv \
+  configs/optics/lact2_measured_single_pixel_400nm.csv \
   --input-photons 1000000 \
-  --provenance-json configs/optics/lact2_measured_full_response_400nm.provenance.json \
-  --source-config configs/optics/lact2_measured_full_response_400nm.cfg
+  --provenance-json configs/optics/lact2_measured_single_pixel_400nm.provenance.json \
+  --source-config configs/optics/lact2_measured_single_pixel_400nm.cfg
 ```
 
 生成后 `Instrument.from_repository()` 会自动优先使用该完整响应；没有生成时才回退到
 旧的轴上理想误差时间核。光学响应决定探测概率、像素接收、PSF 和到达时间分布，
 但 HBT 相关性仍必须在两台望远镜的入射热光统计中产生。线性被动光学不会凭空生成
 两镜相关，也不会移动 UV 坐标；它改变 UV 点的误差和权重。
+
+### 单像素恒星强度干涉统一流程
+
+论文级可复现实例位于
+[`notebooks/lact_sii_paper_simulation.ipynb`](notebooks/lact_sii_paper_simulation.ipynb)。
+它按“源模型与理论天图 → 32 台望远镜的固定 RA/Dec 天球 `uvw` → 单像素光学和
+2 μs 波形 → 长曝光 `|V|²` → 独立无相位重建”的顺序执行。修改 notebook 顶部的
+`Instrument`、`BinarySource` 或 `Observation` 即可重跑参数情景；未由 main 提供的
+电子噪声、ADC 量化、串扰、后脉冲、暗计数、时钟残差和角响应接口默认均为零。
+
+在仓库根目录执行：
+
+```bash
+python tools/build_sii_paper_notebook.py
+python tools/execute_notebook.py notebooks/lact_sii_paper_simulation.ipynb --cwd . --timeout 1200
+```
 
 ## Photon CSV
 

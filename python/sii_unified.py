@@ -1,16 +1,10 @@
 #!/usr/bin/env python3
-"""Unified stellar-intensity-interferometry simulation primitives.
+"""恒星强度干涉的最小可复用模拟组件。
 
-The module deliberately separates three scales:
-
-1. optical coherence and source visibility;
-2. short digitized electronics waveforms used to validate delays, SPE shaping,
-   ADC effects, noise, and SiPM recovery;
-3. long-exposure |V|^2 estimators used for an observing-night simulation.
-
-It is not scientifically meaningful to allocate a full night at 625 MS/s in
-memory.  The short waveform calibrates response effects, while the sufficient
-long-exposure statistic is simulated with its explicit uncertainty.
+模块明确分成三个时间尺度：光学相干与源可见度、用于校准响应的短波形、
+以及用显式误差模拟小时级观测的 ``|V|^2`` 统计量。没有必要把整夜的
+625 MS/s 波形全部放入内存；短波形负责验证 SPE、时延、ADC 和 SiPM，
+长曝光则直接使用相应的充分统计量。
 """
 
 from __future__ import annotations
@@ -44,21 +38,28 @@ class Instrument:
     throughput: float = 0.20
     electronics_bandwidth_hz: float = 200.0e6
     adc_sample_rate_hz: float = 625.0e6
-    adc_bits: int = 8
-    adc_full_scale_mv: float = 200.0
+    # main 没有提供 ADC 位数和满量程时，0 表示保留模拟波形、不量化。
+    adc_bits: int = 0
+    adc_full_scale_mv: float = 0.0
     detected_nsb_rate_hz: float = 70.527e6
-    electronic_noise_rms_mv: float = 0.35
+    # 以下未在 main 中标定的随机效应默认关闭；有实测值后直接替换。
+    electronic_noise_rms_mv: float = 0.0
     excess_noise_factor: float = 1.016142
     polarization_factor: float = 0.5
     spectral_shape_factor: float = 0.842
     microcells_per_pixel: int = 270_336
     microcell_recovery_time_ns: float = 10.0
-    telescope_gain_calibration_rms: float = 0.010
-    per_night_gain_rms: float = 0.005
-    baseline_zero_point_rms: float = 0.005
-    residual_timing_rms_ns: float = 0.20
-    transparency_fractional_rms: float = 0.03
-    nsb_fractional_rms: float = 0.10
+    telescope_gain_calibration_rms: float = 0.0
+    per_night_gain_rms: float = 0.0
+    baseline_zero_point_rms: float = 0.0
+    residual_timing_rms_ns: float = 0.0
+    transparency_fractional_rms: float = 0.0
+    nsb_fractional_rms: float = 0.0
+    # main 当前没有这些单像素非理想项；接口保留，默认严格为零。
+    sipm_crosstalk_probability: float = 0.0
+    sipm_afterpulse_probability: float = 0.0
+    dark_count_rate_hz: float = 0.0
+    filter_angular_response_path: str | None = None
     spe_template_path: str | None = None
     charge_samples_path: str | None = None
     microcell_device_path: str | None = None
@@ -165,7 +166,7 @@ class Instrument:
         # 优先使用由当前 main 实测光学配置生成的完整响应；没有运行过该
         # 校准时才回退到旧的轴上理想误差时间核，并由 notebook 明确标注。
         full_timing_path = (root / "configs" / "optics"
-                            / "lact2_measured_full_response_400nm.csv")
+                            / "lact2_measured_single_pixel_400nm.csv")
         fallback_timing_path = (root / "configs" / "optics"
                                 / "lact_1229_onaxis_timing_kernel.csv")
         timing_path = (full_timing_path if (full_timing_path.exists()
@@ -187,6 +188,19 @@ class Instrument:
             "effective_area_m2": effective_area,
             "throughput": float(throughput),
             "adc_sample_rate_hz": 1.0e9/sample_width_ns,
+            "adc_bits": int(electronics.get("adc.bits", base.adc_bits)),
+            "adc_full_scale_mv": float(electronics.get(
+                "adc.full_scale_mv", base.adc_full_scale_mv)),
+            "electronic_noise_rms_mv": float(electronics.get(
+                "electronics.noise_rms_mv", base.electronic_noise_rms_mv)),
+            "sipm_crosstalk_probability": float(electronics.get(
+                "sipm.crosstalk_probability",
+                base.sipm_crosstalk_probability)),
+            "sipm_afterpulse_probability": float(electronics.get(
+                "sipm.afterpulse_probability",
+                base.sipm_afterpulse_probability)),
+            "dark_count_rate_hz": float(electronics.get(
+                "sipm.dark_count_rate_hz", base.dark_count_rate_hz)),
             "detected_nsb_rate_hz": float(nsb_rate),
             "excess_noise_factor": excess_noise,
             "microcells_per_pixel": microcells,
@@ -196,6 +210,9 @@ class Instrument:
             "microcell_device_path": str(device_path.resolve()),
             "optical_timing_kernel_path": (
                 str(timing_path.resolve()) if timing_path.exists() else None),
+            "filter_angular_response_path": (
+                str(workspace_path(cfg["efficiency.filter_angular_response"]).resolve())
+                if cfg.get("efficiency.filter_angular_response") else None),
             "parameter_source": str(config_path),
         }
         values.update(overrides)
@@ -248,7 +265,10 @@ def _read_two_column_curve(path) -> tuple[np.ndarray, np.ndarray]:
 
 def source_direction_enu(hour_angle_rad: float, dec_rad: float,
                          lat_rad: float) -> np.ndarray:
-    """Topocentric source unit vector in East, North, Up coordinates."""
+    """返回 ENU 坐标中的源方向单位向量。
+
+    这里沿用仓库已有的时角符号约定；后面的天球切向基底与该约定一致。
+    """
     vector = np.array([
         math.cos(dec_rad) * math.sin(hour_angle_rad),
         math.sin(dec_rad) * math.cos(lat_rad)
@@ -259,23 +279,49 @@ def source_direction_enu(hour_angle_rad: float, dec_rad: float,
     return vector / np.linalg.norm(vector)
 
 
+def celestial_tangent_axes_enu(hour_angle_rad: float, dec_rad: float,
+                                lat_rad: float) -> tuple[np.ndarray, ...]:
+    """返回固定 RA/Dec 天球基底在 ENU 中的三个单位轴。
+
+    ``u`` 是当前时角符号下的天球东西向切向轴，``v`` 是赤纬增加方向，
+    ``w`` 指向源。它们由源方向对时角和赤纬的导数得到，不会像
+    ``local_up × source`` 那样随视差角额外旋转。
+    """
+    hour = float(hour_angle_rad)
+    dec = float(dec_rad)
+    lat = float(lat_rad)
+    sh, ch = math.sin(hour), math.cos(hour)
+    sd, cd = math.sin(dec), math.cos(dec)
+    sl, cl = math.sin(lat), math.cos(lat)
+    source = source_direction_enu(hour, dec, lat)
+    u_axis = np.array([ch, sl * sh, -cl * sh], dtype=float)
+    v_axis = np.array([
+        -sd * sh,
+        cd * cl + sd * ch * sl,
+        cd * sl - sd * ch * cl,
+    ], dtype=float)
+    # 显式归一化抵抗浮点误差，并让 w 与源方向完全一致。
+    u_axis /= np.linalg.norm(u_axis)
+    v_axis /= np.linalg.norm(v_axis)
+    return u_axis, v_axis, source
+
+
 def uvw_from_enu(baseline_enu_m, hour_angle_rad: float, dec_rad: float,
                  lat_rad: float) -> np.ndarray:
-    """Project a local ENU baseline onto east/north/source sky axes."""
-    source = source_direction_enu(hour_angle_rad, dec_rad, lat_rad)
-    u_axis = np.cross(np.array([0.0, 0.0, 1.0]), source)
-    if np.linalg.norm(u_axis) < 1.0e-14:
-        u_axis = np.array([1.0, 0.0, 0.0])
-    else:
-        u_axis /= np.linalg.norm(u_axis)
-    v_axis = np.cross(source, u_axis)
+    """把 ENU 基线投影到固定 RA/Dec 天球的 ``(u,v,w)`` 坐标。
+
+    ``w`` 是几何传播方向，几何时延为 ``w/c``；交换基线端点会严格得到
+    ``(-u,-v,-w)``。该定义与双星位置角使用的 RA/Dec 切平面保持一致。
+    """
+    u_axis, v_axis, w_axis = celestial_tangent_axes_enu(
+        hour_angle_rad, dec_rad, lat_rad)
     baseline = np.asarray(baseline_enu_m, dtype=float)
     return np.array([baseline @ u_axis, baseline @ v_axis,
-                     baseline @ source])
+                     baseline @ w_axis])
 
 
 def uniform_disk_visibility(q_lambda, diameter_mas: float) -> np.ndarray:
-    """Real visibility of a circular uniform disk."""
+    """计算均匀圆盘的实复可见度。"""
     if j1 is None:
         raise RuntimeError("SciPy is required for uniform-disk visibility")
     x = np.pi * diameter_mas * MAS_TO_RAD * np.asarray(q_lambda, float)
@@ -287,7 +333,7 @@ def uniform_disk_visibility(q_lambda, diameter_mas: float) -> np.ndarray:
 
 def binary_visibility(u_lambda, v_lambda,
                       source: BinarySource = BinarySource()) -> np.ndarray:
-    """Normalized complex visibility of two uniform-disk components."""
+    """计算两颗均匀圆盘双星的归一化复可见度。"""
     u = np.asarray(u_lambda, dtype=float)
     v = np.asarray(v_lambda, dtype=float)
     q = np.hypot(u, v)
@@ -303,7 +349,7 @@ def binary_visibility(u_lambda, v_lambda,
 
 
 def ab_photon_spectral_density(magnitude: float, wavelength_m: float) -> float:
-    """AB-source photon spectral density in photons s^-1 m^-2 Hz^-1."""
+    """把 AB 星等换算为每平方米、每赫兹的光子谱密度。"""
     f_nu = 3631.0 * JY_W_M2_HZ * 10.0 ** (-0.4 * magnitude)
     photon_energy = H_J_S * C_M_S / wavelength_m
     return f_nu / photon_energy
@@ -320,11 +366,11 @@ def unit_visibility_snr(magnitude: float, integration_s: float,
                         instrument: Instrument = Instrument(),
                         spectral_channels: int = 1,
                         nsb_rate_hz: float | None = None) -> float:
-    """Shot-noise approximation for an unresolved equal-telescope pair."""
+    """计算未分辨等口径双镜的散粒噪声近似 SNR。"""
     nsb = (instrument.detected_nsb_rate_hz if nsb_rate_hz is None
            else nsb_rate_hz)
     star = detected_star_rate_hz(magnitude, instrument)
-    total = star + nsb
+    total = star + nsb + instrument.dark_count_rate_hz
     one_channel = (
         star**2 / (total * instrument.optical_bandwidth_hz)
         * math.sqrt(instrument.electronics_bandwidth_hz * integration_s / 2.0)
@@ -335,11 +381,10 @@ def unit_visibility_snr(magnitude: float, integration_s: float,
 
 def mean_recovery_fraction(rate_hz: float, microcells: int,
                            recovery_time_ns: float) -> float:
-    """Mean charge fraction for uniform random illumination of many cells.
+    """计算均匀随机照明下大量微单元的平均电荷比例。
 
-    Each cell sees a Poisson rate ``rate_hz/microcells``.  Averaging
-    ``1-exp(-dt/tau)`` over the exponential inter-arrival distribution gives
-    exactly ``1/(1 + rate_per_cell*tau)``.
+    每个微单元看到的 Poisson 率为 ``rate_hz/microcells``。对指数间隔分布平均
+    ``1-exp(-dt/tau)`` 后，结果正好是 ``1/(1 + rate_per_cell*tau)``。
     """
     if rate_hz < 0 or microcells <= 0 or recovery_time_ns <= 0:
         raise ValueError("rate, microcell count, and recovery time are invalid")
@@ -349,7 +394,7 @@ def mean_recovery_fraction(rate_hz: float, microcells: int,
 
 def apply_exponential_microcell_recovery(times_ns, cell_ids,
                                          recovery_time_ns: float) -> np.ndarray:
-    """Return charge fraction for a time-ordered sequence of cell hits."""
+    """对按时间排序的微单元击中序列计算指数恢复电荷比例。"""
     times = np.asarray(times_ns, dtype=float)
     cells = np.asarray(cell_ids, dtype=np.int64)
     if times.shape != cells.shape or recovery_time_ns <= 0:
@@ -372,7 +417,7 @@ def apply_exponential_microcell_recovery(times_ns, cell_ids,
 
 
 def load_measured_spe_template(path) -> tuple[np.ndarray, np.ndarray]:
-    """Load the repository two-column time/amplitude measured SPE CSV."""
+    """读取仓库中的两列实测 SPE 时间/幅度 CSV。"""
     data = np.genfromtxt(Path(path), delimiter=",", names=True)
     names = list(data.dtype.names or ())
     if len(names) < 2:
@@ -385,7 +430,7 @@ def load_measured_spe_template(path) -> tuple[np.ndarray, np.ndarray]:
 
 def load_empirical_charge_factors(
         path, column: str = "charge_factor_mean_one") -> np.ndarray:
-    """Load and exactly mean-normalize positive empirical SPE charges."""
+    """读取正值实测 SPE 电荷，并严格归一化到均值为一。"""
     data = np.genfromtxt(Path(path), delimiter=",", names=True, dtype=None,
                          encoding="utf-8")
     names = list(data.dtype.names or ())
@@ -399,11 +444,10 @@ def load_empirical_charge_factors(
 
 
 def load_optical_timing_mixture(path) -> dict[str, np.ndarray | float]:
-    """Load the compact per-facet optical arrival-time mixture.
+    """读取按镜面分面汇总的光学到达时间混合分布。
 
-    The stored means include an arbitrary common propagation time.  Sampling
-    and transfer calculations center that common time, because only the path
-    spread changes an intensity-correlation peak.
+    文件中的均值包含任意公共传播时间；抽样和传递计算会去掉这个公共时间，
+    因为强度相关峰只受路径展宽影响。
     """
     data = np.genfromtxt(Path(path), delimiter=",", names=True)
     required = {"weight", "mean_time_ns", "std_time_ns"}
@@ -433,7 +477,7 @@ def load_optical_timing_mixture(path) -> dict[str, np.ndarray | float]:
 
 def sample_optical_delays_ns(rng: np.random.Generator, count: int,
                              mixture) -> np.ndarray:
-    """Draw centered per-photoelectron optical propagation delays."""
+    """按混合分布抽取已居中的逐光电子光路延迟。"""
     if count < 0:
         raise ValueError("count must be non-negative")
     weights = np.asarray(mixture["weights"], dtype=float)
@@ -445,12 +489,11 @@ def sample_optical_delays_ns(rng: np.random.Generator, count: int,
 
 def optical_timing_transfer_efficiency(
         mixture, bandwidth_hz: float, samples: int = 4097) -> float:
-    """Band-averaged zero-lag HBT contrast retained by optical time spread.
+    """计算光学到达时间展宽在电子带宽内保留的零延迟 HBT 对比度。
 
-    For identical telescopes with timing characteristic function H(f), the
-    retained zero-lag cross spectrum over a rectangular electronics band is
-    ``mean(|H(f)|^2, 0..B)``.  A calibrated correction divides by this number
-    and therefore inflates the visibility-squared uncertainty by its inverse.
+    对相同望远镜，若时间特征函数为 H(f)，矩形电子带宽内保留的零延迟
+    交叉谱是 ``mean(|H(f)|^2, 0..B)``。校正回原始可见度平方时要除以该值，
+    因而其倒数会放大不确定度。
     """
     if bandwidth_hz <= 0.0 or samples < 3:
         raise ValueError("bandwidth and sample count must be positive")
@@ -468,7 +511,7 @@ def optical_timing_transfer_efficiency(
 
 def residual_delay_response(mixture, delay_ns, bandwidth_hz: float,
                             samples: int = 4097) -> np.ndarray:
-    """Relative zero-lag correlation after an uncorrected pair delay."""
+    """计算未校正双镜时延下的相对零延迟相关响应。"""
     delays = np.asarray(delay_ns, dtype=float)
     frequency_hz = np.linspace(0.0, bandwidth_hz, samples)
     frequency_per_ns = frequency_hz * 1.0e-9
@@ -492,7 +535,7 @@ def residual_delay_response(mixture, delay_ns, bandwidth_hz: float,
 
 def convolve_pe_times(times_ns, amplitudes, sample_times_ns,
                       template_time_ns, template_amplitude_mv) -> np.ndarray:
-    """Directly sum shifted calibrated SPE templates on an ADC time grid."""
+    """在 ADC 时间网格上叠加每个平移后的标定 SPE 模板。"""
     output = np.zeros_like(np.asarray(sample_times_ns, dtype=float))
     for time_ns, amplitude in zip(times_ns, amplitudes):
         output += float(amplitude) * np.interp(
@@ -502,7 +545,9 @@ def convolve_pe_times(times_ns, amplitudes, sample_times_ns,
 
 
 def digitize_adc(waveform_mv, bits: int, full_scale_mv: float) -> np.ndarray:
-    """Symmetric signed ADC quantization in millivolts."""
+    """按对称满量程量化；``bits=full_scale=0`` 表示关闭 ADC 量化。"""
+    if bits == 0 and full_scale_mv == 0.0:
+        return np.asarray(waveform_mv, float).copy()
     if bits < 2 or full_scale_mv <= 0:
         raise ValueError("invalid ADC specification")
     half = full_scale_mv / 2.0
@@ -527,12 +572,11 @@ def simulate_short_pair_waveforms(
         optical_timing_mixture=None,
         padding_ns: float | None = None,
         seed: int = 20260824) -> dict[str, np.ndarray | float]:
-    """Simulate a representative two-telescope ADC record.
+    """模拟一段代表性的双望远镜 ADC 记录。
 
-    Correlated star counts use a shared-Poisson construction whose covariance
-    per ADC bin equals ``r_star^2 * coherence_area * dt * |V|^2``.  NSB and
-    remaining star counts are independent.  This reproduces the required
-    second moment without pretending to resolve the femtosecond optical field.
+    恒星相关计数使用共享 Poisson 分量，使每个 ADC bin 的协方差等于
+    ``r_star^2 * coherence_area * dt * |V|^2``；NSB 和剩余星光相互独立。
+    这样得到正确的二阶矩，但不假装在数值上解析飞秒光场。
     """
     if duration_ns <= 0.0:
         raise ValueError("duration_ns must be positive")
@@ -557,6 +601,7 @@ def simulate_short_pair_waveforms(
                    * max(0.0, float(visibility2)))
     star_mean = star_rate_hz * dt_s
     nsb_mean = nsb_rate_hz * dt_s
+    dark_mean = instrument.dark_count_rate_hz * dt_s
     if shared_mean > star_mean:
         raise ValueError("shared thermal component exceeds the star count")
     common = rng.poisson(shared_mean, event_bins)
@@ -564,6 +609,9 @@ def simulate_short_pair_waveforms(
     counts_b = common + rng.poisson(star_mean - shared_mean, event_bins)
     counts_a += rng.poisson(nsb_mean, event_bins)
     counts_b += rng.poisson(nsb_mean, event_bins)
+    if dark_mean > 0.0:
+        counts_a += rng.poisson(dark_mean, event_bins)
+        counts_b += rng.poisson(dark_mean, event_bins)
 
     empirical_charge = (None if charge_factors is None
                         else np.asarray(charge_factors, dtype=float))
@@ -963,7 +1011,8 @@ def _electronics_correlation_efficiency(instrument, total_rate_hz):
     charge_second_moment = instrument.excess_noise_factor**2
     shot_variance = (total_rate_hz/1.0e9 * charge_second_moment
                      * np.trapezoid(template_v**2, template_t))
-    adc_step = instrument.adc_full_scale_mv/2**instrument.adc_bits
+    adc_step = (0.0 if instrument.adc_bits <= 0
+                else instrument.adc_full_scale_mv/2**instrument.adc_bits)
     additive = instrument.electronic_noise_rms_mv**2 + adc_step**2/12.0
     return float(shot_variance/(shot_variance+additive))
 
@@ -1022,6 +1071,7 @@ def simulate_uv_observation(
         return np.exp(rms*state-0.5*rms**2)
 
     nsb_rate = nsb_multiplier*instrument.detected_nsb_rate_hz
+    dark_rate = instrument.dark_count_rate_hz
     star_rate = detected_star_rate_hz(source.ab_magnitude, instrument)
     if electronics_case == "ideal":
         excess_noise, electronics_efficiency = 1.0, 1.0
@@ -1053,10 +1103,15 @@ def simulate_uv_observation(
             star_rate*transparency*observation.segment_s)
         nsb_counts = rng.poisson(
             nsb_rate*nsb_factor*observation.segment_s)
+        dark_counts = rng.poisson(
+            dark_rate*observation.segment_s, size=telescope_count)
         observed_star = star_counts/observation.segment_s
-        observed_total = (star_counts+nsb_counts)/observation.segment_s
+        observed_total = (
+            star_counts + nsb_counts + dark_counts[None, :]
+        ) / observation.segment_s
         photon_relative_rms.append(float(np.median(
-            1.0/np.sqrt(np.maximum(star_counts+nsb_counts, 1)))))
+            1.0/np.sqrt(np.maximum(
+                star_counts + nsb_counts + dark_counts[None, :], 1)))))
 
         nightly_gain = rng.normal(0.0, instrument.per_night_gain_rms,
                                   telescope_count)
@@ -1111,6 +1166,7 @@ def simulate_uv_observation(
         "source_case": source_case,
         "nsb_multiplier": nsb_multiplier,
         "nsb_rate_MHz": nsb_rate/1.0e6,
+        "dark_count_rate_MHz": dark_rate/1.0e6,
         "electronics_case": electronics_case,
         "electronics_correlation_efficiency": electronics_efficiency,
         "optical_timing_efficiency": optical_efficiency,
