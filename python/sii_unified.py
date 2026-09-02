@@ -190,6 +190,9 @@ class Instrument:
             "effective_area_m2": effective_area,
             "throughput": float(throughput),
             "adc_sample_rate_hz": 1.0e9/sample_width_ns,
+            # main 当前只给采样间隔、没有独立标定的模拟前端带宽；相关器
+            # 可用带宽不能超过 Nyquist，因此使用 fs/2 作为保守上限。
+            "electronics_bandwidth_hz": 0.5e9/sample_width_ns,
             "adc_bits": int(electronics.get("adc.bits", base.adc_bits)),
             "adc_full_scale_mv": float(electronics.get(
                 "adc.full_scale_mv", base.adc_full_scale_mv)),
@@ -371,13 +374,17 @@ def unit_visibility_snr(magnitude: float, integration_s: float,
                         instrument: Instrument = Instrument(),
                         spectral_channels: int = 1,
                         nsb_rate_hz: float | None = None) -> float:
-    """计算未分辨等口径双镜的散粒噪声近似 SNR。"""
+    """计算未分辨等口径双镜的散粒噪声近似 SNR。
+
+    使用和短波形相关对完全相同的有效相干面积 ``coherence_area_s``；
+    其中已经包含偏振与有限滤光片谱形造成的相关对比度稀释。
+    """
     nsb = (instrument.detected_nsb_rate_hz if nsb_rate_hz is None
            else nsb_rate_hz)
     star = detected_star_rate_hz(magnitude, instrument)
     total = star + nsb + instrument.dark_count_rate_hz
     one_channel = (
-        star**2 / (total * instrument.optical_bandwidth_hz)
+        star**2 / total * instrument.coherence_area_s
         * math.sqrt(instrument.electronics_bandwidth_hz * integration_s / 2.0)
         / instrument.excess_noise_factor
     )
@@ -1140,7 +1147,7 @@ def simulate_uv_observation(
         total_j = observed_total[row_segment, row_j]
         unit_snr = (
             star_i*star_j/np.sqrt(total_i*total_j)
-            / instrument.optical_bandwidth_hz
+            * instrument.coherence_area_s
             * np.sqrt(instrument.electronics_bandwidth_hz
                       * observation.segment_s/2.0)
             / excess_noise)

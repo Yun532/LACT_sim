@@ -114,6 +114,9 @@ def test_two_microsecond_waveform_has_padding_for_full_spe_tail():
 def test_repository_instrument_follows_main_configs():
     instrument = sii.Instrument.from_repository(ROOT)
     assert np.isclose(instrument.effective_area_m2, 24.576860)
+    assert np.isclose(
+        instrument.electronics_bandwidth_hz,
+        instrument.adc_sample_rate_hz/2.0)
     assert np.isclose(instrument.detected_nsb_rate_hz, 70.527e6, rtol=2e-4)
     assert instrument.microcells_per_pixel == 270_336
     assert np.isclose(instrument.adc_sample_rate_hz, 250e6)
@@ -178,6 +181,25 @@ def test_dark_counts_are_sampled_per_segment_and_telescope(monkeypatch):
     sii.simulate_uv_observation(
         uvw, sii.BinarySource(), observation, instrument, seed=17)
     assert (2, 2) in poisson_sizes
+
+
+def test_short_pair_rate_and_long_exposure_snr_use_same_coherence_area():
+    instrument = sii.Instrument(
+        optical_width_nm=2.0, electronics_bandwidth_hz=110.0e6,
+        detected_nsb_rate_hz=70.0e6, polarization_factor=0.5,
+        spectral_shape_factor=0.842)
+    integration_s = 1200.0
+    star = sii.detected_star_rate_hz(2.0, instrument)
+    total = star + instrument.detected_nsb_rate_hz
+    pair_rate_at_unit_visibility = sii.hbt_correlated_pair_rate_hz(
+        star, star, instrument.coherence_area_s, 1.0)
+    snr_implied_by_short_pairs = (
+        pair_rate_at_unit_visibility/total
+        * np.sqrt(instrument.electronics_bandwidth_hz*integration_s/2.0)
+        / instrument.excess_noise_factor)
+    assert np.isclose(
+        sii.unit_visibility_snr(2.0, integration_s, instrument),
+        snr_implied_by_short_pairs)
 
 
 def test_full_optical_response_uses_brightest_pixel_and_weight(tmp_path):

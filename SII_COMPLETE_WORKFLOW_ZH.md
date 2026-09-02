@@ -19,7 +19,7 @@
 - 独立重建模块：[`python/sii_reconstruction.py`](python/sii_reconstruction.py)
 - 自动测试：[`tests/test_sii_unified.py`](tests/test_sii_unified.py)
 
-本文和图对应 `intensity-interferometry-unified` 分支提交 `46fe0ed`。图由上述 notebook 使用固定随机种子生成，不是手工绘制的示意图。
+本文和图以 `intensity-interferometry-unified` 分支 2026-09-03 的完整重算为准。图由上述 notebook 使用固定随机种子生成，不是手工绘制的示意图。
 
 ## 0. 首先明确三个容易混淆的问题
 
@@ -251,7 +251,7 @@ $$
 
 **图 3。** 以中天为中心，从一个 20 分钟时间格逐步累积到 6 小时的 UV 覆盖。负基线共轭点以相同显著度显示，但不计作新的独立测量。延长同一晚的观测既增加积分时间，也延长 UV 轨迹；重复相同恒星时角的多晚观测主要提高 SNR，不会持续产生全新的轨迹。
 
-当前案例已用每个 20 分钟时间段内 41 个子时刻检查中点近似。段平均与中点 $|V|^2$ 的最大绝对差约为 0.0072，RMS 约为 0.0011；参考情形单点统计误差约为 0.099，因此当前近似足够。更小的源、更长的基线或更长时间格应改为段内积分。
+当前案例已用每个 20 分钟时间段内 41 个子时刻检查中点近似。段平均与中点 $|V|^2$ 的最大绝对差约为 0.0072，RMS 约为 0.0011；修正后的参考情形单点统计误差约为 0.235，因此当前近似足够。更小的源、更长的基线或更长时间格应改为段内积分。
 
 ---
 
@@ -410,17 +410,51 @@ $$
 
 **图 5。** 左：几何时延校正前，相关峰位于非零 lag；校正后被移到零延迟。右：零延迟附近的电子学展宽相关峰。峰高约为 $10^{-6}$ 量级，因此真实短波形通常看不到稳定峰，需要大量时间样本累积。
 
-### 5.5 小时级测量的充分统计量
+### 5.5 短波形和长曝光是否一致
+
+必须区分“同一个物理随机过程”和“同一个数值估计器”。短波形与长曝光现在共享同一个有效相干面积：
+
+$$
+\tau_{\rm eff}=\frac{p_{\rm pol}s_{\rm spec}}{\Delta\nu},
+$$
+
+以及同一个相关对率：
+
+$$
+R_{\rm pair}=r_{\star,i}r_{\star,j}\tau_{\rm eff}|V|^2.
+$$
+
+但是图 4 中直接画出的原始零延迟 Pearson 相关没有对白化后的频率做最优加权。约 170 ns 的 SPE 尾巴使相邻 4 ns 采样高度相关，所以它的等效独立带宽只有约 $14.0\,\mathrm{MHz}$。使用已知 SPE 和光学时间核进行频域白化/匹配加权后，有效带宽约为 $110.9\,\mathrm{MHz}$，接近但低于 4 ns 采样的 $125\,\mathrm{MHz}$ Nyquist 上限。
+
+当前真实参数下，该示例基线的相关对率约为 $682\,\mathrm{s^{-1}}$。一条 2 μs 记录中期望相关对只有
+
+$$
+682\times2\times10^{-6}\simeq0.00136,
+$$
+
+一个相关对都没有的概率为
+
+$$
+e^{-0.00136}\simeq99.864\%.
+$$
+
+因此 2 μs 实际短波形只能检查数据链，不能直接验证恒星相关峰。为了在可计算时间内检查均值，notebook 只把 HBT 相关分量人为放大 $10^4$ 倍，而保持恒星、NSB、光学时间核、实测 SPE、电荷涨落和 4 ns 采样不变。完整波形 Monte Carlo 得到原始零延迟相关约 $0.02394\pm0.00629$，解析预测为 $0.02419$，二者在统计误差内一致。无相关短波形在 200、400、800 ns 下的相关误差严格按 $T^{-1/2}$ 缩放。
+
+![短波形与长曝光闭合检验](docs/sii_workflow_figures/05a_short_long_consistency.png)
+
+**图 5a。** 左：4 ns 采样的 Nyquist 带宽、匹配相关器带宽和未经白化的原始零延迟相关带宽。中：人为放大相关分量后的完整波形 Monte Carlo 与解析预测闭合；放大不进入科学结果。右：短记录相关噪声符合 $T^{-1/2}$ 缩放。结果说明短波形的信号均值和噪声缩放可外推到长曝光，但长曝光的 $110.9\,\mathrm{MHz}$ 结果对应匹配/白化相关器，不是图 4 中未经处理的原始 Pearson 相关。
+
+### 5.6 小时级测量的充分统计量
 
 整夜不生成原始 ADC 数组，而使用短波形和仪器响应校准后的强度干涉 SNR：
 
 $$
 \mathrm{SNR}_{ij}=
-\frac{r_{\star,i}r_{\star,j}}
-{\sqrt{r_{{\rm tot},i}r_{{\rm tot},j}}\,\Delta\nu_{\rm opt}}
+\frac{r_{\star,i}r_{\star,j}\tau_{\rm eff}}
+{\sqrt{r_{{\rm tot},i}r_{{\rm tot},j}}}
 |V_{ij}|^2
 \sqrt{\frac{B_{\rm eff}T}{2}}
-\frac{\eta_{\rm elec}\eta_{\rm timing}}{F_{\rm EN}},
+\frac{1}{F_{\rm EN}},
 $$
 
 其中
@@ -429,15 +463,17 @@ $$
 r_{\rm tot}=r_\star+r_{\rm NSB}+r_{\rm dark}.
 $$
 
+$B_{\rm eff}$ 已经把光学时间弥散、SPE、4 ns 采样、ADC 和加性电子噪声统一折算进去，因此不能再次乘同一套光学/电子学效率。残余基线时延仍作为额外的相关峰衰减单独处理。
+
 所以单位可见度的统计误差为
 
 $$
 \sigma(|V|^2)=
 \left[
-\frac{r_{\star,i}r_{\star,j}}
-{\sqrt{r_{{\rm tot},i}r_{{\rm tot},j}}\,\Delta\nu_{\rm opt}}
+\frac{r_{\star,i}r_{\star,j}\tau_{\rm eff}}
+{\sqrt{r_{{\rm tot},i}r_{{\rm tot},j}}}
 \sqrt{\frac{B_{\rm eff}T}{2}}
-\frac{\eta_{\rm elec}\eta_{\rm timing}}{F_{\rm EN}}
+\frac{1}{F_{\rm EN}}
 \right]^{-1}.
 $$
 
@@ -483,7 +519,7 @@ $$
 
 ![模拟的稀疏 UV 测量和测量闭合](docs/sii_workflow_figures/06_simulated_uv_measurements.png)
 
-**图 6。** 左：默认 $m_{AB}=2$ 双星在实际 32 镜、6 小时覆盖上的带噪声 $|V|^2$；颜色值未裁剪。右：模拟测量与注入真值的闭合关系，参考情形每 20 分钟段的单位可见度 SNR 约 10.1，对应 $\sigma(|V|^2)\simeq0.099$。
+**图 6。** 左：默认 $m_{AB}=2$ 双星在实际 32 镜、6 小时覆盖上的带噪声 $|V|^2$；颜色值未裁剪。右：模拟测量与注入真值的闭合关系。统一使用偏振和谱形稀释后的有效相干面积后，每 20 分钟段的单位可见度 SNR 约 4.26，对应 $\sigma(|V|^2)\simeq0.235$。
 
 重建前，对落入同一 UV 单元的点进行逆方差加权：
 
@@ -555,7 +591,7 @@ $$
 
 ![无相位图像重建结果](docs/sii_workflow_figures/07_phaseless_reconstruction.png)
 
-**图 7。** 上排依次为合并后的 UV 功率、自相关脏图和正向闭合；下排为统一角分辨率下的真实双星、歧义对齐后的无相位重建和残差。本例正向加权 RMSE 为 0.042，重建与真值的相关系数为 0.972。真值只用于最后验证和歧义对齐，不进入优化器。
+**图 7。** 上排依次为合并后的 UV 功率、自相关脏图和正向闭合；下排为统一角分辨率下的真实双星、歧义对齐后的无相位重建和残差。修正后本例正向加权 RMSE 为 0.083，重建与真值的相关系数为 0.965、NRMSE 为 0.37。真值只用于最后验证和歧义对齐，不进入优化器。
 
 Fienup HIO+ER 在 notebook 中作为独立基准，但主结果采用上面的正值、有限支撑、误差加权直接拟合。
 
@@ -655,7 +691,7 @@ reconstruction = reconstruct_uv(measurements)
 
 论文级 notebook 还额外生成不同时间 UV 覆盖、不同 NSB、不同观测时间、不同星等、多次噪声实现、单星零假设以及参数/非参数重建对照。
 
-## 11. 本文七张图的复现来源
+## 11. 本文结果图的复现来源
 
 | 本文图 | notebook 输出文件 | 对应步骤 |
 |---|---|---|
@@ -664,7 +700,8 @@ reconstruction = reconstruct_uv(measurements)
 | 图 3 | `uv_coverage_cumulative_time.png` | 32 镜 UVW 覆盖 |
 | 图 4 | `short_waveform_and_recovery.png` | 单像素波形与 SiPM 响应 |
 | 图 5 | `two_telescope_g2_peak.png` | 两镜几何时延与相关峰 |
+| 图 5a | `short_long_consistency.png` | 短波形—长曝光闭合与相关器带宽 |
 | 图 6 | `simulated_uv_measurements.png` | 带噪声稀疏 UV 测量 |
 | 图 7 | `phaseless_reconstruction.png` | 无相位重建与闭合 |
 
-运行 [`notebooks/lact_sii_paper_simulation.ipynb`](notebooks/lact_sii_paper_simulation.ipynb) 后，原始输出写入 `run_logs/sii_paper_notebook/`。本文 `docs/sii_workflow_figures/` 中的七张图是这些输出的同版本副本，目的是保证 Markdown 在 GitHub 或本地预览时可以直接显示。
+运行 [`notebooks/lact_sii_paper_simulation.ipynb`](notebooks/lact_sii_paper_simulation.ipynb) 后，原始输出写入 `run_logs/sii_paper_notebook/`。本文 `docs/sii_workflow_figures/` 中的图片是这些输出的同版本副本，目的是保证 Markdown 在 GitHub 或本地预览时可以直接显示。
