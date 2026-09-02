@@ -151,6 +151,35 @@ def test_single_pixel_electronics_entry_uses_recovery_config():
     assert values["electronics.microcell.recovery_time_ns"] == "10.0"
 
 
+def test_dark_counts_are_sampled_per_segment_and_telescope(monkeypatch):
+    inner = np.random.default_rng(17)
+    poisson_sizes = []
+
+    class RecordingGenerator:
+        def poisson(self, lam, size=None):
+            poisson_sizes.append(size)
+            return inner.poisson(lam, size)
+
+        def __getattr__(self, name):
+            return getattr(inner, name)
+
+    recorder = RecordingGenerator()
+    monkeypatch.setattr(sii.np.random, "default_rng", lambda seed: recorder)
+    layout = pd.DataFrame({
+        "telescope_id": [1, 2], "name": ["A", "B"],
+        "east_m": [0.0, 100.0], "north_m": [0.0, 0.0],
+        "up_m": [0.0, 0.0],
+    })
+    observation = sii.Observation(
+        hours_per_night=2.0/3600.0, segment_s=1.0)
+    instrument = sii.Instrument(
+        detected_nsb_rate_hz=0.0, dark_count_rate_hz=1.0e3)
+    uvw = sii.generate_uvw(layout, observation, instrument)
+    sii.simulate_uv_observation(
+        uvw, sii.BinarySource(), observation, instrument, seed=17)
+    assert (2, 2) in poisson_sizes
+
+
 def test_full_optical_response_uses_brightest_pixel_and_weight(tmp_path):
     hits = pd.DataFrame({
         "mirror_id": [1, 2, 3], "time_ns": [80.0, 82.0, 90.0],

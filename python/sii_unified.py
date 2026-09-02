@@ -1109,11 +1109,14 @@ def simulate_uv_observation(
             star_rate*transparency*observation.segment_s)
         nsb_counts = rng.poisson(
             nsb_rate*nsb_factor*observation.segment_s)
+        # 暗计数与恒星/NSB一样按“时间段×望远镜”独立抽样；同一格计数
+        # 再由该望远镜在该时间段参与的全部基线共享。
         dark_counts = rng.poisson(
-            dark_rate*observation.segment_s, size=telescope_count)
+            dark_rate*observation.segment_s,
+            size=(segment_count, telescope_count))
         observed_star = star_counts/observation.segment_s
         observed_total = (
-            star_counts + nsb_counts + dark_counts[None, :]
+            star_counts + nsb_counts + dark_counts
         ) / observation.segment_s
         photon_relative_rms.append(float(np.median(
             1.0/np.sqrt(np.maximum(
