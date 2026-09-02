@@ -46,4 +46,5 @@ __pycache__/
 !external/hessioxxx/sha256.sum
 external/hessioxxx/source/bin/
 external/hessioxxx/source/out/
+external/hessioxxx/source/
 external/pylast/

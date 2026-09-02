@@ -1,2 +1,0 @@
-event_id,telescope_id,pixel_id,primary_cherenkov_pe,primary_nsb_pe,primary_dark_pe,primary_total_pe,fired_cherenkov_pe,fired_nsb_pe,fired_dark_pe,fired_total_pe,gap_lost_pe,saturation_lost_pe
-1,1,0,151,163,0,314,151,163,0,314,0,0

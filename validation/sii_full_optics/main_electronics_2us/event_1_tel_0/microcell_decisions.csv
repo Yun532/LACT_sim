@@ -1,1 +1,0 @@
-primary_index,event_id,telescope_id,pixel_id,time_ns,sensor_x_m,sensor_y_m,grid_column,grid_row,channel_id,microcell_id,fired,gap_rejected,saturation_rejected,origin

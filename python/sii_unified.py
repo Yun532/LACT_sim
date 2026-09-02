@@ -32,6 +32,8 @@ MAS_TO_RAD = math.pi / (180.0 * 3600.0 * 1000.0)
 
 @dataclass(frozen=True)
 class Instrument:
+    """单像素仪器参数；可由 ``from_repository`` 跟随 main 配置更新。"""
+
     wavelength_nm: float = 400.0
     optical_width_nm: float = 2.0
     effective_area_m2: float = 24.576860
@@ -221,6 +223,8 @@ class Instrument:
 
 @dataclass(frozen=True)
 class BinarySource:
+    """双星亮度、角分离、位置角、流量比和两颗星的角直径。"""
+
     ab_magnitude: float = 2.0
     separation_mas: float = 0.20
     position_angle_deg: float = 35.0
@@ -357,6 +361,7 @@ def ab_photon_spectral_density(magnitude: float, wavelength_m: float) -> float:
 
 def detected_star_rate_hz(magnitude: float,
                           instrument: Instrument = Instrument()) -> float:
+    """由 AB 星等、有效面积、通光效率和光学带宽得到探测光子率。"""
     return (instrument.effective_area_m2 * instrument.throughput
             * ab_photon_spectral_density(magnitude, instrument.wavelength_m)
             * instrument.optical_bandwidth_hz)
@@ -678,6 +683,7 @@ def simulate_short_pair_waveforms(
 
 
 def normalized_cross_correlation(left, right) -> tuple[np.ndarray, np.ndarray]:
+    """计算两条去均值波形的归一化互相关及其整数采样滞后。"""
     left = np.asarray(left, float) - np.mean(left)
     right = np.asarray(right, float) - np.mean(right)
     scale = np.std(left) * np.std(right) * len(left)

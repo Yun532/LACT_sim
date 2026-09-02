@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "python"))
 
 import sii_unified as sii
+from config_io import expand_component_config
 
 
 def test_uvw_preserves_baseline_norm():
@@ -139,6 +140,15 @@ def test_repository_instrument_follows_main_configs():
         assert np.isclose(instrument.throughput, 0.20, rtol=2e-4)
     assert Path(instrument.optical_timing_kernel_path) == (
         full if full.exists() else fallback).resolve()
+
+
+def test_single_pixel_electronics_entry_uses_recovery_config():
+    config = ROOT / "configs" / "sii" / "single_pixel_electronics.cfg"
+    values, component_paths = expand_component_config(config)
+    assert component_paths["electronics"].is_file()
+    assert values["electronics.n_pixels"] == "1"
+    assert values["electronics.microcell.recovery_enabled"] == "true"
+    assert values["electronics.microcell.recovery_time_ns"] == "10.0"
 
 
 def test_full_optical_response_uses_brightest_pixel_and_weight(tmp_path):

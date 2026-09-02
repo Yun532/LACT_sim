@@ -1,2 +1,0 @@
-type,name,role,material_id,center_x_m,center_y_m,center_z_m,half_x_m,half_y_m,half_z_m
-box,upstream_camera_body,camera_body,default,0,0,0.5,0.2,0.2,0.1

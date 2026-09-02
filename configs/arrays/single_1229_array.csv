@@ -1,2 +1,0 @@
-telescope_id,name,config_path,position_x_m,position_y_m,position_z_m,pointing_az_deg,pointing_el_deg
-0,LACT_1229,configs/telescopes/lact_1229.cfg,0,0,0,0,90

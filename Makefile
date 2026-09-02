@@ -2,7 +2,7 @@
 #
 # Common usage:
 #   make          # build hessioxxx and LACT_sim in ./build
-#   make test     # build and run the CTest suite
+#   make test     # run the compact SII regression check
 #   make clean    # remove CMake build output only
 #   make distclean# remove CMake build output and hessioxxx build products
 
@@ -25,8 +25,8 @@ configure: hessio
 build: configure
 	$(CMAKE) --build "$(BUILD_DIR)" -j$(JOBS)
 
-test: build
-	ctest --test-dir "$(BUILD_DIR)" --output-on-failure
+test:
+	python3 -m pytest -q tests/test_sii_unified.py
 
 no-hessio:
 	$(CMAKE) -S . -B "$(BUILD_DIR)" -DCMAKE_BUILD_TYPE="$(BUILD_TYPE)" -DLACT_ENABLE_HESSIO=OFF

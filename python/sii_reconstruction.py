@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Non-parametric image reconstruction from sampled SII visibility squared.
+"""由离散采样的 SII ``|V(u,v)|²`` 做非参数图像重建。
 
-The optimizer only consumes sampled |V(u,v)|^2 values. Simulation truth is
-accepted separately and is used only for post-fit validation.
+优化器只读取观测量和不确定度，不读取模拟真值。真值参数只允许在拟合完成后
+计算闭合指标，避免把答案泄漏给重建算法。
 """
 
 from __future__ import annotations
@@ -38,6 +38,8 @@ MAS_TO_RAD = math.pi / (180.0 * 3600.0 * 1000.0)
 
 @dataclass
 class UvData:
+    """合并重复采样后的 UV 数据、误差权重和输入质量统计。"""
+
     u_lambda: np.ndarray
     v_lambda: np.ndarray
     visibility_abs2: np.ndarray
@@ -51,6 +53,8 @@ class UvData:
 
 @dataclass
 class ReconstructionResult:
+    """重建图、脏自相关、可见度预测和诊断指标。"""
+
     theta_mas: np.ndarray
     image: np.ndarray
     dirty_autocorrelation: np.ndarray
@@ -71,7 +75,7 @@ def read_uv_measurements(
         value_column,
         duplicate_tolerance_lambda=1e-3,
         sigma_column="auto"):
-    """Read and average exact/repeated uv samples without inventing uv points."""
+    """读取并合并重复 UV 样本；不会插值或虚构未观测的 UV 点。"""
     path = Path(path)
     with path.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
@@ -363,6 +367,12 @@ def reconstruct_uv_data(
         seed=12345,
         peak_minimum_separation_mas=0.35,
         truth_sky_image=None):
+    """在正值和有限支撑约束下，以多起点 L-BFGS-B 拟合 ``|V|²``。
+
+    图像通过 softmax 保证非负并归一化；Huber 损失降低异常 UV 点的影响，
+    ``smoothness`` 控制相邻像素正则。绝对平移和 180° 镜像是幅度干涉本身
+    无法消除的固有简并，而不是优化器错误。
+    """
     if minimize is None:
         raise RuntimeError("reconstruct-uv requires scipy.optimize")
     if starts <= 0 or max_iter <= 0:
@@ -623,6 +633,7 @@ def reconstruct_uv_csv(
         duplicate_tolerance_lambda=1e-3,
         sigma_column="auto",
         **kwargs):
+    """从标准 UV CSV 重建，并写出图像、拟合表、指标 JSON 和诊断图。"""
     uv = read_uv_measurements(
         input_csv, value_column, duplicate_tolerance_lambda, sigma_column)
     result = reconstruct_uv_data(uv, **kwargs)
@@ -647,7 +658,7 @@ def reconstruct_uv_csv(
 
 
 def reconstruction_self_test():
-    """Small deterministic closure test for the Fourier-power optimizer."""
+    """用确定性双星数据执行傅里叶功率重建的最小闭合检查。"""
     rng = np.random.default_rng(90210)
     angles = rng.uniform(0.0, 2.0 * math.pi, 120)
     radii = np.sqrt(rng.uniform(0.0, 1.0, 120)) * 2.0e8
