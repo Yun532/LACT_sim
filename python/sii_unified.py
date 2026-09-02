@@ -1120,7 +1120,7 @@ def simulate_uv_observation(
         ) / observation.segment_s
         photon_relative_rms.append(float(np.median(
             1.0/np.sqrt(np.maximum(
-                star_counts + nsb_counts + dark_counts[None, :], 1)))))
+                star_counts + nsb_counts + dark_counts, 1)))))
 
         nightly_gain = rng.normal(0.0, instrument.per_night_gain_rms,
                                   telescope_count)
