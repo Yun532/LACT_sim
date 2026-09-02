@@ -20,6 +20,7 @@ python/config_io.py           读取 main 的 cfg/CSV
 configs/                      当前流程实际引用的配置和实测数据
 notebooks/lact_sii_paper_simulation.ipynb
                               从源模型到重建的完整可复现结果
+SII_COMPLETE_WORKFLOW_ZH.md    七步计算流程、完整公式和对应结果图
 tests/test_sii_unified.py      唯一保留的 SII 闭合检查
 ```
 
