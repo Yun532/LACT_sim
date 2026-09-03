@@ -145,6 +145,12 @@ def test_repository_instrument_follows_main_configs():
         full if full.exists() else fallback).resolve()
 
 
+def test_repository_response_sets_matched_effective_bandwidth():
+    instrument = sii.Instrument.from_repository(ROOT)
+    bandwidth_hz = sii.matched_effective_bandwidth_hz(instrument)
+    assert np.isclose(bandwidth_hz, 110.910077e6, rtol=2e-6)
+
+
 def test_single_pixel_electronics_entry_uses_recovery_config():
     config = ROOT / "configs" / "sii" / "single_pixel_electronics.cfg"
     values, component_paths = expand_component_config(config)

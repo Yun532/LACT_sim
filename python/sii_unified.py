@@ -3,7 +3,7 @@
 
 模块明确分成三个时间尺度：光学相干与源可见度、用于校准响应的短波形、
 以及用显式误差模拟小时级观测的 ``|V|^2`` 统计量。没有必要把整夜的
-625 MS/s 波形全部放入内存；短波形负责验证 SPE、时延、ADC 和 SiPM，
+高采样率波形全部放入内存；短波形负责验证 SPE、时延、ADC 和 SiPM，
 长曝光则直接使用相应的充分统计量。
 """
 
@@ -487,6 +487,72 @@ def load_optical_timing_mixture(path) -> dict[str, np.ndarray | float]:
     }
 
 
+def matched_effective_bandwidth_hz(
+        instrument: Instrument, source_ab_magnitude: float = 2.0,
+        fine_dt_ns: float = 0.01) -> float:
+    """由光学时间核、实测 SPE、采样和噪声计算匹配相关带宽。
+
+    ``Instrument.from_repository`` 中的带宽只是 ADC Nyquist 上限；长曝光
+    SNR 应使用本函数返回的等效带宽。SPE 在线性散粒噪声极限下同时滤波
+    信号和光子噪声，因而相消；存在附加电子噪声或量化噪声时会通过散粒
+    噪声占比进入积分。
+    """
+    if fine_dt_ns <= 0.0:
+        raise ValueError("fine_dt_ns must be positive")
+    if not instrument.spe_template_path:
+        raise ValueError("instrument has no measured SPE template")
+    if not instrument.optical_timing_kernel_path:
+        raise ValueError("instrument has no optical timing kernel")
+
+    spe_t_ns, spe_mv = load_measured_spe_template(
+        instrument.spe_template_path)
+    fine_time_ns = np.arange(
+        spe_t_ns.min(), spe_t_ns.max() + fine_dt_ns/2.0, fine_dt_ns)
+    fine_pulse = np.interp(fine_time_ns, spe_t_ns, spe_mv)
+    fft_length = 1 << int(np.ceil(np.log2(len(fine_pulse)*16)))
+    full_frequency_hz = np.fft.rfftfreq(fft_length, fine_dt_ns*1.0e-9)
+    full_pulse_spectrum = (
+        np.fft.rfft(fine_pulse, n=fft_length)*fine_dt_ns*1.0e-9)
+    frequency_limit_hz = min(
+        instrument.electronics_bandwidth_hz,
+        instrument.adc_sample_rate_hz/2.0)
+    keep = full_frequency_hz <= frequency_limit_hz
+    frequency_hz = full_frequency_hz[keep]
+    sampled_pulse = (
+        full_pulse_spectrum[keep]
+        * np.sinc(frequency_hz/instrument.adc_sample_rate_hz))
+
+    timing = load_optical_timing_mixture(
+        instrument.optical_timing_kernel_path)
+    weights = np.asarray(timing["weights"], dtype=float)
+    means_ns = np.asarray(timing["mean_delay_ns"], dtype=float)
+    sigmas_ns = np.asarray(timing["std_delay_ns"], dtype=float)
+    frequency_per_ns = frequency_hz*1.0e-9
+    optical_transfer = (
+        np.exp(-2j*np.pi*frequency_per_ns[:, None]*means_ns[None, :])
+        * np.exp(-2*np.pi**2*frequency_per_ns[:, None]**2
+                 * sigmas_ns[None, :]**2)) @ weights
+
+    star_rate_hz = detected_star_rate_hz(source_ab_magnitude, instrument)
+    total_rate_hz = (star_rate_hz + instrument.detected_nsb_rate_hz
+                     + instrument.dark_count_rate_hz)
+    shot_psd = (2.0*total_rate_hz*instrument.excess_noise_factor**2
+                * np.abs(sampled_pulse)**2)
+    adc_step_mv = (
+        0.0 if instrument.adc_bits <= 0
+        else instrument.adc_full_scale_mv/2**instrument.adc_bits)
+    sample_noise_variance_mv2 = (
+        instrument.electronic_noise_rms_mv**2 + adc_step_mv**2/12.0)
+    additive_noise_psd = (
+        2.0*sample_noise_variance_mv2/instrument.adc_sample_rate_hz)
+    shot_fraction = np.divide(
+        shot_psd, shot_psd + additive_noise_psd,
+        out=np.zeros_like(shot_psd),
+        where=(shot_psd + additive_noise_psd) > 0.0)
+    matched_weight = np.abs(optical_transfer)**4*shot_fraction**2
+    return float(np.trapezoid(matched_weight, frequency_hz))
+
+
 def sample_optical_delays_ns(rng: np.random.Generator, count: int,
                              mixture) -> np.ndarray:
     """按混合分布抽取已居中的逐光电子光路延迟。"""
@@ -703,7 +769,7 @@ def hbt_correlated_pair_rate_hz(star_rate_a_hz: float,
                                 star_rate_b_hz: float,
                                 coherence_area_s: float,
                                 visibility2: float) -> float:
-    """热光 HBT 超额光子对率：``R_pair=R1 R2 tau_c |V|^2``。"""
+    """热光 HBT 超额光子对率：``R_pair=R1 R2 tau_eff |V|^2``。"""
     values = (star_rate_a_hz, star_rate_b_hz, coherence_area_s, visibility2)
     if any(not np.isfinite(value) or value < 0.0 for value in values):
         raise ValueError("HBT rates, coherence area, and visibility must be finite and >= 0")
@@ -747,7 +813,7 @@ def simulate_hbt_primary_pe(
     """生成可直接交给 main ``run_camera_electronics`` 的双镜 p.e. 流。
 
     在光学相干时间远短于电子学分辨率时，热光的二阶超额相关可等价为
-    稀疏相关光子对，其率为 ``R1*R2*tau_c*|V|^2``。其余恒星光子和
+    稀疏相关光子对，其率为 ``R1*R2*tau_eff*|V|^2``。其余恒星光子和
     NSB 分别是独立 Poisson 流；DC 时间核独立作用于每一个恒星光子。
     """
     if duration_ns <= 0.0 or padding_ns < 0.0:
