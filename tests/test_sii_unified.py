@@ -149,6 +149,25 @@ def test_repository_response_sets_matched_effective_bandwidth():
     instrument = sii.Instrument.from_repository(ROOT)
     bandwidth_hz = sii.matched_effective_bandwidth_hz(instrument)
     assert np.isclose(bandwidth_hz, 110.910077e6, rtol=2e-6)
+    calibrated = sii.with_matched_effective_bandwidth(instrument)
+    assert calibrated.optical_timing_in_effective_bandwidth
+    assert np.isclose(calibrated.electronics_bandwidth_hz, bandwidth_hz)
+
+
+def test_matched_bandwidth_does_not_double_count_optical_timing():
+    instrument = sii.with_matched_effective_bandwidth(
+        sii.Instrument.from_repository(ROOT))
+    layout = pd.DataFrame({
+        "name": ["A", "B"],
+        "east_m": [0.0, 100.0],
+        "north_m": [0.0, 0.0],
+        "up_m": [0.0, 0.0],
+    })
+    observation = sii.Observation(hours_per_night=1.0/3.0, segment_s=1200.0)
+    uvw = sii.generate_uvw(layout, observation, instrument)
+    _, metadata = sii.simulate_uv_observation(
+        uvw, sii.BinarySource(), observation, instrument, seed=17)
+    assert metadata["optical_timing_efficiency"] == 1.0
 
 
 def test_single_pixel_electronics_entry_uses_recovery_config():

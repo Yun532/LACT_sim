@@ -275,17 +275,21 @@ $$
 
 ### 4.1 光学频带
 
-当前中心波长为
+当前模拟场景选择的中心波长为
 
 $$
 \lambda_0=400\ \mathrm{nm},
 $$
 
-滤光片等效宽度当前近似为
+并假设一个等效宽度为
 
 $$
 \Delta\lambda=2\ \mathrm{nm}.
 $$
+
+这里必须区分“LACT 当前已有硬件”和“SII 性能研究的场景参数”：main 提供了镜面、滤光片透过率和 PDE 曲线在 400 nm 附近的响应，但没有提供一片已经确定用于恒星强度干涉、等效带宽恰好为 2 nm 的实物窄带滤光片。因此 $\lambda_0=400\ \mathrm{nm}$、$\Delta\lambda=2\ \mathrm{nm}$ 目前是可替换的 SII 基准假设，不是 LACT 已定型滤光片的实测结论。
+
+SII 常使用 nm 量级或更窄的光学通道，原因包括延长光学相干时间、抑制 NSB、减轻宽带色散和允许多个独立光谱通道分别相关。但“单通道越窄，理想 SNR 就越高”并不成立：在平坦连续谱和散粒噪声极限下，窄带使 $r_\star\propto\Delta\nu$ 下降，同时使 $\tau_{\rm eff}\propto1/\Delta\nu$ 上升，因此 $r_\star\tau_{\rm eff}$ 近似不变。真实系统中 NSB、谱线、PDE、电子噪声、计数率饱和和滤光片角响应会打破这种理想抵消，所以最终带宽需要扫描优化，不能把 2 nm 当成普适最优值。
 
 窄带近似下，波长宽度对应的光学频率带宽为
 
@@ -302,7 +306,7 @@ $$
 =3.7474\ \mathrm{THz}.
 $$
 
-$\Delta\nu$ 是**光学频带宽度**，不是 ADC 或相关器带宽。它决定光子率和飞秒量级的相干尺度。
+$\Delta\nu$ 是**光学频带宽度**，不是 ADC 或相关器带宽。它同时进入第 4.2 节的光子率和第 5.2 节的相干面积；附录 A 给出为什么 $\int|g^{(1)}|^2d\tau\propto1/\Delta\nu$ 的完整推导。
 
 ### 4.2 AB 星等和恒星光电子率
 
@@ -362,11 +366,13 @@ $$
 r_{{\rm tot},i}=r_{\star,i}+r_{{\rm NSB},i}+r_{{\rm dark},i}.
 $$
 
-当前 main 的暗夜 NSB 模型给出
+当前 main 的宽带相机响应和暗夜天空模型积分给出
 
 $$
 r_{\rm NSB}=70.5275\ \mathrm{MHz},
 $$
+
+这个数并不是经过假设 2 nm SII 窄带片后的 NSB。当前 notebook 将它保留为保守背景压力值，所以时间响应研究仍有效，但光谱灵敏度不是最终自洽硬件预测。最终版本需要定义同一个总光谱响应 $T(\lambda)$，并用它分别积分恒星和 NSB；在此之前，不应把 70.5275 MHz 称为“2 nm 通道的背景率”。
 
 暗计数因尚无本型号实测输入而暂设为
 
@@ -411,15 +417,24 @@ $$
 
 $$
 \tau_{\rm eff}
-\equiv p_{\rm pol}\,s_{\rm spec}
+\equiv p_{\rm pol}
 \int_{-\infty}^{\infty}|g^{(1)}(\tau)|^2\,d\tau
-\simeq\frac{p_{\rm pol}s_{\rm spec}}{\Delta\nu}.
+=\frac{p_{\rm pol}s_{\rm spec}}{\Delta\nu}.
 $$
+
+这里严格出现的是 $1/\Delta\nu$，不是直接的 $1/\Delta\lambda$。二者只通过窄带近似
+
+$$
+\frac{1}{\Delta\nu}\simeq
+\frac{\lambda_0^2}{c\,\Delta\lambda}
+$$
+
+相互转换。直观上，频谱越宽，包含的不同光频越多，它们在延迟轴上越快失相干，所以相关峰越窄；频谱越窄，相关峰越宽。附录 A 从归一化矩形频谱的傅里叶变换和 Parseval 定理完整推导这个关系。
 
 这里：
 
 - $p_{\rm pol}$ 是偏振稀释因子；当前探测两种互不相干偏振，总计数率不分偏振，因此 $p_{\rm pol}=0.5$；
-- $s_{\rm spec}$ 是实际滤光片谱形相对理想矩形频带的峰面积修正；当前模型取 $s_{\rm spec}=0.842$；
+- $s_{\rm spec}$ 是实际或假设的归一化谱形相对理想矩形频带的峰面积修正；当前基准模型假设 $s_{\rm spec}=0.842$，它尚不是 LACT 实物 SII 滤光片的标定值；
 - $\Delta\nu$ 是第 4.1 节已经定义的光学频率带宽。
 
 代入当前值：
@@ -579,6 +594,20 @@ $$
 
 的匹配统计带宽。notebook 另外给出的 `rectangular_optical_retention=0.9407` 是 $|H_{\rm opt}|^2$ 的频带平均值，描述未匹配矩形零延迟峰高；它与积分 $|H_{\rm opt}|^4$ 定义的 $B_{\rm eff}/f_{\rm Nyq}$ 不是同一个量。
 
+第 8.2 节将从计数统计推导出 $\mathrm{SNR}\propto\sqrt{B_{\rm eff}}$。因此已知且被匹配处理的 DC 时间展宽，主要通过降低 $B_{\rm eff}$ 影响长曝光结果。与无时间展宽的 125 MHz 上限相比，当前光学核使 SNR 乘以
+
+$$
+\sqrt{\frac{110.910}{125}}=0.942,
+$$
+
+即降低约 $5.8\%$；达到相同 SNR 所需的曝光时间增加为
+
+$$
+\frac{125}{110.910}=1.127,
+$$
+
+即约增加 $12.7\%$。这说明当前 $0.549\ \mathrm{ns}$ 单镜光学展宽有影响，但对匹配相关器不是灾难性的。若直接使用原始零延迟协方差，则实测长 SPE 尾部使带宽进一步降到下一节的 $B_{\rm raw}=14.02\ \mathrm{MHz}$，损失会大得多。
+
 ### 6.5 为什么 170 ns SPE 没把最优带宽降到几 MHz
 
 令
@@ -668,13 +697,22 @@ $$
 
 ![短波形与 PE 恢复](docs/sii_workflow_figures/04_short_waveform_and_recovery.png)
 
-**图 4。** 单像素光电子点过程、微单元恢复、实测 SPE 卷积和 ADC 采样后的短波形。
+**图 4。** 左：实测 SPE 模板。中：同一次 2 µs Monte Carlo 得到的 A、B 两台望远镜电压波形。右：直接由中图这两条波形计算的归一化延迟相关。右图确实与中图一一对应，但其起伏由有限记录噪声主导；零延迟附近没有可识别的物理 HBT 峰。
 
 ![两台望远镜的相关峰](docs/sii_workflow_figures/05_two_telescope_g2_peak.png)
 
-**图 5。** 两路完整短波形的延迟相关。物理信号远小于一条 2 µs 记录的随机相关起伏，因此图中同时使用增强相关对的闭合试验检查峰位和幅度。
+**图 5。** 由 $\tau_{\rm eff}$、该基线的 $P$、几何时延、光学时间核和采样响应计算的**期望电子相关峰形**。它不是图 4 那一次随机波形的测量相关；图中没有叠加 2 µs 记录的随机噪声，所以能看见均值只有几 $\times10^{-6}$ 的理论峰。
 
-### 7.3 为什么 2 µs 看不到真实 HBT 峰
+### 7.3 图 4 和图 5 的关系
+
+两图使用相同的源、基线、光子率和仪器响应，但表示不同统计对象：
+
+- 图 4 是一次有限样本 realization；中图两条电压波形直接产生右图的噪声主导相关曲线。
+- 图 5 是把同一随机实验无限重复后相关曲线的期望值，也可由已知传递函数直接算出。
+
+因此“图 5 有理论峰”和“图 4 的 2 µs 实测相关看不见峰”可以同时成立。类比来说，单次抛硬币可能严重偏离 50%，但概率模型的期望仍是 50%。只有累积足够多独立时间样本，图 4 类型的测量平均值才逐渐趋近图 5。
+
+### 7.4 为什么 2 µs 看不到真实 HBT 峰
 
 一次记录中期望物理相关对数为
 
@@ -713,7 +751,52 @@ $$
 
 ### 8.2 单基线长曝光 SNR
 
-令 $T_{\rm seg}$ 为一个基线在一个时间段内的有效积分时长。对望远镜 $i,j$，功率可见度 $P_{ij}=P(u_{ij},v_{ij})$ 的散粒噪声近似 SNR 为
+令 $T_{\rm seg}$ 为一条基线在一个时间段内的有效积分时长。先用计数窗口的图像推导 SNR，再把真实响应等效为第 6 节的 $B_{\rm eff}$。
+
+在本文的单边带宽约定下，定义等效独立时间窗口
+
+$$
+\Delta t_{\rm eff}\equiv\frac{2}{B_{\rm eff}}.
+$$
+
+$\Delta t_{\rm eff}$ 不是 4 ns ADC 采样间隔，也不是 SPE 长度；它是把匹配相关器的信息量换算成理想矩形相关器后，一个统计自由度所占的等效时间。一个窗口内，来自恒星的 HBT 超额相关对期望数由第 5.3 节的相关对率给出：
+
+$$
+\mu_{{\rm HBT},ij}
+=r_{\star,i}r_{\star,j}\tau_{\rm eff}P_{ij}\Delta t_{\rm eff},
+$$
+
+其中 $P_{ij}=P(u_{ij},v_{ij})$ 是该基线和时刻的理论功率可见度。恒星、NSB 和暗计数形成的随机符合本底约为
+
+$$
+\mu_{{\rm acc},ij}
+\simeq r_{{\rm tot},i}r_{{\rm tot},j}\Delta t_{\rm eff}^2,
+$$
+
+其中下标 `acc` 表示 accidental coincidence，即无相关的随机符合。Poisson 极限下，其标准差近似为
+
+$$
+\sigma_{{\rm acc},ij}
+\simeq\sqrt{\mu_{{\rm acc},ij}}
+=\sqrt{r_{{\rm tot},i}r_{{\rm tot},j}}\,\Delta t_{\rm eff}.
+$$
+
+因此单个等效窗口的信噪比是
+
+$$
+\frac{\mu_{{\rm HBT},ij}}{\sigma_{{\rm acc},ij}}
+=\frac{r_{\star,i}r_{\star,j}\tau_{\rm eff}}
+{\sqrt{r_{{\rm tot},i}r_{{\rm tot},j}}}P_{ij}.
+$$
+
+$\Delta t_{\rm eff}$ 在单窗口信号和噪声中相消。一个 $T_{\rm seg}$ 时间段包含
+
+$$
+M_{\rm eff}=\frac{T_{\rm seg}}{\Delta t_{\rm eff}}
+=\frac{B_{\rm eff}T_{\rm seg}}{2}
+$$
+
+个等效独立时间自由度，其中 $M_{\rm eff}$ 是有效独立样本数。独立样本的 SNR 按 $\sqrt{M_{\rm eff}}$ 合并；再除以单 PE 电荷涨落惩罚 $F_{\rm EN}$，便得到
 
 $$
 \boxed{
@@ -725,6 +808,8 @@ $$
 \frac{1}{F_{\rm EN}}
 }.
 $$
+
+这不是突然引入的经验公式，而是“每个窗口的 HBT 超额相关对 ÷ 随机符合涨落”，再乘“独立窗口数的平方根”。推导使用弱相关、Poisson 散粒噪声主导、时间段内平稳、匹配响应已知的近似；附录 B 再用量纲和极限情况检查该公式。
 
 公式中的每个量都已在前文定义：
 
@@ -782,7 +867,7 @@ $$
 S^{(1)}(2\ \mu\mathrm{s})=1.7384\times10^{-4},
 $$
 
-远小于 1，与第 7.3 节“几乎总是零相关对”的结论一致。将记录时长增加时，独立模拟测得的相关估计器标准差满足
+远小于 1，与第 7.4 节“几乎总是零相关对”的结论一致。将记录时长增加时，独立模拟测得的相关估计器标准差满足
 
 $$
 \sigma\propto T^{-1/2},
@@ -864,7 +949,7 @@ $$
 
 ![带噪声的稀疏 UV 测量](docs/sii_workflow_figures/06_simulated_uv_measurements.png)
 
-**图 7。** 默认参考场景的稀疏 $\widehat P(u,v)$。点的位置由几何决定，颜色由源真值、仪器响应和随机噪声共同决定。正负基线使用相同测量值和显著度。
+**图 7。** 默认参考场景的 8928 个稀疏 $\widehat P(u,v)$。点的位置由几何决定，颜色由源真值、仪器响应和随机噪声共同决定。绘图色标限制在 0 到 1，超出范围的噪声值只在显示时颜色饱和，CSV 中的数据没有裁剪。右图显示测量值相对真值仍有明显散布。正负基线使用相同测量值和显著度。
 
 ---
 
@@ -928,9 +1013,17 @@ $$
 
 其中 $\mathrm{TV}(\mathbf x)$ 是总变分，抑制噪声产生的像素级振荡；$\lambda_{\rm TV}$ 是总变分权重；$\lambda_2$ 是二范数正则权重。每次迭代后投影回 $x_p\ge0$ 且 $\sum x_p=1$ 的集合。
 
-因为目标函数是非凸的，程序使用多个初值并比较正向残差。当前默认 6 小时重建的加权正向 RMSE 约为 0.081；共同分辨率卷积后与真值的相关系数约为 0.946。一次噪声 realization 中恢复分离角为 0.194 mas，而真值为 0.200 mas。峰值流量比更容易受无相位歧义、有限 UV 覆盖和正则化偏差影响，不应只凭一张“看起来很清楚”的图宣称精确测光。
+因为目标函数是非凸的，程序使用多个初值并比较正向残差。图 8 对应的默认 6 小时 realization 中，加权正向 RMSE 为 0.0831；共同分辨率卷积后与真值的相关系数为 0.9647。恢复分离角为 0.2025 mas，真值为 0.2000 mas；恢复位置角为 $39.8^\circ$，真值为 $35.0^\circ$；恢复峰值比为 0.799，真值流量比为 0.55。后两项的偏差说明“能看出是双星”不等于位置角和测光都已准确。
 
-### 10.4 强度干涉固有歧义
+### 10.4 为什么单点 SNR 为 0.636 仍能重建
+
+第 8.2 节的 0.636 只对应一个 $P=0.149476$ 的特定基线、一个 20 min 时间段，不代表所有 UV 点。当前数据中 $P$ 从接近 0 延伸到 0.985；当 $P\simeq1$ 时，同一时间段的 SNR 是 4.258。8928 个测量的中位单点 SNR 为 1.381，约 $60.1\%$ 的点大于 1，约 $13.8\%$ 的点大于 3。
+
+重建也不是从一个 0.636 的点作图，而是同时拟合所有测量。以 $120\ \mathrm{M}\lambda$ 网格合并后，8928 个测量形成 1021 个实际 UV 格；再加入由总流量归一化给出的零基线 $P(0,0)=1$，优化器共使用 1022 个约束点。一个 UV 格的测量重复数中位数为 6，因此其误差中位数从原始单点的 0.2348 降到约 0.0959。源的信号还具有跨 UV 平面连续、成体系的条纹结构，非负性、有限支撑、总流量归一化和平滑正则会排除大量纯噪声图像。
+
+所以“单点不显著”和“整体模型显著”并不矛盾，类似很多低 SNR 像素共同检出一个已知形状的弱源。不过当前重建仍偏乐观，原因包括：源很亮（$m_{\rm AB}=2$）；缺失的增益漂移、时钟误差和附加电子噪声均设为 0；匹配时间响应假设完全已知；长曝光统计误差主要按基线独立高斯量抽取，尚未使用完整的跨基线协方差矩阵；重建还使用非负、有限视场和弱平滑先验。因此图 8 是在当前假设下的可行性结果，不是对真实 LACT 六小时必然成像质量的保证。
+
+### 10.5 强度干涉固有歧义
 
 仅有 $P=|V|^2$ 时，至少存在以下信息损失：
 
@@ -989,7 +1082,7 @@ $$
 | 10 h | 3.210 | 2.693 |
 | 50 h | 3.763 | 3.289 |
 
-这些数字是“单基线、单位 $P$、当前 NSB 和当前带宽”条件下的检测门槛，不是复杂双星可靠成像极限。真实基线上 $P<1$ 时，显著度应再乘 $P$。多光谱通道若彼此统计独立且每个通道保持相同窄带性能，总 SNR 理想情况下按 $\sqrt{N_{\rm ch}}$ 增长，其中 $N_{\rm ch}$ 是独立光谱通道数；工程损耗和通道间相关会降低该收益。
+这些数字是“单基线、单位 $P$、假设 2 nm 恒星通道、main 宽带 NSB 压力值和当前电子带宽”条件下的检测门槛，不是最终硬件星等极限，也不是复杂双星可靠成像极限。真实基线上 $P<1$ 时，显著度应再乘 $P$。多光谱通道若彼此统计独立且每个通道保持相同窄带性能，总 SNR 理想情况下按 $\sqrt{N_{\rm ch}}$ 增长，其中 $N_{\rm ch}$ 是独立光谱通道数；工程损耗和通道间相关会降低该收益。最终灵敏度必须在恒星和 NSB 共用同一个实测 $T(\lambda)$ 后重新计算。
 
 ---
 
@@ -1000,11 +1093,13 @@ $$
 | 32 台望远镜坐标 | 已有 | 直接读取 `layout_0803` run-card 导出 |
 | 遮挡后面积 $A_{\rm col}$ | 已有 | $24.57686\ \mathrm{m^2}$ |
 | 单像素净面积效率乘积 | 光追标定 | $4.64128\ \mathrm{m^2}$，含中心像素光追和上游传输因子 |
-| 镜面、滤光片、PDE、集光器、PSF | 已有 | 进入 400 nm 单像素光追响应 |
+| 镜面、宽带相机窗口、PDE、集光器、PSF | 已有 | 进入 main 的 400 nm 单像素光追响应 |
+| SII 光谱通道 $\lambda_0,\Delta\lambda$ | 场景假设 | 当前取 400 nm、2 nm；不是已有 LACT 窄带片标定 |
+| 谱形因子 $s_{\rm spec}$ | 场景假设 | 当前取 0.842；需由最终 SII 总光谱响应重新积分 |
 | 光学到达时间核 $K_{\rm opt}$ | 光追标定 | 100 万平行光子，$\sigma_{\rm opt}=0.548827\ \mathrm{ns}$ |
 | 实测 SPE $h_{\rm SPE}$ | 已有 | 537 个干净脉冲模板，用于完整短波形 |
 | SPE 电荷涨落 $F_{\rm EN}$ | 已有 | $F_{\rm EN}=1.016142$，进入短波形和长曝光 SNR |
-| 暗夜 NSB | 模型估计 | $70.5275\ \mathrm{MHz/pixel}$ |
+| 暗夜 NSB | main 宽带模型估计 | $70.5275\ \mathrm{MHz/pixel}$；当前作为保守压力值，尚未与假设的 2 nm SII 通道统一 |
 | 微单元数 | 已有 | 270336 个/像素 |
 | 微单元恢复时间 $\tau_{\rm rec}$ | 暂定 | 10 ns，可替换 |
 | ADC 采样 | 已有 | 4 ns，即 250 MS/s、Nyquist 125 MHz |
@@ -1017,7 +1112,7 @@ $$
 | 随天顶角、方位角变化的光学核 | 缺失 | 当前只用轴上核；未来可按方向替换 $K_{\rm opt}$ |
 | 窄带滤光片角响应 | 缺失 | 路径接口保留，当前只使用轴上频带 |
 
-因此，当前结果是“已有 main 光学/SPE/采样输入下的物理一致基准模拟”，不是完整实测系统误差预算。缺失项设 0 可保证不虚构性能参数，但结果应理解为在这些系统误差得到控制时的统计性能。
+因此，当前时间响应链和短—长曝光统计闭合是物理一致的，但光谱部分仍是“2 nm 恒星通道 + main 宽带 NSB 压力值”的保守混合场景，不是最终自洽通带。缺失系统误差设 0 可避免虚构参数，但重建质量应理解为这些误差得到控制时的可行性结果。形成硬件灵敏度结论前，必须用同一个总响应 $T(\lambda)$ 同时计算 $r_\star$、$r_{\rm NSB}$、$s_{\rm spec}$ 和 $\tau_{\rm eff}$。
 
 ---
 
@@ -1028,20 +1123,14 @@ $$
 `python/sii_unified.py` 将仪器、源、阵列和观测计划分开。典型调用关系是：
 
 ```python
-from dataclasses import replace
-
 base_instrument = Instrument.from_repository(repo_root)
 source = BinarySource(...)
 observation = Observation(...)
 
 # from_repository 先给出 ADC Nyquist 上限；再用实际响应计算 B_eff。
-B_eff = matched_effective_bandwidth_hz(
+instrument = with_matched_effective_bandwidth(
     base_instrument,
     source_ab_magnitude=source.ab_magnitude,
-)
-instrument = replace(
-    base_instrument,
-    electronics_bandwidth_hz=B_eff,
 )
 
 result = run_sii_pipeline(
@@ -1053,7 +1142,9 @@ result = run_sii_pipeline(
 )
 ```
 
-`Instrument.from_repository(...)` 会重新读取 main 当前使用的镜面/滤光片/PDE 配置、单像素光追响应、SPE、SiPM 和采样参数，但其中的 `electronics_bandwidth_hz` 首先只是 $f_{\rm Nyq}$。公共函数 `matched_effective_bandwidth_hz(...)` 再执行第 6.4 节的积分；不能跳过该步直接把 125 MHz 当成最终 $B_{\rm eff}$。因此以后 main 中这些文件更新后，重新构造 `Instrument`、重新计算 $B_{\rm eff}$ 并重跑 notebook，变化才会完整传播到结果。没有标定值的接口仍保持 0，除非用户显式赋值。
+`Instrument.from_repository(...)` 会重新读取 main 当前使用的镜面/宽带窗口/PDE 配置、单像素光追响应、SPE、SiPM 和采样参数，但其中的 `electronics_bandwidth_hz` 首先只是 $f_{\rm Nyq}$。公共函数 `with_matched_effective_bandwidth(...)` 再执行第 6.4 节的积分，同时标记光学时间核已经进入 $B_{\rm eff}$，从而避免长曝光里重复乘一次光学时间效率。不能跳过该步直接把 125 MHz 当成最终 $B_{\rm eff}$。没有标定值的接口仍保持 0，除非用户显式赋值。
+
+需要额外注意：main 参数变化可以自动传播，但当前假设的 2 nm SII 光谱通道并不来自 main。若更换 SII 滤光片，必须同时更新恒星光谱积分、NSB 光谱积分和 $\tau_{\rm eff}$，不能只改 `optical_width_nm` 一个数字。
 
 ### 13.2 重建独立运行
 
@@ -1070,3 +1161,170 @@ notebook 把“源 → 理论 UV → 阵列 UVW → 仪器标定 → 短波形�
 ## 14. 一句话总结
 
 当前程序先用源模型计算连续理论 $P(u,v)$，再用 32 台望远镜和地球自转决定采样位置；单镜光子率与光学相干面积给出 HBT 信号强度，光追时间核、实测 SPE、采样和噪声谱决定估计器的有效带宽；微秒完整波形验证这套响应，小时级充分统计量以同一公式生成每个带误差的 UV 点，最后用非负、归一化、正则化的无相位优化重建天空图。短波形回答“真实仪器链是否实现了预期相关统计”，长曝光回答“在实际观测时间内这些相关统计能测到多准”；两者必须闭合，但用途不同。
+
+---
+
+## 附录 A：为什么相干面积与 $1/\Delta\nu$ 成正比
+
+### A.1 从归一化频谱到一阶相干函数
+
+令 $\psi(\nu)$ 表示探测到的归一化光子频谱形状，$\nu$ 是光频率，并规定
+
+$$
+\int_{-\infty}^{\infty}\psi(\nu)\,d\nu=1.
+$$
+
+$\psi$ 的单位是 $\mathrm{Hz^{-1}}$。Wiener–Khintchine 关系给出归一化一阶时间相干函数
+
+$$
+g^{(1)}(\tau)=
+\int_{-\infty}^{\infty}
+\psi(\nu)e^{2\pi i\nu\tau}\,d\nu.
+$$
+
+在本文使用的傅里叶变换约定下，Parseval 定理给出
+
+$$
+\int_{-\infty}^{\infty}|g^{(1)}(\tau)|^2\,d\tau
+=
+\int_{-\infty}^{\infty}|\psi(\nu)|^2\,d\nu.
+$$
+
+左边单位是 s；右边的 $|\psi|^2d\nu$ 单位是 $\mathrm{Hz^{-1}}=\mathrm{s}$，量纲一致。
+
+### A.2 矩形频带的直接计算
+
+对中心频率 $\nu_0$、宽度 $\Delta\nu$ 的理想矩形频带，归一化频谱为
+
+$$
+\psi(\nu)=
+\begin{cases}
+1/\Delta\nu,
+& |\nu-\nu_0|\le\Delta\nu/2,\\
+0,&\text{其他频率}.
+\end{cases}
+$$
+
+直接代入 Parseval 关系：
+
+$$
+\int |g^{(1)}(\tau)|^2d\tau
+=\int |\psi(\nu)|^2d\nu
+=\left(\frac{1}{\Delta\nu}\right)^2\Delta\nu
+=\frac{1}{\Delta\nu}.
+$$
+
+也可以先做傅里叶变换：
+
+$$
+g^{(1)}(\tau)=
+e^{2\pi i\nu_0\tau}\,
+\operatorname{sinc}(\Delta\nu\tau),
+$$
+
+其中 $\operatorname{sinc}(x)=\sin(\pi x)/(\pi x)$。相位因子取绝对值后为 1，而 $\operatorname{sinc}^2$ 峰的宽度与 $1/\Delta\nu$ 成正比，所以积分仍为 $1/\Delta\nu$。
+
+### A.3 非矩形频谱和当前 $s_{\rm spec}$
+
+一般频谱不必是矩形。本文定义无量纲谱形因子
+
+$$
+s_{\rm spec}\equiv
+\Delta\nu\int_{-\infty}^{\infty}|\psi(\nu)|^2d\nu.
+$$
+
+于是
+
+$$
+\int|g^{(1)}(\tau)|^2d\tau
+=\frac{s_{\rm spec}}{\Delta\nu},
+$$
+
+再考虑两种未分辨偏振模式的稀释 $p_{\rm pol}$，便得到正文第 5.2 节使用的
+
+$$
+\boxed{
+\tau_{\rm eff}
+=\frac{p_{\rm pol}s_{\rm spec}}{\Delta\nu}
+}.
+$$
+
+窄带近似 $\Delta\nu\simeq c\Delta\lambda/\lambda_0^2$ 给出
+
+$$
+\tau_{\rm eff}\simeq
+p_{\rm pol}s_{\rm spec}
+\frac{\lambda_0^2}{c\,\Delta\lambda}.
+$$
+
+因此人们有时口头说“相干时间与 $1/\Delta\lambda$ 成正比”，但严格的傅里叶共轭变量是频率，基本关系是 $1/\Delta\nu$；只有在 $\Delta\lambda\ll\lambda_0$ 时才可使用上面的波长近似。
+
+---
+
+## 附录 B：长曝光 SNR 公式的自洽检查
+
+### B.1 量纲检查
+
+正文第 8.2 节 SNR 公式的率和相干面积组合为
+
+$$
+\frac{r_{\star,i}r_{\star,j}\tau_{\rm eff}}
+{\sqrt{r_{{\rm tot},i}r_{{\rm tot},j}}}.
+$$
+
+分子的量纲是 $\mathrm{s^{-2}}\times\mathrm{s}=\mathrm{s^{-1}}$，分母也是 $\mathrm{s^{-1}}$，所以该项无量纲；$B_{\rm eff}T_{\rm seg}$ 也是 $\mathrm{s^{-1}}\times\mathrm{s}$，因此最终 SNR 无量纲。
+
+### B.2 理想情况下为什么单通道 SNR 对光学带宽近似不敏感
+
+对两台相同望远镜、忽略 NSB 和暗计数时，$r_{\rm tot}=r_\star$，SNR 中与光学频带有关的部分化为
+
+$$
+\frac{r_\star^2\tau_{\rm eff}}{r_\star}
+=r_\star\tau_{\rm eff}.
+$$
+
+由第 4.2 节和附录 A，平坦连续谱下
+
+$$
+r_\star=A_{\rm col}\eta_{\rm det}n_\nu\Delta\nu,
+\qquad
+\tau_{\rm eff}=\frac{p_{\rm pol}s_{\rm spec}}{\Delta\nu}.
+$$
+
+两式相乘后 $\Delta\nu$ 抵消：
+
+$$
+r_\star\tau_{\rm eff}
+=A_{\rm col}\eta_{\rm det}n_\nu
+\,p_{\rm pol}s_{\rm spec}.
+$$
+
+这正是“窄带降低光子率，却提高单对光子的相干对比度”的定量表达。若恒星和连续谱 NSB 都经过同一理想滤光片并保持线性，它们随带宽的共同缩放也会产生类似抵消。真正改变最优带宽的是谱线和非平坦光谱、波长依赖的 PDE/透过率、暗计数与附加电子噪声、探测器饱和/恢复、色散、滤光片入射角漂移，以及是否能同时读取多个独立光谱通道。
+
+### B.3 时间展宽怎样传到曝光时间
+
+光学时间核不改变 $\tau_{\rm eff}$ 所表示的 HBT 总面积，而是通过 $H_{\rm opt}(f)$ 改变 $B_{\rm eff}$。由于
+
+$$
+\mathrm{SNR}\propto\sqrt{B_{\rm eff}T_{\rm seg}},
+$$
+
+在其他条件不变时
+
+$$
+\frac{\mathrm{SNR}_2}{\mathrm{SNR}_1}
+=\sqrt{\frac{B_{{\rm eff},2}}{B_{{\rm eff},1}}},
+\qquad
+\frac{T_2}{T_1}
+=\frac{B_{{\rm eff},1}}{B_{{\rm eff},2}}
+$$
+
+分别给出 SNR 比和达到相同 SNR 所需的曝光时间比。当前 DC 时间核把 125 MHz 降到 110.91 MHz，因此匹配 SNR 降低约 5.8%，等效曝光增加约 12.7%。这就是第 6 节光学时间展宽进入第 8.2 节观测结果的明确路径。
+
+---
+
+## 参考物理关系
+
+- [Pupil plane intensity interferometry with imaging air Cherenkov telescopes](https://academic.oup.com/mnras/article/538/2/867/8015798)：给出时间相干面积、电子带宽和 SNR 的统一表达。
+- [Intensity interferometry with more than two detectors?](https://academic.oup.com/mnras/article/437/1/798/1007746)：解释窄带下光子率与相干时间的抵消，以及独立光谱通道的收益。
+- [Intensity interferometer results on Sirius with 0.25 m telescopes](https://academic.oup.com/mnras/article/537/3/2527/8003771)：讨论实际系统中探测时间分辨远大于光学相干时间时的相关对比度展宽。

@@ -47,6 +47,7 @@ class Instrument:
     # 以下未在 main 中标定的随机效应默认关闭；有实测值后直接替换。
     electronic_noise_rms_mv: float = 0.0
     excess_noise_factor: float = 1.016142
+    optical_timing_in_effective_bandwidth: bool = False
     polarization_factor: float = 0.5
     spectral_shape_factor: float = 0.842
     microcells_per_pixel: int = 270_336
@@ -551,6 +552,18 @@ def matched_effective_bandwidth_hz(
         where=(shot_psd + additive_noise_psd) > 0.0)
     matched_weight = np.abs(optical_transfer)**4*shot_fraction**2
     return float(np.trapezoid(matched_weight, frequency_hz))
+
+
+def with_matched_effective_bandwidth(
+        instrument: Instrument, source_ab_magnitude: float = 2.0,
+        fine_dt_ns: float = 0.01) -> Instrument:
+    """返回已把光学时间核计入相关带宽的仪器参数。"""
+    bandwidth_hz = matched_effective_bandwidth_hz(
+        instrument, source_ab_magnitude, fine_dt_ns)
+    return replace(
+        instrument,
+        electronics_bandwidth_hz=bandwidth_hz,
+        optical_timing_in_effective_bandwidth=True)
 
 
 def sample_optical_delays_ns(rng: np.random.Generator, count: int,
@@ -1164,8 +1177,10 @@ def simulate_uv_observation(
     if instrument.optical_timing_kernel_path:
         timing = load_optical_timing_mixture(
             instrument.optical_timing_kernel_path)
-        optical_efficiency = optical_timing_transfer_efficiency(
-            timing, instrument.electronics_bandwidth_hz)
+        optical_efficiency = (
+            1.0 if instrument.optical_timing_in_effective_bandwidth
+            else optical_timing_transfer_efficiency(
+                timing, instrument.electronics_bandwidth_hz))
         timing_grid = np.linspace(-3.0, 3.0, 2401)
         timing_response = residual_delay_response(
             timing, timing_grid, instrument.electronics_bandwidth_hz)
