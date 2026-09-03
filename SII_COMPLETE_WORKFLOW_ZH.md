@@ -26,7 +26,7 @@
 - 自动测试：[`tests/test_sii_unified.py`](tests/test_sii_unified.py)
 
 本文原有图 1–7 来自解析长曝光 notebook；图 8、8a 和 9 来自波形
-GLS 方法验证；图 10–16 及参数影响表来自当前完整论文报告 notebook
+GLS 方法验证；图 10–19 及参数影响表来自当前完整论文报告 notebook
 从头重算。两条路径的区别会在第 8 节明确列出，不能混用其误差数值。
 全部随机实验使用固定种子，图片不是手工示意图。
 
@@ -1540,12 +1540,40 @@ $\Delta\mathrm{BIC}=\mathrm{BIC}_{\rm single}-\mathrm{BIC}_{\rm binary}$
 回收分离角依次为0.2191、0.1941和0.1941 mas；输入值为0.20 mas。这里显示
 的是一次随机实现，而不是不同时间的成功概率。
 
+![不同观测时间的实测UV数据](docs/sii_workflow_figures/17_observed_uv_vs_time.png)
+
+**图 17。** 与图14严格对应的实测UV数据：颜色是波形GLS从带噪模拟中得到的
+$\widehat P$，不是理论真值。20 min只有496个独立测量，轨迹稀疏；2 h和6 h
+分别扩展为2976和8928个测量。图上复制了共轭点$(-u,-v)$并赋予相同
+$\widehat P$，所以呈中心对称；这一复制只方便显示，不增加独立数据。三个
+面板使用同一色标，超出显示范围的原始值只发生颜色饱和，没有在数据表或
+重建输入中被裁剪。
+
+![3等星随观测时间的无相位重建](docs/sii_workflow_figures/18_faint_m3_reconstruction_vs_time.png)
+
+**图 18。** 为了直接检验较暗目标，把参考双星改为$m_{\rm AB}=3$，其余源形态
+和仪器设置保持不变，并用该星等重新标定波形GLS。20 min、2 h和6 h仍从同一
+个6 h噪声实现中取严格嵌套的中心时段。20 min结果出现额外伪峰，回收分离角
+为0.1795 mas；2 h和6 h均回收0.1941 mas，接近0.20 mas真值。加权可见度
+RMSE依次为0.5246、0.3178和0.2208。该图说明延长观测可稳定当前这一随机
+实现，但不能据此宣称“3等星在6 h必然可成像”：正式灵敏度结论仍需多随机
+种子，并同时检查单星假阳性率和双星模型证据。
+
 ![不同星等的无相位重建](docs/sii_workflow_figures/15_reconstruction_vs_magnitude.png)
 
 **图 15。** 2–5等星均独立完成波形标定并观测6 h。5等星重建仍可能输出
 若干亮斑，但其回收分离角为0.1047 mas，且
 $\Delta\mathrm{BIC}=-5.77$，数据不支持双星模型。这说明“优化器返回一张图”
 不等于“天体形态被检出”。
+
+![不同星等的实测UV显著度](docs/sii_workflow_figures/19_observed_uv_vs_magnitude.png)
+
+**图 19。** 与图15的6 h星等扫描相对应，颜色显示每个UV测量的标准化值
+$\widehat P/\sigma_P$。这里不用同一色标直接比较$\widehat P$，因为2–5等星的
+$\sigma_P$跨越近两个数量级，原始值会被最暗目标的噪声范围支配。2等星中
+可以辨认连续条纹；3等星条纹已明显变弱；4–5等星多数单点接近随机噪声。
+重建使用的仍是未裁剪的$(\widehat P,\sigma_P)$，不是图中饱和到$[-3,3]$的
+显示值，也不是$P$的理论真值。
 
 ![不同源模型的理论量与重建](docs/sii_workflow_figures/16_reconstruction_source_models.png)
 
@@ -1653,7 +1681,7 @@ result = run_sii_pipeline(
 - 对不同源、观测时间、NSB 或电子学场景重复运行统一前向流程；
 - 将来把模拟表替换成格式相同的真实相关测量，而不重写重建器。
 
-`sii_complete_waveform_report.ipynb` 是当前主入口，完整生成图10–16和参数
+`sii_complete_waveform_report.ipynb` 是当前主入口，完整生成图10–19和参数
 影响表；`waveform_gls_validation.ipynb` 专门检查短块—长曝光统计闭合并输出
 图8、8a和9。原 `lact_sii_paper_simulation.ipynb` 只保留作解析上限和历史
 扫描对照，不能把其中解析灵敏度称为新方法结果。
