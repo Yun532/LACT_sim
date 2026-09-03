@@ -5,6 +5,7 @@ import sys
 
 import numpy as np
 import pandas as pd
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "python"))
@@ -351,6 +352,26 @@ def test_waveform_gls_recovers_injected_visibility_and_time_scaling():
     _, sigma_4s = sii.waveform_gls_weights(calibration, 4.0)
     assert np.isclose(estimate, 0.4)
     assert np.isclose(sigma_4s, sigma_1s/2.0)
+
+
+def test_ellipse_and_transit_visibility_are_normalized_and_hermitian():
+    u = np.array([0.0, 1.1e8, -0.7e8])
+    v = np.array([0.0, -0.4e8, 1.3e8])
+    for case, source in (
+            ("ellipse", sii.EllipseSource()),
+            ("transit", sii.TransitSource())):
+        visibility = sii.source_visibility(u, v, source, case)
+        mirrored = sii.source_visibility(-u, -v, source, case)
+        assert np.isclose(visibility[0], 1.0)
+        assert np.allclose(mirrored, np.conj(visibility))
+
+
+def test_transit_requires_planet_inside_stellar_disk():
+    source = sii.TransitSource(
+        stellar_diameter_mas=0.2, planet_diameter_mas=0.1,
+        planet_east_offset_mas=0.08, planet_north_offset_mas=0.0)
+    with pytest.raises(ValueError, match="completely inside"):
+        sii.transit_visibility(np.array([0.0]), np.array([0.0]), source)
 
 
 def test_waveform_gls_long_uv_path_uses_calibrated_peak_covariance():

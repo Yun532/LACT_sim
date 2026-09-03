@@ -238,6 +238,27 @@ class BinarySource:
 
 
 @dataclass(frozen=True)
+class EllipseSource:
+    """均匀椭圆源；位置角从北向东计算。"""
+
+    ab_magnitude: float = 2.0
+    major_diameter_mas: float = 0.24
+    minor_diameter_mas: float = 0.12
+    position_angle_deg: float = 35.0
+
+
+@dataclass(frozen=True)
+class TransitSource:
+    """均匀恒星盘减去完全位于盘内的不透明行星圆盘。"""
+
+    ab_magnitude: float = 2.0
+    stellar_diameter_mas: float = 0.30
+    planet_diameter_mas: float = 0.08
+    planet_east_offset_mas: float = 0.06
+    planet_north_offset_mas: float = 0.03
+
+
+@dataclass(frozen=True)
 class Observation:
     """一次完整观测的几何和积分设置。"""
 
@@ -379,6 +400,68 @@ def binary_visibility(u_lambda, v_lambda,
               * np.exp(-2j * np.pi * (u * dx + v * dy)))
     ratio = source.flux_ratio_secondary_to_primary
     return (first + ratio * second) / (1.0 + ratio)
+
+
+def ellipse_visibility(u_lambda, v_lambda,
+                       source: EllipseSource = EllipseSource()) -> np.ndarray:
+    """均匀椭圆的归一化复可见度（椭圆中心固定在相位中心）。"""
+    u = np.asarray(u_lambda, dtype=float)
+    v = np.asarray(v_lambda, dtype=float)
+    pa = math.radians(source.position_angle_deg)
+    along_major = u*math.sin(pa) + v*math.cos(pa)
+    along_minor = u*math.cos(pa) - v*math.sin(pa)
+    x = np.pi*MAS_TO_RAD*np.hypot(
+        source.major_diameter_mas*along_major,
+        source.minor_diameter_mas*along_minor)
+    output = np.ones_like(x)
+    nonzero = np.abs(x) > 1.0e-12
+    output[nonzero] = 2.0*j1(x[nonzero])/x[nonzero]
+    return output.astype(complex)
+
+
+def transit_visibility(u_lambda, v_lambda,
+                       source: TransitSource = TransitSource()) -> np.ndarray:
+    """均匀恒星盘被盘内不透明圆行星遮挡时的归一化复可见度。"""
+    star_radius = 0.5*source.stellar_diameter_mas
+    planet_radius = 0.5*source.planet_diameter_mas
+    offset = math.hypot(
+        source.planet_east_offset_mas, source.planet_north_offset_mas)
+    if planet_radius <= 0.0 or planet_radius+offset > star_radius:
+        raise ValueError("transit planet must lie completely inside the stellar disk")
+    u = np.asarray(u_lambda, dtype=float)
+    v = np.asarray(v_lambda, dtype=float)
+    q = np.hypot(u, v)
+    blocked_fraction = (source.planet_diameter_mas
+                        / source.stellar_diameter_mas)**2
+    phase = np.exp(-2j*np.pi*MAS_TO_RAD*(
+        u*source.planet_east_offset_mas
+        + v*source.planet_north_offset_mas))
+    star = uniform_disk_visibility(q, source.stellar_diameter_mas)
+    planet = uniform_disk_visibility(q, source.planet_diameter_mas)*phase
+    return (star-blocked_fraction*planet)/(1.0-blocked_fraction)
+
+
+def source_visibility(u_lambda, v_lambda, source,
+                      source_case: str = "binary") -> np.ndarray:
+    """把所有内置源模型映射为同一个归一化复可见度接口。"""
+    if source_case == "binary":
+        if not isinstance(source, BinarySource):
+            raise TypeError("binary source_case needs BinarySource")
+        return binary_visibility(u_lambda, v_lambda, source)
+    if source_case == "single_disk":
+        if not isinstance(source, BinarySource):
+            raise TypeError("single_disk source_case needs BinarySource")
+        return uniform_disk_visibility(
+            np.hypot(u_lambda, v_lambda), source.primary_diameter_mas)
+    if source_case == "ellipse":
+        if not isinstance(source, EllipseSource):
+            raise TypeError("ellipse source_case needs EllipseSource")
+        return ellipse_visibility(u_lambda, v_lambda, source)
+    if source_case == "transit":
+        if not isinstance(source, TransitSource):
+            raise TypeError("transit source_case needs TransitSource")
+        return transit_visibility(u_lambda, v_lambda, source)
+    raise ValueError("source_case must be binary, single_disk, ellipse or transit")
 
 
 def ab_photon_spectral_density(magnitude: float, wavelength_m: float) -> float:
@@ -1145,6 +1228,7 @@ def simulate_waveform_gls_calibration(
         hbt_pair_rate_scale: float = 10_000.0,
         covariance_shrinkage: float = 0.01,
         nsb_rate_hz: float | None = None,
+        spe_template=None,
         seed: int = 20260824) -> tuple[WaveformGLSCalibration, dict]:
     """用 main 同参数的单像素短波形生成完整峰 GLS 标定。
 
@@ -1155,7 +1239,7 @@ def simulate_waveform_gls_calibration(
         raise ValueError("block duration and maximum lag are invalid")
     if null_records < 8 or signal_records < 4:
         raise ValueError("calibration needs at least 8 null and 4 signal records")
-    if not instrument.spe_template_path:
+    if spe_template is None and not instrument.spe_template_path:
         raise ValueError("instrument has no measured SPE template")
 
     rng = np.random.default_rng(seed)
@@ -1163,7 +1247,8 @@ def simulate_waveform_gls_calibration(
     nsb_rate = (instrument.detected_nsb_rate_hz if nsb_rate_hz is None
                 else float(nsb_rate_hz))
     background_rate = nsb_rate+instrument.dark_count_rate_hz
-    template = load_measured_spe_template(instrument.spe_template_path)
+    template = (load_measured_spe_template(instrument.spe_template_path)
+                if spe_template is None else spe_template)
     timing = (None if not instrument.optical_timing_kernel_path else
               load_optical_timing_mixture(instrument.optical_timing_kernel_path))
     timing_padding = 0.0 if timing is None else 5.0*timing["rms_spread_ns"]
@@ -1370,7 +1455,7 @@ def generate_uvw(layout, observation: Observation,
 
 
 def segment_averaged_visibility2(
-        uvw, source: BinarySource, observation: Observation,
+        uvw, source, observation: Observation,
         instrument: Instrument = Instrument(),
         source_case: str = "binary") -> np.ndarray:
     """计算每个积分段沿地球自转轨迹平均后的 ``|V|²`` 期望值。"""
@@ -1404,13 +1489,7 @@ def segment_averaged_visibility2(
                + baseline[:, 1]*(cd*cl+sd*ch*sl)
                + baseline[:, 2]*(cd*sl-sd*ch*cl))
         u, v = u_m/instrument.wavelength_m, v_m/instrument.wavelength_m
-        if source_case == "binary":
-            averaged += np.abs(binary_visibility(u, v, source))**2
-        elif source_case == "single_disk":
-            averaged += uniform_disk_visibility(
-                np.hypot(u, v), source.primary_diameter_mas)**2
-        else:
-            raise ValueError("source_case must be binary or single_disk")
+        averaged += np.abs(source_visibility(u, v, source, source_case))**2
     return averaged/samples
 
 
@@ -1430,7 +1509,7 @@ def _electronics_correlation_efficiency(instrument, total_rate_hz):
 
 
 def simulate_uv_observation(
-        uvw, source: BinarySource, observation: Observation,
+        uvw, source, observation: Observation,
         instrument: Instrument = Instrument(), seed: int = 20260824,
         source_case: str = "binary", nsb_multiplier: float = 1.0,
         electronics_case: str = "reference", estimator: str = "analytic",
@@ -1454,13 +1533,7 @@ def simulate_uv_observation(
 
     u = frame.u_lambda.to_numpy(float)
     v = frame.v_lambda.to_numpy(float)
-    if source_case == "binary":
-        center_truth = np.abs(binary_visibility(u, v, source))**2
-    elif source_case == "single_disk":
-        center_truth = uniform_disk_visibility(
-            np.hypot(u, v), source.primary_diameter_mas)**2
-    else:
-        raise ValueError("source_case must be binary or single_disk")
+    center_truth = np.abs(source_visibility(u, v, source, source_case))**2
     truth = segment_averaged_visibility2(
         frame, source, observation, instrument, source_case)
     frame["visibility2_center"] = center_truth
@@ -1719,7 +1792,7 @@ def reconstruct_uv(measurements, cell_mlambda=120.0, **kwargs):
 
 
 def run_sii_pipeline(
-        layout, source: BinarySource = BinarySource(),
+        layout, source=BinarySource(),
         observation: Observation = Observation(),
         instrument: Instrument = Instrument(), seed: int = 20260824,
         do_reconstruction: bool = True, reconstruction_kwargs=None,
