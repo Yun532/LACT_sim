@@ -259,6 +259,30 @@ class PipelineResult:
     metadata: dict
 
 
+@dataclass
+class WaveformGLSCalibration:
+    """由短波形标定出的完整相关峰和单块噪声协方差。"""
+
+    lags_ns: np.ndarray
+    null_mean: np.ndarray
+    peak_per_visibility2: np.ndarray
+    covariance_per_block: np.ndarray
+    block_duration_s: float
+    star_rate_hz: float
+    background_rate_hz: float
+    calibration_visibility2: float
+    hbt_pair_rate_scale: float
+    null_records: int
+    signal_records: int
+    covariance_shrinkage: float
+
+    def covariance(self, exposure_s: float) -> np.ndarray:
+        """按独立数据块平均的 ``1/T`` 定律返回指定曝光协方差。"""
+        if exposure_s <= 0.0:
+            raise ValueError("exposure_s must be positive")
+        return self.covariance_per_block * self.block_duration_s / exposure_s
+
+
 def _read_two_column_curve(path) -> tuple[np.ndarray, np.ndarray]:
     """读取 main 中通用的两列光谱 CSV。"""
     data = np.genfromtxt(path, delimiter=",", names=True)
@@ -387,8 +411,11 @@ def unit_visibility_snr(magnitude: float, integration_s: float,
     total = star + nsb + instrument.dark_count_rate_hz
     one_channel = (
         star**2 / total * instrument.coherence_area_s
-        * math.sqrt(instrument.electronics_bandwidth_hz * integration_s / 2.0)
-        / instrument.excess_noise_factor
+        # B_eff 是 0..Nyquist 的单边等效带宽。实值波形在时长 T 内
+        # 有 2*B_eff*T 个独立实自由度；白噪声极限 B=fs/2 时正好
+        # 回到 N=fs*T 个独立 ADC 样点。
+        * math.sqrt(2.0 * instrument.electronics_bandwidth_hz * integration_s)
+        / instrument.excess_noise_factor**2
     )
     return one_channel * math.sqrt(spectral_channels)
 
@@ -823,7 +850,8 @@ def simulate_hbt_primary_pe(
         geometric_delay_ns: float = 0.0,
         padding_ns: float = 200.0,
         event_id: int = 1,
-        pixel_id: int = 0) -> tuple[pd.DataFrame, dict]:
+        pixel_id: int = 0,
+        hbt_pair_rate_scale: float = 1.0) -> tuple[pd.DataFrame, dict]:
     """生成可直接交给 main ``run_camera_electronics`` 的双镜 p.e. 流。
 
     在光学相干时间远短于电子学分辨率时，热光的二阶超额相关可等价为
@@ -844,8 +872,13 @@ def simulate_hbt_primary_pe(
     nsb = pair(nsb_rate_hz)
     if min(*star, *nsb) < 0.0:
         raise ValueError("photon rates must be >= 0")
-    pair_rate = hbt_correlated_pair_rate_hz(
+    if not np.isfinite(hbt_pair_rate_scale) or hbt_pair_rate_scale <= 0.0:
+        raise ValueError("hbt_pair_rate_scale must be finite and positive")
+    physical_pair_rate = hbt_correlated_pair_rate_hz(
         star[0], star[1], instrument.coherence_area_s, visibility2)
+    # 标定时可注入已知倍率的相关光子对，再把响应除回该倍率。总星光率
+    # 保持不变，因此不会人为降低散粒噪声或提高最终物理曝光的 SNR。
+    pair_rate = physical_pair_rate * hbt_pair_rate_scale
     if pair_rate > min(star):
         raise ValueError("correlated-pair approximation exceeds a marginal star rate")
 
@@ -894,8 +927,11 @@ def simulate_hbt_primary_pe(
         "nsb_rate_a_hz": nsb[0], "nsb_rate_b_hz": nsb[1],
         "visibility2": float(visibility2),
         "coherence_area_ps": instrument.coherence_area_s*1.0e12,
-        "hbt_pair_rate_hz": pair_rate,
-        "expected_hbt_pairs_in_analysis_window": pair_rate*duration_ns*1.0e-9,
+        "hbt_pair_rate_hz": physical_pair_rate,
+        "injected_hbt_pair_rate_hz": pair_rate,
+        "hbt_pair_rate_scale": float(hbt_pair_rate_scale),
+        "expected_hbt_pairs_in_analysis_window": (
+            physical_pair_rate*duration_ns*1.0e-9),
         "generated_hbt_pairs_with_padding": pair_count,
         "optical_timing_rms_ns": (0.0 if optical_timing_mixture is None else
                                   float(optical_timing_mixture["rms_spread_ns"])),
@@ -1026,6 +1062,244 @@ def waveform_cross_correlation(left, right, sample_width_ns: float,
     correlation = raw/overlap/scale if scale > 0.0 else np.zeros_like(raw)
     keep = np.abs(lags*sample_width_ns) <= max_lag_ns
     return lags[keep]*sample_width_ns, correlation[keep]
+
+
+def calibrate_waveform_gls(
+        lags_ns, null_correlations, signal_correlations,
+        block_duration_s: float, star_rate_hz: float,
+        background_rate_hz: float, calibration_visibility2: float = 1.0,
+        hbt_pair_rate_scale: float = 1.0,
+        covariance_shrinkage: float = 0.05) -> WaveformGLSCalibration:
+    """由无信号和已知注入记录标定完整峰 GLS 估计器。
+
+    ``signal_correlations`` 的注入强度为
+    ``calibration_visibility2*hbt_pair_rate_scale``。增强只用于更快得到
+    平均响应模板，函数会除回该倍率；噪声协方差始终来自物理的零信号记录。
+    """
+    lags = np.asarray(lags_ns, float)
+    null = np.asarray(null_correlations, float)
+    signal = np.asarray(signal_correlations, float)
+    if (null.ndim != 2 or signal.ndim != 2 or null.shape[1:] != lags.shape
+            or signal.shape[1:] != lags.shape):
+        raise ValueError("correlation records must have shape (records, lags)")
+    if null.shape[0] < 3 or signal.shape[0] < 1:
+        raise ValueError("calibration needs at least 3 null and 1 signal records")
+    scale = calibration_visibility2*hbt_pair_rate_scale
+    if (block_duration_s <= 0.0 or star_rate_hz < 0.0
+            or background_rate_hz < 0.0 or scale <= 0.0
+            or not 0.0 <= covariance_shrinkage <= 1.0):
+        raise ValueError("invalid waveform GLS calibration parameters")
+
+    null_mean = null.mean(axis=0)
+    peak = (signal.mean(axis=0)-null_mean)/scale
+    covariance = np.atleast_2d(np.cov(null, rowvar=False, ddof=1))
+    diagonal = np.diag(np.diag(covariance))
+    covariance = ((1.0-covariance_shrinkage)*covariance
+                  + covariance_shrinkage*diagonal)
+    if np.any(np.diag(covariance) <= 0.0) or not np.any(np.abs(peak) > 0.0):
+        raise ValueError("degenerate waveform GLS calibration")
+    return WaveformGLSCalibration(
+        lags_ns=lags, null_mean=null_mean,
+        peak_per_visibility2=peak, covariance_per_block=covariance,
+        block_duration_s=float(block_duration_s),
+        star_rate_hz=float(star_rate_hz),
+        background_rate_hz=float(background_rate_hz),
+        calibration_visibility2=float(calibration_visibility2),
+        hbt_pair_rate_scale=float(hbt_pair_rate_scale),
+        null_records=int(null.shape[0]), signal_records=int(signal.shape[0]),
+        covariance_shrinkage=float(covariance_shrinkage))
+
+
+def waveform_gls_weights(
+        calibration: WaveformGLSCalibration,
+        exposure_s: float) -> tuple[np.ndarray, float]:
+    """返回 ``P_hat=w·(C-C0)`` 的 GLS 权重及其 ``sigma_P``。"""
+    covariance = calibration.covariance(exposure_s)
+    peak = calibration.peak_per_visibility2
+    solved = np.linalg.solve(covariance, peak)
+    information = float(peak @ solved)
+    if not np.isfinite(information) or information <= 0.0:
+        raise ValueError("waveform GLS covariance has no positive information")
+    return solved/information, 1.0/math.sqrt(information)
+
+
+def estimate_visibility2_gls(
+        correlations, calibration: WaveformGLSCalibration,
+        exposure_s: float | None = None) -> tuple[np.ndarray | float, float]:
+    """从一条或多条完整互相关峰估计 ``P=|V|^2``。"""
+    exposure = (calibration.block_duration_s if exposure_s is None
+                else float(exposure_s))
+    weight, sigma = waveform_gls_weights(calibration, exposure)
+    values = np.asarray(correlations, float)
+    if values.shape[-1] != len(calibration.lags_ns):
+        raise ValueError("correlation lag grid does not match calibration")
+    estimate = (values-calibration.null_mean) @ weight
+    return (float(estimate) if np.ndim(estimate) == 0 else estimate), sigma
+
+
+def simulate_waveform_gls_calibration(
+        instrument: Instrument, source_ab_magnitude: float = 2.0,
+        block_duration_ns: float = 20_000.0, max_lag_ns: float = 200.0,
+        null_records: int = 1024, signal_records: int = 256,
+        calibration_visibility2: float = 1.0,
+        hbt_pair_rate_scale: float = 10_000.0,
+        covariance_shrinkage: float = 0.01,
+        nsb_rate_hz: float | None = None,
+        seed: int = 20260824) -> tuple[WaveformGLSCalibration, dict]:
+    """用 main 同参数的单像素短波形生成完整峰 GLS 标定。
+
+    输出峰模板和零信号协方差；后续长曝光只需按 ``1/T`` 缩放协方差，
+    不需要在内存中保存整段20分钟波形。
+    """
+    if block_duration_ns <= 0.0 or max_lag_ns < 0.0:
+        raise ValueError("block duration and maximum lag are invalid")
+    if null_records < 8 or signal_records < 4:
+        raise ValueError("calibration needs at least 8 null and 4 signal records")
+    if not instrument.spe_template_path:
+        raise ValueError("instrument has no measured SPE template")
+
+    rng = np.random.default_rng(seed)
+    star_rate = detected_star_rate_hz(source_ab_magnitude, instrument)
+    nsb_rate = (instrument.detected_nsb_rate_hz if nsb_rate_hz is None
+                else float(nsb_rate_hz))
+    background_rate = nsb_rate+instrument.dark_count_rate_hz
+    template = load_measured_spe_template(instrument.spe_template_path)
+    timing = (None if not instrument.optical_timing_kernel_path else
+              load_optical_timing_mixture(instrument.optical_timing_kernel_path))
+    timing_padding = 0.0 if timing is None else 5.0*timing["rms_spread_ns"]
+    padding_ns = max(abs(template[0].min()), abs(template[0].max()))+timing_padding
+
+    def one_record(visibility2, pair_scale):
+        hits, _ = simulate_hbt_primary_pe(
+            rng, block_duration_ns, star_rate, background_rate, visibility2,
+            instrument, optical_timing_mixture=timing, padding_ns=padding_ns,
+            hbt_pair_rate_scale=pair_scale)
+        waveforms = []
+        for telescope_id in (0, 1):
+            times = hits.loc[hits.telescope_id == telescope_id, "time_ns"]
+            rendered = render_pe_waveform(
+                rng, times.to_numpy(float), block_duration_ns, instrument,
+                template=template)
+            waveforms.append(rendered["adc_mv"])
+        return waveform_cross_correlation(
+            waveforms[0], waveforms[1], instrument.sample_width_ns,
+            max_lag_ns)
+
+    null = []
+    for _ in range(null_records):
+        lags, correlation = one_record(0.0, 1.0)
+        null.append(correlation)
+    signal = []
+    for _ in range(signal_records):
+        signal_lags, correlation = one_record(
+            calibration_visibility2, hbt_pair_rate_scale)
+        if not np.array_equal(signal_lags, lags):
+            raise RuntimeError("waveform correlation lag grids changed")
+        signal.append(correlation)
+
+    null = np.asarray(null)
+    signal = np.asarray(signal)
+    null_split = null_records//2
+    signal_split = signal_records//2
+    calibration = calibrate_waveform_gls(
+        lags, null[:null_split], signal[:signal_split], block_duration_ns*1.0e-9,
+        star_rate, background_rate, calibration_visibility2,
+        hbt_pair_rate_scale, covariance_shrinkage)
+
+    # 对平稳波形，两个相关滞后点的协方差只依赖滞后之差。沿每条对角线
+    # 平均可大幅减少有限标定样本造成的协方差噪声，再轻微向对角阵收缩。
+    raw_covariance = np.cov(null[:null_split], rowvar=False, ddof=1)
+    lag_count = len(lags)
+    toeplitz_values = np.array([
+        np.mean(np.diag(raw_covariance, offset))
+        for offset in range(lag_count)])
+    stationary_covariance = np.fromfunction(
+        lambda i, j: toeplitz_values[np.abs(i-j).astype(int)],
+        (lag_count, lag_count), dtype=int)
+    diagonal = np.diag(np.diag(stationary_covariance))
+    covariance = ((1.0-covariance_shrinkage)*stationary_covariance
+                  + covariance_shrinkage*diagonal)
+    eigenvalue, eigenvector = np.linalg.eigh(covariance)
+    eigenvalue = np.maximum(eigenvalue, eigenvalue.max()*1.0e-10)
+    calibration.covariance_per_block = (
+        eigenvector*eigenvalue) @ eigenvector.T
+    # 当前模拟没有跨望远镜共享电子噪声，P=0 的总体期望严格为零。
+    # 真实数据应把这里替换成足够长的离源/错延迟零点标定。
+    calibration.null_mean = np.zeros(lag_count)
+    calibration.peak_per_visibility2 = 0.5*(
+        calibration.peak_per_visibility2
+        + calibration.peak_per_visibility2[::-1])
+    calibration.null_records = null_records
+    calibration.signal_records = signal_records
+
+    # 留出的零信号记录不参与权重拟合，用其实际散布校准 sigma 的绝对尺度。
+    validation_null, predicted_sigma = estimate_visibility2_gls(
+        null[null_split:], calibration)
+    empirical_sigma = float(np.std(validation_null, ddof=1))
+    covariance_scale = (empirical_sigma/predicted_sigma)**2
+    calibration.covariance_per_block *= covariance_scale
+    validation_signal, _ = estimate_visibility2_gls(
+        signal[signal_split:], calibration)
+    injected_visibility2 = calibration_visibility2*hbt_pair_rate_scale
+    response_closure = float(np.mean(validation_signal)/injected_visibility2)
+    _, sigma_block = waveform_gls_weights(
+        calibration, calibration.block_duration_s)
+    diagnostics = {
+        "null_correlations": null,
+        "signal_correlations": signal,
+        "mean_signal_correlation": np.mean(signal, axis=0),
+        "sigma_visibility2_per_block": sigma_block,
+        "validation_null_mean_visibility2": float(np.mean(validation_null)),
+        "validation_null_std_visibility2": empirical_sigma,
+        "validation_response_closure": response_closure,
+        "covariance_validation_scale": float(covariance_scale),
+        "null_training_records": null_split,
+        "signal_training_records": signal_split,
+        "padding_ns": float(padding_ns),
+        "source_ab_magnitude": float(source_ab_magnitude),
+        "physical_hbt_pair_rate_hz": hbt_correlated_pair_rate_hz(
+            star_rate, star_rate, instrument.coherence_area_s, 1.0),
+    }
+    return calibration, diagnostics
+
+
+def combine_visibility_estimates(values, sigmas) -> tuple[float, float]:
+    """用逆方差合并多个独立 ``P`` 估计。"""
+    estimates = np.asarray(values, float)
+    uncertainty = np.asarray(sigmas, float)
+    if (estimates.shape != uncertainty.shape or estimates.size == 0
+            or np.any(~np.isfinite(estimates))
+            or np.any(~np.isfinite(uncertainty))
+            or np.any(uncertainty <= 0.0)):
+        raise ValueError("visibility estimates and sigmas are invalid")
+    inverse_variance = 1.0/uncertainty**2
+    return (float(np.sum(estimates*inverse_variance)/np.sum(inverse_variance)),
+            float(1.0/math.sqrt(np.sum(inverse_variance))))
+
+
+def sample_waveform_gls_visibility2(
+        visibility2, calibration: WaveformGLSCalibration,
+        exposure_s: float,
+        rng: np.random.Generator | None = None) -> tuple[np.ndarray, float]:
+    """抽样完整相关峰，再用同一个 GLS 估计器得到长曝光 ``P``。
+
+    这是短波形到长曝光的充分统计量：均值为 ``C0+P*k``，协方差由
+    标定块按 ``T_block/T`` 缩放。没有生成无法存储的连续20分钟数组。
+    """
+    truth = np.asarray(visibility2, float)
+    if np.any(~np.isfinite(truth)):
+        raise ValueError("visibility2 must be finite")
+    generator = np.random.default_rng() if rng is None else rng
+    covariance = calibration.covariance(exposure_s)
+    noise = generator.multivariate_normal(
+        np.zeros(len(calibration.lags_ns)), covariance,
+        size=truth.size).reshape(truth.shape+(len(calibration.lags_ns),))
+    correlations = (calibration.null_mean
+                    + truth[..., None]*calibration.peak_per_visibility2
+                    + noise)
+    estimates, sigma = estimate_visibility2_gls(
+        correlations, calibration, exposure_s)
+    return np.asarray(estimates), sigma
 
 
 def _load_layout(layout) -> pd.DataFrame:
@@ -1159,7 +1433,9 @@ def simulate_uv_observation(
         uvw, source: BinarySource, observation: Observation,
         instrument: Instrument = Instrument(), seed: int = 20260824,
         source_case: str = "binary", nsb_multiplier: float = 1.0,
-        electronics_case: str = "reference") -> tuple[pd.DataFrame, dict]:
+        electronics_case: str = "reference", estimator: str = "analytic",
+        waveform_calibration: WaveformGLSCalibration | None = None,
+        ) -> tuple[pd.DataFrame, dict]:
     """把完整 UVW 表转换成带误差的长曝光 ``|V|²`` 测量。
 
     每镜每段显式抽样 ``N_star~Poisson(r_star*T)`` 和
@@ -1216,10 +1492,78 @@ def simulate_uv_observation(
     nsb_rate = nsb_multiplier*instrument.detected_nsb_rate_hz
     dark_rate = instrument.dark_count_rate_hz
     star_rate = detected_star_rate_hz(source.ab_magnitude, instrument)
+    if estimator == "waveform_gls":
+        if waveform_calibration is None:
+            raise ValueError("waveform_gls estimator needs waveform_calibration")
+        expected_background = nsb_rate+dark_rate
+        if (not np.isclose(waveform_calibration.star_rate_hz, star_rate,
+                           rtol=1e-9)
+                or not np.isclose(waveform_calibration.background_rate_hz,
+                                  expected_background, rtol=1e-9)):
+            raise ValueError(
+                "waveform calibration rates do not match this source/background")
+        unsupported = {
+            "telescope_gain_calibration_rms": instrument.telescope_gain_calibration_rms,
+            "per_night_gain_rms": instrument.per_night_gain_rms,
+            "baseline_zero_point_rms": instrument.baseline_zero_point_rms,
+            "residual_timing_rms_ns": instrument.residual_timing_rms_ns,
+            "transparency_fractional_rms": instrument.transparency_fractional_rms,
+            "nsb_fractional_rms": instrument.nsb_fractional_rms,
+        }
+        enabled = [name for name, value in unsupported.items() if value != 0.0]
+        if enabled:
+            raise NotImplementedError(
+                "waveform_gls systematics are not calibrated: " + ", ".join(enabled))
+        exposure_s = observation.segment_s*observation.nights
+        measured, sigma_value = sample_waveform_gls_visibility2(
+            truth, waveform_calibration, exposure_s, rng)
+        sigma_stat = np.full(len(frame), sigma_value)
+        frame["visibility2_measured"] = measured
+        frame["sigma_visibility2_stat"] = sigma_stat
+        frame["sigma_visibility2"] = sigma_stat
+        endpoint = observation.hours_per_night/2*math.pi/12.0
+        altitude = [math.asin(source_direction_enu(
+            sign*endpoint, math.radians(observation.source_dec_deg),
+            math.radians(observation.site_lat_deg))[2]) for sign in (-1, 1)]
+        metadata = {
+            "estimator": "waveform_gls",
+            "hours_per_night": observation.hours_per_night,
+            "nights": observation.nights,
+            "total_integration_hours": observation.hours_per_night*observation.nights,
+            "integration_s_per_uv_measurement": exposure_s,
+            "visibility_subsamples_per_segment": (
+                observation.visibility_subsamples_per_segment),
+            "max_abs_segment_time_smearing": float(
+                np.max(np.abs(truth-center_truth))),
+            "source_ab_magnitude": source.ab_magnitude,
+            "detected_star_rate_MHz": star_rate/1.0e6,
+            "source_case": source_case,
+            "nsb_multiplier": nsb_multiplier,
+            "nsb_rate_MHz": nsb_rate/1.0e6,
+            "dark_count_rate_MHz": dark_rate/1.0e6,
+            "electronics_case": "waveform_gls_calibrated",
+            "waveform_block_duration_us": (
+                waveform_calibration.block_duration_s*1.0e6),
+            "waveform_lag_samples": len(waveform_calibration.lags_ns),
+            "waveform_null_records": waveform_calibration.null_records,
+            "waveform_signal_records": waveform_calibration.signal_records,
+            "waveform_hbt_pair_rate_scale": (
+                waveform_calibration.hbt_pair_rate_scale),
+            "minimum_altitude_deg": math.degrees(min(altitude)),
+            "uv_measurements": len(frame),
+            "sigma_visibility2_stat": float(sigma_value),
+            "sigma_visibility2_total": float(sigma_value),
+            "instrument_parameter_source": instrument.parameter_source,
+        }
+        frame.attrs.update(metadata)
+        return frame, metadata
+    if estimator != "analytic":
+        raise ValueError("estimator must be analytic or waveform_gls")
+
     if electronics_case == "ideal":
-        excess_noise, electronics_efficiency = 1.0, 1.0
+        charge_rms, electronics_efficiency = 1.0, 1.0
     elif electronics_case == "reference":
-        excess_noise = instrument.excess_noise_factor
+        charge_rms = instrument.excess_noise_factor
         electronics_efficiency = _electronics_correlation_efficiency(
             instrument, star_rate+nsb_rate)
     else:
@@ -1280,9 +1624,9 @@ def simulate_uv_observation(
         unit_snr = (
             star_i*star_j/np.sqrt(total_i*total_j)
             * instrument.coherence_area_s
-            * np.sqrt(instrument.electronics_bandwidth_hz
-                      * observation.segment_s/2.0)
-            / excess_noise)
+            * np.sqrt(2.0 * instrument.electronics_bandwidth_hz
+                      * observation.segment_s)
+            / charge_rms**2)
         sigma = 1.0/(unit_snr*electronics_efficiency*optical_efficiency)
         expected = (truth*pair_gain*delay_factor
                     + np.asarray([pair_zero[pair] for pair in pairs]))
@@ -1306,6 +1650,7 @@ def simulate_uv_observation(
         sign*endpoint, math.radians(observation.source_dec_deg),
         math.radians(observation.site_lat_deg))[2]) for sign in (-1, 1)]
     metadata = {
+        "estimator": "analytic",
         "hours_per_night": observation.hours_per_night,
         "nights": observation.nights,
         "total_integration_hours": observation.hours_per_night*observation.nights,

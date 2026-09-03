@@ -255,11 +255,21 @@ def test_short_pair_rate_and_long_exposure_snr_use_same_coherence_area():
         star, star, instrument.coherence_area_s, 1.0)
     snr_implied_by_short_pairs = (
         pair_rate_at_unit_visibility/total
-        * np.sqrt(instrument.electronics_bandwidth_hz*integration_s/2.0)
-        / instrument.excess_noise_factor)
+        * np.sqrt(2.0*instrument.electronics_bandwidth_hz*integration_s)
+        / instrument.excess_noise_factor**2)
     assert np.isclose(
         sii.unit_visibility_snr(2.0, integration_s, instrument),
         snr_implied_by_short_pairs)
+
+
+def test_one_sided_nyquist_bandwidth_counts_all_real_samples():
+    """B=fs/2 时，2BT 必须等于时域独立样点数 fs*T。"""
+    sample_rate_hz = 250.0e6
+    integration_s = 10.0
+    bandwidth_hz = sample_rate_hz/2.0
+    assert np.isclose(
+        2.0*bandwidth_hz*integration_s,
+        sample_rate_hz*integration_s)
 
 
 def test_full_optical_response_uses_brightest_pixel_and_weight(tmp_path):
@@ -322,6 +332,65 @@ def test_fast_waveform_renderer_and_fft_cross_correlation():
     assert np.isclose(lags[np.argmax(correlation)], 0.0)
     assert np.isclose(np.max(correlation), 1.0)
     assert len(left["sample_time_ns"]) == 400
+
+
+def test_waveform_gls_recovers_injected_visibility_and_time_scaling():
+    rng = np.random.default_rng(14)
+    lags = np.arange(-2.0, 3.0)
+    peak = np.exp(-0.5*(lags/0.8)**2)*2.0e-4
+    covariance = 2.0e-4*np.fromfunction(
+        lambda i, j: 0.35**np.abs(i-j), (len(lags), len(lags)))
+    null = rng.multivariate_normal(np.zeros(len(lags)), covariance, 800)
+    signal = rng.multivariate_normal(0.7*peak, covariance, 800)
+    calibration = sii.calibrate_waveform_gls(
+        lags, null, signal, 1.0, 10e6, 2e6,
+        calibration_visibility2=0.7, covariance_shrinkage=0.05)
+
+    noiseless = calibration.null_mean+0.4*calibration.peak_per_visibility2
+    estimate, sigma_1s = sii.estimate_visibility2_gls(noiseless, calibration)
+    _, sigma_4s = sii.waveform_gls_weights(calibration, 4.0)
+    assert np.isclose(estimate, 0.4)
+    assert np.isclose(sigma_4s, sigma_1s/2.0)
+
+
+def test_waveform_gls_long_uv_path_uses_calibrated_peak_covariance():
+    instrument = sii.Instrument(detected_nsb_rate_hz=3.0e6)
+    star_rate = sii.detected_star_rate_hz(2.0, instrument)
+    calibration = sii.WaveformGLSCalibration(
+        lags_ns=np.array([-1.0, 0.0, 1.0]),
+        null_mean=np.array([0.01, -0.02, 0.01]),
+        peak_per_visibility2=np.array([0.2, 1.0, 0.2]),
+        covariance_per_block=np.diag([0.5, 1.0, 0.5]),
+        block_duration_s=1.0, star_rate_hz=star_rate,
+        background_rate_hz=instrument.detected_nsb_rate_hz,
+        calibration_visibility2=1.0, hbt_pair_rate_scale=10.0,
+        null_records=20, signal_records=20, covariance_shrinkage=0.05)
+    layout = pd.DataFrame({
+        "name": ["A", "B"], "east_m": [0.0, 100.0],
+        "north_m": [0.0, 0.0], "up_m": [0.0, 0.0]})
+    observation = sii.Observation(
+        hours_per_night=1.0/3.0, segment_s=1200.0)
+    uvw = sii.generate_uvw(layout, observation, instrument)
+    measured, metadata = sii.simulate_uv_observation(
+        uvw, sii.BinarySource(), observation, instrument, seed=7,
+        estimator="waveform_gls", waveform_calibration=calibration)
+    _, expected_sigma = sii.waveform_gls_weights(calibration, 1200.0)
+    assert metadata["estimator"] == "waveform_gls"
+    assert np.allclose(measured.sigma_visibility2, expected_sigma)
+    assert measured.visibility2_measured.notna().all()
+
+
+def test_hbt_calibration_scale_does_not_change_reported_physical_rate():
+    instrument = sii.Instrument(optical_width_nm=0.01)
+    rng = np.random.default_rng(7)
+    _, reference = sii.simulate_hbt_primary_pe(
+        rng, 10.0, 1e6, 0.0, 0.5, instrument,
+        padding_ns=0.0, hbt_pair_rate_scale=1.0)
+    _, enhanced = sii.simulate_hbt_primary_pe(
+        rng, 10.0, 1e6, 0.0, 0.5, instrument,
+        padding_ns=0.0, hbt_pair_rate_scale=10.0)
+    assert enhanced["hbt_pair_rate_hz"] == reference["hbt_pair_rate_hz"]
+    assert enhanced["injected_hbt_pair_rate_hz"] == 10*reference["hbt_pair_rate_hz"]
 
 
 def test_complete_pipeline_without_reconstruction():
