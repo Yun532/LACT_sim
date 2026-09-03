@@ -246,6 +246,7 @@ class Observation:
     hours_per_night: float = 6.0
     nights: int = 1
     segment_s: float = 1200.0
+    visibility_subsamples_per_segment: int = 9
 
 
 @dataclass
@@ -1094,6 +1095,51 @@ def generate_uvw(layout, observation: Observation,
     return pd.DataFrame(rows)
 
 
+def segment_averaged_visibility2(
+        uvw, source: BinarySource, observation: Observation,
+        instrument: Instrument = Instrument(),
+        source_case: str = "binary") -> np.ndarray:
+    """计算每个积分段沿地球自转轨迹平均后的 ``|V|²`` 期望值。"""
+    frame = uvw
+    required = {"hour_angle_h", "baseline_east_m", "baseline_north_m",
+                "baseline_up_m"}
+    if not required.issubset(frame):
+        missing = sorted(required-set(frame.columns))
+        raise ValueError(
+            f"uvw is missing segment-average columns {missing}")
+    samples = observation.visibility_subsamples_per_segment
+    if not isinstance(samples, int) or samples < 1:
+        raise ValueError("visibility_subsamples_per_segment must be a positive integer")
+
+    baseline = frame[["baseline_east_m", "baseline_north_m",
+                      "baseline_up_m"]].to_numpy(float)
+    center_hour = frame.hour_angle_h.to_numpy(float)
+    offsets_h = ((np.arange(samples)+0.5)/samples-0.5
+                 )*observation.segment_s/3600.0
+    lat = math.radians(observation.site_lat_deg)
+    dec = math.radians(observation.source_dec_deg)
+    sl, cl = math.sin(lat), math.cos(lat)
+    sd, cd = math.sin(dec), math.cos(dec)
+    averaged = np.zeros(len(frame), dtype=float)
+    for offset_h in offsets_h:
+        hour = (center_hour+offset_h)*math.pi/12.0
+        sh, ch = np.sin(hour), np.cos(hour)
+        u_m = (baseline[:, 0]*ch + baseline[:, 1]*sl*sh
+               - baseline[:, 2]*cl*sh)
+        v_m = (-baseline[:, 0]*sd*sh
+               + baseline[:, 1]*(cd*cl+sd*ch*sl)
+               + baseline[:, 2]*(cd*sl-sd*ch*cl))
+        u, v = u_m/instrument.wavelength_m, v_m/instrument.wavelength_m
+        if source_case == "binary":
+            averaged += np.abs(binary_visibility(u, v, source))**2
+        elif source_case == "single_disk":
+            averaged += uniform_disk_visibility(
+                np.hypot(u, v), source.primary_diameter_mas)**2
+        else:
+            raise ValueError("source_case must be binary or single_disk")
+    return averaged/samples
+
+
 def _electronics_correlation_efficiency(instrument, total_rate_hz):
     """由主程序 SPE 模板估算加性电子噪声造成的相关效率。"""
     if not instrument.spe_template_path:
@@ -1133,13 +1179,18 @@ def simulate_uv_observation(
     u = frame.u_lambda.to_numpy(float)
     v = frame.v_lambda.to_numpy(float)
     if source_case == "binary":
-        truth = np.abs(binary_visibility(u, v, source))**2
+        center_truth = np.abs(binary_visibility(u, v, source))**2
     elif source_case == "single_disk":
-        truth = uniform_disk_visibility(
+        center_truth = uniform_disk_visibility(
             np.hypot(u, v), source.primary_diameter_mas)**2
     else:
         raise ValueError("source_case must be binary or single_disk")
+    truth = segment_averaged_visibility2(
+        frame, source, observation, instrument, source_case)
+    frame["visibility2_center"] = center_truth
     frame["visibility2_true"] = truth
+    frame["segment_time_smearing_delta"] = truth-center_truth
+    frame["baseline_integration_s"] = observation.segment_s*observation.nights
 
     rng = np.random.default_rng(seed)
     row_i = frame.telescope_i_index.to_numpy(int)
@@ -1258,6 +1309,12 @@ def simulate_uv_observation(
         "hours_per_night": observation.hours_per_night,
         "nights": observation.nights,
         "total_integration_hours": observation.hours_per_night*observation.nights,
+        "integration_s_per_uv_measurement": (
+            observation.segment_s*observation.nights),
+        "visibility_subsamples_per_segment": (
+            observation.visibility_subsamples_per_segment),
+        "max_abs_segment_time_smearing": float(
+            np.max(np.abs(truth-center_truth))),
         "source_ab_magnitude": source.ab_magnitude,
         "detected_star_rate_MHz": star_rate/1.0e6,
         "source_case": source_case,

@@ -170,6 +170,41 @@ def test_matched_bandwidth_does_not_double_count_optical_timing():
     assert metadata["optical_timing_efficiency"] == 1.0
 
 
+def test_uv_measurement_uses_segment_averaged_visibility():
+    layout = pd.DataFrame({
+        "name": ["A", "B"],
+        "east_m": [0.0, 1000.0],
+        "north_m": [0.0, 0.0],
+        "up_m": [0.0, 0.0],
+    })
+    observation = sii.Observation(
+        hours_per_night=1.0/3.0, segment_s=1200.0,
+        visibility_subsamples_per_segment=9)
+    dense_observation = sii.Observation(
+        hours_per_night=1.0/3.0, segment_s=1200.0,
+        visibility_subsamples_per_segment=1001)
+    source = sii.BinarySource(separation_mas=1.0)
+    instrument = sii.Instrument(detected_nsb_rate_hz=0.0)
+    uvw = sii.generate_uvw(layout, observation, instrument)
+    averaged = sii.segment_averaged_visibility2(
+        uvw, source, observation, instrument)
+    dense = sii.segment_averaged_visibility2(
+        uvw, source, dense_observation, instrument)
+    center = np.abs(sii.binary_visibility(
+        uvw.u_lambda, uvw.v_lambda, source))**2
+    assert np.allclose(averaged, dense, atol=5e-4)
+    assert np.max(np.abs(averaged-center)) > 1e-3
+
+    measurements, metadata = sii.simulate_uv_observation(
+        uvw, source, observation, instrument, seed=17,
+        electronics_case="ideal")
+    assert np.allclose(measurements.visibility2_true, averaged)
+    assert np.allclose(
+        measurements.segment_time_smearing_delta, averaged-center)
+    assert measurements.baseline_integration_s.eq(1200.0).all()
+    assert metadata["visibility_subsamples_per_segment"] == 9
+
+
 def test_single_pixel_electronics_entry_uses_recovery_config():
     config = ROOT / "configs" / "sii" / "single_pixel_electronics.cfg"
     values, component_paths = expand_component_config(config)
