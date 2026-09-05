@@ -29,6 +29,8 @@ C_M_S = 299_792_458.0
 H_J_S = 6.626_070_15e-34
 JY_W_M2_HZ = 1.0e-26
 MAS_TO_RAD = math.pi / (180.0 * 3600.0 * 1000.0)
+# 固定赤道坐标场景采用平均恒星日；曝光仍以SI秒计，不把24小时当作恒星日。
+SIDEREAL_DAY_S = 86164.0905
 
 
 @dataclass(frozen=True)
@@ -52,7 +54,8 @@ class Instrument:
     polarization_factor: float = 0.5
     spectral_shape_factor: float = 1.0
     microcells_per_pixel: int = 270_336
-    microcell_recovery_time_ns: float = 10.0
+    microcell_recovery_time_ns: float = 0.0
+    intrinsic_time_jitter_ns: float = 0.0
     telescope_gain_calibration_rms: float = 0.0
     per_night_gain_rms: float = 0.0
     baseline_zero_point_rms: float = 0.0
@@ -69,6 +72,9 @@ class Instrument:
     charge_samples_path: str | None = None
     microcell_device_path: str | None = None
     optical_timing_kernel_path: str | None = None
+    # 窄带积分节点及HBT功率权重；空元组表示显式单色场景。
+    visibility_wavelength_nm: tuple = ()
+    visibility_spectral_weights: tuple = ()
     parameter_source: str = "built-in defaults"
 
     @property
@@ -99,7 +105,7 @@ class Instrument:
         """从 main 使用的 cfg/CSV 读取探测器响应，显式参数仍可覆盖。
 
         ``source_transmission_scale`` 表示大气及尚未单列的通光损失。当前
-        取值使 400 nm 默认总效率保持约 20%；镜面、滤光片、PDE、NSB、
+        数值是固定场景假设，不是实测大气透过率；镜面、滤光片、PDE、NSB、
         SPE、采样间隔或微单元配置在 main 中更新后会在下次调用时重新读取。
         """
         root = Path(repo_root).resolve()
@@ -174,6 +180,11 @@ class Instrument:
         band_average_ratio = photon_integral/(width_nm/wavelength_nm)/central_response
         spectral_shape = (width_nm*np.trapezoid(response**2, wavelength)
                           / (wavelength_nm**2*photon_integral**2))
+        # HBT相关面积按探测光谱密度平方加权；平坦AB谱下换成波长后正比于响应平方。
+        nodes, quadrature = np.polynomial.legendre.leggauss(5)
+        spectral_nodes = wavelength_nm+width_nm/2*nodes
+        spectral_weights = quadrature*np.interp(spectral_nodes, wavelength, response)**2
+        spectral_weights /= spectral_weights.sum()
         detected_spectrum = np.interp(wavelength, wave_nsb, nsb_flux,
                                      left=0., right=0.)*response
         # main 的诊断工具把结果写成 p.e./ns；这里的公共接口统一使用 Hz。
@@ -195,8 +206,9 @@ class Instrument:
         microcells = math.prod(int(device[key]) for key in (
             "channel_columns", "channel_rows",
             "microcell_columns_per_channel", "microcell_rows_per_channel"))
-        recovery_ns = float(electronics.get(
-            "microcell.recovery_time_ns", base.microcell_recovery_time_ns))
+        recovery_ns = (float(electronics.get("microcell.recovery_time_ns", 0.0))
+                       if electronics.get("microcell.recovery_enabled", "false").lower() == "true"
+                       else 0.0)
         # 优先使用由当前 main 实测光学配置生成的完整响应；没有运行过该
         # 校准时才回退到旧的轴上理想误差时间核，并由 notebook 明确标注。
         full_timing_path = (root / "configs" / "optics"
@@ -222,9 +234,11 @@ class Instrument:
             "effective_area_m2": effective_area,
             "throughput": float(throughput*band_average_ratio),
             "spectral_shape_factor": float(spectral_shape),
+            "visibility_wavelength_nm": tuple(spectral_nodes),
+            "visibility_spectral_weights": tuple(spectral_weights),
             "adc_sample_rate_hz": 1.0e9/sample_width_ns,
             # main 当前只给采样间隔、没有独立标定的模拟前端带宽；相关器
-            # 可用带宽不能超过 Nyquist，因此使用 fs/2 作为保守上限。
+            # 可用数字频带以fs/2标记，实际响应由SPE决定；这不是实测前端带宽。
             "electronics_bandwidth_hz": 0.5e9/sample_width_ns,
             "adc_bits": int(electronics.get("adc.bits", base.adc_bits)),
             "adc_full_scale_mv": float(electronics.get(
@@ -243,6 +257,8 @@ class Instrument:
             "excess_noise_factor": excess_noise,
             "microcells_per_pixel": microcells,
             "microcell_recovery_time_ns": recovery_ns,
+            "intrinsic_time_jitter_ns": (float(electronics.get("single_pe.time_jitter.sigma_ns", 0.0))
+                if electronics.get("single_pe.time_jitter.enabled", "false").lower() == "true" else 0.0),
             "spe_template_path": str(template_path.resolve()),
             "charge_samples_path": str(charge_path.resolve()),
             "microcell_device_path": str(device_path.resolve()),
@@ -358,10 +374,10 @@ def source_direction_enu(hour_angle_rad: float, dec_rad: float,
                          lat_rad: float) -> np.ndarray:
     """返回 ENU 坐标中的源方向单位向量。
 
-    这里沿用仓库已有的时角符号约定；后面的天球切向基底与该约定一致。
+    时角H=LST-RA，西向为正；后面的天球切向基底与此约定一致。
     """
     vector = np.array([
-        math.cos(dec_rad) * math.sin(hour_angle_rad),
+        -math.cos(dec_rad) * math.sin(hour_angle_rad),
         math.sin(dec_rad) * math.cos(lat_rad)
         - math.cos(dec_rad) * math.cos(hour_angle_rad) * math.sin(lat_rad),
         math.sin(dec_rad) * math.sin(lat_rad)
@@ -385,9 +401,9 @@ def celestial_tangent_axes_enu(hour_angle_rad: float, dec_rad: float,
     sd, cd = math.sin(dec), math.cos(dec)
     sl, cl = math.sin(lat), math.cos(lat)
     source = source_direction_enu(hour, dec, lat)
-    u_axis = np.array([ch, sl * sh, -cl * sh], dtype=float)
+    u_axis = np.array([ch, -sl * sh, cl * sh], dtype=float)
     v_axis = np.array([
-        -sd * sh,
+        sd * sh,
         cd * cl + sd * ch * sl,
         cd * sl - sd * ch * cl,
     ], dtype=float)
@@ -547,7 +563,7 @@ def mean_recovery_fraction(rate_hz: float, microcells: int,
     每个微单元看到的 Poisson 率为 ``rate_hz/microcells``。对指数间隔分布平均
     ``1-exp(-dt/tau)`` 后，结果正好是 ``1/(1 + rate_per_cell*tau)``。
     """
-    if rate_hz < 0 or microcells <= 0 or recovery_time_ns <= 0:
+    if rate_hz < 0 or microcells <= 0 or recovery_time_ns < 0:
         raise ValueError("rate, microcell count, and recovery time are invalid")
     occupancy = rate_hz * recovery_time_ns * 1.0e-9 / microcells
     return 1.0 / (1.0 + occupancy)
@@ -558,8 +574,11 @@ def apply_exponential_microcell_recovery(times_ns, cell_ids,
     """对按时间排序的微单元击中序列计算指数恢复电荷比例。"""
     times = np.asarray(times_ns, dtype=float)
     cells = np.asarray(cell_ids, dtype=np.int64)
-    if times.shape != cells.shape or recovery_time_ns <= 0:
+    if times.shape != cells.shape or recovery_time_ns < 0:
         raise ValueError("times/cells or recovery time are invalid")
+    # 恢复时间尚未实测时取0：所有光电子权重为1，不把SPE波形尾部当恢复时间。
+    if recovery_time_ns == 0:
+        return np.ones_like(times)
     order = np.argsort(times, kind="stable")
     fractions = np.empty_like(times)
     last: dict[int, float] = {}
@@ -1100,10 +1119,10 @@ def _validate_waveform_instrument(instrument):
 
 
 def waveform_instrument_signature(instrument, template=None):
-    """Bind calibrations to numerical parameters and response contents, not paths."""
+    """用数值参数和响应内容绑定标定；移动文件不会失效，内容改变必须重标定。"""
     values = asdict(instrument)
     values.pop("parameter_source")
-    values.pop("detected_nsb_rate_hz")  # Actual rate is checked separately.
+    values.pop("detected_nsb_rate_hz")  # 实际光子率另外核对。
     for name in list(values):
         if name.endswith("_path"):
             path = values[name]
@@ -1124,9 +1143,13 @@ def render_pe_waveform(
         instrument: Instrument = Instrument(), sample_width_ns: float | None = None,
         template: tuple[np.ndarray, np.ndarray] | None = None,
         electronic_noise_rms_mv: float | None = None) -> dict:
-    """Sample the continuous shifted SPE sum; do not quantize photon times."""
+    """直接采样平移后的连续SPE叠加，保留光电子到达时刻的亚采样间隔信息。"""
     _validate_waveform_instrument(instrument)
     times = np.asarray(pe_times_ns, dtype=float)
+    if instrument.intrinsic_time_jitter_ns < 0:
+        raise ValueError("intrinsic timing jitter must be nonnegative")
+    if instrument.intrinsic_time_jitter_ns > 0:
+        times = times+rng.normal(0., instrument.intrinsic_time_jitter_ns, len(times))
     dt = instrument.sample_width_ns if sample_width_ns is None else float(sample_width_ns)
     if (not np.isfinite(duration_ns) or not np.isfinite(dt) or duration_ns <= 0 or dt <= 0
             or times.ndim != 1 or not np.all(np.isfinite(times))):
@@ -1145,7 +1168,8 @@ def render_pe_waveform(
     samples = len(centers)
     if samples == 0:
         raise ValueError("duration contains no ADC sample center")
-    cells = rng.integers(0, instrument.microcells_per_pixel, len(times))
+    cells = (rng.integers(0, instrument.microcells_per_pixel, len(times))
+             if instrument.microcell_recovery_time_ns > 0 else np.zeros(len(times), dtype=int))
     recovery = apply_exponential_microcell_recovery(
         times, cells, instrument.microcell_recovery_time_ns)
     if instrument.charge_samples_path:
@@ -1156,7 +1180,7 @@ def render_pe_waveform(
     weights = recovery*charge
     analog = np.zeros(samples)
     offsets = np.arange(int(math.ceil(np.ptp(template_time)/dt))+1)
-    # Bound temporary memory while evaluating only samples inside each SPE support.
+    # 只计算各个SPE支持区间内的样本，并限制临时数组的内存占用。
     chunk = max(1, 1_000_000//len(offsets))
     for begin in range(0, len(times), chunk):
         arrival = times[begin:begin+chunk]
@@ -1171,7 +1195,7 @@ def render_pe_waveform(
                  if electronic_noise_rms_mv is None else electronic_noise_rms_mv)
     if not np.isfinite(noise_rms) or noise_rms < 0:
         raise ValueError("electronic noise RMS must be finite and nonnegative")
-    noisy = analog + rng.normal(0.0, noise_rms, samples)
+    noisy = analog + rng.normal(0.0, noise_rms, samples) if noise_rms > 0 else analog.copy()
     return {
         "sample_time_ns": centers, "analog_mv": analog, "noisy_mv": noisy,
         "adc_mv": digitize_adc(noisy, instrument.adc_bits, instrument.adc_full_scale_mv),
@@ -1313,7 +1337,8 @@ def simulate_waveform_gls_calibration(
     timing = (None if not instrument.optical_timing_kernel_path else
               load_optical_timing_mixture(instrument.optical_timing_kernel_path))
     timing_padding = 0.0 if timing is None else 5.0*timing["rms_spread_ns"]
-    padding_ns = max(abs(template[0].min()), abs(template[0].max()))+timing_padding
+    padding_ns = (max(abs(template[0].min()), abs(template[0].max()))+timing_padding
+                  +5*instrument.intrinsic_time_jitter_ns)
 
     def one_record(visibility2, pair_scale):
         hits, _ = simulate_hbt_primary_pe(
@@ -1396,7 +1421,7 @@ def simulate_waveform_gls_calibration(
     calibration.signal_records = signal_records
     calibration.instrument_signature = waveform_instrument_signature(instrument, template)
 
-    # Scale the fixed weights on records not used to choose regularization.
+    # 用未参加正则化选择的记录确定固定权重的噪声尺度。
     validation_null, predicted_sigma = estimate_visibility2_gls(null[null_scale_start:], calibration)
     empirical_sigma = float(np.std(validation_null, ddof=1))
     covariance_scale = (empirical_sigma/predicted_sigma)**2
@@ -1451,7 +1476,7 @@ def sample_waveform_gls_visibility2(
         visibility2, calibration: WaveformGLSCalibration,
         exposure_s: float,
         rng: np.random.Generator | None = None) -> tuple[np.ndarray, float]:
-    """抽样完整相关峰，再用同一个 GLS 估计器得到长曝光 ``P``。
+    """抽样完整相关峰的线性GLS投影，得到长曝光 ``P``。
 
     这是短波形到长曝光的充分统计量：均值为 ``C0+P*k``，协方差由
     标定块按 ``T_block/T`` 缩放。没有生成无法存储的连续20分钟数组。
@@ -1461,8 +1486,11 @@ def sample_waveform_gls_visibility2(
         raise ValueError("visibility2 must be finite")
     generator = np.random.default_rng() if rng is None else rng
     _, sigma = waveform_gls_weights(calibration, exposure_s)
-    # The projection of multivariate Gaussian lag noise is exactly scalar Gaussian.
-    return truth + generator.normal(0.0, sigma, size=truth.shape), sigma
+    # 同一标定用于整批UV点：增益误差只抽一次，不能当作每条基线的独立噪声。
+    gain_sigma = calibration.response_relative_uncertainty
+    gain = 1.+generator.normal(0., gain_sigma) if gain_sigma > 0 else 1.
+    # 多维高斯相关函数的线性GLS投影严格等价于这个一维高斯抽样。
+    return gain*truth + generator.normal(0.0, sigma, size=truth.shape), sigma
 
 
 def _load_layout(layout) -> pd.DataFrame:
@@ -1496,15 +1524,22 @@ def generate_uvw(layout, observation: Observation,
         raise ValueError("nights must be positive")
     segment_count = int(round(
         observation.hours_per_night*3600.0/observation.segment_s))
+    if not np.isclose(segment_count*observation.segment_s,
+                      observation.hours_per_night*3600., rtol=1e-12, atol=1e-9):
+        raise ValueError("observation duration must be an integer number of segments")
     if segment_count < 1:
         raise ValueError("observation has no integration segment")
     half_segment_h = observation.segment_s/7200.0
     hour_angles_h = np.linspace(
         -observation.hours_per_night/2 + half_segment_h,
         observation.hours_per_night/2 - half_segment_h,
-        segment_count)
+        segment_count)*86400.0/SIDEREAL_DAY_S
     lat = math.radians(observation.site_lat_deg)
     dec = math.radians(observation.source_dec_deg)
+    # 时角H=LST-RA，西向为正；地平线以下不能继续累计可见光有效曝光。
+    for hour in (-observation.hours_per_night/2, 0., observation.hours_per_night/2):
+        if source_direction_enu(hour*3600.*2*math.pi/SIDEREAL_DAY_S, dec, lat)[2] <= 0:
+            raise ValueError("source is below the horizon during the observation")
     rows = []
     for i, j in combinations(range(len(telescopes)), 2):
         first, second = telescopes.iloc[i], telescopes.iloc[j]
@@ -1550,7 +1585,7 @@ def segment_uv_samples(uvw, observation: Observation,
                       "baseline_up_m"]].to_numpy(float)
     center_hour = frame.hour_angle_h.to_numpy(float)
     offsets_h = ((np.arange(samples)+0.5)/samples-0.5
-                 )*observation.segment_s/3600.0
+                 )*observation.segment_s/3600.0*86400.0/SIDEREAL_DAY_S
     lat = math.radians(observation.site_lat_deg)
     dec = math.radians(observation.source_dec_deg)
     sl, cl = math.sin(lat), math.cos(lat)
@@ -1559,15 +1594,29 @@ def segment_uv_samples(uvw, observation: Observation,
     for offset_h in offsets_h:
         hour = (center_hour+offset_h)*math.pi/12.0
         sh, ch = np.sin(hour), np.cos(hour)
-        u_m = (baseline[:, 0]*ch + baseline[:, 1]*sl*sh
-               - baseline[:, 2]*cl*sh)
-        v_m = (-baseline[:, 0]*sd*sh
+        u_m = (baseline[:, 0]*ch - baseline[:, 1]*sl*sh
+               + baseline[:, 2]*cl*sh)
+        v_m = (baseline[:, 0]*sd*sh
                + baseline[:, 1]*(cd*cl+sd*ch*sl)
                + baseline[:, 2]*(cd*sl-sd*ch*cl))
         u, v = u_m/instrument.wavelength_m, v_m/instrument.wavelength_m
         us.append(u)
         vs.append(v)
-    return np.stack(us, axis=1), np.stack(vs, axis=1)
+    u, v = np.stack(us, axis=1), np.stack(vs, axis=1)
+    wavelength = np.asarray(instrument.visibility_wavelength_nm or (instrument.wavelength_nm,))
+    scale = instrument.wavelength_nm/wavelength
+    return ((u[..., None]*scale).reshape(len(frame), -1),
+            (v[..., None]*scale).reshape(len(frame), -1))
+
+
+def segment_sampling_weights(observation, instrument):
+    """时间中点等权，波长按HBT相关面积加权；生成和重建必须使用同一权重。"""
+    spectral = np.asarray(instrument.visibility_spectral_weights or (1.,), float)
+    if (spectral.size != len(instrument.visibility_wavelength_nm or (instrument.wavelength_nm,))
+            or np.any(spectral < 0) or not np.isclose(spectral.sum(), 1.)):
+        raise ValueError("invalid spectral quadrature weights")
+    count = observation.visibility_subsamples_per_segment
+    return np.tile(spectral/count, count)
 
 
 def segment_averaged_visibility2(
@@ -1575,7 +1624,7 @@ def segment_averaged_visibility2(
         instrument: Instrument = Instrument(), source_case: str = "binary"):
     """计算每个积分段沿地球自转轨迹平均后的 ``|V|²`` 期望值。"""
     u, v = segment_uv_samples(uvw, observation, instrument)
-    return np.mean(np.abs(source_visibility(u, v, source, source_case))**2, axis=1)
+    return np.abs(source_visibility(u, v, source, source_case))**2 @ segment_sampling_weights(observation, instrument)
 
 
 def _electronics_correlation_efficiency(instrument, total_rate_hz):
@@ -1611,6 +1660,7 @@ def simulate_uv_observation(
     sample_u, sample_v = segment_uv_samples(frame, observation, instrument)
     frame["uv_samples_u"] = list(map(tuple, sample_u))
     frame["uv_samples_v"] = list(map(tuple, sample_v))
+    frame["uv_samples_weight"] = [tuple(segment_sampling_weights(observation, instrument))]*len(frame)
     required = {"u_lambda", "v_lambda", "segment",
                 "telescope_i_index", "telescope_j_index"}
     if not required.issubset(frame):
@@ -1686,13 +1736,16 @@ def simulate_uv_observation(
         frame["sigma_visibility2"] = sigma_stat
         frame["sigma_visibility2_calibration"] = (
             np.abs(measured)*waveform_calibration.response_relative_uncertainty)
-        endpoint = observation.hours_per_night/2*math.pi/12.0
+        frame["calibration_relative_sigma"] = waveform_calibration.response_relative_uncertainty
+        frame["calibration_id"] = hashlib.sha256(
+            waveform_calibration.peak_per_visibility2.tobytes()).hexdigest()
+        endpoint = observation.hours_per_night*3600.*math.pi/SIDEREAL_DAY_S
         altitude = [math.asin(source_direction_enu(
             sign*endpoint, math.radians(observation.source_dec_deg),
             math.radians(observation.site_lat_deg))[2]) for sign in (-1, 1)]
         metadata = {
             "estimator": "waveform_gls",
-            "uncertainty_model": "statistical conditional on calibration; shared gain uncertainty reported separately",
+            "uncertainty_model": "independent statistical errors plus one shared Gaussian calibration gain, profiled in reconstruction",
             "calibration_response_relative_uncertainty": waveform_calibration.response_relative_uncertainty,
             "calibration_sigma_relative_uncertainty": waveform_calibration.sigma_relative_uncertainty,
             "hours_per_night": observation.hours_per_night,
@@ -1813,7 +1866,7 @@ def simulate_uv_observation(
     frame["sigma_visibility2_stat"] = sigma_stat
     frame["sigma_visibility2"] = sigma_total
 
-    endpoint = observation.hours_per_night/2*math.pi/12.0
+    endpoint = observation.hours_per_night*3600.*math.pi/SIDEREAL_DAY_S
     altitude = [math.asin(source_direction_enu(
         sign*endpoint, math.radians(observation.source_dec_deg),
         math.radians(observation.site_lat_deg))[2]) for sign in (-1, 1)]
@@ -1853,11 +1906,23 @@ def simulate_uv_observation(
 def prepare_reconstruction_uv(measurements, cell_mlambda=120.0, legacy=False):
     """逆方差合并观测，并保留每个时间子采样在预测量中的相同权重。
 
-    当前要求测量独立；已知共享误差应由UvData.covariance直接传入重建器。
+    统计噪声独立；共享标定增益通过独立先验传入，不参与逆方差合并。
+    其他已知相关统计误差应由UvData.covariance直接传入重建器。
     cell_mlambda=None不合并，仅用于大小受控的独立检查。
     """
     from sii_reconstruction import UvData
     data = measurements.copy()
+    gain_sigma = 0.
+    if "calibration_relative_sigma" in data:
+        if data.calibration_relative_sigma.nunique() != 1:
+            raise ValueError("one reconstruction must use one shared calibration prior")
+        if "calibration_id" in data and data.calibration_id.nunique() != 1:
+            raise ValueError("multiple independent calibrations need separate likelihood groups")
+        gain_sigma = float(data.calibration_relative_sigma.iloc[0])
+        if not np.isfinite(gain_sigma) or gain_sigma < 0:
+            raise ValueError("calibration prior must be finite and nonnegative")
+        if legacy and gain_sigma > 0:
+            raise ValueError("legacy reconstruction does not support shared calibration uncertainty")
     required = ["u_lambda", "v_lambda", "visibility2_measured", "sigma_visibility2"]
     if (len(data) == 0 or not np.all(np.isfinite(data[required].to_numpy(float)))
             or np.any(data.sigma_visibility2 <= 0)):
@@ -1916,7 +1981,8 @@ def prepare_reconstruction_uv(measurements, cell_mlambda=120.0, legacy=False):
         multiplicity=grouped.multiplicity.to_numpy(int),
         input_rows=len(data), finite_rows=len(data),
         physical_violations=int(((grouped.visibility2 < 0)
-                                 | (grouped.visibility2 > 1)).sum()), sampling=sampling)
+                                 | (grouped.visibility2 > 1)).sum()), sampling=sampling,
+        calibration_relative_sigma=gain_sigma)
     return uv
 
 

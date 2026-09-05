@@ -44,6 +44,9 @@ __pycache__/
 !docs/assets/*.png
 !docs/sii_workflow_figures/
 !docs/sii_workflow_figures/*.png
+!docs/sii_science_figures/
+!docs/sii_science_figures/*.png
+!validation/sii_science/*.csv
 !external/hessioxxx/hessioxxx.tar.gz
 !external/hessioxxx/sha256.sum
 external/hessioxxx/source/bin/

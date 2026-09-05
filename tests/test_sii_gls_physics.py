@@ -20,7 +20,7 @@ def test_shared_passband_rates_and_coherence(tmp_path):
     triangle = tmp_path/'triangle.csv'
     triangle.write_text('wavelength_nm,transmission\n399,0\n400,1\n401,0\n')
     shaped = sii.Instrument.from_repository(ROOT, sii_bandpass_path=str(triangle))
-    # A triangular transmission halves both rates and increases coherence area by 4/3.
+    # 三角形透过率使两种光子率减半，相干面积增大为原来的4/3。
     assert np.isclose(shaped.detected_nsb_rate_hz/wide.detected_nsb_rate_hz, .5, rtol=.03)
     assert np.isclose(sii.detected_star_rate_hz(2, shaped)/sii.detected_star_rate_hz(2, wide), .5, rtol=.03)
     assert np.isclose(shaped.coherence_area_s/wide.coherence_area_s, 4/3, rtol=.01)

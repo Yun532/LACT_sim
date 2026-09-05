@@ -20,18 +20,17 @@ from scipy.linalg import solve_triangular
 
 try:
     from scipy.optimize import minimize
-except ImportError:  # pragma: no cover - reconstruction requires SciPy.
+except ImportError:  # pragma: no cover - 重建需要SciPy。
     minimize = None
 
 try:
     import matplotlib
 
-    # A reusable library must not replace an already active notebook backend.
-    # Select Agg only for headless/script imports that have not loaded pyplot.
+    # 不替换Notebook已经启用的绘图后端；脚本尚未导入pyplot时才选择Agg。
     if "matplotlib.pyplot" not in sys.modules:
         matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-except ImportError:  # pragma: no cover - CSV reconstruction remains usable.
+except ImportError:  # pragma: no cover - CSV重建仍可使用。
     plt = None
 
 
@@ -54,6 +53,8 @@ class UvData:
     # 每个实际子采样的(u,v,所属输出格,归一化平均权重)，不含源真值。
     sampling: tuple | None = None
     covariance: np.ndarray | None = None
+    # 这是全体测量共享的标定先验，不随合并UV点数按平方根缩小。
+    calibration_relative_sigma: float = 0.0
 
 
 @dataclass
@@ -269,10 +270,34 @@ def _power_gradient(kernel, influence, image):
     return 2*fftconvolve(lag_gradient, image, mode="valid")
 
 
+def profile_calibration_gain(uv, prediction):
+    """对共享增益g作解析剖面拟合：最小化统计卡方与(g-1)^2/s_g^2之和。"""
+    scale = uv.calibration_relative_sigma
+    if scale <= 0:
+        return 1., 0.
+    base = replace(uv, calibration_relative_sigma=0.)
+    _, precision_prediction = statistical_loss(base, prediction)
+    information = float(prediction @ precision_prediction)+1/scale**2
+    gain = (float(uv.visibility_abs2 @ precision_prediction)+1/scale**2)/information
+    return gain, 1/np.sqrt(information)
+
+
 def statistical_loss(uv, residual, likelihood="gaussian", huber_delta=2.5):
     """返回绝对统计损失及对P残差的导数；不归一化/截断逆方差。"""
     if likelihood == "noiseless":
         return 0.5*float(residual @ residual), residual
+    if not np.isfinite(uv.calibration_relative_sigma) or uv.calibration_relative_sigma < 0:
+        raise ValueError("calibration prior must be finite and nonnegative")
+    if uv.calibration_relative_sigma > 0:
+        if likelihood != "gaussian":
+            raise ValueError("shared calibration profiling requires Gaussian likelihood")
+        prediction = np.asarray(residual)+uv.visibility_abs2
+        gain, _ = profile_calibration_gain(uv, prediction)
+        value, gradient = statistical_loss(replace(uv, calibration_relative_sigma=0.),
+                                           gain*prediction-uv.visibility_abs2)
+        value += .5*((gain-1)/uv.calibration_relative_sigma)**2
+        # 包络定理：在最优g处，对图像求导不需要额外的dg/dI项。
+        return value, gain*gradient
     if not np.all(np.isfinite(uv.sigma) & (uv.sigma > 0)):
         raise ValueError("statistical reconstruction requires finite positive sigma; use likelihood='noiseless' explicitly for ideal data")
     if uv.covariance is None:
@@ -298,22 +323,17 @@ def statistical_loss(uv, residual, likelihood="gaussian", huber_delta=2.5):
 
 
 def _initial_image(xx, yy, support, rng, start_index, fov_mas):
-    if start_index == 0:
-        image = np.exp(-(xx * xx + yy * yy) / (2.0 * (0.12 * fov_mas) ** 2))
+    """使用集中、弥散和随机平滑初值；不把双星形态预先编码到所有随机起点。"""
+    from scipy.ndimage import gaussian_filter
+    if start_index % 3 == 0:
+        image = np.exp(-(xx**2+yy**2)/(2*(.12*fov_mas)**2))
+    elif start_index % 3 == 1:
+        image = np.ones_like(xx)
     else:
-        separation = rng.uniform(0.15, 0.45) * fov_mas
-        angle = rng.uniform(0.0, math.pi)
-        dx = 0.5 * separation * math.sin(angle)
-        dy = 0.5 * separation * math.cos(angle)
-        sigma = rng.uniform(0.04, 0.11) * fov_mas
-        ratio = rng.uniform(0.25, 1.0)
-        image = np.exp(-((xx - dx) ** 2 + (yy - dy) ** 2) / (2.0 * sigma ** 2))
-        image += ratio * np.exp(
-            -((xx + dx) ** 2 + (yy + dy) ** 2) / (2.0 * sigma ** 2)
-        )
-    supported = image[support] + 1e-8
-    noise = rng.normal(0.0, 0.35, size=supported.size)
-    return np.log(supported) + noise
+        field = gaussian_filter(rng.normal(size=xx.shape), max(1., len(xx)/12.))
+        image = np.exp(field/max(float(field.std()), 1e-12))
+    return np.log(image[support]+1e-8)+rng.normal(0., .15, support.sum())
+
 
 
 def _dirty_autocorrelation(uv, xx, yy):
@@ -357,8 +377,16 @@ def _center_image(image):
 
 
 def _peak_diagnostic(image, theta_mas, minimum_separation_mas):
+    """只报告实际局部极大值；单峰图不强行挑出第二个亮像素冒充双星。"""
+    from scipy.ndimage import maximum_filter, label
     yy, xx = np.meshgrid(theta_mas, theta_mas, indexing="ij")
-    order = np.argsort(image.ravel())[::-1]
+    maxima = (image == maximum_filter(image, size=3)) & (image > .05*image.max())
+    regions, count = label(maxima)
+    candidates = []
+    for region in range(1, count+1):
+        indices = np.flatnonzero(regions.ravel() == region)
+        candidates.append(indices[np.argmax(image.ravel()[indices])])
+    order = sorted(candidates, key=lambda index: image.ravel()[index], reverse=True)
     peaks = []
     for flat_index in order:
         row, col = np.unravel_index(flat_index, image.shape)
@@ -421,7 +449,8 @@ def _best_truth_alignment(image, truth):
         row, col = np.unravel_index(np.argmax(correlation), correlation.shape)
         shift_y = int(row if row <= image.shape[0] // 2 else row - image.shape[0])
         shift_x = int(col if col <= image.shape[1] // 2 else col - image.shape[1])
-        aligned = np.roll(candidate, (shift_y, shift_x), axis=(0, 1))
+        # 配准仅用于拟合后评价；禁止周期卷绕把视场边缘通量搬到另一侧。
+        aligned = _shift_without_wrap(candidate, shift_y, shift_x)
         a = aligned.ravel()
         b = truth.ravel()
         coefficient = float(np.corrcoef(a, b)[0, 1])
@@ -433,6 +462,7 @@ def _best_truth_alignment(image, truth):
                 "truth_nrmse": nrmse,
                 "truth_uses_180_degree_mirror": mirrored,
                 "truth_alignment_shift_pixels": [shift_y, shift_x],
+                "truth_alignment_retained_flux": float(aligned.sum()/candidate.sum()),
             })
     return best[1], best[2]
 
@@ -443,7 +473,7 @@ def reconstruct_uv_data(
         fov_mas=4.0,
         support_radius_mas=None,
         starts=4,
-        max_iter=1600,
+        max_iter=8000,
         smoothness="cv",
         huber_delta=2.5,
         seed=12345,
@@ -516,8 +546,16 @@ def reconstruct_uv_data(
                 max_iter=max_iter, smoothness=float(alpha), huber_delta=huber_delta,
                 seed=seed, likelihood=likelihood, optimizer_ftol=ftol,
                 parameterization=parameterization, _power_kernel=kernel[training])
-            residual = power_from_image(kernel[validation], fit.image)-validation_uv.visibility_abs2
-            score, _ = statistical_loss(validation_uv, residual, "gaussian")
+            validation_prediction = power_from_image(kernel[validation], fit.image)
+            train_prediction = power_from_image(kernel[training], fit.image)
+            gain, gain_sigma = profile_calibration_gain(train_uv, train_prediction)
+            residual = gain*validation_prediction-validation_uv.visibility_abs2
+            # 验证集只接收训练集的增益后验；不允许验证集自行重新标定。
+            standardized = residual/validation_uv.sigma
+            factor = gain_sigma*validation_prediction/validation_uv.sigma
+            denominator = 1.+factor @ factor
+            score = .5*(standardized @ standardized
+                         -(standardized @ factor)**2/denominator+np.log(denominator))
             cv_results.append({"smoothness": float(alpha), "validation_chi2_per_point":
                 2*score/len(validation), "training_converged": fit.metrics["optimizer_success"]})
         smoothness = min(cv_results, key=lambda row: row["validation_chi2_per_point"])["smoothness"]
@@ -598,16 +636,26 @@ def reconstruct_uv_data(
         else:
             center_shift = (0, 0)
 
-    # Recalculate the visibility after choosing the translation gauge.
+    # 选定允许的平移后重新计算可见度，保证保存的图像与预测一致。
     supported_image = image[support]
     supported_image /= np.sum(supported_image)
     predicted = (np.abs(fourier @ supported_image) ** 2 if legacy
                  else power_from_image(kernel, image))
     residual = predicted - observed
+    calibration_gain, calibration_gain_sigma = profile_calibration_gain(uv, predicted)
     metrics = {
         "algorithm": f"positive_{parameterization}_multistart_lbfgsb",
         "parameterization": parameterization,
+        "calibration_gain": float(calibration_gain),
+        "calibration_gain_posterior_sigma": float(calibration_gain_sigma),
+        "chi2_statistical": (float("nan") if legacy or likelihood == "noiseless" else
+            2*statistical_loss(replace(uv, calibration_relative_sigma=0.),
+                              calibration_gain*predicted-observed, "gaussian")[0]),
+        "chi2_calibration_prior": ((calibration_gain-1)/uv.calibration_relative_sigma)**2
+            if uv.calibration_relative_sigma > 0 else 0.,
         "simplex_stationarity_gap": stationarity_gap,
+        "stationarity_gap_per_objective": stationarity_gap/max(1., abs(float(selected.fun))),
+        "stationarity_passed": stationarity_gap <= 1e-4*max(1., abs(float(selected.fun))),
         "objective": float(selected.fun),
         "fit_rmse": float(np.sqrt(np.mean(residual * residual))),
         "weighted_fit_rmse": float(np.sqrt(

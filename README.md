@@ -16,19 +16,22 @@ apps/                         C++ 可执行程序入口
 include/ + src/               main 的光学、电子学和输入输出主体
 python/sii_unified.py         SII 源模型、UVW、噪声测量和一键流程
 python/sii_reconstruction.py  独立的 |V|² 无相位重建
+python/sii_validation.py      独立热光场、解析响应与参数区间验证
 python/config_io.py           读取 main 的 cfg/CSV
 configs/                      当前流程实际引用的配置和实测数据
 notebooks/sii_complete_waveform_report.ipynb
-                              当前主报告：波形GLS、绝对统计重建及新旧对照
+                              当前主报告：波形GLS、独立验证、参数区间与图像稳定性
 notebooks/lact_sii_paper_simulation.ipynb
                               保留的早期模拟报告，不代表当前主结果
-SII_COMPLETE_WORKFLOW_ZH.md    七步计算流程、完整公式和对应结果图
-tests/test_sii_unified.py      唯一保留的 SII 闭合检查
+docs/SII_PHYSICS_ZH.md         物理因果链、公式、输入来源与结果边界
+docs/SII_IMPLEMENTATION_ZH.md  函数、数据接口与复现说明
+SII_COMPLETE_WORKFLOW_ZH.md    当前说明及计算证据入口
+tests/test_sii_*.py            SII自动检查
 ```
 
-SII 两个 Python 文件都包含中文模块说明、关键物理步骤注释和函数 docstring。
-notebook 进一步给出公式、参数来源表、理论天图、理论/模拟 UV 图、双镜波形、重建和
-星等/观测时间情景。
+SII核心Python文件包含中文模块说明、关键物理步骤注释和函数docstring。
+两份说明分别讲[物理原理](docs/SII_PHYSICS_ZH.md)和[代码实现](docs/SII_IMPLEMENTATION_ZH.md)。
+Notebook保存实际执行的参数、独立波形验证、1000次参数区间覆盖率检验和图像重复结果。
 
 ## 物理流程
 
@@ -41,7 +44,7 @@ notebook 进一步给出公式、参数来源表、理论天图、理论/模拟 
         ↓
 main 参数：镜面/遮挡/滤光片/PDE/NSB/光学时间核/SPE/SiPM
         ↓
-逐望远镜 Poisson 涨落 + 共享系统误差 + 电子学噪声
+短波形标定 + 独立统计噪声 + 全体UV共享的标定增益误差
         ↓
 模拟每个 UV 点的 |V|² 与不确定度
         ↓
@@ -62,7 +65,9 @@ g2(0)-1 = <delta I1(t) delta I2(t)> / (<I1><I2>)
 
 当前主报告使用多个延迟点的相关曲线，通过标定模板与噪声协方差做GLS估计，得到
 该基线的 `P_hat` 与 `sigma_P`，不只是读取零延迟峰值。重建默认最小化绝对误差对应的
-高斯负对数似然，预测值保留与观测相同的时间/UV平均；平滑强度由测量留出集选择。
+高斯负对数似然，并剖面拟合共同标定增益，预测值保留与观测相同的时间/光谱/UV平均；平滑强度由测量留出集选择。
+上式给出通常的强度相关定义；程序实际相关向量以两条波形标准差的乘积归一化，
+其到平方可见度的转换包含在标定模板中，不能把原始相关系数直接当成`g2-1`。
 强度干涉不直接测傅里叶相位，非负、归一化和有限支撑等约束仍然必要，结果不保证唯一。
 旧经验权重方法仅通过 `likelihood="legacy"` 用于历史对照。
 当前主重建直接优化非负像素并归一化，默认使用`parameterization="flux"`和`1e-12`停止容差；
@@ -129,9 +134,11 @@ NSB或电子学参数时可以复用UVW；改变阵列、源赤纬、时角、�
 | S17351 微单元几何 | `configs/electronics/devices/s17351_tiled_2x4.cfg` |
 
 这些 cfg/CSV 改变后，下一次创建 `Instrument` 会重新读取，不需要同步修改 SII 代码。
-当前没有实测来源的量保留为接口：微单元恢复时间暂用 `10 ns`；串扰、后脉冲、暗计数、
-额外电子噪声、跨镜共享增益/时钟/透明度标定误差默认均为 `0`。获得实测值后通过
-`Instrument(...)` 或 `Instrument.from_repository(..., parameter=value)` 覆盖。
+当前没有实测来源的电子学量保留为接口且设为`0`，包括微单元恢复、本征抖动、串扰、
+后脉冲、暗计数、额外电子噪声和仪器增益/时钟/透明度漂移。实测SPE长尾不被当成恢复时间。
+获得实测值后通过`Instrument.from_repository(..., parameter=value)`覆盖并重新标定；
+尚无时间/电荷模型的串扰、后脉冲及未标定GLS漂移若设为非零会明确报错。
+2 nm通带和固定源透过率仍是场景假设。有限Monte Carlo标定误差来自程序估计，另行传播。
 
 ## 运行
 
@@ -140,7 +147,8 @@ Python 环境：
 ```bash
 python -m pip install -r requirements.txt
 python tools/execute_notebook.py notebooks/sii_complete_waveform_report.ipynb --cwd . --timeout 3600
-python -m pytest -q tests/test_sii_unified.py
+python -m pytest -q tests
+python tools/check_sii_science_artifacts.py
 ```
 
 C++ main（Linux）：

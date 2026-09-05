@@ -1,0 +1,9 @@
+parameter,value,unit,source
+SPE integral,84.03495572475866,mV ns,measured
+charge second moment,1.0325452577961836,1,measured samples
+optical time RMS,0.5488274245908952,ns,ray trace
+sample interval,4.0,ns,main config
+"stellar rate, m_AB=2",199.88929829641629,MHz,spectrum + response
+NSB rate,0.5732140884464285,MHz,sky model + passband
+coherence area,0.13342919223619465,ps,same passband
+SII passband width,2.0,nm,scenario

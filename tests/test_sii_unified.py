@@ -437,7 +437,7 @@ def test_complete_pipeline_without_reconstruction():
 def test_reconstruction_import_preserves_loaded_pyplot_backend():
     import importlib
     import matplotlib
-    import matplotlib.pyplot  # noqa: F401 - establishes the active backend.
+    import matplotlib.pyplot  # noqa: F401 - 预先建立活动绘图后端。
 
     before = matplotlib.get_backend()
     sys.modules.pop("sii_reconstruction", None)

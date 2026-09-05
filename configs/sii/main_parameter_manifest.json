@@ -1,0 +1,56 @@
+{
+  "main_commit": "2926031b14c8aa2164a4d9233f5c2d0a75324127",
+  "comparison": "LF-normalized bytes",
+  "files": [
+    {
+      "path": "configs/electronics/measured_spe_4ns.cfg",
+      "sha256_lf": "153df0c5e2bb2b1e50038d48f34bfd315af568236062d31583cb1e43d5da6256",
+      "matches_main": true
+    },
+    {
+      "path": "configs/electronics/parameters/spe_template_measured.csv",
+      "sha256_lf": "37f0f38a87b3bed0e1d64e1f4ef2f37877bd06b3a4bca7fe5221034e575e3b8f",
+      "matches_main": true
+    },
+    {
+      "path": "configs/electronics/parameters/spe_charge_samples_measured.csv",
+      "sha256_lf": "ba27c1248f744525b146517e8292a99e7af025be4bdc9f8ec6f8d9b55c808383",
+      "matches_main": true
+    },
+    {
+      "path": "configs/electronics/devices/s17351_tiled_2x4.cfg",
+      "sha256_lf": "ef0441ace5e2352f19ee427805c790d1eae0d253baa2c5453863d014c31e0e57",
+      "matches_main": true
+    },
+    {
+      "path": "configs/efficiency/mirror_reflectivity_dm0113_13point_mean.csv",
+      "sha256_lf": "b97747ce7d7335890f00170babc25eab1347ec36b05e7049ad72401699dfc231",
+      "matches_main": true
+    },
+    {
+      "path": "configs/efficiency/filter_transmission.csv",
+      "sha256_lf": "1d726926d917d0a6803a4f76b65651cf0672f03f832a29eefe530c5ddcd646c8",
+      "matches_main": true
+    },
+    {
+      "path": "configs/efficiency/sipm_pde.csv",
+      "sha256_lf": "c166c3336115ce33269dc80f3459fc72e48889f6b91afb331e6612f08aa15762",
+      "matches_main": true
+    },
+    {
+      "path": "configs/nsb/nsb_spectrum.csv",
+      "sha256_lf": "5f202dbc0928ebb71b775b7054950d70eb68c9cfb50ef5f4c70fff12dd54bf17",
+      "matches_main": true
+    },
+    {
+      "path": "configs/calibrated/lact2_measured_20260622/mirror_20260622.cfg",
+      "sha256_lf": "1ea985be1b03063afd2f265352bf63c8ef8ae3d2d22938639201d58676e2a444",
+      "matches_main": true
+    },
+    {
+      "path": "configs/calibrated/lact2_measured_20260622/mirror_elevation_series_20260622.csv",
+      "sha256_lf": "2610282598463858dfcd69e77b5a65350efe847c3fbcbe2dcc88803297229fcc",
+      "matches_main": true
+    }
+  ]
+}

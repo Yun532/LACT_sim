@@ -1,0 +1,217 @@
+# SII程序实现、数据接口与复现
+
+当前主入口是[`sii_complete_waveform_report.ipynb`](../notebooks/sii_complete_waveform_report.ipynb)。它从仪器配置开始，实际生成标定波形，做独立验证，再生成整阵列测量、参数区间和图像重建。本文说明程序如何计算；物理推导见[原理说明](SII_PHYSICS_ZH.md)。不要用历史Notebook的图片或早期标定数值替代当前结果。
+
+## 1. 文件职责与调用关系
+
+| 文件 | 负责什么 | 不应混用的层次 |
+|---|---|---|
+| [`python/sii_unified.py`](../python/sii_unified.py) | 读配置、源模型、几何、光子流、波形、GLS标定、长曝光数据和数据整理 | 波形GLS与旧解析SNR分支分别命名 |
+| [`python/sii_reconstruction.py`](../python/sii_reconstruction.py) | 只根据测量和采样重建；处理共同增益先验、正则化与收敛诊断 | 真值只能在拟合完成后用于评价 |
+| [`python/sii_validation.py`](../python/sii_validation.py) | 独立热光场、连续响应解析对照、留出波形、参数剖面和覆盖率工具 | 解析参考不调用共享光电子对生成器 |
+| [`tools/build_sii_science_notebook.py`](../tools/build_sii_science_notebook.py) | 用nbformat生成主Notebook的代码及中文解释 | 重新生成会清空该Notebook的执行输出，随后必须从头运行 |
+| [`tools/execute_notebook.py`](../tools/execute_notebook.py) | 用nbclient在指定目录完整执行并保存Notebook | 单元报错时保留已执行输出，进程仍返回失败 |
+| [`tests`](../tests)中的三个SII测试文件 | 物理恒等式、统计目标、数据独立性及数值边界检查 | 自动测试通过不等于所有科学主张通过 |
+| [`validation/sii_science`](../validation/sii_science) | 本次计算结果表、标定、图像数组及汇总 | 图像重复、区间覆盖和波形检验各有不同样本含义 |
+
+```text
+Instrument.from_repository
+    ├─ 模板/电荷样本/时间核/同通带光谱积分
+    └─ simulate_waveform_gls_calibration
+         ├─ simulate_hbt_primary_pe
+         ├─ render_pe_waveform
+         ├─ waveform_cross_correlation
+         └─ 分组估计模板、协方差、增益和误差
+
+run_sii_pipeline
+    ├─ generate_uvw
+    ├─ simulate_uv_observation(estimator="waveform_gls")
+    │    ├─ segment_uv_samples + segment_sampling_weights
+    │    ├─ source_visibility → 时间/通带平均的P
+    │    └─ sample_waveform_gls_visibility2 → 随机测量
+    └─ prepare_reconstruction_uv → UvData
+         └─ reconstruct_uv_data
+              ├─ power_sampling_kernel → 与数据相同的平均算子
+              ├─ statistical_loss → 剖面共同标定增益
+              ├─ 测量留出选择平滑项 + 多起点优化
+              └─ 驻点、预测残差、峰数和拟合后评价
+```
+
+## 2. 从main读取的是什么
+
+`Instrument.from_repository(ROOT)`读取**当前本地检出的配置文件**，不会在每次调用时联网取GitHub。此次已核对main提交`2926031b14c8aa2164a4d9233f5c2d0a75324127`中的10个关键参数文件，其内容与当前工作树一致。清单存于[`main_parameter_manifest.json`](../configs/sii/main_parameter_manifest.json)，使用统一换行后的SHA-256，避免Windows与Linux换行差异造成假变更。
+
+另同步保留了main的[`spe_model_measured.yaml`](../configs/electronics/parameters/spe_model_measured.yaml)。运行时的数值来自cfg和CSV；YAML是SPE参数来源补充，不用其中的长尾解释替代微单元恢复测量。
+
+默认响应入口为`configs/examples/corsika_lact_pylast_root_only_measured_waveform.cfg`，由既有`config_io`展开组件。数据流为：
+
+1. 读取镜面、滤光片和PDE曲线，乘用户设置的SII通带，积分星光率、NSB率及相干面积。
+2. 从电子学组件读取4 ns采样、SPE路径、电荷样本和微单元几何。电荷样本强制归一化为均值1，并由样本计算二阶矩。
+3. 优先采用`lact2_measured_single_pixel_400nm.csv`和对应光追溯源JSON。有效探测面积已含光追损失，不重复乘PDE、镜面等因素。
+4. 若完整光追核不可用，库保留旧核回退行为。因此正式报告另记录实际使用的输入哈希，不把回退核说成完整实测光学响应。
+5. 最后应用调用者明确给出的覆盖参数。常数`source_transmission_scale=0.7836336`始终标为场景假设。
+
+主Notebook记录源代码、布局和光追缓存哈希、随机种子及Python/NumPy/SciPy版本。光追缓存的原始逐光子文件位于历史溯源记录中的路径；本次没有重新运行百万光子的完整C++光追，不能将输入参数一致性核对说成重新验证了整条光学链。
+
+## 3. 缺失参数的零值约定
+
+`Instrument`是不可变dataclass，修改使用`dataclasses.replace`或`from_repository(..., **overrides)`。字段名保留英文，物理用途和关键算法用中文注释。
+
+| 接口 | 当前值 | 零值行为 | 将来非零时的处理 |
+|---|---:|---|---|
+| `electronic_noise_rms_mv` | 0 | 不产生加性噪声 | 当前支持独立白噪声；有色谱需扩展模型 |
+| `dark_count_rate_hz` | 0 | 不增加暗计数 | 当前支持独立泊松暗计数并重新标定 |
+| `microcell_recovery_time_ns` | 0 | 所有恢复比例严格为1 | 已有指数恢复模型；仅有独立实测恢复时间后启用 |
+| `intrinsic_time_jitter_ns` | 0 | 不扰动光电子时刻 | 当前支持独立高斯时间抖动，单位ns |
+| `adc_bits`、`adc_full_scale_mv` | 0、0 | 不量化、不剪裁 | 必须同时给有效位数及满量程，重新做波形标定 |
+| `sipm_crosstalk_probability` | 0 | 无串扰 | 非零显式报未实现，等待实测时间/电荷模型 |
+| `sipm_afterpulse_probability` | 0 | 无后脉冲 | 非零显式报未实现，等待实测延迟/幅度分布 |
+| 每镜/每夜增益、基线零点、时延残差、透明度及NSB漂移 | 0 | 不额外扰动长曝光测量 | GLS分支对未标定非零项报错，避免套用平稳标定 |
+
+这些0是“关闭效应”，不是伪造零误差测量。实测SPE、电荷涨落和光追展宽仍然存在。采样率、通带宽度、总光子率等必要物理输入不能用0占位。
+
+最小使用方式：
+
+```python
+from pathlib import Path
+from dataclasses import replace
+import sys
+import pandas as pd
+
+ROOT = Path.cwd()  # 在仓库根目录运行
+sys.path.insert(0, str(ROOT / "python"))
+import sii_unified as sii
+
+instrument = sii.Instrument.from_repository(ROOT)
+# 有本征时间抖动实测后才填写；当前保持0。
+instrument = replace(instrument, intrinsic_time_jitter_ns=0.0)
+calibration, diagnostics = sii.simulate_waveform_gls_calibration(
+    instrument, null_records=2048, signal_records=512, seed=20260905)
+layout = pd.read_csv(ROOT / "configs/arrays/layout_0803_reco32_coordinates.csv")
+result = sii.run_sii_pipeline(
+    layout, sii.BinarySource(), sii.Observation(), instrument,
+    estimator="waveform_gls", waveform_calibration=calibration,
+    do_reconstruction=False, seed=20261305)
+# 重建只传测量表；生成函数保留真值列供后验评价，整理函数不读取它。
+image = sii.reconstruct_uv(result.measurements, grid_size=32,
+    fov_mas=0.70, support_radius_mas=0.32, starts=3, max_iter=8000)
+```
+
+波形路径中的`electronics_bandwidth_hz`须与采样Nyquist频率一致，实际前端形状由SPE体现。`with_matched_effective_bandwidth`是旧解析SNR分支的辅助接口，不能先应用它再进入波形模拟，以免重复计算带宽损失。
+
+## 4. 短波形与GLS标定的实现
+
+`simulate_hbt_primary_pe`生成两镜的共享对与独立光电子，保持单镜平均率不变。`hbt_pair_rate_scale`只用于已知注入倍率，输出同时记录物理对率及注入对率。与main逐光电子接口兼容的`origin="cherenkov"`是原接口的信号标签，并不表示这里模拟的是切伦科夫光。
+
+`render_pe_waveform`在每个SPE支持范围内计算连续平移模板，在ADC采样中心插值求和，用分块数组限制内存。它不先把光子时刻取整到采样格。微单元恢复关闭时不抽随机单元；电噪声关闭时不抽噪声数组，保持真正无效应的零值语义。
+
+`waveform_cross_correlation`用FFT计算两条去均值波形的互相关，按重叠样本数修正滞后边缘，并按波形方差归一化。有限样本比值偏差通过解析对照和独立波形检查评估。
+
+`WaveformGLSCalibration`包含以下数值，而不只是一个SNR常数：
+
+| 字段 | 内容 |
+|---|---|
+| `lags_ns` | 完整相关峰的滞后坐标 |
+| `null_mean` | 采用的零信号期望向量 |
+| `peak_per_visibility2` | 单位平方可见度的峰模板 |
+| `covariance_per_block`、`block_duration_s` | 单个标定块的协方差与时长 |
+| `star_rate_hz`、`background_rate_hz` | 标定所对应的源与背景率 |
+| `instrument_signature` | 仪器数值参数及响应内容签名 |
+| `response_relative_uncertainty` | 固定选定权重下的有限响应增益不确定度 |
+| `sigma_relative_uncertainty` | 噪声尺度估计的有限样本相对误差 |
+
+`simulate_waveform_gls_calibration`的样本划分为：零信号一半训练、四分之一选收缩、四分之一定尺度；信号一半训练、四分之一校正响应、最后四分之一检验。候选收缩量为`1e-4, 1e-3, 1e-2, 5e-2`。模型假定平稳，将协方差按滞后差做Toeplitz平均，并给特征值设置相对`1e-10`下限。
+
+`waveform_gls_weights`返回固定峰权重及条件统计误差。`sample_waveform_gls_visibility2`只生成GLS投影后的标量高斯统计量，并为整批数据抽一次共同增益。它不会生成6小时的250 MS/s数组。参数或光子率改变后，`simulate_uv_observation`检查签名和率，不匹配就要求重新标定。
+
+保存的`waveform_calibration.npz`可用`np.load(..., allow_pickle=False)`读取，再将零维数组转为Python标量构造`WaveformGLSCalibration`。加载后仍需执行同样的仪器/率一致性检查；不能仅凭文件名断言有效。
+
+## 5. 测量表和重建器之间的边界
+
+`generate_uvw`采用ENU坐标和西向为正的时角。时间推进使用`SIDEREAL_DAY_S`；曝光和协方差缩放使用秒。每段9个时间中点乘5个谱节点，组成45个实际子采样。
+
+| 测量列 | 含义和使用范围 |
+|---|---|
+| `u_lambda`、`v_lambda` | 段中心、中心波长的代表坐标，用于索引和显示 |
+| `uv_samples_u`、`uv_samples_v`、`uv_samples_weight` | 实际时间/光谱采样，用于正向平均与重建 |
+| `visibility2_measured` | 随机测量，不做0至1裁剪 |
+| `sigma_visibility2` | 独立统计标准差，用于逆方差合并 |
+| `calibration_relative_sigma`、`calibration_id` | 共同增益先验及其标定身份 |
+| `visibility2_true`、`visibility2_center` | 仅模拟及拟合后评价；不属于重建输入 |
+
+`sigma_visibility2_calibration`是便于显示的逐行估算，**不能**代替共同协方差，也不能平方相加后假装所有基线独立。旧字段`segment_time_smearing_delta`目前包括时间与光谱平均相对中心值的合并差异。
+
+`prepare_reconstruction_uv`以逆方差合并同一UV格的测量，统计误差按合并权重计算；把每一行内的真实采样权重乘该行在合并格中的权重，存入`UvData.sampling`。共同增益先验保持原值。它拒绝混合多个独立标定ID，因为那需要多组共同增益的似然，不能静默合成一个先验。
+
+主Notebook导出的`binary_measurements.csv`为易读测量表，省去了变长子采样列。**不要直接用这张简表调用通用CSV重建入口来复现精确平均的主结果。** 主结果应从Notebook中的配置、观测及随机种子重新生成完整DataFrame。通用`read_uv_measurements`针对单点UV CSV，不会凭空恢复被省去的积分轨迹或共享标定先验。
+
+## 6. 重建目标和独立性保护
+
+`power_sampling_kernel`利用图像自相关表示平方可见度，提前平均每个像素位移处的余弦核。`power_from_image`用FFT得到图像自相关后乘该核；`_power_gradient`给出同一算子的伴随导数。算子本身只依赖几何和平均权重，不含源真值。
+
+`statistical_loss`采用绝对误差，保留完整逆方差尺度。共同增益由`profile_calibration_gain`解析剖面消去。若直接提供完整`UvData.covariance`，代码检查对称性、正定性及其对角线与`sigma²`一致。当前自动交叉验证只支持独立统计误差加单一共同增益。
+
+验证评分使用训练集的增益后验。若验证预测向量为$m$，统计对角阵为$D$，训练后的增益标准差为$s$，则验证预测协方差是$D+s^2mm^T$。评分包含二次型及其秩一行列式项，不在验证集重新拟合增益。
+
+图像参数默认是有界非负流量再归一化，避免softmax让暗像素难以增长。旧`legacy`模式只用于历史算法对照，保留明确名称，不作为当前科学报告结果。多起点包括集中、弥散和随机平滑形态。
+
+图像结果同时保存优化器状态、迭代次数、各起点目标函数、统计卡方、标定先验惩罚和单纯形驻点间隙。当前默认迭代上限为8000，达到上限仍报告失败，不把正常返回对象当成收敛。驻点阈值是明确数值诊断，不是全局最优证明。
+
+拟合后图像配准只允许平移与180°中心反演，不使用周期卷绕。配准保留通量另作记录。`_peak_diagnostic`寻找局部极大值；单峰不输出第二颗“星”。真值只用于拟合后比较，相关自动测试还会污染真值列，确认测量整理不依赖它。
+
+## 7. 独立验证为何不是程序自己证明自己
+
+| 检查 | 独立输入或方法 | 能排除的问题 |
+|---|---|---|
+| `thermal_mode_counts` | 复高斯场→光强→条件泊松，独立于共享对生成器 | 热光二阶相关和超泊松方差公式/实现错误 |
+| `analytic_waveform_calibration` | 连续SPE自相关、光学传递、Bartlett协方差 | 两个波形函数共享同一错误却互相闭合 |
+| `waveform_records` | 固定新种子、完全独立记录，不训练权重 | 训练数据上的噪声低估和响应偏差 |
+| 不同注入倍率、块长 | 重新生成波形而非缩放既有结果 | 注入非线性及块长归一化错误 |
+| 梯度有限差分 | 对标量目标直接作扰动 | 共同增益剖面导数或平均功率伴随错误 |
+| `profile_model_grid` | 逐模型解析剖面，与显式似然优化对照 | 批量参数似然和区间实现错误 |
+| 1000次直径区间 | 独立增益及噪声实现，报告二项区间 | 在指定场景中的区间覆盖不足 |
+| 网格/合并/图像重复 | 固定测量改数值设置，或固定设置改噪声 | 数值误差与随机误差混淆、形态不稳定 |
+
+独立解析对照只适用于线性探测和弱信号。ADC剪裁、微单元恢复、串扰和后脉冲开启时，它显式拒绝计算。白噪声和高斯本征抖动可在该解析对照中传播。解析网格0.05 ns与0.025 ns另作收敛检查。
+
+圆盘的剖面区间采用0.12至0.20 mas、801个固定网格点。`profile_grid_interval`报告碰边和不连通情况。当前1000次检验为953次覆盖，比例0.953，95%二项区间约[0.9380, 0.9653]；这与名义95%相容。噪声尺度改变约±6.13%后，覆盖率分别为0.939和0.963，说明有限尺度标定值得保留，不能只报告漂亮的中心数值。
+
+## 8. 如何完整复现
+
+在仓库根目录运行，Python环境需包含[`requirements.txt`](../requirements.txt)中的依赖。本次使用Python 3.13.13、NumPy 2.4.4、SciPy 1.17.1；跨平台优化器停止位置可能有小差异，应比较误差及目标函数而不要求所有像素逐位相等。
+
+[`requirements-sii-validated.txt`](../requirements-sii-validated.txt)固定本次直接依赖版本，可用于建立同版本环境；它不锁定操作系统、BLAS或全部传递依赖。`ipykernel`已列为显式依赖，避免干净环境只有nbclient却没有可执行的Python内核。
+
+```powershell
+python -m pip install -r requirements.txt
+python -m pytest -q tests
+python tools/build_sii_science_notebook.py
+python tools/execute_notebook.py notebooks/sii_complete_waveform_report.ipynb --cwd . --timeout 3600
+```
+
+运行时间主要由几千条短波形和多次图像优化决定。Notebook固定随机种子，并将BLAS线程数设为1，避免小矩阵过度并行。正式运行不要同时修改导入模块，也不要手工编辑中间CSV后只执行末尾绘图单元。
+
+主要输出为：
+
+- `parameters.csv`、`thermal_modes.csv`：实际输入数值及独立热光检验。
+- `response.csv`、`covariance.csv`、`waveform_calibration.npz`：本次GLS标定。
+- `independent_null.csv`、`injection_scale.csv`、`block_duration.csv`：独立波形结果。
+- `binary_measurements.csv`：供检查和画图的长曝光测量简表。
+- `diameter_profile.csv`、`diameter_coverage.csv`、`time_quadrature.csv`：参数区间、覆盖率和时间积分检验。
+- `reconstruction.csv`、`convergence.csv`、`image_alignment.csv`、`image_repeats.csv`和各源`*_image.npy`：重建与稳定性。
+- `summary.json`：实际运行版本、输入哈希、种子、所有核心结果及适用范围。
+- `docs/sii_science_figures`：Notebook直接生成的科学图，不是手工示意图。
+
+`tools/validate_sii_gls.py`是较小的独立标定/重建检查入口，可用于修改后的快速定位，不能替代主Notebook的完整证据。
+
+本次完整运行共22个单元，其中12个代码单元按顺序执行并保存输出，56项自动测试通过。
+运行`python tools/check_sii_science_artifacts.py`可再检查说明链接、公式分隔符、Notebook执行状态和结果中的源代码/输入哈希。
+36次图像重复中，35次优化器正常结束，31次通过驻点阈值；5次驻点未通过全部来自单圆盘，其中1次优化器也未报告收敛。失败记录和对应图像仍参与公开的稳定性汇总，不能把35/36的优化器状态写成全部图像可靠。
+
+## 9. 收到下一批真实参数时怎样更新
+
+先保存现有分支或标签，将真实参数文件同步到工作树，记录main提交及文件哈希。`verify_main_parameters`会拒绝与旧清单不一致的文件，提醒来源已经改变；更新清单前应实际核对新文件，不是为使测试通过而覆盖哈希。
+
+SPE形状、电荷分布、采样、通带、光子率或光学核变化后重新生成标定和全部相关结果。新增非线性/相关电子学数据时，先实现对应分布与时间结构，在短波形级验证后再允许长曝光使用。若是每镜各不相同的响应，需要按镜对或响应分组标定；当前示例是同型镜共享一套标定。
+
+未来论文应明确采用哪条结果主张：测量灵敏度、角直径区间、双星模型比较或非参数图像恢复。当前实现已补齐多项可独立检验的科学环节；对尚未验证的多镜热光协方差、瞳面空间相干平均、实测系统误差与行星检出显著性，不能用“论文级程序”这一标签代替证据。

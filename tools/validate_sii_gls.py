@@ -1,4 +1,4 @@
-"""Run an independent waveform calibration check and a reconstruction smoke test."""
+"""执行独立波形标定检查和小规模重建检查。"""
 import argparse
 import json
 from pathlib import Path

@@ -1,0 +1,449 @@
+{
+  "seed": 20260905,
+  "python": "3.13.13",
+  "numpy": "2.4.4",
+  "scipy": "1.17.1",
+  "code_sha256_lf": {
+    "python/sii_unified.py": "64ed97bc123e11b512aac3b0686024ab34dc443f5e415f546d25254e580c4e28",
+    "python/sii_reconstruction.py": "d9b1faca0be1990e9b206340efa9d1a3e0c181557997ac15e72d58dbbb01f589",
+    "python/sii_validation.py": "5d96a0d55e48b3edf923db468bb319a9efb7b982837d27a885dbd847404ceace",
+    "tools/build_sii_science_notebook.py": "9e86a517ae92a53e66fe5f95b38a8a2bd83d954c1a94653b6a776c5f2fe6a2dc"
+  },
+  "main_parameter_commit": "2926031b14c8aa2164a4d9233f5c2d0a75324127",
+  "derived_input_sha256_lf": {
+    "configs/arrays/layout_0803_reco32_coordinates.csv": "5130cf6b8db422ee0b5ec09219ba9f00dba9d61dcdb7b145a3ebfafb3d8bf3f6",
+    "configs/optics/lact2_measured_single_pixel_400nm.csv": "51192df2901fa72a5c91840d1d8bda728ffe08f240b383c8de56769a7987dd7e",
+    "configs/optics/lact2_measured_single_pixel_400nm.provenance.json": "8908936000594fdbc73251c70071c43c516d8aae6cba98e0e067015272e2f9ed"
+  },
+  "missing_effects_disabled": {
+    "microcell_recovery_time_ns": 0.0,
+    "intrinsic_time_jitter_ns": 0.0,
+    "electronic_noise_rms_mv": 0.0,
+    "sipm_crosstalk_probability": 0.0,
+    "sipm_afterpulse_probability": 0.0,
+    "dark_count_rate_hz": 0.0,
+    "adc_bits": 0
+  },
+  "parameters": [
+    {
+      "parameter": "SPE integral",
+      "value": 84.03495572475866,
+      "unit": "mV ns",
+      "source": "measured"
+    },
+    {
+      "parameter": "charge second moment",
+      "value": 1.0325452577961836,
+      "unit": "1",
+      "source": "measured samples"
+    },
+    {
+      "parameter": "optical time RMS",
+      "value": 0.5488274245908952,
+      "unit": "ns",
+      "source": "ray trace"
+    },
+    {
+      "parameter": "sample interval",
+      "value": 4.0,
+      "unit": "ns",
+      "source": "main config"
+    },
+    {
+      "parameter": "stellar rate, m_AB=2",
+      "value": 199.88929829641629,
+      "unit": "MHz",
+      "source": "spectrum + response"
+    },
+    {
+      "parameter": "NSB rate",
+      "value": 0.5732140884464285,
+      "unit": "MHz",
+      "source": "sky model + passband"
+    },
+    {
+      "parameter": "coherence area",
+      "value": 0.13342919223619465,
+      "unit": "ps",
+      "source": "same passband"
+    },
+    {
+      "parameter": "SII passband width",
+      "value": 2.0,
+      "unit": "nm",
+      "source": "scenario"
+    }
+  ],
+  "thermal_modes": [
+    {
+      "quantity": "mean intensity",
+      "theory": 1.0,
+      "simulation": 1.000313194014998,
+      "relative_difference": 0.000313194014998075
+    },
+    {
+      "quantity": "intensity covariance",
+      "theory": 0.0375,
+      "simulation": 0.03752457891399892,
+      "relative_difference": 0.0006554377066378958
+    },
+    {
+      "quantity": "mean detected count",
+      "theory": 8.0,
+      "simulation": 7.997673333333333,
+      "relative_difference": -0.00029083333333335126
+    },
+    {
+      "quantity": "count variance",
+      "theory": 10.25,
+      "simulation": 10.268915483007165,
+      "relative_difference": 0.0018454129763088023
+    },
+    {
+      "quantity": "count covariance",
+      "theory": 1.3499999999999999,
+      "simulation": 1.3295920448179273,
+      "relative_difference": -0.015117003838572285
+    }
+  ],
+  "calibration": {
+    "sigma_1200_s": 0.07926739750846691,
+    "analytic_sigma_1200_s": 0.07545321401275529,
+    "response_relative_uncertainty": 0.006407205176490397,
+    "sigma_relative_uncertainty": 0.031280562354492725,
+    "selected_shrinkage": 0.0001,
+    "fine_grid_sigma_ratio": 0.9999996563995989,
+    "photon_degeneracy": 2.6671067608350585e-05
+  },
+  "independent_null": [
+    {
+      "kind": "null",
+      "batch": 0,
+      "estimator": "MC",
+      "mean_over_sigma": 0.05835910994693997,
+      "std_over_sigma": 1.0233988398630847,
+      "std_ci_low": 0.9643206058053514,
+      "std_ci_high": 1.0902467350867668
+    },
+    {
+      "kind": "null",
+      "batch": 0,
+      "estimator": "analytic",
+      "mean_over_sigma": 0.040304727216164606,
+      "std_over_sigma": 1.0183845905408209,
+      "std_ci_low": 0.9595958164507421,
+      "std_ci_high": 1.0849049575318495
+    },
+    {
+      "kind": "null",
+      "batch": 1,
+      "estimator": "MC",
+      "mean_over_sigma": -0.008033699811450112,
+      "std_over_sigma": 1.0588951569419858,
+      "std_ci_low": 0.9977678100194622,
+      "std_ci_high": 1.128061653665387
+    },
+    {
+      "kind": "null",
+      "batch": 1,
+      "estimator": "analytic",
+      "mean_over_sigma": 0.01975789928994244,
+      "std_over_sigma": 1.0573574491954003,
+      "std_ci_low": 0.9963188702630547,
+      "std_ci_high": 1.126423503625607
+    },
+    {
+      "kind": "null",
+      "batch": 2,
+      "estimator": "MC",
+      "mean_over_sigma": 0.0687374295696921,
+      "std_over_sigma": 0.9845417382504299,
+      "std_ci_low": 0.9277066266728673,
+      "std_ci_high": 1.048851507226435
+    },
+    {
+      "kind": "null",
+      "batch": 2,
+      "estimator": "analytic",
+      "mean_over_sigma": 0.04891883795038199,
+      "std_over_sigma": 0.9625294673116696,
+      "std_ci_low": 0.9069650686214072,
+      "std_ci_high": 1.0254014058700183
+    }
+  ],
+  "injection_scales": [
+    {
+      "scale": 1000.0,
+      "estimator": "MC",
+      "response": 1.013050512585915,
+      "sem": 0.04481018868045596
+    },
+    {
+      "scale": 1000.0,
+      "estimator": "analytic",
+      "response": 0.9783095083383286,
+      "sem": 0.041902185684025185
+    },
+    {
+      "scale": 3000.0,
+      "estimator": "MC",
+      "response": 0.9951902509925586,
+      "sem": 0.016696391883994043
+    },
+    {
+      "scale": 3000.0,
+      "estimator": "analytic",
+      "response": 0.9957398043245214,
+      "sem": 0.014954001224302179
+    },
+    {
+      "scale": 10000.0,
+      "estimator": "MC",
+      "response": 1.006339128426121,
+      "sem": 0.005099831044529846
+    },
+    {
+      "scale": 10000.0,
+      "estimator": "analytic",
+      "response": 1.001631425152676,
+      "sem": 0.004926750160573205
+    }
+  ],
+  "block_durations": [
+    {
+      "duration_us": 10.0,
+      "std_over_sigma": 1.0822963588385737,
+      "ci_low": 0.9959621868942571,
+      "ci_high": 1.1851461944289419
+    },
+    {
+      "duration_us": 40.0,
+      "std_over_sigma": 0.9934273287610692,
+      "ci_low": 0.9141821893729273,
+      "ci_high": 1.0878320050769894
+    }
+  ],
+  "observation": {
+    "telescopes": 32,
+    "uv_measurements": 8928,
+    "hours": 6,
+    "integration_s_per_measurement": 1200,
+    "time_subsamples": 9,
+    "spectral_nodes": 5,
+    "max_baseline_m": 1219.2096265080916,
+    "expected_hbt_pairs_per_20us": 0.10662521978098953
+  },
+  "diameter_interval": {
+    "estimate": 0.1604,
+    "low": 0.1596561093308526,
+    "high": 0.16124081170389765,
+    "touches_boundary": false,
+    "disconnected": false
+  },
+  "diameter_coverage": [
+    {
+      "assumed_sigma_scale": 1.0,
+      "covered": 953,
+      "trials": 1000,
+      "coverage": 0.953,
+      "binomial_ci_low": 0.9379873693066948,
+      "binomial_ci_high": 0.9652649377332041,
+      "boundary_intervals": 0,
+      "disconnected_intervals": 0
+    },
+    {
+      "assumed_sigma_scale": 0.9386900977851943,
+      "covered": 939,
+      "trials": 1000,
+      "coverage": 0.939,
+      "binomial_ci_low": 0.9223292259508765,
+      "binomial_ci_high": 0.9530221244589198,
+      "boundary_intervals": 0,
+      "disconnected_intervals": 0
+    },
+    {
+      "assumed_sigma_scale": 1.0613099022148058,
+      "covered": 963,
+      "trials": 1000,
+      "coverage": 0.963,
+      "binomial_ci_low": 0.949358876940075,
+      "binomial_ci_high": 0.9738172911562627,
+      "boundary_intervals": 0,
+      "disconnected_intervals": 0
+    }
+  ],
+  "time_quadrature": [
+    {
+      "source": "binary",
+      "time_nodes": 9,
+      "reference_time_nodes": 27,
+      "max_abs_P_difference": 7.40741643419085e-05,
+      "rms_difference_over_row_sigma": 0.00013955431542840045
+    },
+    {
+      "source": "single_disk",
+      "time_nodes": 9,
+      "reference_time_nodes": 27,
+      "max_abs_P_difference": 5.527370422309108e-06,
+      "rms_difference_over_row_sigma": 1.3949915549817256e-05
+    },
+    {
+      "source": "ellipse",
+      "time_nodes": 9,
+      "reference_time_nodes": 27,
+      "max_abs_P_difference": 1.022379938239032e-05,
+      "rms_difference_over_row_sigma": 1.645451923964095e-05
+    },
+    {
+      "source": "transit",
+      "time_nodes": 9,
+      "reference_time_nodes": 27,
+      "max_abs_P_difference": 5.491953566527652e-06,
+      "rms_difference_over_row_sigma": 8.706218645909142e-06
+    }
+  ],
+  "reconstruction": [
+    {
+      "source": "binary",
+      "constraints": 1023,
+      "converged": true,
+      "chi2_per_point": 0.9561884700058547,
+      "gain": 1.0200113642709154,
+      "gain_sigma": 0.001869461621386177,
+      "smoothness": 0.0001,
+      "stationarity_gap": 0.010991830682200998,
+      "stationarity_passed": true,
+      "iterations": 1542,
+      "training_all_converged": true
+    },
+    {
+      "source": "single_disk",
+      "constraints": 1023,
+      "converged": true,
+      "chi2_per_point": 0.9822956153545865,
+      "gain": 1.0107886137261035,
+      "gain_sigma": 0.002564971779783571,
+      "smoothness": 0.0,
+      "stationarity_gap": 0.034677560050795364,
+      "stationarity_passed": true,
+      "iterations": 5871,
+      "training_all_converged": true
+    },
+    {
+      "source": "ellipse",
+      "constraints": 1023,
+      "converged": true,
+      "chi2_per_point": 1.0336713955021706,
+      "gain": 1.011267852553135,
+      "gain_sigma": 0.0027460611188306473,
+      "smoothness": 0.01,
+      "stationarity_gap": 0.01932466808807476,
+      "stationarity_passed": true,
+      "iterations": 889,
+      "training_all_converged": true
+    },
+    {
+      "source": "transit",
+      "constraints": 1023,
+      "converged": true,
+      "chi2_per_point": 0.8974421691829049,
+      "gain": 1.0092221631269973,
+      "gain_sigma": 0.004343778022251029,
+      "smoothness": 0.0001,
+      "stationarity_gap": 0.010076226822491208,
+      "stationarity_passed": true,
+      "iterations": 1475,
+      "training_all_converged": true
+    }
+  ],
+  "image_alignment": [
+    {
+      "source": "binary",
+      "truth_correlation": 0.7817497220194481,
+      "truth_nrmse": 0.6875299850017208,
+      "truth_uses_180_degree_mirror": false,
+      "truth_alignment_retained_flux": 0.9974322098728658
+    },
+    {
+      "source": "single_disk",
+      "truth_correlation": 0.6097523184480683,
+      "truth_nrmse": 1.3204419067139421,
+      "truth_uses_180_degree_mirror": false,
+      "truth_alignment_retained_flux": 0.999250495288575
+    },
+    {
+      "source": "ellipse",
+      "truth_correlation": 0.9734446691039356,
+      "truth_nrmse": 0.22632237388925064,
+      "truth_uses_180_degree_mirror": true,
+      "truth_alignment_retained_flux": 0.9993337959209153
+    },
+    {
+      "source": "transit",
+      "truth_correlation": 0.6501058417771948,
+      "truth_nrmse": 1.0161549894741622,
+      "truth_uses_180_degree_mirror": true,
+      "truth_alignment_retained_flux": 1.0
+    }
+  ],
+  "convergence": [
+    {
+      "grid": 24,
+      "cell_Mlambda": 120.0,
+      "constraints": 1023,
+      "converged": true,
+      "truth_nrmse": 0.49848804306107825,
+      "truth_correlation": 0.9000822542277976,
+      "power_rmse": 0.04228276194790766
+    },
+    {
+      "grid": 40,
+      "cell_Mlambda": 120.0,
+      "constraints": 1023,
+      "converged": true,
+      "truth_nrmse": 0.32503790790558373,
+      "truth_correlation": 0.9493117477005698,
+      "power_rmse": 0.04185662504018445
+    },
+    {
+      "grid": 32,
+      "cell_Mlambda": 60.0,
+      "constraints": 3013,
+      "converged": true,
+      "truth_nrmse": 0.6868687104065427,
+      "truth_correlation": 0.7819236664736189,
+      "power_rmse": 0.05864976993848345
+    }
+  ],
+  "image_repeats": [
+    {
+      "source": "binary",
+      "nrmse_mean": 0.5543297802991368,
+      "nrmse_std": 0.05064639970068467,
+      "converged_fraction": 1.0
+    },
+    {
+      "source": "single_disk",
+      "nrmse_mean": 1.195068355358611,
+      "nrmse_std": 0.07067599266339498,
+      "converged_fraction": 0.9166666666666666
+    },
+    {
+      "source": "transit",
+      "nrmse_mean": 0.9652346447946113,
+      "nrmse_std": 0.0940117128711544,
+      "converged_fraction": 1.0
+    }
+  ],
+  "scope": {
+    "source": "static scenes, observed total AB magnitude",
+    "optical_passband": "2 nm top-hat scenario over main response curves",
+    "source_transmission_scale": 0.7836336,
+    "source_transmission_origin": "scenario assumption, not measured electronics",
+    "weak_thermal_approximation": "pair generator omits thermal self noise; degeneracy is reported",
+    "reconstruction_repeats": 12,
+    "pixel_intervals": "not confidence intervals",
+    "calibration": "shared gain profiled, independent statistical sigma retained",
+    "notebook_execution": "all cells executed in this run"
+  }
+}

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Execute a notebook in place with an explicit working directory."""
+"""在指定工作目录从头执行Notebook；即使单元失败也保存已执行输出供定位。"""
 
 import argparse
 from pathlib import Path
@@ -15,13 +15,15 @@ parser.add_argument("--timeout", type=int, default=300)
 args = parser.parse_args()
 
 notebook = nbformat.read(args.notebook, as_version=4)
-NotebookClient(
-    notebook,
-    timeout=args.timeout,
-    kernel_name="python3",
-    resources={"metadata": {"path": str(args.cwd.resolve())}},
-    on_cell_executed=lambda **event: print(
-        f"Executed cell {event['cell_index'] + 1}/{len(notebook.cells)}", flush=True),
-).execute()
-nbformat.write(notebook, args.notebook)
+try:
+    NotebookClient(
+        notebook,
+        timeout=args.timeout,
+        kernel_name="python3",
+        resources={"metadata": {"path": str(args.cwd.resolve())}},
+        on_cell_executed=lambda **event: print(
+            f"已执行单元 {event['cell_index'] + 1}/{len(notebook.cells)}", flush=True),
+    ).execute()
+finally:
+    nbformat.write(notebook, args.notebook)
 print(f"Executed {len(notebook.cells)} cells: {args.notebook}")
