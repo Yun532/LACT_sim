@@ -2,7 +2,7 @@
 
 本版本是一套用仓库仪器输入约束的随机模拟和统计推断程序。短记录实际生成光电子并形成波形；整夜观测使用由短波形标定的统计量。它可以支持明确假设下的方法和性能研究。它还不是实测恒星观测，也不能仅凭重建图声称检测到双星或行星。
 
-计算证据在[完整Notebook](../notebooks/sii_complete_waveform_report.ipynb)，函数和复现方法在[代码实现说明](SII_IMPLEMENTATION_ZH.md)。当前数值由[结果汇总](../validation/sii_science/summary.json)及其同目录CSV保存。原始备份节点为`backup/sii-gls-before-fixes-20260905`。
+计算证据在[完整Notebook](../notebooks/sii_complete_waveform_report.ipynb)，函数和复现方法在[代码实现说明](SII_IMPLEMENTATION_ZH.md)。当前数值由[结果汇总](../validation/sii_science/summary.json)及其同目录CSV保存。
 
 ## 1. 先区分输入事实与观测场景
 
