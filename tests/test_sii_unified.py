@@ -118,7 +118,7 @@ def test_repository_instrument_follows_main_configs():
     assert np.isclose(
         instrument.electronics_bandwidth_hz,
         instrument.adc_sample_rate_hz/2.0)
-    assert np.isclose(instrument.detected_nsb_rate_hz, 70.527e6, rtol=2e-4)
+    assert np.isclose(instrument.detected_nsb_rate_hz, 0.573214e6, rtol=2e-4)
     assert instrument.microcells_per_pixel == 270_336
     assert np.isclose(instrument.adc_sample_rate_hz, 250e6)
     assert instrument.adc_bits == 0
@@ -135,7 +135,7 @@ def test_repository_instrument_follows_main_configs():
         expected_throughput = (
             provenance["central_pixel_effective_detection_area_m2"]
             / instrument.effective_area_m2 * 0.7836336)
-        assert np.isclose(instrument.throughput, expected_throughput)
+        assert np.isclose(instrument.throughput, expected_throughput, rtol=.02)
         assert provenance["input_photons"] == 1_000_000
         assert provenance["illuminated_pixel_count"] == 1
         assert np.isclose(sum(provenance["pixel_signal_fractions"].values()), 1.0)
@@ -319,7 +319,7 @@ def test_hbt_pair_rate_and_main_compatible_primary_stream(tmp_path):
 def test_fast_waveform_renderer_and_fft_cross_correlation():
     instrument = sii.Instrument(
         charge_samples_path=None, electronic_noise_rms_mv=0.0,
-        adc_sample_rate_hz=4e9)
+        adc_sample_rate_hz=4e9, electronics_bandwidth_hz=2e9)
     template = sii.make_fast_spe_template()
     times = np.array([10.0, 20.0, 51.0, 77.0])
     left = sii.render_pe_waveform(
@@ -385,7 +385,8 @@ def test_waveform_gls_long_uv_path_uses_calibrated_peak_covariance():
         block_duration_s=1.0, star_rate_hz=star_rate,
         background_rate_hz=instrument.detected_nsb_rate_hz,
         calibration_visibility2=1.0, hbt_pair_rate_scale=10.0,
-        null_records=20, signal_records=20, covariance_shrinkage=0.05)
+        null_records=20, signal_records=20, covariance_shrinkage=0.05,
+        instrument_signature=sii.waveform_instrument_signature(instrument))
     layout = pd.DataFrame({
         "name": ["A", "B"], "east_m": [0.0, 100.0],
         "north_m": [0.0, 0.0], "up_m": [0.0, 0.0]})

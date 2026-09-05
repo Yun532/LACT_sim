@@ -1,0 +1,38 @@
+{
+  "seed": 20260824,
+  "null_records": 1024,
+  "star_rate_hz": 199889298.29641628,
+  "nsb_rate_hz": 573214.0884464285,
+  "coherence_area_s": 1.3342919223619466e-13,
+  "sigma_visibility2_1200_s": 0.08019719066670376,
+  "analytic_matched_sigma_1200_s": 0.07525254588691443,
+  "selected_shrinkage": 0.0001,
+  "shrinkage_selection": [
+    {
+      "shrinkage": 0.0001,
+      "tuning_sigma": 573.2107956493815
+    },
+    {
+      "shrinkage": 0.001,
+      "tuning_sigma": 632.6751484624473
+    },
+    {
+      "shrinkage": 0.01,
+      "tuning_sigma": 778.497440668499
+    },
+    {
+      "shrinkage": 0.05,
+      "tuning_sigma": 951.1727589641712
+    }
+  ],
+  "independent_null_std_over_sigma": 0.9950011732703058,
+  "independent_null_mean_over_sigma": 0.09776753847036608,
+  "independent_response": 0.9846791773820669,
+  "independent_response_sem": 0.004518003525285447,
+  "response_relative_calibration_uncertainty": 0.008877595890600679,
+  "sigma_relative_calibration_uncertainty": 0.04428074427700476,
+  "reconstruction_measurements": 18,
+  "reconstruction_image_flux": 1.0,
+  "reconstruction_optimizer_success": true,
+  "uncertainty_model": "statistical conditional on calibration; shared gain uncertainty reported separately"
+}

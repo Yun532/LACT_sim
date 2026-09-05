@@ -9,10 +9,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from itertools import combinations
 from pathlib import Path
 import json
+import hashlib
 import math
 
 import numpy as np
@@ -38,18 +39,18 @@ class Instrument:
     optical_width_nm: float = 2.0
     effective_area_m2: float = 24.576860
     throughput: float = 0.20
-    electronics_bandwidth_hz: float = 200.0e6
+    electronics_bandwidth_hz: float = 312.5e6
     adc_sample_rate_hz: float = 625.0e6
     # main 没有提供 ADC 位数和满量程时，0 表示保留模拟波形、不量化。
     adc_bits: int = 0
     adc_full_scale_mv: float = 0.0
-    detected_nsb_rate_hz: float = 70.527e6
+    detected_nsb_rate_hz: float = 0.573135e6
     # 以下未在 main 中标定的随机效应默认关闭；有实测值后直接替换。
     electronic_noise_rms_mv: float = 0.0
     excess_noise_factor: float = 1.016142
     optical_timing_in_effective_bandwidth: bool = False
     polarization_factor: float = 0.5
-    spectral_shape_factor: float = 0.842
+    spectral_shape_factor: float = 1.0
     microcells_per_pixel: int = 270_336
     microcell_recovery_time_ns: float = 10.0
     telescope_gain_calibration_rms: float = 0.0
@@ -63,6 +64,7 @@ class Instrument:
     sipm_afterpulse_probability: float = 0.0
     dark_count_rate_hz: float = 0.0
     filter_angular_response_path: str | None = None
+    sii_bandpass_path: str | None = None
     spe_template_path: str | None = None
     charge_samples_path: str | None = None
     microcell_device_path: str | None = None
@@ -113,6 +115,10 @@ class Instrument:
         cfg, component_paths = expand_component_config(config_path)
         base = cls()
         wavelength_nm = float(overrides.get("wavelength_nm", base.wavelength_nm))
+        width_nm = float(overrides.get("optical_width_nm", base.optical_width_nm))
+        if not (np.isfinite(wavelength_nm) and np.isfinite(width_nm)
+                and 0 < width_nm < 2*wavelength_nm):
+            raise ValueError("SII wavelength and passband width must be positive and finite")
 
         def workspace_path(value):
             return resolve_workspace_path(config_path, value)
@@ -140,13 +146,38 @@ class Instrument:
             * collector * float(source_transmission_scale))
 
         wave_nsb, nsb_flux = _read_two_column_curve(nsb_spectrum_path)
-        detected_spectrum = (
-            nsb_flux
-            * np.interp(wave_nsb, wave_mirror, mirror, left=0.0, right=0.0)
-            * np.interp(wave_nsb, wave_filter, filt, left=0.0, right=0.0)
-            * np.interp(wave_nsb, wave_pde, pde, left=0.0, right=0.0))
+        lower, upper = wavelength_nm-width_nm/2, wavelength_nm+width_nm/2
+        bandpass_path = overrides.get("sii_bandpass_path")
+        bandpass = (None if bandpass_path is None else
+                    _read_two_column_curve(workspace_path(bandpass_path)))
+        knots = [wave_mirror, wave_filter, wave_pde, wave_nsb,
+                 np.linspace(lower, upper, 1025)]
+        if bandpass is not None:
+            knots.append(bandpass[0])
+        wavelength = np.unique(np.concatenate(knots))
+        wavelength = wavelength[(wavelength >= lower) & (wavelength <= upper)]
+        response = np.ones_like(wavelength)
+        for x, y in ((wave_mirror, mirror), (wave_filter, filt), (wave_pde, pde)):
+            response *= np.interp(wavelength, x, y, left=0., right=0.)
+        if bandpass is not None:
+            if np.any((bandpass[1] < 0) | (bandpass[1] > 1)):
+                raise ValueError("SII passband transmission must lie in [0, 1]")
+            response *= np.interp(wavelength, *bandpass, left=0., right=0.)
+        photon_integral = np.trapezoid(response/wavelength, wavelength)
+        if photon_integral <= 0:
+            raise ValueError("SII passband has no detected throughput")
+        central_response = (np.interp(wavelength_nm, wave_mirror, mirror)
+                            * np.interp(wavelength_nm, wave_filter, filt)
+                            * np.interp(wavelength_nm, wave_pde, pde))
+        if central_response <= 0:
+            raise ValueError("central wavelength has no detected throughput")
+        band_average_ratio = photon_integral/(width_nm/wavelength_nm)/central_response
+        spectral_shape = (width_nm*np.trapezoid(response**2, wavelength)
+                          / (wavelength_nm**2*photon_integral**2))
+        detected_spectrum = np.interp(wavelength, wave_nsb, nsb_flux,
+                                     left=0., right=0.)*response
         # main 的诊断工具把结果写成 p.e./ns；这里的公共接口统一使用 Hz。
-        nsb_rate = (np.trapezoid(detected_spectrum, wave_nsb)
+        nsb_rate = (np.trapezoid(detected_spectrum, wavelength)
                     * effective_area * (pixel_size/focal_length)**2 * collector)
 
         electronics_path = component_paths["electronics"]
@@ -189,7 +220,8 @@ class Instrument:
 
         values = {
             "effective_area_m2": effective_area,
-            "throughput": float(throughput),
+            "throughput": float(throughput*band_average_ratio),
+            "spectral_shape_factor": float(spectral_shape),
             "adc_sample_rate_hz": 1.0e9/sample_width_ns,
             # main 当前只给采样间隔、没有独立标定的模拟前端带宽；相关器
             # 可用带宽不能超过 Nyquist，因此使用 fs/2 作为保守上限。
@@ -222,6 +254,8 @@ class Instrument:
             "parameter_source": str(config_path),
         }
         values.update(overrides)
+        if bandpass_path is not None:
+            values["sii_bandpass_path"] = str(workspace_path(bandpass_path).resolve())
         return replace(base, **values)
 
 
@@ -296,6 +330,9 @@ class WaveformGLSCalibration:
     null_records: int
     signal_records: int
     covariance_shrinkage: float
+    instrument_signature: str | None = None
+    response_relative_uncertainty: float = 0.0
+    sigma_relative_uncertainty: float = 0.0
 
     def covariance(self, exposure_s: float) -> np.ndarray:
         """按独立数据块平均的 ``1/T`` 定律返回指定曝光协方差。"""
@@ -1050,30 +1087,64 @@ def make_fast_spe_template(rise_ns: float = 0.15,
     return time_ns, amplitude
 
 
+def _validate_waveform_instrument(instrument):
+    for name in ("sipm_crosstalk_probability", "sipm_afterpulse_probability"):
+        if getattr(instrument, name) != 0.0:
+            raise NotImplementedError(f"waveform renderer does not simulate {name}")
+    if not np.isclose(instrument.electronics_bandwidth_hz,
+                      instrument.adc_sample_rate_hz/2, rtol=1e-12, atol=0):
+        raise ValueError("waveform mode requires Nyquist electronics_bandwidth_hz; "
+                         "use an SPE template with the desired hardware response")
+    if instrument.optical_timing_in_effective_bandwidth:
+        raise ValueError("an analytic effective bandwidth is not a waveform instrument")
+
+
+def waveform_instrument_signature(instrument, template=None):
+    """Bind calibrations to numerical parameters and response contents, not paths."""
+    values = asdict(instrument)
+    values.pop("parameter_source")
+    values.pop("detected_nsb_rate_hz")  # Actual rate is checked separately.
+    for name in list(values):
+        if name.endswith("_path"):
+            path = values[name]
+            values[name] = (None if path is None else
+                            hashlib.sha256(Path(path).read_bytes()).hexdigest())
+    if template is None and instrument.spe_template_path:
+        template = load_measured_spe_template(instrument.spe_template_path)
+    values.pop("spe_template_path")
+    values["spe_template"] = (None if template is None else [
+        hashlib.sha256(np.asarray(a, dtype="<f8").tobytes()).hexdigest()
+        for a in template])
+    values["renderer_version"] = "continuous-spe-v1"
+    return hashlib.sha256(json.dumps(values, sort_keys=True, allow_nan=False).encode()).hexdigest()
+
+
 def render_pe_waveform(
-        rng: np.random.Generator,
-        pe_times_ns,
-        duration_ns: float,
-        instrument: Instrument = Instrument(),
-        sample_width_ns: float | None = None,
+        rng: np.random.Generator, pe_times_ns, duration_ns: float,
+        instrument: Instrument = Instrument(), sample_width_ns: float | None = None,
         template: tuple[np.ndarray, np.ndarray] | None = None,
         electronic_noise_rms_mv: float | None = None) -> dict:
-    """把逐 p.e. 事件变成 main 同参数的 SiPM/SPE/ADC 波形。
-
-    使用分箱脉冲列和 FFT 卷积，避免逐 p.e. 对整段波形重复插值。微单元
-    恢复、实测电荷涨落、加性噪声和 ADC 量化均保留。
-    """
+    """Sample the continuous shifted SPE sum; do not quantize photon times."""
+    _validate_waveform_instrument(instrument)
     times = np.asarray(pe_times_ns, dtype=float)
     dt = instrument.sample_width_ns if sample_width_ns is None else float(sample_width_ns)
-    if duration_ns <= 0.0 or dt <= 0.0:
-        raise ValueError("duration and sample width must be positive")
+    if (not np.isfinite(duration_ns) or not np.isfinite(dt) or duration_ns <= 0 or dt <= 0
+            or times.ndim != 1 or not np.all(np.isfinite(times))):
+        raise ValueError("duration, sample width and photon times must be finite and valid")
     if template is None:
         if not instrument.spe_template_path:
             raise ValueError("instrument has no measured SPE template")
         template = load_measured_spe_template(instrument.spe_template_path)
-    template_time, template_amplitude = map(lambda value: np.asarray(value, float), template)
-    samples = int(math.ceil(duration_ns/dt))
-
+    template_time, template_amplitude = [np.asarray(value, float) for value in template]
+    if (template_time.ndim != 1 or len(template_time) < 2
+            or template_time.shape != template_amplitude.shape
+            or not np.all(np.isfinite(template_time+template_amplitude))
+            or not np.all(np.diff(template_time) > 0)):
+        raise ValueError("SPE template needs finite amplitudes and strictly increasing times")
+    centers = np.arange(dt/2, duration_ns, dt)
+    samples = len(centers)
+    if samples == 0:
+        raise ValueError("duration contains no ADC sample center")
     cells = rng.integers(0, instrument.microcells_per_pixel, len(times))
     recovery = apply_exponential_microcell_recovery(
         times, cells, instrument.microcell_recovery_time_ns)
@@ -1083,45 +1154,31 @@ def render_pe_waveform(
     else:
         charge = np.ones(len(times))
     weights = recovery*charge
-
-    # 把模板支撑范围外扩，确保分析窗边缘前后的 p.e. 尾巴仍进入波形。
-    grid_start = -math.ceil(max(0.0, template_time.max())/dt)*dt
-    grid_end = duration_ns + math.ceil(max(0.0, -template_time.min())/dt)*dt
-    extended_samples = int(math.ceil((grid_end-grid_start)/dt))
-    impulses = np.zeros(extended_samples)
-    indices = np.rint((times-grid_start)/dt-0.5).astype(np.int64)
-    valid = (indices >= 0) & (indices < extended_samples)
-    np.add.at(impulses, indices[valid], weights[valid])
-    first_offset = int(math.floor(template_time.min()/dt))
-    last_offset = int(math.ceil(template_time.max()/dt))
-    offsets = np.arange(first_offset, last_offset+1)
-    pulse = np.interp(offsets*dt, template_time, template_amplitude,
-                      left=0.0, right=0.0)
-    try:
-        from scipy.signal import fftconvolve
-        full = fftconvolve(impulses, pulse, mode="full")
-    except ImportError:  # pragma: no cover
-        full = np.convolve(impulses, pulse, mode="full")
-    start = -first_offset
-    extended_analog = full[start:start+extended_samples]
-    extended_centers = grid_start+(np.arange(extended_samples)+0.5)*dt
-    analysis = (extended_centers >= 0.0) & (extended_centers < duration_ns)
-    analog = extended_analog[analysis][:samples]
-    centers = extended_centers[analysis][:samples]
+    analog = np.zeros(samples)
+    offsets = np.arange(int(math.ceil(np.ptp(template_time)/dt))+1)
+    # Bound temporary memory while evaluating only samples inside each SPE support.
+    chunk = max(1, 1_000_000//len(offsets))
+    for begin in range(0, len(times), chunk):
+        arrival = times[begin:begin+chunk]
+        first = np.ceil((arrival+template_time[0])/dt-0.5).astype(np.int64)
+        indices = first[:, None]+offsets
+        relative = (indices+0.5)*dt-arrival[:, None]
+        amplitudes = np.interp(relative, template_time, template_amplitude,
+                               left=0., right=0.)*weights[begin:begin+chunk, None]
+        valid = (indices >= 0) & (indices < samples)
+        analog += np.bincount(indices[valid], weights=amplitudes[valid], minlength=samples)
     noise_rms = (instrument.electronic_noise_rms_mv
                  if electronic_noise_rms_mv is None else electronic_noise_rms_mv)
+    if not np.isfinite(noise_rms) or noise_rms < 0:
+        raise ValueError("electronic noise RMS must be finite and nonnegative")
     noisy = analog + rng.normal(0.0, noise_rms, samples)
     return {
-        "sample_time_ns": centers,
-        "analog_mv": analog,
-        "noisy_mv": noisy,
-        "adc_mv": digitize_adc(noisy, instrument.adc_bits,
-                                instrument.adc_full_scale_mv),
-        "recovery_fraction": recovery,
-        "charge_factor": charge,
-        "sample_width_ns": dt,
-        "pe_count": len(times),
+        "sample_time_ns": centers, "analog_mv": analog, "noisy_mv": noisy,
+        "adc_mv": digitize_adc(noisy, instrument.adc_bits, instrument.adc_full_scale_mv),
+        "recovery_fraction": recovery, "charge_factor": charge,
+        "sample_width_ns": dt, "pe_count": len(times),
     }
+
 
 
 def waveform_cross_correlation(left, right, sample_width_ns: float,
@@ -1226,7 +1283,7 @@ def simulate_waveform_gls_calibration(
         null_records: int = 1024, signal_records: int = 256,
         calibration_visibility2: float = 1.0,
         hbt_pair_rate_scale: float = 10_000.0,
-        covariance_shrinkage: float = 0.01,
+        covariance_shrinkage: float | str = "auto",
         nsb_rate_hz: float | None = None,
         spe_template=None,
         seed: int = 20260824) -> tuple[WaveformGLSCalibration, dict]:
@@ -1237,8 +1294,12 @@ def simulate_waveform_gls_calibration(
     """
     if block_duration_ns <= 0.0 or max_lag_ns < 0.0:
         raise ValueError("block duration and maximum lag are invalid")
-    if null_records < 8 or signal_records < 4:
-        raise ValueError("calibration needs at least 8 null and 4 signal records")
+    _validate_waveform_instrument(instrument)
+    if not np.isclose(block_duration_ns/instrument.sample_width_ns,
+                      round(block_duration_ns/instrument.sample_width_ns), atol=1e-10, rtol=0):
+        raise ValueError("calibration block duration must contain an integer number of samples")
+    if null_records < 16 or signal_records < 16:
+        raise ValueError("calibration needs at least 16 null and 16 signal records")
     if spe_template is None and not instrument.spe_template_path:
         raise ValueError("instrument has no measured SPE template")
 
@@ -1286,10 +1347,15 @@ def simulate_waveform_gls_calibration(
     signal = np.asarray(signal)
     null_split = null_records//2
     signal_split = signal_records//2
+    null_scale_start = 3*null_records//4
+    signal_test_start = 3*signal_records//4
+    candidates = (1e-4, 1e-3, 1e-2, 5e-2) if covariance_shrinkage == "auto" else (float(covariance_shrinkage),)
+    if any(not np.isfinite(x) or not 0 <= x <= 1 for x in candidates):
+        raise ValueError("covariance_shrinkage must be auto or a number in [0, 1]")
     calibration = calibrate_waveform_gls(
         lags, null[:null_split], signal[:signal_split], block_duration_ns*1.0e-9,
         star_rate, background_rate, calibration_visibility2,
-        hbt_pair_rate_scale, covariance_shrinkage)
+        hbt_pair_rate_scale, candidates[0])
 
     # 对平稳波形，两个相关滞后点的协方差只依赖滞后之差。沿每条对角线
     # 平均可大幅减少有限标定样本造成的协方差噪声，再轻微向对角阵收缩。
@@ -1301,34 +1367,44 @@ def simulate_waveform_gls_calibration(
     stationary_covariance = np.fromfunction(
         lambda i, j: toeplitz_values[np.abs(i-j).astype(int)],
         (lag_count, lag_count), dtype=int)
-    diagonal = np.diag(np.diag(stationary_covariance))
-    covariance = ((1.0-covariance_shrinkage)*stationary_covariance
-                  + covariance_shrinkage*diagonal)
-    eigenvalue, eigenvector = np.linalg.eigh(covariance)
-    eigenvalue = np.maximum(eigenvalue, eigenvalue.max()*1.0e-10)
-    calibration.covariance_per_block = (
-        eigenvector*eigenvalue) @ eigenvector.T
-    # 当前模拟没有跨望远镜共享电子噪声，P=0 的总体期望严格为零。
-    # 真实数据应把这里替换成足够长的离源/错延迟零点标定。
     calibration.null_mean = np.zeros(lag_count)
     calibration.peak_per_visibility2 = 0.5*(
-        calibration.peak_per_visibility2
-        + calibration.peak_per_visibility2[::-1])
+        calibration.peak_per_visibility2+calibration.peak_per_visibility2[::-1])
+    diagonal = np.diag(np.diag(stationary_covariance))
+    injected_visibility2 = calibration_visibility2*hbt_pair_rate_scale
+    selection = []
+    for shrinkage in candidates:
+        covariance = (1-shrinkage)*stationary_covariance+shrinkage*diagonal
+        eigenvalue, eigenvector = np.linalg.eigh(covariance)
+        eigenvalue = np.maximum(eigenvalue, eigenvalue.max()*1e-10)
+        calibration.covariance_per_block = (eigenvector*eigenvalue) @ eigenvector.T
+        tune_null, _ = estimate_visibility2_gls(null[null_split:null_scale_start], calibration)
+        gain_values, _ = estimate_visibility2_gls(signal[signal_split:signal_test_start], calibration)
+        gain = float(gain_values.mean()/injected_visibility2)
+        score = float(tune_null.std(ddof=1)/gain) if gain > 0 else float("inf")
+        selection.append((score, shrinkage, calibration.covariance_per_block.copy(), gain))
+    score, shrinkage, covariance, gain = min(selection, key=lambda row: row[0])
+    if not np.isfinite(score):
+        raise ValueError("calibration injection has no positive held-out response")
+    calibration.covariance_per_block = covariance
+    calibration.covariance_shrinkage = shrinkage
+    gain_values, _ = estimate_visibility2_gls(signal[signal_split:signal_test_start], calibration)
+    calibration.response_relative_uncertainty = float(
+        gain_values.std(ddof=1)/np.sqrt(len(gain_values))/abs(gain_values.mean()))
+    calibration.peak_per_visibility2 *= gain
     calibration.null_records = null_records
     calibration.signal_records = signal_records
+    calibration.instrument_signature = waveform_instrument_signature(instrument, template)
 
-    # 留出的零信号记录不参与权重拟合，用其实际散布校准 sigma 的绝对尺度。
-    validation_null, predicted_sigma = estimate_visibility2_gls(
-        null[null_split:], calibration)
+    # Scale the fixed weights on records not used to choose regularization.
+    validation_null, predicted_sigma = estimate_visibility2_gls(null[null_scale_start:], calibration)
     empirical_sigma = float(np.std(validation_null, ddof=1))
     covariance_scale = (empirical_sigma/predicted_sigma)**2
     calibration.covariance_per_block *= covariance_scale
-    validation_signal, _ = estimate_visibility2_gls(
-        signal[signal_split:], calibration)
-    injected_visibility2 = calibration_visibility2*hbt_pair_rate_scale
+    calibration.sigma_relative_uncertainty = 1/math.sqrt(2*(len(validation_null)-1))
+    validation_signal, _ = estimate_visibility2_gls(signal[signal_test_start:], calibration)
     response_closure = float(np.mean(validation_signal)/injected_visibility2)
-    _, sigma_block = waveform_gls_weights(
-        calibration, calibration.block_duration_s)
+    _, sigma_block = waveform_gls_weights(calibration, calibration.block_duration_s)
     diagnostics = {
         "null_correlations": null,
         "signal_correlations": signal,
@@ -1341,8 +1417,14 @@ def simulate_waveform_gls_calibration(
         "null_training_records": null_split,
         "signal_training_records": signal_split,
         # 正态近似下，有限尺度标定本身的相对标准误差；不是额外的独立UV噪声。
-        "null_scale_records": null_records-null_split,
-        "sigma_relative_calibration_error_approx": 1/math.sqrt(2*(null_records-null_split-1)),
+        "null_scale_records": null_records-null_scale_start,
+        "null_scale_start": null_scale_start,
+        "signal_test_start": signal_test_start,
+        "selected_covariance_shrinkage": shrinkage,
+        "shrinkage_selection": [{"shrinkage": row[1], "tuning_sigma": row[0]} for row in selection],
+        "response_gain_correction": gain,
+        "response_relative_calibration_error": calibration.response_relative_uncertainty,
+        "sigma_relative_calibration_error_approx": calibration.sigma_relative_uncertainty,
         "padding_ns": float(padding_ns),
         "source_ab_magnitude": float(source_ab_magnitude),
         "physical_hbt_pair_rate_hz": hbt_correlated_pair_rate_hz(
@@ -1378,16 +1460,9 @@ def sample_waveform_gls_visibility2(
     if np.any(~np.isfinite(truth)):
         raise ValueError("visibility2 must be finite")
     generator = np.random.default_rng() if rng is None else rng
-    covariance = calibration.covariance(exposure_s)
-    noise = generator.multivariate_normal(
-        np.zeros(len(calibration.lags_ns)), covariance,
-        size=truth.size).reshape(truth.shape+(len(calibration.lags_ns),))
-    correlations = (calibration.null_mean
-                    + truth[..., None]*calibration.peak_per_visibility2
-                    + noise)
-    estimates, sigma = estimate_visibility2_gls(
-        correlations, calibration, exposure_s)
-    return np.asarray(estimates), sigma
+    _, sigma = waveform_gls_weights(calibration, exposure_s)
+    # The projection of multivariate Gaussian lag noise is exactly scalar Gaussian.
+    return truth + generator.normal(0.0, sigma, size=truth.shape), sigma
 
 
 def _load_layout(layout) -> pd.DataFrame:
@@ -1580,6 +1655,9 @@ def simulate_uv_observation(
     if estimator == "waveform_gls":
         if waveform_calibration is None:
             raise ValueError("waveform_gls estimator needs waveform_calibration")
+        _validate_waveform_instrument(instrument)
+        if waveform_calibration.instrument_signature != waveform_instrument_signature(instrument):
+            raise ValueError("waveform calibration instrument/response signature mismatch; recalibrate")
         expected_background = nsb_rate+dark_rate
         if (not np.isclose(waveform_calibration.star_rate_hz, star_rate,
                            rtol=1e-9)
@@ -1606,12 +1684,17 @@ def simulate_uv_observation(
         frame["visibility2_measured"] = measured
         frame["sigma_visibility2_stat"] = sigma_stat
         frame["sigma_visibility2"] = sigma_stat
+        frame["sigma_visibility2_calibration"] = (
+            np.abs(measured)*waveform_calibration.response_relative_uncertainty)
         endpoint = observation.hours_per_night/2*math.pi/12.0
         altitude = [math.asin(source_direction_enu(
             sign*endpoint, math.radians(observation.source_dec_deg),
             math.radians(observation.site_lat_deg))[2]) for sign in (-1, 1)]
         metadata = {
             "estimator": "waveform_gls",
+            "uncertainty_model": "statistical conditional on calibration; shared gain uncertainty reported separately",
+            "calibration_response_relative_uncertainty": waveform_calibration.response_relative_uncertainty,
+            "calibration_sigma_relative_uncertainty": waveform_calibration.sigma_relative_uncertainty,
             "hours_per_night": observation.hours_per_night,
             "nights": observation.nights,
             "total_integration_hours": observation.hours_per_night*observation.nights,
