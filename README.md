@@ -31,6 +31,7 @@ tests/test_sii_*.py            SII自动检查
 
 SII核心Python文件包含中文模块说明、关键物理步骤注释和函数docstring。
 两份说明分别讲[物理原理](docs/SII_PHYSICS_ZH.md)和[代码实现](docs/SII_IMPLEMENTATION_ZH.md)。
+已确认的论文主线和后续六方面工作见[研究计划](docs/SII_RESEARCH_PLAN_ZH.md)。
 Notebook保存实际执行的参数、独立波形验证、1000次参数区间覆盖率检验和图像重复结果。
 
 ## 物理流程
