@@ -11,10 +11,12 @@ import csv
 import json
 import math
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
+from scipy.signal import fftconvolve
+from scipy.linalg import solve_triangular
 
 try:
     from scipy.optimize import minimize
@@ -49,6 +51,9 @@ class UvData:
     input_rows: int
     finite_rows: int
     physical_violations: int
+    # 每个实际子采样的(u,v,所属输出格,归一化平均权重)，不含源真值。
+    sampling: tuple | None = None
+    covariance: np.ndarray | None = None
 
 
 @dataclass
@@ -113,6 +118,8 @@ def read_uv_measurements(
         entry[2] += value
         entry[3] += 1
         sigma = _parse_float(row, sigma_column) if sigma_column else math.nan
+        if sigma_column and not (math.isfinite(sigma) and sigma > 0.0):
+            raise ValueError("every measured UV row must have a finite positive uncertainty")
         if math.isfinite(sigma) and sigma > 0.0:
             inverse_variance = 1.0 / (sigma * sigma)
             entry[4] += inverse_variance
@@ -136,15 +143,9 @@ def read_uv_measurements(
     sigma = array[:, 4]
     finite_sigma = sigma[np.isfinite(sigma) & (sigma > 0.0)]
     if finite_sigma.size:
-        floor = max(1e-6, 0.5 * float(np.percentile(finite_sigma, 20.0)))
-        effective = np.where(np.isfinite(sigma) & (sigma > 0.0),
-                             np.maximum(sigma, floor), np.nan)
-        fallback = float(np.median(finite_sigma))
-        effective = np.where(np.isfinite(effective), effective, fallback)
-        weight = 1.0 / (effective * effective)
-        weight /= np.mean(weight)
-        weight = np.clip(weight, 0.1, 10.0)
-        weight /= np.mean(weight)
+        if finite_sigma.size != len(sigma):
+            raise ValueError("some UV measurements lack a finite positive uncertainty")
+        weight = 1.0 / sigma**2
     else:
         weight = np.ones(len(array), dtype=float)
     return UvData(
@@ -213,6 +214,87 @@ def _softmax(z):
     shifted = z - np.max(z)
     value = np.exp(shifted)
     return value / np.sum(value)
+
+
+def power_sampling_kernel(uv, grid_size, fov_mas):
+    """精确预计算平均功率算子，避免以平均UV坐标替代平均|V|²。
+
+    Wiener–Khinchin: P(q)=sum_d A_I(d) cos(2πq·d)。A_I是像素图自相关。
+    先平均cos核，再作用于A_I，与逐个子采样算|V|²后平均代数等价。
+    这里没有补相位、插值UV、或对测量做自相关。
+    """
+    lag = np.arange(1-grid_size, grid_size)*fov_mas/(grid_size-1)*MAS_TO_RAD
+    count = len(uv.u_lambda)
+    if count*len(lag)**2*8 > 1_000_000_000:
+        raise ValueError("exact power kernel exceeds 1 GB; use UV grouping or a smaller diagnostic subset")
+    if uv.sampling is None:
+        u, v = uv.u_lambda, uv.v_lambda
+        group, fraction = np.arange(count), np.ones(count)
+    else:
+        u, v, group, fraction = uv.sampling
+    u, v, fraction = map(lambda x: np.asarray(x, float), (u, v, fraction))
+    original_group = np.asarray(group)
+    group = np.asarray(group, int)
+    if np.any(original_group != group):
+        raise ValueError("sampling group indices must be integers")
+    if not (u.shape == v.shape == group.shape == fraction.shape):
+        raise ValueError("sampling arrays must have equal shapes")
+    if (not np.all(np.isfinite(u+v+fraction)) or np.any(fraction < 0)
+            or np.any(group < 0) or np.any(group >= count)):
+        raise ValueError("invalid sampling coordinates or averaging weights")
+    if not np.allclose(np.bincount(group, weights=fraction, minlength=count), 1.0):
+        raise ValueError("sampling weights must sum to one for every measurement")
+    order = np.argsort(group, kind="stable")
+    boundaries = np.r_[0, np.cumsum(np.bincount(group, minlength=count))]
+    kernel = np.empty((count, len(lag)**2))
+    for index in range(count):
+        selected = order[boundaries[index]:boundaries[index+1]]
+        # 分离u、v指数，只需两个窄矩阵；积的实部就是余弦平均。
+        ex = np.exp(-2j*np.pi*u[selected, None]*lag)
+        ey = np.exp(-2j*np.pi*v[selected, None]*lag)
+        kernel[index] = ((ey*fraction[selected, None]).T @ ex).real.ravel()
+    return kernel
+
+
+def power_from_image(kernel, image):
+    """给定天图返回与实际测量使用完全相同平均方式的P。"""
+    autocorrelation = fftconvolve(image, image[::-1, ::-1], mode="full")
+    return kernel @ autocorrelation.ravel()
+
+
+def _power_gradient(kernel, influence, image):
+    lag_gradient = (kernel.T @ influence).reshape((2*len(image)-1,)*2)
+    # 实图自相关为中心对称量，消除浮点级非对称后取精确伴随导数。
+    lag_gradient = 0.5*(lag_gradient+lag_gradient[::-1, ::-1])
+    return 2*fftconvolve(lag_gradient, image, mode="valid")
+
+
+def statistical_loss(uv, residual, likelihood="gaussian", huber_delta=2.5):
+    """返回绝对统计损失及对P残差的导数；不归一化/截断逆方差。"""
+    if likelihood == "noiseless":
+        return 0.5*float(residual @ residual), residual
+    if not np.all(np.isfinite(uv.sigma) & (uv.sigma > 0)):
+        raise ValueError("statistical reconstruction requires finite positive sigma; use likelihood='noiseless' explicitly for ideal data")
+    if uv.covariance is None:
+        standardized = residual/uv.sigma
+        unwhiten_gradient = lambda x: x/uv.sigma
+    else:
+        covariance = np.asarray(uv.covariance, float)
+        if (covariance.shape != (len(residual),)*2
+                or not np.all(np.isfinite(covariance))
+                or not np.allclose(covariance, covariance.T, rtol=1e-10,
+                                   atol=1e-14*np.max(np.abs(covariance)))
+                or not np.allclose(np.diag(covariance), uv.sigma**2, rtol=1e-8, atol=0)):
+            raise ValueError("UV covariance must be symmetric and have diagonal sigma²")
+        chol = np.linalg.cholesky(covariance)
+        standardized = solve_triangular(chol, residual, lower=True)
+        unwhiten_gradient = lambda x: solve_triangular(chol.T, x, lower=False)
+    if likelihood == "gaussian":
+        return 0.5*float(standardized @ standardized), unwhiten_gradient(standardized)
+    if likelihood == "huber":
+        values, influence = _huber(standardized, huber_delta)
+        return float(values.sum()), unwhiten_gradient(influence)
+    raise ValueError("likelihood must be gaussian, huber, noiseless or legacy")
 
 
 def _initial_image(xx, yy, support, rng, start_index, fov_mas):
@@ -361,64 +443,135 @@ def reconstruct_uv_data(
         fov_mas=4.0,
         support_radius_mas=None,
         starts=4,
-        max_iter=600,
-        smoothness=0.2,
-        huber_delta=0.18,
+        max_iter=1600,
+        smoothness="cv",
+        huber_delta=2.5,
         seed=12345,
         peak_minimum_separation_mas=0.35,
-        truth_sky_image=None):
+        truth_sky_image=None,
+        likelihood="gaussian",
+        smoothness_candidates=(0.0, 1e-5, 1e-3, 1e-1),
+        cv_seed=314159,
+        optimizer_ftol=None,
+        parameterization=None,
+        _power_kernel=None):
     """在正值和有限支撑约束下，以多起点 L-BFGS-B 拟合 ``|V|²``。
 
-    图像通过 softmax 保证非负并归一化；Huber 损失降低异常 UV 点的影响，
-    ``smoothness`` 控制相邻像素正则。绝对平移和 180° 镜像是幅度干涉本身
-    无法消除的固有简并，而不是优化器错误。
+    默认直接优化有界非负像素再归一化，避免softmax使暗像素梯度过小；
+    parameterization="softmax"保留旧参数化，legacy默认仍用它。两者物理目标相同。
+    默认使用绝对Gaussian误差，
+    可选Huber对标准化残差降低异常点影响。smoothness="cv"只用留出测量选先验，
+    数值强度对应视场归一化坐标上的亮度密度梯度；旧定义仅在legacy模式保留。
+    绝对平移和180°中心反演是幅度干涉的固有简并。
     """
     if minimize is None:
         raise RuntimeError("reconstruct-uv requires scipy.optimize")
     if starts <= 0 or max_iter <= 0:
         raise ValueError("starts and max_iter must be positive")
-    if smoothness < 0.0 or huber_delta <= 0.0:
+    if parameterization is None:
+        parameterization = "softmax" if likelihood == "legacy" else "flux"
+    if parameterization not in ("softmax", "flux"):
+        raise ValueError("parameterization must be softmax or flux")
+    if (len(uv.u_lambda) == 0 or any(len(x) != len(uv.u_lambda) for x in
+            (uv.v_lambda, uv.visibility_abs2, uv.sigma, uv.weight, uv.multiplicity))
+            or not np.all(np.isfinite(uv.visibility_abs2))):
+        raise ValueError("UV arrays must be nonempty, equally sized, with finite measurements")
+    if (smoothness != "cv" and smoothness < 0.0) or huber_delta <= 0.0:
         raise ValueError("smoothness must be non-negative and huber_delta positive")
     if support_radius_mas is None:
         support_radius_mas = 0.47 * fov_mas
     theta, xx, yy, support = _image_grid(grid_size, fov_mas, support_radius_mas)
-    fourier = _fourier_matrix(uv, xx, yy, support)
+    legacy = likelihood == "legacy"
+    # 新目标是卡方总和，不是旧平均损失。保留可调停止容差，并在报告中做严格容差对照。
+    ftol = (1e-12 if parameterization == "flux" or likelihood in ("legacy", "noiseless")
+            else 1e-9) if optimizer_ftol is None else optimizer_ftol
+    if not np.isfinite(ftol) or ftol <= 0:
+        raise ValueError("optimizer_ftol must be finite and positive")
+    if legacy:
+        if smoothness == "cv":
+            raise ValueError("legacy comparison requires an explicit old smoothness")
+        fourier = _fourier_matrix(uv, xx, yy, support)
+        kernel = None
+    else:
+        kernel = (power_sampling_kernel(uv, grid_size, fov_mas)
+                  if _power_kernel is None else _power_kernel)
+        statistical_loss(uv, np.zeros(len(uv.u_lambda)), likelihood, huber_delta)
+    cv_results = []
+    if smoothness == "cv":
+        if uv.covariance is not None or likelihood == "noiseless":
+            raise ValueError("CV currently requires independent noisy UV measurements")
+        if len(uv.u_lambda) < 10:
+            raise ValueError("CV needs at least 10 UV measurements; specify smoothness explicitly")
+        # 一次固定80/20留出，只读测量；不读真图，也不按图像相似度选参数。
+        order = np.random.default_rng(cv_seed).permutation(len(uv.u_lambda))
+        validation, training = order[:max(2, len(order)//5)], order[max(2, len(order)//5):]
+        def subset(indices):
+            return replace(uv, u_lambda=uv.u_lambda[indices], v_lambda=uv.v_lambda[indices],
+                visibility_abs2=uv.visibility_abs2[indices], sigma=uv.sigma[indices],
+                weight=uv.weight[indices], multiplicity=uv.multiplicity[indices], sampling=None)
+        train_uv, validation_uv = subset(training), subset(validation)
+        for alpha in smoothness_candidates:
+            fit = reconstruct_uv_data(train_uv, grid_size=grid_size, fov_mas=fov_mas,
+                support_radius_mas=support_radius_mas, starts=min(starts, 2),
+                max_iter=max_iter, smoothness=float(alpha), huber_delta=huber_delta,
+                seed=seed, likelihood=likelihood, optimizer_ftol=ftol,
+                parameterization=parameterization, _power_kernel=kernel[training])
+            residual = power_from_image(kernel[validation], fit.image)-validation_uv.visibility_abs2
+            score, _ = statistical_loss(validation_uv, residual, "gaussian")
+            cv_results.append({"smoothness": float(alpha), "validation_chi2_per_point":
+                2*score/len(validation), "training_converged": fit.metrics["optimizer_success"]})
+        smoothness = min(cv_results, key=lambda row: row["validation_chi2_per_point"])["smoothness"]
     observed = uv.visibility_abs2
     rng = np.random.default_rng(seed)
     trials = []
 
-    def objective(z):
-        supported_image = _softmax(z)
-        field = fourier @ supported_image
-        predicted = np.abs(field) ** 2
-        residual = predicted - observed
-        loss, influence = _huber(residual, huber_delta)
-        weight_sum = float(np.sum(uv.weight))
-        value = float(np.sum(uv.weight * loss) / weight_sum)
-        gradient_x = 2.0 * np.real(
-            fourier.T @ (uv.weight * influence * np.conj(field))
-        ) / weight_sum
+    def image_objective(supported_image):
+        """先在真实像素流量上求导，再通过参数化传回优化器。"""
         full_image = np.zeros_like(xx)
         full_image[support] = supported_image
+        if legacy:
+            field = fourier @ supported_image
+            predicted = np.abs(field) ** 2
+            residual = predicted - observed
+            loss, influence = _huber(residual, huber_delta)
+            weight_sum = float(np.sum(uv.weight))
+            value = float(np.sum(uv.weight * loss) / weight_sum)
+            gradient_x = 2.0 * np.real(
+                fourier.T @ (uv.weight * influence * np.conj(field))) / weight_sum
+        else:
+            predicted = power_from_image(kernel, full_image)
+            value, influence = statistical_loss(uv, predicted-observed, likelihood, huber_delta)
+            gradient_x = _power_gradient(kernel, influence, full_image)[support]
+        # 在视场归一化坐标上惩罚亮度密度梯度；(N-1)^4补偿像素流量随网格变化。
+        strength = smoothness if legacy else smoothness*(grid_size-1)**4
         regularization, regularization_gradient = _smoothness_value_gradient(
-            full_image, smoothness)
+            full_image, strength)
         value += regularization
         gradient_x += regularization_gradient[support]
-        gradient_z = supported_image * (
-            gradient_x - np.dot(gradient_x, supported_image)
-        )
-        return value, gradient_z
+        return value, gradient_x
+
+    def objective(z):
+        if parameterization == "flux" and z.sum() <= 0:
+            # 全零向量没有定义归一化图像；拒绝这一步，不虚构预测量。
+            return np.inf, -np.ones_like(z)
+        pixels = _softmax(z) if parameterization == "softmax" else z/z.sum()
+        value, gradient = image_objective(pixels)
+        tangent = gradient-np.dot(gradient, pixels)
+        return value, tangent*(pixels if parameterization == "softmax" else 1/z.sum())
 
     for start_index in range(starts):
         initial = _initial_image(xx, yy, support, rng, start_index, fov_mas)
+        if parameterization == "flux":
+            initial = _softmax(initial)
         fit = minimize(
             objective,
             initial,
             method="L-BFGS-B",
             jac=True,
+            bounds=[(0.0, 1.0)]*len(initial) if parameterization == "flux" else None,
             options={
                 "maxiter": max_iter,
-                "ftol": 1e-12,
+                "ftol": ftol,
                 "gtol": 1e-8,
                 "maxcor": 20,
             },
@@ -427,16 +580,34 @@ def reconstruct_uv_data(
     selected_index = int(np.argmin([trial.fun for trial in trials]))
     selected = trials[selected_index]
     image = np.zeros_like(xx)
-    image[support] = _softmax(selected.x)
-    image, centroid_before, center_shift = _center_image(image)
+    image[support] = (_softmax(selected.x) if parameterization == "softmax"
+                      else selected.x/selected.x.sum())
+    _, pixel_gradient = image_objective(image[support])
+    # 单纯形上的一阶驻点检查：把少量流量移到梯度最小像素，能否降低目标。
+    # 这是局部必要条件，不是非凸问题的全局最优证明。
+    stationarity_gap = float(image[support] @ pixel_gradient-pixel_gradient.min())
+    centered, centroid_before, center_shift = _center_image(image)
+    # 中心平移若会裁掉通量或移出支撑，不改变优化后的解。禁止裁剪后重新归一化改变P。
+    if legacy:
+        image = centered
+    else:
+        candidate = _shift_without_wrap(image, *center_shift)
+        if (np.isclose(candidate.sum(), image.sum(), rtol=0, atol=1e-13)
+                and np.sum(candidate[~support]) < 1e-13):
+            image = candidate
+        else:
+            center_shift = (0, 0)
 
     # Recalculate the visibility after choosing the translation gauge.
     supported_image = image[support]
     supported_image /= np.sum(supported_image)
-    predicted = np.abs(fourier @ supported_image) ** 2
+    predicted = (np.abs(fourier @ supported_image) ** 2 if legacy
+                 else power_from_image(kernel, image))
     residual = predicted - observed
     metrics = {
-        "algorithm": "positive_softmax_multistart_lbfgsb",
+        "algorithm": f"positive_{parameterization}_multistart_lbfgsb",
+        "parameterization": parameterization,
+        "simplex_stationarity_gap": stationarity_gap,
         "objective": float(selected.fun),
         "fit_rmse": float(np.sqrt(np.mean(residual * residual))),
         "weighted_fit_rmse": float(np.sqrt(
@@ -449,11 +620,20 @@ def reconstruct_uv_data(
         "optimizer_status": int(selected.status),
         "optimizer_message": str(selected.message),
         "optimizer_iterations": int(selected.nit),
+        "optimizer_ftol": float(ftol),
         "grid_size": grid_size,
         "fov_mas": fov_mas,
         "pixel_scale_mas": float(theta[1] - theta[0]),
         "support_radius_mas": support_radius_mas,
         "smoothness": smoothness,
+        "likelihood": likelihood,
+        "smoothness_selection": cv_results,
+        "per_start_objective": [float(t.fun) for t in trials],
+        "per_start_success": [bool(t.success) for t in trials],
+        "per_start_iterations": [int(t.nit) for t in trials],
+        "chi2": (float("nan") if legacy or likelihood == "noiseless" else
+                 2*statistical_loss(uv, residual, "gaussian")[0]),
+        "forward_model": "representative_uv" if legacy else "averaged_power_exact",
         "huber_delta": huber_delta,
         "seed": seed,
         "input_rows": uv.input_rows,
@@ -689,6 +869,7 @@ def reconstruction_self_test():
         starts=5,
         max_iter=800,
         smoothness=0.02,
+        likelihood="legacy",
         huber_delta=0.5,
         seed=321,
         peak_minimum_separation_mas=0.35,

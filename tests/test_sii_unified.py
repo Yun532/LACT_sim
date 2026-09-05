@@ -442,3 +442,115 @@ def test_reconstruction_import_preserves_loaded_pyplot_backend():
     sys.modules.pop("sii_reconstruction", None)
     importlib.import_module("sii_reconstruction")
     assert matplotlib.get_backend() == before
+
+
+def test_exact_averaged_power_and_gradient():
+    from sii_reconstruction import (UvData, power_sampling_kernel, power_from_image,
+                                    _power_gradient, MAS_TO_RAD)
+    rng = np.random.default_rng(45)
+    u, v = rng.normal(0, 1e9, (2, 12))
+    group = np.repeat(np.arange(4), 3)
+    fraction = np.tile([0.2, 0.3, 0.5], 4)
+    uv = UvData(u[:4], v[:4], np.zeros(4), np.ones(4), np.ones(4),
+                np.ones(4), 4, 4, 0, sampling=(u, v, group, fraction))
+    image = rng.uniform(size=(12, 12))
+    image /= image.sum()
+    theta = np.linspace(-.35, .35, 12)*MAS_TO_RAD
+    yy, xx = np.meshgrid(theta, theta, indexing="ij")
+    field = np.exp(-2j*np.pi*(u[:, None]*xx.ravel()+v[:, None]*yy.ravel())) @ image.ravel()
+    direct = np.bincount(group, weights=fraction*abs(field)**2)
+    kernel = power_sampling_kernel(uv, 12, .7)
+    assert np.allclose(power_from_image(kernel, image), direct, atol=1e-13)
+    influence = rng.normal(size=4)
+    gradient = _power_gradient(kernel, influence, image)
+    direction = rng.normal(size=image.shape)
+    epsilon = 1e-7
+    finite_difference = (power_from_image(kernel, image+epsilon*direction)
+                         - power_from_image(kernel, image-epsilon*direction)) @ influence/(2*epsilon)
+    assert np.isclose(finite_difference, np.sum(gradient*direction), rtol=1e-7)
+
+
+def test_absolute_likelihood_sigma_scaling_and_covariance():
+    from dataclasses import replace
+    from sii_reconstruction import UvData, statistical_loss
+    uv = UvData(np.arange(3.), np.zeros(3), np.zeros(3), np.array([.1, .2, .3]),
+                np.ones(3), np.ones(3), 3, 3, 0)
+    residual = np.array([.02, -.3, .1])
+    loss, gradient = statistical_loss(uv, residual)
+    scaled_loss, scaled_gradient = statistical_loss(replace(uv, sigma=10*uv.sigma), residual)
+    assert np.isclose(scaled_loss, loss/100)
+    assert np.allclose(scaled_gradient, gradient/100)
+    covariance = np.diag(uv.sigma**2)
+    covariance[0, 1] = covariance[1, 0] = .005
+    full_loss, full_gradient = statistical_loss(replace(uv, covariance=covariance), residual)
+    assert np.allclose(full_gradient, np.linalg.solve(covariance, residual))
+    assert np.isclose(full_loss, residual @ full_gradient/2)
+    with pytest.raises(ValueError, match="diagonal"):
+        statistical_loss(replace(uv, sigma=uv.sigma*1e-8,
+                                 covariance=2*covariance*1e-16), residual)
+    with pytest.raises(ValueError, match="positive sigma"):
+        statistical_loss(replace(uv, sigma=np.zeros(3)), residual)
+
+
+def test_uv_grouping_keeps_forward_weights_without_artificial_dc():
+    data = pd.DataFrame({"u_lambda": [1e8, 1.1e8], "v_lambda": [0., 0.],
+                         "visibility2_measured": [.4, .8], "sigma_visibility2": [.1, .2],
+                         "uv_samples_u": [(8e7, 1.2e8), (1e8, 1.2e8)],
+                         "uv_samples_v": [(0., 0.), (0., 0.)]})
+    uv = sii.prepare_reconstruction_uv(data, cell_mlambda=500)
+    assert len(uv.u_lambda) == 1
+    assert np.isclose(uv.visibility_abs2[0], .48)
+    assert np.isclose(uv.sigma[0], np.sqrt(1/125))
+    assert np.allclose(uv.sampling[3], [.4, .4, .1, .1])
+    assert len(sii.prepare_reconstruction_uv(data, cell_mlambda=None).u_lambda) == 2
+    # 真值列即使被污染，也不能改变重建输入；只允许观测和采样几何进入。
+    data["visibility2_true"] = [np.nan, -999.0]
+    poisoned = sii.prepare_reconstruction_uv(data, cell_mlambda=500)
+    assert np.array_equal(poisoned.visibility_abs2, uv.visibility_abs2)
+    assert all(np.array_equal(a, b) for a, b in zip(poisoned.sampling, uv.sampling))
+
+
+def test_statistical_reconstruction_cv_and_returned_prediction():
+    from sii_reconstruction import (UvData, power_sampling_kernel, power_from_image,
+                                    reconstruct_uv_data)
+    rng = np.random.default_rng(91)
+    u, v = rng.normal(0, 3e8, (2, 24))
+    uv = UvData(u, v, np.zeros(24), np.full(24, .03), np.full(24, 1/.03**2),
+                np.ones(24), 24, 24, 0)
+    image = np.zeros((12, 12))
+    image[5:7, 5:7] = .25
+    kernel = power_sampling_kernel(uv, 12, .7)
+    uv.visibility_abs2 = power_from_image(kernel, image)+rng.normal(0, .03, 24)
+    result = reconstruct_uv_data(uv, grid_size=12, fov_mas=.7, starts=1,
+        max_iter=100, smoothness="cv", smoothness_candidates=(0., .01), seed=5)
+    assert len(result.metrics["smoothness_selection"]) == 2
+    assert np.allclose(result.predicted_visibility_abs2, power_from_image(kernel, result.image))
+    residual = (result.predicted_visibility_abs2-uv.visibility_abs2)/uv.sigma
+    assert np.isclose(result.metrics["chi2"], np.sum(residual**2))
+    assert np.isclose(result.image.sum(), 1)
+
+
+def test_flux_parameterization_gradient_and_zero_vector_guard(monkeypatch):
+    import sii_reconstruction as reconstruction
+    rng = np.random.default_rng(81)
+    uv = reconstruction.UvData(rng.normal(0, 1e9, 20), rng.normal(0, 1e9, 20),
+        np.full(20, .2), np.full(20, .1), np.full(20, 100.), np.ones(20), 20, 20, 0)
+    original = reconstruction.minimize
+
+    def checked(fun, initial, **kwargs):
+        direction = initial*rng.normal(size=len(initial))
+        epsilon = 1e-4
+        value, gradient = fun(initial)
+        finite_difference = (fun(initial+epsilon*direction)[0]
+                             - fun(initial-epsilon*direction)[0])/(2*epsilon)
+        assert np.isclose(finite_difference, gradient @ direction, rtol=1e-5, atol=1e-7)
+        invalid, escape = fun(np.zeros_like(initial))
+        assert np.isinf(invalid) and np.all(np.isfinite(escape))
+        return original(fun, initial, **kwargs)
+
+    monkeypatch.setattr(reconstruction, 'minimize', checked)
+    fit = reconstruction.reconstruct_uv_data(uv, grid_size=12, fov_mas=.7,
+        starts=1, max_iter=200, smoothness=.001, parameterization='flux')
+    assert np.all(fit.image >= 0) and np.isclose(fit.image.sum(), 1)
+    assert fit.metrics['simplex_stationarity_gap'] >= -1e-8
+    assert fit.metrics['parameterization'] == 'flux'

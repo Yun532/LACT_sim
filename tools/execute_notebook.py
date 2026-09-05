@@ -20,6 +20,8 @@ NotebookClient(
     timeout=args.timeout,
     kernel_name="python3",
     resources={"metadata": {"path": str(args.cwd.resolve())}},
+    on_cell_executed=lambda **event: print(
+        f"Executed cell {event['cell_index'] + 1}/{len(notebook.cells)}", flush=True),
 ).execute()
 nbformat.write(notebook, args.notebook)
 print(f"Executed {len(notebook.cells)} cells: {args.notebook}")

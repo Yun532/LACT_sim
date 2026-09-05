@@ -1196,7 +1196,7 @@ def calibrate_waveform_gls(
 def waveform_gls_weights(
         calibration: WaveformGLSCalibration,
         exposure_s: float) -> tuple[np.ndarray, float]:
-    """返回 ``P_hat=w·(C-C0)`` 的 GLS 权重及其 ``sigma_P``。"""
+    """返回GLS权重及条件sigma_P；有限标定精度另见标定diagnostics。"""
     covariance = calibration.covariance(exposure_s)
     peak = calibration.peak_per_visibility2
     solved = np.linalg.solve(covariance, peak)
@@ -1340,6 +1340,9 @@ def simulate_waveform_gls_calibration(
         "covariance_validation_scale": float(covariance_scale),
         "null_training_records": null_split,
         "signal_training_records": signal_split,
+        # 正态近似下，有限尺度标定本身的相对标准误差；不是额外的独立UV噪声。
+        "null_scale_records": null_records-null_split,
+        "sigma_relative_calibration_error_approx": 1/math.sqrt(2*(null_records-null_split-1)),
         "padding_ns": float(padding_ns),
         "source_ab_magnitude": float(source_ab_magnitude),
         "physical_hbt_pair_rate_hz": hbt_correlated_pair_rate_hz(
@@ -1454,11 +1457,9 @@ def generate_uvw(layout, observation: Observation,
     return pd.DataFrame(rows)
 
 
-def segment_averaged_visibility2(
-        uvw, source, observation: Observation,
-        instrument: Instrument = Instrument(),
-        source_case: str = "binary") -> np.ndarray:
-    """计算每个积分段沿地球自转轨迹平均后的 ``|V|²`` 期望值。"""
+def segment_uv_samples(uvw, observation: Observation,
+                       instrument: Instrument = Instrument()):
+    """只由基线和时间生成积分子采样；模拟和重建共用，不接触天体真值。"""
     frame = uvw
     required = {"hour_angle_h", "baseline_east_m", "baseline_north_m",
                 "baseline_up_m"}
@@ -1479,7 +1480,7 @@ def segment_averaged_visibility2(
     dec = math.radians(observation.source_dec_deg)
     sl, cl = math.sin(lat), math.cos(lat)
     sd, cd = math.sin(dec), math.cos(dec)
-    averaged = np.zeros(len(frame), dtype=float)
+    us, vs = [], []
     for offset_h in offsets_h:
         hour = (center_hour+offset_h)*math.pi/12.0
         sh, ch = np.sin(hour), np.cos(hour)
@@ -1489,8 +1490,17 @@ def segment_averaged_visibility2(
                + baseline[:, 1]*(cd*cl+sd*ch*sl)
                + baseline[:, 2]*(cd*sl-sd*ch*cl))
         u, v = u_m/instrument.wavelength_m, v_m/instrument.wavelength_m
-        averaged += np.abs(source_visibility(u, v, source, source_case))**2
-    return averaged/samples
+        us.append(u)
+        vs.append(v)
+    return np.stack(us, axis=1), np.stack(vs, axis=1)
+
+
+def segment_averaged_visibility2(
+        uvw, source, observation: Observation,
+        instrument: Instrument = Instrument(), source_case: str = "binary"):
+    """计算每个积分段沿地球自转轨迹平均后的 ``|V|²`` 期望值。"""
+    u, v = segment_uv_samples(uvw, observation, instrument)
+    return np.mean(np.abs(source_visibility(u, v, source, source_case))**2, axis=1)
 
 
 def _electronics_correlation_efficiency(instrument, total_rate_hz):
@@ -1517,13 +1527,15 @@ def simulate_uv_observation(
         ) -> tuple[pd.DataFrame, dict]:
     """把完整 UVW 表转换成带误差的长曝光 ``|V|²`` 测量。
 
-    每镜每段显式抽样 ``N_star~Poisson(r_star*T)`` 和
-    ``N_nsb~Poisson(r_nsb*T)``；同一台镜的计数、增益和时钟状态被它
-    参与的所有基线共享。相关器统计误差采用
-
-    ``sigma(|V|²) = 1 / [SNR_unit * eta_elec * eta_optics]``。
+    主报告显式选waveform_gls：使用匹配当前仪器和光子率的短波形标定，
+    按积分时间缩放协方差并抽样P；不是重新产生数小时ADC波形。
+    为兼容保留的analytic分支才另外抽样每镜每段的Poisson计数及共享状态，
+    并使用解析SNR计算sigma。两条估计器不能混称；GLS未标定的系统误差会报错。
     """
     frame = uvw.copy().reset_index(drop=True)
+    sample_u, sample_v = segment_uv_samples(frame, observation, instrument)
+    frame["uv_samples_u"] = list(map(tuple, sample_u))
+    frame["uv_samples_v"] = list(map(tuple, sample_v))
     required = {"u_lambda", "v_lambda", "segment",
                 "telescope_i_index", "telescope_j_index"}
     if not required.issubset(frame):
@@ -1755,13 +1767,25 @@ def simulate_uv_observation(
     return frame, metadata
 
 
-def reconstruct_uv(measurements, cell_mlambda=120.0, **kwargs):
-    """独立重建入口：只读取 ``u,v,|V|²,sigma``，不读取模拟真值。"""
-    from sii_reconstruction import UvData, reconstruct_uv_data
+def prepare_reconstruction_uv(measurements, cell_mlambda=120.0, legacy=False):
+    """逆方差合并观测，并保留每个时间子采样在预测量中的相同权重。
 
+    当前要求测量独立；已知共享误差应由UvData.covariance直接传入重建器。
+    cell_mlambda=None不合并，仅用于大小受控的独立检查。
+    """
+    from sii_reconstruction import UvData
     data = measurements.copy()
-    data["ku"] = np.round(data.u_lambda/1.0e6/cell_mlambda).astype(int)
-    data["kv"] = np.round(data.v_lambda/1.0e6/cell_mlambda).astype(int)
+    required = ["u_lambda", "v_lambda", "visibility2_measured", "sigma_visibility2"]
+    if (len(data) == 0 or not np.all(np.isfinite(data[required].to_numpy(float)))
+            or np.any(data.sigma_visibility2 <= 0)):
+        raise ValueError("UV coordinates, measurements and positive sigma must be finite")
+    if cell_mlambda is None:
+        data["ku"], data["kv"] = np.arange(len(data)), 0
+    else:
+        if cell_mlambda <= 0:
+            raise ValueError("cell_mlambda must be positive or None")
+        data["ku"] = np.round(data.u_lambda/1.0e6/cell_mlambda).astype(int)
+        data["kv"] = np.round(data.v_lambda/1.0e6/cell_mlambda).astype(int)
     data["inverse_variance"] = 1.0/data.sigma_visibility2**2
     data["weighted_value"] = (
         data.visibility2_measured*data.inverse_variance)
@@ -1772,13 +1796,35 @@ def reconstruct_uv(measurements, cell_mlambda=120.0, **kwargs):
         multiplicity=("visibility2_measured", "size"))
     grouped["visibility2"] = grouped.weighted_value/grouped.inverse_variance
     grouped["sigma"] = np.sqrt(1.0/grouped.inverse_variance)
-    # |V(0,0)|²=1 是总流量归一化，不是虚构的长基线测量。
-    grouped = pd.concat([grouped, pd.DataFrame([{
-        "u_lambda": 0.0, "v_lambda": 0.0, "visibility2": 1.0,
-        "sigma": 0.01, "multiplicity": 1}])], ignore_index=True)
-    weight = 1.0/grouped.sigma.to_numpy(float)**2
-    weight = np.clip(weight/np.mean(weight), 0.1, 10.0)
-    weight /= weight.mean()
+    sampling = None
+    if legacy:
+        grouped = pd.concat([grouped, pd.DataFrame([{
+            "u_lambda": 0.0, "v_lambda": 0.0, "visibility2": 1.0,
+            "sigma": 0.01, "multiplicity": 1}])], ignore_index=True)
+        weight = 1.0/grouped.sigma.to_numpy(float)**2
+        weight = np.clip(weight/np.mean(weight), 0.1, 10.0)
+        weight /= weight.mean()
+    else:
+        weight = 1.0/grouped.sigma.to_numpy(float)**2
+        groups = data.groupby(["ku", "kv"], sort=True).ngroup().to_numpy()
+        if "uv_samples_u" in data and "uv_samples_v" in data:
+            us = [np.asarray(x, float) for x in data.uv_samples_u]
+            vs = [np.asarray(x, float) for x in data.uv_samples_v]
+        else:
+            us = [np.array([x]) for x in data.u_lambda]
+            vs = [np.array([x]) for x in data.v_lambda]
+        lengths = np.array([len(x) for x in us])
+        if np.any(lengths == 0) or any(len(v) != len(u) for u, v in zip(us, vs)):
+            raise ValueError("invalid per-measurement UV samples")
+        time_weights = ([np.asarray(x, float) for x in data.uv_samples_weight]
+                        if "uv_samples_weight" in data else
+                        [np.full(n, 1.0/n) for n in lengths])
+        if any(len(w) != n or not np.isclose(w.sum(), 1) or np.any(w < 0)
+               for w, n in zip(time_weights, lengths)):
+            raise ValueError("time weights must be nonnegative and sum to one")
+        fractions = data.inverse_variance.to_numpy()/grouped.inverse_variance.to_numpy()[groups]
+        sampling = (np.concatenate(us), np.concatenate(vs), np.repeat(groups, lengths),
+                    np.concatenate([w*f for w, f in zip(time_weights, fractions)]))
     uv = UvData(
         u_lambda=grouped.u_lambda.to_numpy(float),
         v_lambda=grouped.v_lambda.to_numpy(float),
@@ -1787,7 +1833,18 @@ def reconstruct_uv(measurements, cell_mlambda=120.0, **kwargs):
         multiplicity=grouped.multiplicity.to_numpy(int),
         input_rows=len(data), finite_rows=len(data),
         physical_violations=int(((grouped.visibility2 < 0)
-                                 | (grouped.visibility2 > 1)).sum()))
+                                 | (grouped.visibility2 > 1)).sum()), sampling=sampling)
+    return uv
+
+
+def reconstruct_uv(measurements, cell_mlambda=120.0, **kwargs):
+    """独立重建入口：只读测量、误差和采样几何；默认使用绝对高斯似然。"""
+    from sii_reconstruction import reconstruct_uv_data
+    legacy = kwargs.get("likelihood") == "legacy"
+    if legacy:
+        kwargs.setdefault("smoothness", 0.020)
+        kwargs.setdefault("huber_delta", 0.15)
+    uv = prepare_reconstruction_uv(measurements, cell_mlambda, legacy=legacy)
     return reconstruct_uv_data(uv, **kwargs)
 
 
@@ -1806,8 +1863,8 @@ def run_sii_pipeline(
         defaults = {
             "grid_size": 28, "fov_mas": 0.70,
             "support_radius_mas": 0.32, "starts": 3,
-            "max_iter": 650, "smoothness": 0.020,
-            "huber_delta": 0.15, "seed": seed+1,
+            "max_iter": 1600, "smoothness": "cv",
+            "huber_delta": 2.5, "seed": seed+1,
             "peak_minimum_separation_mas": 0.10,
         }
         defaults.update(reconstruction_kwargs or {})

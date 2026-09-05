@@ -6,8 +6,8 @@
 2. `SII`：32 台望远镜的 UVW、带噪 `|V|²`、双镜波形和无相位图像重建。
 
 强度干涉只使用每台望远镜的一个像素，不模拟完整相机图像。完整夜间观测也不会
-逐采样点保存数小时波形：短波形用来标定光学和电子学响应，长曝光直接模拟与它等价的
-相关统计量。这样保留物理影响，同时避免不可运行的数据量。
+逐采样点保存数小时波形：短波形用来标定光学和电子学响应，长曝光在平稳噪声等假设下
+模拟相应的相关统计量。这是经过有限闭合检查的统计近似，不是数小时完整ADC波形验证。
 
 ## 文件在哪里
 
@@ -18,8 +18,10 @@ python/sii_unified.py         SII 源模型、UVW、噪声测量和一键流程
 python/sii_reconstruction.py  独立的 |V|² 无相位重建
 python/config_io.py           读取 main 的 cfg/CSV
 configs/                      当前流程实际引用的配置和实测数据
+notebooks/sii_complete_waveform_report.ipynb
+                              当前主报告：波形GLS、绝对统计重建及新旧对照
 notebooks/lact_sii_paper_simulation.ipynb
-                              从源模型到重建的完整可复现结果
+                              保留的早期模拟报告，不代表当前主结果
 SII_COMPLETE_WORKFLOW_ZH.md    七步计算流程、完整公式和对应结果图
 tests/test_sii_unified.py      唯一保留的 SII 闭合检查
 ```
@@ -58,8 +60,13 @@ tau_g = dot(B12, source_direction) / c
 g2(0)-1 = <delta I1(t) delta I2(t)> / (<I1><I2>)
 ```
 
-峰面积经电子带宽和相干时间标定后给出该基线投影位置的 `|V(u,v)|²`。强度干涉不直接
-测傅里叶相位，因此重建必须加入正值、有限视场和平滑等约束。
+当前主报告使用多个延迟点的相关曲线，通过标定模板与噪声协方差做GLS估计，得到
+该基线的 `P_hat` 与 `sigma_P`，不只是读取零延迟峰值。重建默认最小化绝对误差对应的
+高斯负对数似然，预测值保留与观测相同的时间/UV平均；平滑强度由测量留出集选择。
+强度干涉不直接测傅里叶相位，非负、归一化和有限支撑等约束仍然必要，结果不保证唯一。
+旧经验权重方法仅通过 `likelihood="legacy"` 用于历史对照。
+当前主重建直接优化非负像素并归一化，默认使用`parameterization="flux"`和`1e-12`停止容差；
+`parameterization="softmax"`保留旧参数化对照。数值停止、局部驻点和形态正确性分别检查。
 
 ## SII 公共接口
 
@@ -73,6 +80,7 @@ sys.path.insert(0, str(root / "python"))
 from sii_unified import (
     Instrument,
     generate_uvw,
+    simulate_waveform_gls_calibration,
     simulate_uv_observation,
     reconstruct_uv,
     run_sii_pipeline,
@@ -81,18 +89,29 @@ from sii_unified import (
 # 直接读取 main 当前使用的实测光学和电子学配置。
 instrument = Instrument.from_repository(root)
 
+# 实测SPE、光学核、星等或背景改变后，需要重新标定，不能复用旧误差。
+calibration, _ = simulate_waveform_gls_calibration(
+    instrument, source_ab_magnitude=source.ab_magnitude, seed=1
+)
 uvw = generate_uvw(layout, observation, instrument)
 measurements, metadata = simulate_uv_observation(
-    uvw, source, observation, instrument, seed=1
+    uvw, source, observation, instrument, seed=1,
+    estimator="waveform_gls", waveform_calibration=calibration
 )
 image = reconstruct_uv(measurements)
 
 # 或使用等价的一键流程：
-result = run_sii_pipeline(layout, source, observation, instrument)
+result = run_sii_pipeline(
+    layout, source, observation, instrument,
+    estimator="waveform_gls", waveform_calibration=calibration
+)
 ```
 
 `generate_uvw`、`simulate_uv_observation` 和 `reconstruct_uv` 相互独立。只改变星等、
-NSB、积分时间或电子学参数时可以复用 UVW；改变阵列、源赤纬、时角或波长时重新生成。
+NSB或电子学参数时可以复用UVW；改变阵列、源赤纬、时角、时间分段或波长时重新生成。
+相同轨迹的独立多夜重复可以合并统计量，但不能把改变曝光时长等同于增加新的UV覆盖。
+上例假设已定义阵列、源和观测参数；可直接运行的完整设置见主notebook。
+为兼容早期调用，省略`estimator`时仍走旧解析噪声分支，不等于当前报告的波形GLS流程。
 
 ## main 参数如何传到 SII
 
@@ -120,7 +139,7 @@ Python 环境：
 
 ```bash
 python -m pip install -r requirements.txt
-python tools/execute_notebook.py notebooks/lact_sii_paper_simulation.ipynb --cwd . --timeout 1200
+python tools/execute_notebook.py notebooks/sii_complete_waveform_report.ipynb --cwd . --timeout 3600
 python -m pytest -q tests/test_sii_unified.py
 ```
 
@@ -147,7 +166,8 @@ build/run_corsika_trace \
 
 ## 当前结论的边界
 
-默认暗天背景约为 `70.5 MHz/pixel`。现有 notebook 的双星案例表明，角分辨能力由最长
-投影基线和波长决定，检出极限还受星等、积分时间、NSB、带宽和系统标定误差共同控制。
+NSB率随滤光片等设置变化，具体数值以主notebook开头的仪器参数表为准。
+最长投影基线和波长给出条纹角尺度，但可可靠恢复的细节还取决于UV覆盖、SNR及先验；
+检出极限受星等、积分时间、NSB、带宽和系统标定误差共同控制。
 notebook 给出的是可复现的研究预测，不是望远镜已经验收的性能。滤光片角度响应、实际
 过压/温度下暗计数、串扰、后脉冲和跨镜时钟稳定度有实测数据后，应通过现有接口补入。
