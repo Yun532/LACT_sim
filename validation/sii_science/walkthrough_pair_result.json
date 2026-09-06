@@ -1,0 +1,9 @@
+{
+  "true_power": 0.8329122516071836,
+  "estimated_power": -295.7442306465386,
+  "sigma_short": 550.8606508586199,
+  "effective_record_s": 2.3768e-05,
+  "residual_delay_ns": -0.967249174009055,
+  "expected_peak": 2.121835734569793e-05,
+  "sigma_1200s": 0.07752601257000102
+}

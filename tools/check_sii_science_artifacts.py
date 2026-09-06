@@ -17,6 +17,14 @@ def main():
         content=path.read_text(encoding='utf-8')
         assert content.count('$$') % 2 == 0, name
         assert content.replace('$$','').count('$') % 2 == 0, name
+        table_columns=0
+        for line in content.splitlines():
+            if line.startswith('|'):
+                columns=line.count('|')
+                assert not table_columns or columns==table_columns, (name,line)
+                table_columns=columns
+            else:
+                table_columns=0
         for target in re.findall(r'\]\(([^)]+)\)',content):
             if target.startswith(('http:','https:','#')):
                 continue
@@ -47,12 +55,72 @@ def main():
     sys.path.insert(0,str(ROOT/'python'))
     from sii_unified import Instrument, waveform_instrument_signature, detected_star_rate_hz
     instrument=Instrument.from_repository(ROOT)
+    # 教学主线必须是同一基准源、同一条物理倍率记录，而不只是摘要数字相等。
+    import numpy as np
+    import sii_unified as sii
+    from sii_observation import source_coherence_spectrum, tracking_geometry, simulate_array_photon_times
+    from sii_performance import integer_align
+    from sii_validation import analytic_waveform_calibration
     from sii_layout import read_corsika_layout
     import pandas as pd
     layout=read_corsika_layout(ROOT/'configs/arrays/lact36_20260906.input')
     pd.testing.assert_frame_equal(layout,pd.read_csv(ROOT/'configs/arrays/lact36_20260906_coordinates.csv'),
                                   check_exact=False,atol=1e-10,rtol=0)
     assert len(layout)==36
+    lesson_dir=ROOT/'validation/sii_science'
+    lesson=json.loads((lesson_dir/'walkthrough_parameters.json').read_text(encoding='utf-8'))
+    pair=json.loads((lesson_dir/'walkthrough_pair_result.json').read_text(encoding='utf-8'))
+    assert lesson==summary['walkthrough'] and pair==summary['walkthrough_pair']
+    assert lesson['source_case']=='single_disk' and lesson['raw_pair_scale']==1.
+    assert lesson['diameter_mas']==.16 and lesson['magnitude']==2. and lesson['pair']==[1,2]
+    assert lesson['hours']==summary['observation']['hours']==6.
+    assert lesson['segment_s']==summary['observation']['integration_s_per_measurement']==1200.
+    assert lesson['wavelength_nm']==instrument.wavelength_nm and lesson['width_nm']==instrument.optical_width_nm
+    observation=sii.Observation()
+    source=sii.BinarySource(ab_magnitude=lesson['magnitude'],primary_diameter_mas=lesson['diameter_mas'])
+    positions=layout[['east_m','north_m','up_m']].to_numpy()[:2]
+    dec,lat=np.deg2rad([lesson['source_dec_deg'],lesson['site_lat_deg']])
+    geometry=tracking_geometry(positions,lesson['hour_angle_rad'],dec,lat)
+    spectrum=source_coherence_spectrum(positions,lesson['hour_angle_rad'],dec,lat,source,instrument,'single_disk')
+    assert math.isclose(lesson['pair_power'],spectrum['pair_visibility2'][0,1],rel_tol=1e-12)
+    assert math.isclose(lesson['star_rate_hz'],detected_star_rate_hz(2.,instrument),rel_tol=1e-12)
+    with np.load(lesson_dir/'walkthrough_record.npz',allow_pickle=False) as record:
+        np.testing.assert_allclose(record['arrival_delays_ns'],geometry['arrival_delays_ns'],atol=1e-12)
+        np.testing.assert_allclose(record['time_ns'],(np.arange(6000)+.5)*instrument.sample_width_ns)
+        assert record['adc_mv'].shape==(2,6000)
+        # 独立重放公开种子，核对未放大对率的事件与实测SPE所产生的ADC。
+        rng=np.random.default_rng(int(record['seed']))
+        template=sii.load_measured_spe_template(instrument.spe_template_path)
+        events,_=simulate_array_photon_times(rng,lesson['raw_record_ns'],lesson['star_rate_hz'],
+            lesson['nsb_rate_hz'],spectrum['coherence'],instrument,geometry['arrival_delays_ns'],
+            pair_rate_scale=1.,padding_ns=float(np.max(abs(template[0]))),
+            spectral_weights=spectrum['spectral_weights'])
+        for i,event in enumerate(events):
+            np.testing.assert_allclose(event,record[f'telescope_{i+1}_events_ns'],atol=1e-12)
+            rendered=sii.render_pe_waveform(rng,event,lesson['raw_record_ns'],instrument,template=template)
+            np.testing.assert_allclose(rendered['adc_mv'],record['adc_mv'][i],rtol=1e-12,atol=1e-12)
+        aligned,residual,exposure=integer_align(record['adc_mv'],record['arrival_delays_ns'],instrument.sample_width_ns)
+    calibration,_=analytic_waveform_calibration(instrument,block_duration_ns=exposure*1e9,
+                                               residual_delay_ns=float(residual[0]))
+    lag,correlation=sii.waveform_cross_correlation(*aligned,instrument.sample_width_ns,200.)
+    saved=pd.read_csv(lesson_dir/'walkthrough_pair_correlation.csv')
+    np.testing.assert_allclose(saved.lag_ns,lag)
+    np.testing.assert_allclose(saved.measured_C,correlation,rtol=1e-12,atol=1e-15)
+    np.testing.assert_allclose(saved.expected_C,lesson['pair_power']*calibration.peak_per_visibility2,rtol=1e-12,atol=1e-15)
+    estimate,sigma=sii.estimate_visibility2_gls(correlation[None,:],calibration)
+    # 固定ADC的线性代数在不同BLAS线程下可有末位差异；容差远低于统计误差。
+    assert math.isclose(pair['estimated_power'],estimate[0],rel_tol=1e-9)
+    assert math.isclose(pair['sigma_short'],sigma,rel_tol=1e-10)
+    assert math.isclose(pair['effective_record_s'],exposure,rel_tol=1e-12)
+    assert math.isclose(pair['sigma_1200s'],sii.waveform_gls_weights(calibration,1200.)[1],rel_tol=1e-10)
+    disk=pd.read_csv(lesson_dir/'walkthrough_disk_measurements.csv')
+    expected=sii.segment_averaged_visibility2(disk,source,observation,instrument,'single_disk')
+    np.testing.assert_allclose(disk.visibility2_true,expected,rtol=1e-11,atol=1e-13)
+    assert len(disk)==11340 and (disk.visibility2_measured<0).any()
+    ideal=pd.read_csv(lesson_dir/'walkthrough_ideal_hbt.csv')
+    assert math.isclose(ideal.loc[ideal.lag_ps.abs().idxmin(),'g2_zero'],1.5,rel_tol=1e-12)
+    print('教学主线：物理倍率事件和ADC可重放；同一记录的相关/GLS、基准圆盘的全部UV期望一致。')
+    observation=ROOT/'validation/sii_observation'
     assert summary['observation']['telescopes']==len(layout)
     assert summary['observation']['uv_measurements']==len(layout)*(len(layout)-1)//2*18
     baselines=pd.read_csv(ROOT/'validation/sii_science/array_baselines.csv')

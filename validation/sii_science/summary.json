@@ -13,7 +13,8 @@
     "tools/validate_sii_observation.py": "63e5733064eef1737b33d373b07167bf7d1618dbf5ae6d3f03db710660c139d8",
     "tools/validate_sii_tracking.py": "983b0c3d464bf9237c89faedf003b4bf0675d48ee559224a730f56e7791f73a7",
     "tools/validate_sii_performance.py": "e5a78ec743a232bed9dd4b31efc66c6d2137d2ac495b8140720a1da22e95e852",
-    "tools/build_sii_science_notebook.py": "abcc0e917ee38ce00d099b990460c60721123c89812ec659e84371c0c7b6f50f"
+    "python/sii_walkthrough.py": "73bd075229f0504d8bc850eb829fb95e00451c3ae94c3b679b1e92864305d0ba",
+    "tools/build_sii_science_notebook.py": "74de8f092162bcf1f45bba3904616144fba00905c6e2adc4a3547d01c58d5143"
   },
   "main_parameter_commit": "2926031b14c8aa2164a4d9233f5c2d0a75324127",
   "derived_input_sha256_lf": {
@@ -30,6 +31,32 @@
     "sipm_afterpulse_probability": 0.0,
     "dark_count_rate_hz": 0.0,
     "adc_bits": 0
+  },
+  "walkthrough": {
+    "source_case": "single_disk",
+    "diameter_mas": 0.16,
+    "magnitude": 2.0,
+    "wavelength_nm": 400.0,
+    "width_nm": 2.0,
+    "source_dec_deg": 22.0,
+    "site_lat_deg": 29.36,
+    "telescopes": 36,
+    "pair": [
+      1,
+      2
+    ],
+    "hour_angle_rad": 0.5,
+    "pair_projected_baseline_m": 139.29408155270852,
+    "pair_power": 0.8329122516071836,
+    "arrival_delay_ns": 231.03275082599095,
+    "star_rate_hz": 199889298.29641628,
+    "nsb_rate_hz": 573214.0884464285,
+    "coherence_area_s": 1.3342919223619466e-13,
+    "sample_width_ns": 4.0,
+    "raw_record_ns": 24000.0,
+    "raw_pair_scale": 1.0,
+    "hours": 6.0,
+    "segment_s": 1200
   },
   "parameters": [
     {
@@ -81,6 +108,211 @@
       "source": "scenario"
     }
   ],
+  "walkthrough_pair": {
+    "true_power": 0.8329122516071836,
+    "estimated_power": -295.7442306465386,
+    "sigma_short": 550.8606508586199,
+    "effective_record_s": 2.3768e-05,
+    "residual_delay_ns": -0.967249174009055,
+    "expected_peak": 2.121835734569793e-05,
+    "sigma_1200s": 0.07752601257000102
+  },
+  "calibration": {
+    "sigma_1200_s": 0.07926739750846691,
+    "analytic_sigma_1200_s": 0.07545321401275529,
+    "response_relative_uncertainty": 0.006407205176490397,
+    "sigma_relative_uncertainty": 0.031280562354492725,
+    "selected_shrinkage": 0.0001,
+    "fine_grid_sigma_ratio": 0.9999996563995989,
+    "photon_degeneracy": 2.6671067608350585e-05
+  },
+  "array_geometry": {
+    "input": "configs/arrays/lact36_20260906.input",
+    "coordinate_conversion": "ENU_m = (-west_cm, north_cm, up_cm) / 100",
+    "baselines": 630,
+    "min_baseline_m": 91.74822291281399,
+    "max_baseline_m": 1197.0085337361797
+  },
+  "observation": {
+    "telescopes": 36,
+    "uv_measurements": 11340,
+    "hours": 6,
+    "integration_s_per_measurement": 1200,
+    "time_subsamples": 9,
+    "spectral_nodes": 5,
+    "max_baseline_m": 1197.0085337361797,
+    "expected_hbt_pairs_per_20us": 0.10662521978098953
+  },
+  "diameter_interval": {
+    "estimate": 0.16010000000000002,
+    "low": 0.15944003153845776,
+    "high": 0.16084873086235482,
+    "touches_boundary": false,
+    "disconnected": false
+  },
+  "diameter_coverage": [
+    {
+      "assumed_sigma_scale": 1.0,
+      "covered": 959,
+      "trials": 1000,
+      "coverage": 0.959,
+      "binomial_ci_low": 0.9447875406847007,
+      "binomial_ci_high": 0.9704198314659639,
+      "boundary_intervals": 0,
+      "disconnected_intervals": 0
+    },
+    {
+      "assumed_sigma_scale": 0.9386900977851943,
+      "covered": 942,
+      "trials": 1000,
+      "coverage": 0.942,
+      "binomial_ci_low": 0.9256635046176483,
+      "binomial_ci_high": 0.9556671397471793,
+      "boundary_intervals": 0,
+      "disconnected_intervals": 0
+    },
+    {
+      "assumed_sigma_scale": 1.0613099022148058,
+      "covered": 971,
+      "trials": 1000,
+      "coverage": 0.971,
+      "binomial_ci_low": 0.9586152808835982,
+      "binomial_ci_high": 0.9804940626756153,
+      "boundary_intervals": 0,
+      "disconnected_intervals": 0
+    }
+  ],
+  "time_quadrature": [
+    {
+      "source": "binary",
+      "time_nodes": 9,
+      "reference_time_nodes": 27,
+      "max_abs_P_difference": 6.795512061985587e-05,
+      "rms_difference_over_row_sigma": 0.00013532810940502848
+    },
+    {
+      "source": "single_disk",
+      "time_nodes": 9,
+      "reference_time_nodes": 27,
+      "max_abs_P_difference": 5.522855460932119e-06,
+      "rms_difference_over_row_sigma": 1.4274772724989942e-05
+    },
+    {
+      "source": "ellipse",
+      "time_nodes": 9,
+      "reference_time_nodes": 27,
+      "max_abs_P_difference": 1.0585534214790915e-05,
+      "rms_difference_over_row_sigma": 1.669101013365986e-05
+    },
+    {
+      "source": "transit",
+      "time_nodes": 9,
+      "reference_time_nodes": 27,
+      "max_abs_P_difference": 5.533917793731913e-06,
+      "rms_difference_over_row_sigma": 9.235262077293607e-06
+    }
+  ],
+  "reconstruction": [
+    {
+      "source": "binary",
+      "constraints": 1448,
+      "converged": true,
+      "chi2_per_point": 0.9180875248077128,
+      "gain": 1.0151322245619314,
+      "gain_sigma": 0.0016419869915730474,
+      "smoothness": 0.0001,
+      "stationarity_gap": 0.025373913727207764,
+      "stationarity_passed": true,
+      "iterations": 1725,
+      "training_all_converged": true
+    },
+    {
+      "source": "single_disk",
+      "constraints": 1448,
+      "converged": true,
+      "chi2_per_point": 1.0719301179677483,
+      "gain": 1.016379123244882,
+      "gain_sigma": 0.0022669818714855495,
+      "smoothness": 0.01,
+      "stationarity_gap": 0.014687808013945869,
+      "stationarity_passed": true,
+      "iterations": 472,
+      "training_all_converged": true
+    },
+    {
+      "source": "ellipse",
+      "constraints": 1448,
+      "converged": true,
+      "chi2_per_point": 0.9777539603028791,
+      "gain": 1.0181964485033876,
+      "gain_sigma": 0.002408519876862561,
+      "smoothness": 0.01,
+      "stationarity_gap": 0.027592406299277172,
+      "stationarity_passed": true,
+      "iterations": 669,
+      "training_all_converged": true
+    },
+    {
+      "source": "transit",
+      "constraints": 1448,
+      "converged": true,
+      "chi2_per_point": 0.943680453905452,
+      "gain": 1.0040559862348373,
+      "gain_sigma": 0.004012048598981712,
+      "smoothness": 0.01,
+      "stationarity_gap": 0.0166128857839567,
+      "stationarity_passed": true,
+      "iterations": 779,
+      "training_all_converged": true
+    }
+  ],
+  "image_alignment": [
+    {
+      "source": "binary",
+      "truth_correlation": 0.8626776234286717,
+      "truth_nrmse": 0.558162161911582,
+      "truth_uses_180_degree_mirror": true,
+      "truth_alignment_retained_flux": 1.0
+    },
+    {
+      "source": "single_disk",
+      "truth_correlation": 0.9883043105358481,
+      "truth_nrmse": 0.1494823869890932,
+      "truth_uses_180_degree_mirror": false,
+      "truth_alignment_retained_flux": 0.9987780880121954
+    },
+    {
+      "source": "ellipse",
+      "truth_correlation": 0.9807901663184587,
+      "truth_nrmse": 0.1921055876984898,
+      "truth_uses_180_degree_mirror": false,
+      "truth_alignment_retained_flux": 0.9962659242870278
+    },
+    {
+      "source": "transit",
+      "truth_correlation": 0.906676470992998,
+      "truth_nrmse": 0.4067287997457917,
+      "truth_uses_180_degree_mirror": false,
+      "truth_alignment_retained_flux": 0.9994076231972676
+    }
+  ],
+  "performance": {
+    "execution": "fresh full-array short records and fixed performance suite executed by this notebook",
+    "summary_sha256_lf": "a27b6157e73bad6ec26b0014a296a2487981db39409cddbb1633387430257548",
+    "raw": {
+      "gain": 1.0047962567350652,
+      "gain_relative_sigma": 0.010804029219526964,
+      "noise_scale": 1.0062786158169328,
+      "noise_relative_sigma": 0.002621177525274978,
+      "raw_records": 1152,
+      "raw_duration_s": 0.027648000000000002,
+      "effective_duration_s": 0.026164224000000003,
+      "phase_holdout_max_abs_z": 2.3411508018875584,
+      "phase_null_max_abs_z": 2.266909870524035,
+      "scope": "36 shared ADC channels, 3 short-record epochs; weak pair process. Full night uses sufficient statistics."
+    },
+    "scenarios": 27
+  },
   "thermal_modes": [
     {
       "quantity": "mean intensity",
@@ -113,15 +345,6 @@
       "relative_difference": -0.015117003838572285
     }
   ],
-  "calibration": {
-    "sigma_1200_s": 0.07926739750846691,
-    "analytic_sigma_1200_s": 0.07545321401275529,
-    "response_relative_uncertainty": 0.006407205176490397,
-    "sigma_relative_uncertainty": 0.031280562354492725,
-    "selected_shrinkage": 0.0001,
-    "fine_grid_sigma_ratio": 0.9999996563995989,
-    "photon_degeneracy": 2.6671067608350585e-05
-  },
   "independent_null": [
     {
       "kind": "null",
@@ -364,176 +587,6 @@
       }
     ]
   },
-  "array_geometry": {
-    "input": "configs/arrays/lact36_20260906.input",
-    "coordinate_conversion": "ENU_m = (-west_cm, north_cm, up_cm) / 100",
-    "baselines": 630,
-    "min_baseline_m": 91.74822291281399,
-    "max_baseline_m": 1197.0085337361797
-  },
-  "observation": {
-    "telescopes": 36,
-    "uv_measurements": 11340,
-    "hours": 6,
-    "integration_s_per_measurement": 1200,
-    "time_subsamples": 9,
-    "spectral_nodes": 5,
-    "max_baseline_m": 1197.0085337361797,
-    "expected_hbt_pairs_per_20us": 0.10662521978098953
-  },
-  "diameter_interval": {
-    "estimate": 0.16010000000000002,
-    "low": 0.15944003153845776,
-    "high": 0.16084873086235482,
-    "touches_boundary": false,
-    "disconnected": false
-  },
-  "diameter_coverage": [
-    {
-      "assumed_sigma_scale": 1.0,
-      "covered": 959,
-      "trials": 1000,
-      "coverage": 0.959,
-      "binomial_ci_low": 0.9447875406847007,
-      "binomial_ci_high": 0.9704198314659639,
-      "boundary_intervals": 0,
-      "disconnected_intervals": 0
-    },
-    {
-      "assumed_sigma_scale": 0.9386900977851943,
-      "covered": 942,
-      "trials": 1000,
-      "coverage": 0.942,
-      "binomial_ci_low": 0.9256635046176483,
-      "binomial_ci_high": 0.9556671397471793,
-      "boundary_intervals": 0,
-      "disconnected_intervals": 0
-    },
-    {
-      "assumed_sigma_scale": 1.0613099022148058,
-      "covered": 971,
-      "trials": 1000,
-      "coverage": 0.971,
-      "binomial_ci_low": 0.9586152808835982,
-      "binomial_ci_high": 0.9804940626756153,
-      "boundary_intervals": 0,
-      "disconnected_intervals": 0
-    }
-  ],
-  "time_quadrature": [
-    {
-      "source": "binary",
-      "time_nodes": 9,
-      "reference_time_nodes": 27,
-      "max_abs_P_difference": 6.795512061985587e-05,
-      "rms_difference_over_row_sigma": 0.00013532810940502848
-    },
-    {
-      "source": "single_disk",
-      "time_nodes": 9,
-      "reference_time_nodes": 27,
-      "max_abs_P_difference": 5.522855460932119e-06,
-      "rms_difference_over_row_sigma": 1.4274772724989942e-05
-    },
-    {
-      "source": "ellipse",
-      "time_nodes": 9,
-      "reference_time_nodes": 27,
-      "max_abs_P_difference": 1.0585534214790915e-05,
-      "rms_difference_over_row_sigma": 1.669101013365986e-05
-    },
-    {
-      "source": "transit",
-      "time_nodes": 9,
-      "reference_time_nodes": 27,
-      "max_abs_P_difference": 5.533917793731913e-06,
-      "rms_difference_over_row_sigma": 9.235262077293607e-06
-    }
-  ],
-  "reconstruction": [
-    {
-      "source": "binary",
-      "constraints": 1448,
-      "converged": true,
-      "chi2_per_point": 0.9180875248077128,
-      "gain": 1.0151322245619314,
-      "gain_sigma": 0.0016419869915730474,
-      "smoothness": 0.0001,
-      "stationarity_gap": 0.025373913727207764,
-      "stationarity_passed": true,
-      "iterations": 1725,
-      "training_all_converged": true
-    },
-    {
-      "source": "single_disk",
-      "constraints": 1448,
-      "converged": true,
-      "chi2_per_point": 1.0719301179677483,
-      "gain": 1.016379123244882,
-      "gain_sigma": 0.0022669818714855495,
-      "smoothness": 0.01,
-      "stationarity_gap": 0.014687808013945869,
-      "stationarity_passed": true,
-      "iterations": 472,
-      "training_all_converged": true
-    },
-    {
-      "source": "ellipse",
-      "constraints": 1448,
-      "converged": true,
-      "chi2_per_point": 0.9777539603028791,
-      "gain": 1.0181964485033876,
-      "gain_sigma": 0.002408519876862561,
-      "smoothness": 0.01,
-      "stationarity_gap": 0.027592406299277172,
-      "stationarity_passed": true,
-      "iterations": 669,
-      "training_all_converged": true
-    },
-    {
-      "source": "transit",
-      "constraints": 1448,
-      "converged": true,
-      "chi2_per_point": 0.943680453905452,
-      "gain": 1.0040559862348373,
-      "gain_sigma": 0.004012048598981712,
-      "smoothness": 0.01,
-      "stationarity_gap": 0.0166128857839567,
-      "stationarity_passed": true,
-      "iterations": 779,
-      "training_all_converged": true
-    }
-  ],
-  "image_alignment": [
-    {
-      "source": "binary",
-      "truth_correlation": 0.8626776234286717,
-      "truth_nrmse": 0.558162161911582,
-      "truth_uses_180_degree_mirror": true,
-      "truth_alignment_retained_flux": 1.0
-    },
-    {
-      "source": "single_disk",
-      "truth_correlation": 0.9883043105358481,
-      "truth_nrmse": 0.1494823869890932,
-      "truth_uses_180_degree_mirror": false,
-      "truth_alignment_retained_flux": 0.9987780880121954
-    },
-    {
-      "source": "ellipse",
-      "truth_correlation": 0.9807901663184587,
-      "truth_nrmse": 0.1921055876984898,
-      "truth_uses_180_degree_mirror": false,
-      "truth_alignment_retained_flux": 0.9962659242870278
-    },
-    {
-      "source": "transit",
-      "truth_correlation": 0.906676470992998,
-      "truth_nrmse": 0.4067287997457917,
-      "truth_uses_180_degree_mirror": false,
-      "truth_alignment_retained_flux": 0.9994076231972676
-    }
-  ],
   "convergence": [
     {
       "grid": 24,
@@ -583,23 +636,6 @@
       "converged_fraction": 1.0
     }
   ],
-  "performance": {
-    "execution": "fresh full-array short records and fixed performance suite executed by this notebook",
-    "summary_sha256_lf": "a27b6157e73bad6ec26b0014a296a2487981db39409cddbb1633387430257548",
-    "raw": {
-      "gain": 1.0047962567350652,
-      "gain_relative_sigma": 0.010804029219526964,
-      "noise_scale": 1.0062786158169328,
-      "noise_relative_sigma": 0.002621177525274978,
-      "raw_records": 1152,
-      "raw_duration_s": 0.027648000000000002,
-      "effective_duration_s": 0.026164224000000003,
-      "phase_holdout_max_abs_z": 2.3411508018875584,
-      "phase_null_max_abs_z": 2.266909870524035,
-      "scope": "36 shared ADC channels, 3 short-record epochs; weak pair process. Full night uses sufficient statistics."
-    },
-    "scenarios": 27
-  },
   "scope": {
     "source": "static scenes, observed total AB magnitude",
     "optical_passband": "2 nm top-hat scenario over main response curves",

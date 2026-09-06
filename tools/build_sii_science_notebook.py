@@ -49,6 +49,7 @@ summary['code_sha256_lf']={path:hashlib.sha256((ROOT/path).read_bytes().replace(
                  'python/sii_observation.py','python/sii_layout.py','python/sii_performance.py','tools/validate_sii_observation.py',
                  'tools/validate_sii_tracking.py',
                  'tools/validate_sii_performance.py',
+                 'python/sii_walkthrough.py',
                  'tools/build_sii_science_notebook.py']}
 manifest = verify_main_parameters(ROOT)
 summary['main_parameter_commit'] = manifest['main_commit']
@@ -581,6 +582,143 @@ summary['scope']={'source':'static scenes, observed total AB magnitude',
 print('科学验证结果已写入：',OUT/'summary.json')
 display(pd.DataFrame(summary['reconstruction']))
 ''')
+
+# 保留全部实际验证计算，但以读者的物理理解顺序组织；重检细节放在主线之后。
+evidence=cells
+cells=[]
+md('''# 看懂一次LACT恒星强度干涉观测
+
+先看理论信号，再跟踪同一场景如何变成光电子、单镜波形、两镜相关和UV测量。
+最后改变模型与参数，查看角直径、探索性图像和性能。
+基准场景始终是**AB星等2、直径0.16 mas的均匀圆盘、400±1 nm、36镜、6小时**。
+小节另有变化时会明确列出，不用放大注入冒充物理观测。
+
+本Notebook负责展示过程；详细定义、完整推导和实现对应见[物理说明](../docs/SII_PHYSICS_ZH.md)，
+运行及数据接口见[实现说明](../docs/SII_IMPLEMENTATION_ZH.md)。末尾附加验证会实际重算，
+它们不必打断第一次阅读主线。
+''')
+code(evidence[1].source+'''
+import sii_walkthrough as walk
+from dataclasses import asdict
+baseline_source=sii.BinarySource(ab_magnitude=2.,primary_diameter_mas=.16)
+''')
+md('''## 1. 先知道我们在寻找什么信号
+
+同一颗圆盘星有三种不同表示：天空中的亮度分布、随投影基线改变的可见度、
+理想光子到达的时间相关。我们测量的是平方可见度P；它可以有零点和旁瓣。
+第三幅图的相关峰处在皮秒尺度，**不是4 ns采样ADC直接看到的峰**。
+Tel.1与Tel.2选自原始36镜input，在时角H=0.5 rad（过中天后约1.90小时）作单对示例。
+''')
+code('''
+lesson_scene=walk.theoretical_scene(ROOT,instrument,observation,layout,baseline_source,FIG,OUT)
+summary['walkthrough']=lesson_scene['parameters']
+display(pd.DataFrame([lesson_scene['parameters']]).T.rename(columns={0:'基准值'}))
+''')
+md('''## 2. 同一束光经过怎样的仪器响应
+
+星等和通带决定探测光子率；光学路径差展宽到达时刻；每个光电子产生一份实测SPE。
+下图先展示这些输入，再把它们用于下一节同一条真实随机记录。
+光学核来自仓库光追缓存，SPE及电荷样本来自main；未测电子学仍关闭。
+''')
+code(evidence[3].source)
+md('''## 3. 从到达事件到一个镜子的实际波形
+
+以物理HBT倍率1生成24 μs两镜记录。第一幅图是Tel.1前1 μs的探测事件，
+第二幅图是一份SPE，第三幅图是这批事件的脉冲叠加并每4 ns采样的电压。
+记录计算使用完整时段，图中只放大前1 μs；Tel.2仍保留接收时差。
+每个镜子的平均亮度很高，但微弱的跨镜共同涨落尚不可凭肉眼辨认。
+''')
+code('''
+display(walk.single_record(lesson_scene,instrument,FIG,OUT))
+''')
+md('''## 4. 两镜波形怎样变成相关测量
+
+这里沿用上一节同一条记录。先看原始互相关及预期几何峰位置，再整数移动样本，
+把剩余分数时差放入峰模板。C是电压协方差除以两镜电压标准差，**不是理论g²**。
+物理峰会淹没在短记录噪声中；额外一图只放大理论峰的纵轴，没有放大注入。
+最后的误差棒是固定基线的曝光预测，不是虚构的6小时连续波形。
+''')
+code('''
+lesson_pair=walk.pair_correlation(lesson_scene,instrument,FIG,OUT)
+summary['walkthrough_pair']=lesson_pair
+display(pd.DataFrame([lesson_pair]))
+''')
+md('''## 5. 用整个相关峰估计信号及误差
+
+相关函数的相邻滞后点并非独立。下面显示完整峰模板和滞后噪声协方差，
+说明GLS为什么不能只取最高点。Monte Carlo与连续响应解析式独立计算。
+接下来的探索性UV/图像采用该双镜标定；末尾最终性能另用36镜相位匹配标定。
+两条估计器会明确分开，不能将它们的误差数值混用。
+''')
+code(evidence[7].source)
+md('''## 6. 地球自转把一个镜对扩展成整个UV观测
+
+读取36镜原始位置，按ENU=(-West,North,Up)/100转换，不旋转或平移。
+每个20分钟段平均9个时刻、5个波长；6小时共有630条基线、11340条测量。
+先看阵列，再比较同一0.16 mas圆盘的连续理论平面、实际采样期望和随机测量。
+显示颜色限在0至1，但负测量和大于1的测量均保留在数据及拟合中。
+为后面的形态对照同时计算另外三个源，但本节主图仍只展示基准圆盘。
+''')
+# 旧双星图仍保存供其历史数据追溯，主阅读路径显示统一基准圆盘。
+code(evidence[17].source.replace("fig.savefig(FIG/'04_uv_measurements.png',bbox_inches='tight');plt.show()",
+                               "fig.savefig(FIG/'04_uv_measurements.png',bbox_inches='tight');plt.close(fig)")+'''
+walk.array_and_model_views(pipelines,instrument,observation,FIG,OUT)
+''')
+md('''## 7. 改变形态、角直径，观测会怎样变
+
+仪器、总AB星等2、阵列、赤纬和曝光保持不变。现在明确改变天空形态，参数列在下表；
+`single_disk`只使用对象中的主星直径，双星字段不参与圆盘计算。
+随后只改变均匀圆盘直径0.08/0.16/0.32 mas，看零点移动和实际基线测到的功率分布。
+这些是理论期望的变化；星等和曝光对噪声的影响在第9节单独看。
+''')
+code('''
+display(pd.DataFrame([{'source_case':case,**asdict(source)} for case,source in source_cases.items()]).fillna('—'))
+walk.model_views(pipelines,instrument,FIG)
+''')
+md('''## 8. 用观测反推角直径，或者尝试恢复图像
+
+先在已知圆盘模型族中拟合角直径及共同标定增益，看剖面曲线和重复覆盖率。
+再放宽为非负像素图像重建。图像的问题更不适定；真图只用于事后评价，
+不能据看起来像遮挡的暗区宣布发现行星。这里使用第5节双镜标定的探索性分支。
+''')
+code(evidence[19].source)
+code(evidence[21].source)
+code(evidence[22].source)
+md('''## 9. 最后看性能：哪些条件下能测得准
+
+这里切换到最终36镜相位匹配估计器：实际生成共享ADC，独立训练响应和零信号噪声，
+把标定误差、段内相位和弱光共镜误差修正传入角直径推断。
+固定星等2/4/6、直径0.08/0.16/0.32 mas、曝光1/3/6小时，逐项与基准比较。
+三幅主图依次展示精度、区间覆盖率及规格书暗计数影响。低信噪比触边结果照常保留。
+''')
+code(evidence[27].source.replace("[sys.executable,str(ROOT/'tools/validate_sii_performance.py')]",
+                               "[sys.executable,'-X','utf8',str(ROOT/'tools/validate_sii_performance.py')]"))
+md('''## 附加验证：需要核查细节时再读
+
+以下单元仍完整执行并保留原始结果。它们检查理论生成、独立样本、插值、追踪及图像稳定性，
+不是主线中的另一颗基准恒星。每项验证的特殊参数和注入倍率在本节说明。
+''')
+for index,title in [(4,'### A. 等权热光模的独立物理对照'),
+                    (8,'### B. 独立留出与实际记录长度'),
+                    (10,'### C. 三镜插值核与较长记录对照'),
+                    (12,'### D. 固定相干的七时刻追踪'),
+                    (14,'### E. 圆盘源的七时刻追踪')]:
+    text=evidence[index].source.split('\n',1)[1]
+    md(title+'\n'+text)
+    code(evidence[index+1].source)
+md('''### F. 探索性图像的数值与重复稳定性
+
+改变图像网格与UV合并尺度，再重复随机测量。这里仍沿用第8节图像估计器，
+不会将第9节的误差验证自动套在这些图像上。
+''')
+code(evidence[24].source)
+code(evidence[25].source)
+md('''## 保存本次执行证据
+
+基准记录、相关曲线、UV测量和新增教学图都由上述单元生成；附加实验有独立的种子和适用范围。
+完整推导见物理说明。结果是条件性模拟，原始光追缓存的再生成和真实观测夜晚不在本次复现范围内。
+''')
+code(evidence[29].source)
 
 notebook=nbf.v4.new_notebook(cells=cells,metadata={
     'kernelspec':{'display_name':'Python 3','language':'python','name':'python3'},

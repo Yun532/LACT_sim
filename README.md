@@ -4,7 +4,7 @@
 
 - [物理原理与适用范围](docs/SII_PHYSICS_ZH.md)
 - [代码实现、参数接口与复现](docs/SII_IMPLEMENTATION_ZH.md)
-- [完整可执行Notebook](notebooks/sii_complete_waveform_report.ipynb)
+- [完整可执行Notebook](notebooks/sii_complete_waveform_report.ipynb)：理论→同一批事件与波形→两镜相关→UV观测→模型、反演与性能。
 - [36镜最终性能结果](validation/sii_performance/summary.json)：每场景500次重复、有限口径对照和SiPM规格书暗计数情景。
 - [验证结果](validation/sii_science/summary.json)
 - [时延追踪验证](validation/sii_tracking/summary.json)：36镜几何、七时刻三镜短波形及初始时延对照。
@@ -56,11 +56,11 @@ image = sii.reconstruct_uv(
 
 主要模块：`python/sii_unified.py`负责模拟和GLS标定，`python/sii_reconstruction.py`负责重建，`python/sii_validation.py`提供独立验证，`python/sii_observation.py`提供多镜共享波形、时延补偿及分块相关。
 
-主Notebook第4.1节实际执行三镜观测链、同区间插值收敛与24/96 μs曝光对照；也可运行`python tools/validate_sii_observation.py`。结果保存在`validation/sii_observation/`，输入格式和适用范围见[实现说明](docs/SII_IMPLEMENTATION_ZH.md#41-多镜观测入口)。
+主Notebook附加验证C实际执行三镜观测链、同区间插值收敛与24/96 μs曝光对照；也可运行`python tools/validate_sii_observation.py`。结果保存在`validation/sii_observation/`，输入格式和适用范围见[实现说明](docs/SII_IMPLEMENTATION_ZH.md#41-多镜观测入口)。
 
-第4.2节实际执行跨时刻的局部时延率注入与波形追踪；可单独运行`python tools/validate_sii_tracking.py`。七个时刻的短记录是独立处理检验，不计作连续6小时曝光。
+附加验证D实际执行跨时刻的局部时延率注入与波形追踪；可单独运行`python tools/validate_sii_tracking.py`。七个时刻的短记录是独立处理检验，不计作连续6小时曝光。
 
-第4.3节从圆盘亮度及实际基线构造逐波长相干，生成共享波形，并使用独立点源标定；可运行`python tools/validate_sii_tracking.py --source-case single_disk --seed 20260908`，结果位于`validation/sii_source_tracking/`。
+附加验证E从圆盘亮度及实际基线构造逐波长相干，生成共享波形，并使用独立点源标定；可运行`python tools/validate_sii_tracking.py --source-case single_disk --seed 20260908`，结果位于`validation/sii_source_tracking/`。
 
 ## 参数与输出
 

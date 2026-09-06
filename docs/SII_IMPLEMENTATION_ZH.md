@@ -1,6 +1,6 @@
 # SII程序实现、数据接口与复现
 
-当前主入口是[`sii_complete_waveform_report.ipynb`](../notebooks/sii_complete_waveform_report.ipynb)。它从仪器配置开始，实际生成标定波形，做独立验证，再生成整阵列测量、参数区间和图像重建。本文说明程序如何计算；物理推导见[原理说明](SII_PHYSICS_ZH.md)。不要用历史Notebook的图片或早期标定数值替代当前结果。
+当前主入口是[`sii_complete_waveform_report.ipynb`](../notebooks/sii_complete_waveform_report.ipynb)。它先显示统一基准源的理论，再实际生成同一条事件/电压记录和两镜相关，扩展到整阵列测量，最后比较模型、重建与性能。详细验证放在附加单元中。本文说明程序如何计算；物理推导见[原理说明](SII_PHYSICS_ZH.md)。不要用历史Notebook的图片或早期标定数值替代当前结果。
 
 ## 1. 文件职责与调用关系
 
@@ -10,8 +10,9 @@
 | [`python/sii_reconstruction.py`](../python/sii_reconstruction.py) | 只根据测量和采样重建；处理共同增益先验、正则化与收敛诊断 | 真值只能在拟合完成后用于评价 |
 | [`python/sii_validation.py`](../python/sii_validation.py) | 独立热光场、连续响应解析对照、留出波形、参数剖面和覆盖率工具 | 解析参考不调用共享光电子对生成器 |
 | [`python/sii_layout.py`](../python/sii_layout.py) | 从TELESCOPE input读取原始NWU厘米坐标，转换ENU米并保留原值及行号 | 镜号按input顺序，标签保留；半径400 cm表示4 m半径 |
-| [`python/sii_observation.py`](../python/sii_observation.py) | 天体逐波长相干、多镜共享事件及波形、时延追踪、分块相关、独立多镜热光模 | 主Notebook第4.1至4.3节实际执行；第5节整阵列长曝光仍是独立统计分支 |
+| [`python/sii_observation.py`](../python/sii_observation.py) | 天体逐波长相干、多镜共享事件及波形、时延追踪、分块相关、独立多镜热光模 | 主Notebook附加验证C至E实际执行；第6节整阵列长曝光使用统计分支 |
 | [`python/sii_performance.py`](../python/sii_performance.py) | 整数时延对齐、相位模板、段内误差积分、圆瞳对照和角直径似然 | 第9节最终性能入口；没有替换前面的探索性图像估计器 |
+| [`python/sii_walkthrough.py`](../python/sii_walkthrough.py) | 统一基准理论、同一事件到波形/相关、圆盘UV及模型对照图 | 调用现有物理模块；24 μs记录倍率1；长曝光图仍是统计模拟 |
 | [`tools/build_sii_science_notebook.py`](../tools/build_sii_science_notebook.py) | 用nbformat生成主Notebook的代码及中文解释 | 重新生成会清空该Notebook的执行输出，随后必须从头运行 |
 | [`tools/execute_notebook.py`](../tools/execute_notebook.py) | 用nbclient在指定目录完整执行并保存Notebook | 单元报错时保留已执行输出，进程仍返回失败 |
 | [`tests`](../tests)中的SII测试文件 | 物理恒等式、统计目标、数据独立性及数值边界检查 | 自动测试通过不等于所有科学主张通过 |
@@ -39,6 +40,25 @@ run_sii_pipeline
               ├─ 测量留出选择平滑项 + 多起点优化
               └─ 驻点、预测残差、峰数和拟合后评价
 ```
+
+### 1.1 Notebook的阅读顺序与两份说明的分工
+
+物理MD独立解释完整过程和推导；Notebook负责先看到信号，再看到如何生成观测，不复制MD的全部章节。Notebook主线第1–9节依次为理论、仪器输入、单镜电压、同一记录的两镜相关、GLS、阵列UV、模型/参数变化、反演、最终性能。附加验证A–F保留原有的实际计算与独立种子。
+
+基准是AB 2等、0.16 mas均匀盘、400±1 nm、36镜与6小时。`baseline_source`供理论和短记录使用，`source_cases['single_disk']`供阵列和反演使用；检查脚本重算两者的可见度，防止图表参数不同却只在文字上称为统一。单对示例是Tel.1/Tel.2、H=0.5 rad；整夜模型仍按完整时角窗口积分。
+
+`sii_walkthrough`中`theoretical_scene`返回`lesson_scene`，`single_record`将同一次实际ADC加入该对象，`pair_correlation`直接读取它。前后图共用事件，不重新抽样。以下新增证据均位于`validation/sii_science/`：
+
+| 文件 | 内容及复现用途 |
+|---|---|
+| `walkthrough_parameters.json` | 统一场景、两镜时刻、率、真P、注入倍率、采样与曝光 |
+| `walkthrough_ideal_hbt.csv` | 同一通带的理想光学g²曲线，ps时延 |
+| `walkthrough_record.npz` | 两镜事件（含边界保护区）、24 μs ADC、采样中心、时差、种子 |
+| `walkthrough_pair_correlation.csv` | 由上述ADC得到的对齐相关及解析期望 |
+| `walkthrough_pair_result.json` | 同一曲线的GLS估计、短记录误差及固定基线长曝光预测 |
+| `walkthrough_disk_measurements.csv` | 0.16 mas圆盘的11340行易读UV测量，不含变长求积节点 |
+
+检查脚本从保存的ADC重新计算整数对齐、相关与GLS结果，并重建实际几何和通带平均P；它不只检查摘要中的“通过”标签。UV简表与原来的`binary_measurements.csv`一样，不含完整采样节点，精确重建应使用Notebook生成的完整DataFrame。
 
 ## 2. 从main读取的是什么
 
@@ -221,7 +241,7 @@ aligned = align_waveforms(raw['adc_mv'], delay_ns, instrument.sample_width_ns,
                           arrival_delay_rates_ns_per_s=rate_ns_per_s)
 ```
 
-主Notebook第4.3节实际运行`python tools/validate_sii_tracking.py --source-case single_disk --seed 20260908`，输出到[`validation/sii_source_tracking`](../validation/sii_source_tracking)。每个时刻用独立未分辨点源训练响应，`calibration_truth=1`；待测圆盘的`truth`只用于生成和拟合后检验，不参与求训练增益。点源为同星等、同通带、同几何状态的理想参考源，没有假称获得了实测标定星。
+主Notebook附加验证E实际运行`python tools/validate_sii_tracking.py --source-case single_disk --seed 20260908`，输出到[`validation/sii_source_tracking`](../validation/sii_source_tracking)。每个时刻用独立未分辨点源训练响应，`calibration_truth=1`；待测圆盘的`truth`只用于生成和拟合后检验，不参与求训练增益。点源为同星等、同通带、同几何状态的理想参考源，没有假称获得了实测标定星。
 
 该目录沿用第4.2节的逐记录、响应和曝光表，并增加`source_predictions.csv`：七个时刻×630条基线共4410个36镜通带功率预测。`epochs.csv`中的`source_power_change_over_record`记录该24 μs窗口两端的最大功率差；信号强度在短记录内冻结，时延保留一阶变化。源矩阵、光谱权重与半正定检查不同于完整36镜波形或完整联合误差；这两项尚未由该表提供。
 
@@ -306,7 +326,7 @@ python tools/execute_notebook.py notebooks/sii_complete_waveform_report.ipynb --
 
 `tools/validate_sii_gls.py`是较小的独立标定/重建检查入口，可用于修改后的快速定位，不能替代主Notebook的完整证据。
 
-主Notebook第4.1节通过当前Python解释器实际执行三镜观测验证，显示结果表与两幅验证图。该节的子进程失败会使Notebook失败；结果摘要的统一换行哈希随主摘要保存，避免旧图表与新计算混用。也可单独运行：
+主Notebook附加验证C通过当前Python解释器实际执行三镜观测验证，显示结果表与两幅验证图。该节的子进程失败会使Notebook失败；结果摘要的统一换行哈希随主摘要保存，避免旧图表与新计算混用。也可单独运行：
 
 ```powershell
 python tools/validate_sii_observation.py
@@ -321,7 +341,7 @@ python tools/check_sii_science_artifacts.py
 
 此入口采用固定解析GLS投影，再用独立训练数据校准补偿后的响应；尚未重新优化插值后的完整滞后权重。噪声尺度区间以训练增益固定为条件，增益误差在`response.csv`另报；注入恢复误差棒包含训练与留出两部分。物理倍率记录不与放大注入混合估计噪声，更不能用放大注入的基线相关外推整夜。处理链检验与主Notebook的长曝光灵敏度、重建结果有各自的代码哈希，保持清楚的证据范围。
 
-主Notebook包含30个单元，其中16个代码单元；自动测试共98项。第4.2、4.3节分别执行固定相干与圆盘源的七时刻验证，第9节执行36镜性能验证，主摘要绑定这些结果摘要的哈希。完整执行状态及结果版本由下述检查脚本核对。
+主Notebook包含38个单元，其中20个代码单元；核心自动测试共98项。附加验证D、E分别执行固定相干与圆盘源的七时刻验证，第9节执行36镜性能验证，主摘要绑定这些结果摘要的哈希。完整执行状态及结果版本由下述检查脚本核对。
 运行`python tools/check_sii_science_artifacts.py`可再检查说明链接、公式分隔符、Notebook执行状态和结果中的源代码/输入哈希。
 新36台布局的36次图像重复均由优化器正常结束，并通过驻点阈值。逐次误差及配准保留通量仍公开在`image_repeats.csv`；通过数值诊断不等于图像唯一、全局最优或遮挡结构已检出。程序仍保留失败记录，不按成功状态筛选稳定性汇总。
 

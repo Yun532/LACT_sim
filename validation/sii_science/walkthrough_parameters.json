@@ -1,0 +1,26 @@
+{
+  "source_case": "single_disk",
+  "diameter_mas": 0.16,
+  "magnitude": 2.0,
+  "wavelength_nm": 400.0,
+  "width_nm": 2.0,
+  "source_dec_deg": 22.0,
+  "site_lat_deg": 29.36,
+  "telescopes": 36,
+  "pair": [
+    1,
+    2
+  ],
+  "hour_angle_rad": 0.5,
+  "pair_projected_baseline_m": 139.29408155270852,
+  "pair_power": 0.8329122516071836,
+  "arrival_delay_ns": 231.03275082599095,
+  "star_rate_hz": 199889298.29641628,
+  "nsb_rate_hz": 573214.0884464285,
+  "coherence_area_s": 1.3342919223619466e-13,
+  "sample_width_ns": 4.0,
+  "raw_record_ns": 24000.0,
+  "raw_pair_scale": 1.0,
+  "hours": 6.0,
+  "segment_s": 1200
+}
