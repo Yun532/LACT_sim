@@ -51,7 +51,9 @@ image = sii.reconstruct_uv(
     support_radius_mas=0.32, starts=3, max_iter=8000)
 ```
 
-主要模块：`python/sii_unified.py`负责模拟和GLS标定，`python/sii_reconstruction.py`负责重建，`python/sii_validation.py`提供独立验证。
+主要模块：`python/sii_unified.py`负责模拟和GLS标定，`python/sii_reconstruction.py`负责重建，`python/sii_validation.py`提供独立验证，`python/sii_observation.py`提供多镜共享波形、时延补偿及分块相关。
+
+三镜观测链检查运行`python tools/validate_sii_observation.py`，结果保存在`validation/sii_observation/`；输入格式和适用范围见[实现说明](docs/SII_IMPLEMENTATION_ZH.md#41-多镜观测入口)。
 
 ## 参数与输出
 

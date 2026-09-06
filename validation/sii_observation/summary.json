@@ -1,0 +1,211 @@
+{
+  "seed": 20260906,
+  "records": 384,
+  "calibration_records": 256,
+  "thermal_records": 300000,
+  "python": "3.13.13",
+  "numpy": "2.4.4",
+  "scipy": "1.17.1",
+  "main_commit": "2926031b14c8aa2164a4d9233f5c2d0a75324127",
+  "instrument_signature": "ef8ba0a9011afabfe1fd2d3838b68caf233d946500448190d6fb012227eface6",
+  "instrument_scenario": {
+    "magnitude_ab": 2.0,
+    "star_rate_hz": 199889298.29641628,
+    "background_rate_hz": 573214.0884464285,
+    "sample_width_ns": 4.0,
+    "coherence_area_s": 1.3342919223619466e-13,
+    "hour_angle_rad": 0.5,
+    "dec_rad": 0.3,
+    "lat_rad": 0.5124042337760072,
+    "coherence": [
+      [
+        1.0,
+        0.7,
+        0.5
+      ],
+      [
+        0.7,
+        1.0,
+        0.6
+      ],
+      [
+        0.5,
+        0.6,
+        1.0
+      ]
+    ],
+    "injection_scale": 10000.0
+  },
+  "observation": {
+    "delays": [
+      0.0,
+      -66.71304913110436,
+      489.58305166511207
+    ],
+    "effective_duration_s": 2.332e-05,
+    "wide_effective_duration_s": 2.2936000000000002e-05,
+    "block_effective_duration_s": 2.3312000000000003e-05,
+    "raw_duration_s": 2.4e-05,
+    "telescope_ids": [
+      1,
+      2,
+      6
+    ],
+    "injected_pair_fraction": [
+      0.19736590030179432,
+      0.22670407467097997,
+      0.16269351241093857
+    ]
+  },
+  "frozen_delay_change_ns": [
+    0.0,
+    1.8168638860061037e-07,
+    2.1664545784005895e-06
+  ],
+  "holdout": {
+    "truth": [
+      0.48999999999999994,
+      0.25,
+      0.36
+    ],
+    "means": [
+      [
+        0.4898118882535172,
+        0.25349479390934376,
+        0.3690364230566878
+      ],
+      [
+        0.489672948710499,
+        0.2524858399338607,
+        0.36842785921704496
+      ],
+      [
+        0.48893833404753645,
+        0.25557222793947426,
+        0.36729262914750077
+      ]
+    ],
+    "total_sem": [
+      [
+        0.00480891069107457,
+        0.004676853275560534,
+        0.00489098855569619
+      ],
+      [
+        0.0049569592751251,
+        0.004800703384512461,
+        0.004960041358401266
+      ],
+      [
+        0.00495752063931498,
+        0.004968698321864609,
+        0.00507416109348534
+      ]
+    ],
+    "null_sigma": [
+      580.0734902472145,
+      591.0902419059316,
+      597.8831481299087
+    ],
+    "null_sigma_95_interval": [
+      [
+        541.7434989646445,
+        624.2851267527218
+      ],
+      [
+        552.0322876977315,
+        636.141545501895
+      ],
+      [
+        558.3763334915631,
+        643.4521887123744
+      ]
+    ],
+    "block_minus_whole_mean": [
+      -0.0008735542059806582,
+      0.002077434030130346,
+      -0.0017437939091869334
+    ],
+    "block_minus_whole_sem": [
+      0.0009213875714953095,
+      0.0009130877968219848,
+      0.0008675740988957312
+    ],
+    "block_minus_whole_total_sem": [
+      0.0014656495312193637,
+      0.001441539921650336,
+      0.0015572345609440878
+    ],
+    "wide_to_default_training_response": [
+      1.0016825505632951,
+      1.0009325142623073,
+      1.0214987927937473
+    ],
+    "wide_minus_default_training_response": [
+      0.0015900246339107691,
+      0.0008617576249751865,
+      0.020284078440373676
+    ],
+    "wide_minus_default_training_response_sem": [
+      0.00173974877953997,
+      0.003128491685548852,
+      0.0020868041164971967
+    ]
+  },
+  "checks": [
+    {
+      "name": "independent_injection_response",
+      "max_abs_z": 1.8475657740322764,
+      "passed": true
+    },
+    {
+      "name": "independent_null_mean",
+      "max_abs_z": 1.1569745745547215,
+      "passed": true
+    },
+    {
+      "name": "whole_record_vs_four_blocks",
+      "max_abs_z": 1.4411214000594665,
+      "passed": true
+    },
+    {
+      "name": "independent_thermal_moments",
+      "max_abs_z": 1.441621425541838,
+      "passed": true
+    }
+  ],
+  "code_sha256_lf": {
+    "python/sii_unified.py": "64ed97bc123e11b512aac3b0686024ab34dc443f5e415f546d25254e580c4e28",
+    "python/sii_validation.py": "5d96a0d55e48b3edf923db468bb319a9efb7b982837d27a885dbd847404ceace",
+    "python/sii_observation.py": "eb75fc6ddc5241e7cbeb25dd140493519194cecc796f45ff1e80e2f357fa09fc",
+    "tools/validate_sii_observation.py": "0f595ab6c4354ec9e6734019cbae98fdc5f4469cdc24a4a86fcd9787899d71da",
+    "tests/test_sii_observation.py": "95ba08bd271eb66b8eee0d4076ae01880901876b56eb7376b4bf49b28e113684"
+  },
+  "input_sha256_lf": {
+    "configs/arrays/layout_0803_reco32_coordinates.csv": "5130cf6b8db422ee0b5ec09219ba9f00dba9d61dcdb7b145a3ebfafb3d8bf3f6",
+    "configs/calibrated/lact2_measured_20260622/mirror_20260622.cfg": "1ea985be1b03063afd2f265352bf63c8ef8ae3d2d22938639201d58676e2a444",
+    "configs/calibrated/lact2_measured_20260622/mirror_elevation_series_20260622.csv": "2610282598463858dfcd69e77b5a65350efe847c3fbcbe2dcc88803297229fcc",
+    "configs/efficiency/filter_transmission.csv": "1d726926d917d0a6803a4f76b65651cf0672f03f832a29eefe530c5ddcd646c8",
+    "configs/efficiency/mirror_reflectivity_dm0113_13point_mean.csv": "b97747ce7d7335890f00170babc25eab1347ec36b05e7049ad72401699dfc231",
+    "configs/efficiency/sipm_pde.csv": "c166c3336115ce33269dc80f3459fc72e48889f6b91afb331e6612f08aa15762",
+    "configs/electronics/devices/s17351_tiled_2x4.cfg": "ef0441ace5e2352f19ee427805c790d1eae0d253baa2c5453863d014c31e0e57",
+    "configs/electronics/measured_spe_4ns.cfg": "153df0c5e2bb2b1e50038d48f34bfd315af568236062d31583cb1e43d5da6256",
+    "configs/electronics/parameters/spe_charge_samples_measured.csv": "ba27c1248f744525b146517e8292a99e7af025be4bdc9f8ec6f8d9b55c808383",
+    "configs/electronics/parameters/spe_template_measured.csv": "37f0f38a87b3bed0e1d64e1f4ef2f37877bd06b3a4bca7fe5221034e575e3b8f",
+    "configs/nsb/nsb_spectrum.csv": "5f202dbc0928ebb71b775b7054950d70eb68c9cfb50ef5f4c70fff12dd54bf17",
+    "configs/optics/lact2_measured_single_pixel_400nm.csv": "51192df2901fa72a5c91840d1d8bda728ffe08f240b383c8de56769a7987dd7e",
+    "configs/optics/lact2_measured_single_pixel_400nm.provenance.json": "8908936000594fdbc73251c70071c43c516d8aae6cba98e0e067015272e2f9ed"
+  },
+  "scope": {
+    "waveform_model": "weak pair clusters, one stream per telescope",
+    "thermal_model": "independent discrete complex Gaussian modes with conditional Poisson counts",
+    "physical_scale_covariance": "finite Monte Carlo resolution; not a proof of independent baselines",
+    "injection_covariance": "artificial stress response; never extrapolate to physical exposure",
+    "timing": "constant within each 24 us record; geometry must be updated between observing blocks",
+    "calibration": "fixed analytic projection, independently trained processed response per baseline; gain SEM retained",
+    "sigma_interval": "conditional on fitted response; gain uncertainty reported separately in response.csv",
+    "correlation_interval": "Fisher approximate 95% interval for nearly normal block estimates",
+    "interpolation": "finite bandlimited approximation; no recovery of aliased analog frequencies",
+    "long_exposure": "existing notebook not switched to this experimental observation path"
+  }
+}

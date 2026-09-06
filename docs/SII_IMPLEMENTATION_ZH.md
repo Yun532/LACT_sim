@@ -9,9 +9,10 @@
 | [`python/sii_unified.py`](../python/sii_unified.py) | 读配置、源模型、几何、光子流、波形、GLS标定、长曝光数据和数据整理 | 波形GLS与旧解析SNR分支分别命名 |
 | [`python/sii_reconstruction.py`](../python/sii_reconstruction.py) | 只根据测量和采样重建；处理共同增益先验、正则化与收敛诊断 | 真值只能在拟合完成后用于评价 |
 | [`python/sii_validation.py`](../python/sii_validation.py) | 独立热光场、连续响应解析对照、留出波形、参数剖面和覆盖率工具 | 解析参考不调用共享光电子对生成器 |
+| [`python/sii_observation.py`](../python/sii_observation.py) | 多镜共享事件及波形、到达时差、分数采样补偿、分块相关、独立多镜热光模 | 是短记录观测入口；主Notebook的长曝光分支尚未接入 |
 | [`tools/build_sii_science_notebook.py`](../tools/build_sii_science_notebook.py) | 用nbformat生成主Notebook的代码及中文解释 | 重新生成会清空该Notebook的执行输出，随后必须从头运行 |
 | [`tools/execute_notebook.py`](../tools/execute_notebook.py) | 用nbclient在指定目录完整执行并保存Notebook | 单元报错时保留已执行输出，进程仍返回失败 |
-| [`tests`](../tests)中的三个SII测试文件 | 物理恒等式、统计目标、数据独立性及数值边界检查 | 自动测试通过不等于所有科学主张通过 |
+| [`tests`](../tests)中的SII测试文件 | 物理恒等式、统计目标、数据独立性及数值边界检查 | 自动测试通过不等于所有科学主张通过 |
 | [`validation/sii_science`](../validation/sii_science) | 本次计算结果表、标定、图像数组及汇总 | 图像重复、区间覆盖和波形检验各有不同样本含义 |
 
 ```text
@@ -126,6 +127,38 @@ image = sii.reconstruct_uv(result.measurements, grid_size=32,
 
 保存的`waveform_calibration.npz`可用`np.load(..., allow_pickle=False)`读取，再将零维数组转为Python标量构造`WaveformGLSCalibration`。加载后仍需执行同样的仪器/率一致性检查；不能仅凭文件名断言有效。
 
+### 4.1 多镜观测入口
+
+`sii_observation.py`提供独立短记录入口，沿用main仪器响应。`simulate_array_photon_times`返回逐镜时间数组及对率、边缘率、填充信息；`simulate_array_waveforms`每镜只渲染一次，返回`adc_mv[镜,样本]`。它们接受复相干矩阵，先检查Hermitian、单位对角和半正定条件。弱对模型按每镜参与的全部对率扣除独立星光率，超额注入导致负率时明确报错。背景率显式传入，调用者将NSB与暗计数相加一次。
+
+`geometric_arrival_delays_ns`返回相对参考镜的**到达时差**，即负的位置投影除以光速；`align_waveforms`执行`x_i(t+d_i)`。它返回共同有效样本中心、实际时长、首个输入索引和丢弃样本数。整数偏移精确索引，分数偏移默认16点半宽；改变半宽、采样率或时差后需匹配处理后的标定。没有共同数据时抛出异常。
+
+`correlate_blocks`对所有镜使用同一组完整块，返回`block_correlations[块,基线,滞后]`、等曝光平均、基线顺序、块数和实际曝光；不足一块的尾数据计数后丢弃，恒定通道拒绝归一化。它不把相邻块自动视为统计独立，块相关须由重复数据检查。下面是可运行的最小例子，其中单位矩阵表示零跨镜相干的校验场景：
+
+```python
+import sys
+from pathlib import Path
+import numpy as np
+
+root = Path.cwd()
+sys.path.insert(0, str(root / "python"))
+from sii_unified import Instrument, detected_star_rate_hz
+from sii_observation import simulate_array_waveforms, align_waveforms, correlate_blocks
+
+instrument = Instrument.from_repository(root)
+delay_ns = np.array([0., -66.713, 489.583])
+raw = simulate_array_waveforms(
+    np.random.default_rng(42), 24_000., detected_star_rate_hz(2., instrument),
+    instrument.detected_nsb_rate_hz + instrument.dark_count_rate_hz,
+    np.eye(3), instrument, arrival_delays_ns=delay_ns)
+aligned = align_waveforms(raw["adc_mv"], delay_ns, instrument.sample_width_ns)
+result = correlate_blocks(aligned["adc_mv"], instrument.sample_width_ns,
+                          block_samples=aligned["adc_mv"].shape[1] // 4)
+print(result["mean_correlation"].shape, result["effective_duration_s"])
+```
+
+`joint_thermal_mode_counts`是另外一条复高斯联合场→光强→泊松计数路径，用于验证二阶、三阶及边缘方差，不调用共享对生成器。它返回离散模平均的计数与光强，不输出真实纳秒波形。缺失时变增益、透明度等参数保持0；在当前联合波形入口设为非零会明确报尚未实现，避免被静默忽略。
+
 ## 5. 测量表和重建器之间的边界
 
 `generate_uvw`采用ENU坐标和西向为正的时角。时间推进使用`SIDEREAL_DAY_S`；曝光和协方差缩放使用秒。每段9个时间中点乘5个谱节点，组成45个实际子采样。
@@ -204,7 +237,18 @@ python tools/execute_notebook.py notebooks/sii_complete_waveform_report.ipynb --
 
 `tools/validate_sii_gls.py`是较小的独立标定/重建检查入口，可用于修改后的快速定位，不能替代主Notebook的完整证据。
 
-本次完整运行共22个单元，其中12个代码单元按顺序执行并保存输出，56项自动测试通过。
+三镜观测验证另行运行，不覆盖主Notebook的已有数值：
+
+```powershell
+python tools/validate_sii_observation.py
+python tools/check_sii_science_artifacts.py
+```
+
+它默认生成256条训练记录、各384条注入留出/物理倍率/零信号记录，共1408条24 μs三镜原始波形，另做30万条独立热光模计算。结果位于[`validation/sii_observation`](../validation/sii_observation)：`records.csv`保留固定解析权重的逐记录投影，`response.csv`保存各处理方法及基线的训练增益和标准误，`baseline_covariance.csv`保存基线联合协方差和近似相关区间，`thermal_moments.csv`为独立物理矩检验，`summary.json`记录输入、种子、代码哈希和适用范围。图由本次运行直接绘制。
+
+此入口采用固定解析GLS投影，再用独立训练数据校准补偿后的响应；尚未重新优化插值后的完整滞后权重。噪声尺度区间以训练增益固定为条件，增益误差在`response.csv`另报；注入恢复误差棒包含训练与留出两部分。物理倍率记录不与放大注入混合估计噪声，更不能用放大注入的基线相关外推整夜。处理链检验与主Notebook的长曝光灵敏度、重建结果有各自的代码哈希，保持清楚的证据范围。
+
+主Notebook完整运行共22个单元，其中12个代码单元按顺序执行并保存输出；加入多镜观测入口后，自动测试共67项。
 运行`python tools/check_sii_science_artifacts.py`可再检查说明链接、公式分隔符、Notebook执行状态和结果中的源代码/输入哈希。
 36次图像重复中，35次优化器正常结束，31次通过驻点阈值；5次驻点未通过全部来自单圆盘，其中1次优化器也未报告收敛。失败记录和对应图像仍参与公开的稳定性汇总，不能把35/36的优化器状态写成全部图像可靠。
 
