@@ -7,7 +7,9 @@
     "python/sii_unified.py": "64ed97bc123e11b512aac3b0686024ab34dc443f5e415f546d25254e580c4e28",
     "python/sii_reconstruction.py": "d9b1faca0be1990e9b206340efa9d1a3e0c181557997ac15e72d58dbbb01f589",
     "python/sii_validation.py": "5d96a0d55e48b3edf923db468bb319a9efb7b982837d27a885dbd847404ceace",
-    "tools/build_sii_science_notebook.py": "9e86a517ae92a53e66fe5f95b38a8a2bd83d954c1a94653b6a776c5f2fe6a2dc"
+    "python/sii_observation.py": "b89e0e4d3992cdd4c6802f12b61305a38907c52eab687952cd2ae45b104c4883",
+    "tools/validate_sii_observation.py": "3e9b895d047373d668607a6c098183041ea4213ce08ce2269ada1df169ee2a9c",
+    "tools/build_sii_science_notebook.py": "e94523a6187ad7976c8ace46920cf05b78ae732359fcec1c67c233d6ea812c01"
   },
   "main_parameter_commit": "2926031b14c8aa2164a4d9233f5c2d0a75324127",
   "derived_input_sha256_lf": {
@@ -223,6 +225,41 @@
       "ci_high": 1.0878320050769894
     }
   ],
+  "joint_observation": {
+    "execution": "fresh waveform simulation executed by this notebook",
+    "summary_sha256_lf": "9ae176a75f226f5eb7cb7cd2fd44c7172c677c3a2945d3393e21ed2a0fa57dfe",
+    "short_records": 1408,
+    "long_records": 384,
+    "checks": [
+      {
+        "name": "independent_injection_response",
+        "max_abs_z": 1.8475657740323344,
+        "passed": true
+      },
+      {
+        "name": "independent_null_mean",
+        "max_abs_z": 1.1569745745547209,
+        "passed": true
+      },
+      {
+        "name": "whole_record_vs_four_blocks",
+        "max_abs_z": 1.4411214000597132,
+        "passed": true
+      },
+      {
+        "name": "independent_thermal_moments",
+        "max_abs_z": 1.441621425541838,
+        "passed": true
+      },
+      {
+        "name": "independent_long_record_noise_scaling",
+        "min_scaled_sigma_ratio": 0.9762782783941627,
+        "max_scaled_sigma_ratio": 1.041397149380248,
+        "passed": true
+      }
+    ],
+    "hour_scale_inference_uses_joint_covariance": false
+  },
   "observation": {
     "telescopes": 32,
     "uv_measurements": 8928,
@@ -444,6 +481,7 @@
     "reconstruction_repeats": 12,
     "pixel_intervals": "not confidence intervals",
     "calibration": "shared gain profiled, independent statistical sigma retained",
+    "joint_observation": "fresh short and longer raw records executed; hour-scale inference remains separate",
     "notebook_execution": "all cells executed in this run"
   }
 }

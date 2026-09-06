@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scipy
-from scipy.stats import chi2
+from scipy.stats import chi2, f
 
 from sii_unified import (Instrument, detected_star_rate_hz, waveform_gls_weights,
                          waveform_instrument_signature, SIDEREAL_DAY_S)
@@ -33,6 +33,21 @@ def sha256(path):
 
 def mean_sem(values):
     return np.mean(values, axis=0), np.std(values, axis=0, ddof=1)/np.sqrt(len(values))
+
+
+def common_interval_projections(raw, delays, dt, widths, weights):
+    """所有插值宽度使用同一批样本；参考宽度是数值对照，不当作未知模拟真值。"""
+    variants = [align_waveforms(raw, delays, dt, half_width=width) for width in widths]
+    first = max(item['first_input_index'] for item in variants)
+    last = min(item['first_input_index']+item['adc_mv'].shape[1] for item in variants)
+    if last-first < 2:
+        raise ValueError('核宽对照没有共同有效区间')
+    projections = []
+    for item in variants:
+        offset = first-item['first_input_index']
+        curves = correlate_blocks(item['adc_mv'][:, offset:offset+last-first], dt)
+        projections.append(curves['mean_correlation'] @ weights)
+    return np.asarray(projections), (last-first)*dt*1e-9
 
 
 def main():
@@ -65,8 +80,10 @@ def main():
     dt = instrument.sample_width_ns
     analytic, _ = analytic_waveform_calibration(instrument, block_duration_ns=duration)
     weights, _ = waveform_gls_weights(analytic, duration*1e-9)
-    seed_sequences = np.random.SeedSequence(args.seed).spawn(5)
+    seed_sequences = np.random.SeedSequence(args.seed).spawn(6)
     series, curves = {}, {}
+    widths = [16, 32, 64, 128, 256, 512]
+    kernel_series = {}
     first_record = None
     for case_index, (name, count, coherence, injection) in enumerate([
             ('calibration', args.calibration_records, gamma, scale),
@@ -74,7 +91,7 @@ def main():
             ('physical_scale', args.records, gamma, 1.),
             ('null', args.records, np.eye(3), 1.)]):
         rng = np.random.default_rng(seed_sequences[case_index])
-        projections, all_curves = [], []
+        projections, all_curves, width_records = [], [], []
         for record in range(count):
             raw = simulate_array_waveforms(rng, duration, star, background, coherence,
                                            instrument, delays, injection)
@@ -90,6 +107,10 @@ def main():
             projections.append(np.stack([item['mean_correlation'] @ weights for item in
                                          (corrected, uncorrected, wide_curve, blocks)]))
             all_curves.append(np.stack((corrected['mean_correlation'], uncorrected['mean_correlation'])))
+            if name in ('injection_holdout', 'null'):
+                width_values, common_duration = common_interval_projections(
+                    raw['adc_mv'], delays, dt, widths, weights)
+                width_records.append(width_values)
             if first_record is None:
                 first_record = dict(delays=delays, effective_duration_s=corrected['effective_duration_s'],
                                     wide_effective_duration_s=wide_curve['effective_duration_s'],
@@ -101,6 +122,8 @@ def main():
                 print(f'{name}: {record+1}/{count}', flush=True)
         series[name] = np.array(projections)
         curves[name] = np.array(all_curves)
+        if width_records:
+            kernel_series[name] = np.asarray(width_records)
     # 解析权重只定义固定投影；从独立训练样本标定处理后的响应，留出记录不参与训练。
     gain, gain_sem = mean_sem(series['calibration']/(scale*truth))
     rows, checks = [], []
@@ -191,13 +214,71 @@ def main():
     thermal.to_csv(output/'thermal_moments.csv', index=False)
     checks.append(dict(name='independent_thermal_moments', max_abs_z=float(abs(thermal.z).max()),
                        passed=bool(np.all(abs(thermal.z) < 5))))
+
+    # 保留同记录配对差的不确定度；不同宽度分别定标会掩盖这里要测量的数值响应差。
+    kernel_rows, kernel_records = [], []
+    signal = kernel_series['injection_holdout']/(scale*truth)
+    null = kernel_series['null']
+    for index, width in enumerate(widths):
+        difference = signal[:, index]-signal[:, -1]
+        mean, sem = mean_sem(difference)
+        response, response_sem = mean_sem(signal[:, index])
+        noise_ratio = np.std(null[:, index], axis=0, ddof=1)/np.std(null[:, -1], axis=0, ddof=1)
+        for baseline, (left, right) in enumerate(pairs):
+            kernel_rows.append(dict(half_width=width, baseline=f'{left}-{right}',
+                                    common_duration_s=common_duration,
+                                    reference_half_width=widths[-1], response=response[baseline],
+                                    response_sem=response_sem[baseline],
+                                    response_minus_reference=mean[baseline], paired_sem=sem[baseline],
+                                    noise_std_ratio_to_reference=noise_ratio[baseline]))
+    for name, values in kernel_series.items():
+        for record in range(args.records):
+            for index, width in enumerate(widths):
+                for baseline, (left, right) in enumerate(pairs):
+                    kernel_records.append(dict(case=name, record=record, half_width=width,
+                                               baseline=f'{left}-{right}', projection=values[record, index, baseline]))
+    kernel_table = pd.DataFrame(kernel_rows)
+    kernel_table.to_csv(output/'kernel_convergence.csv', index=False)
+    pd.DataFrame(kernel_records).to_csv(output/'kernel_records.csv', index=False)
+
+    # 用新随机流直接生成4倍长记录，不以短记录拼接或人为缩放噪声代替观测。
+    rng = np.random.default_rng(seed_sequences[5])
+    long_duration = 4*duration
+    long_values = []
+    for record in range(args.records):
+        raw = simulate_array_waveforms(rng, long_duration, star, background, gamma, instrument, delays)
+        aligned = align_waveforms(raw['adc_mv'], delays, dt)
+        correlated = correlate_blocks(aligned['adc_mv'], dt)
+        long_values.append(correlated['mean_correlation'] @ weights)
+        if (record+1) % 128 == 0:
+            print(f'long_physical_scale: {record+1}/{args.records}', flush=True)
+    long_values = np.asarray(long_values)
+    long_exposure = correlated['effective_duration_s']
+    short_exposure = first_record['effective_duration_s']
+    # 增益在比值中抵消；F区间要求块估计量近似正态，并不是极尾概率保证。
+    ratio = (long_values.std(axis=0, ddof=1)/series['physical_scale'][:, 0].std(axis=0, ddof=1)
+             *np.sqrt(long_exposure/short_exposure))
+    ratio_low = ratio/np.sqrt(f.ppf(.975, args.records-1, args.records-1))
+    ratio_high = ratio/np.sqrt(f.ppf(.025, args.records-1, args.records-1))
+    scaling_rows = [dict(baseline=f'{left}-{right}', short_exposure_s=short_exposure,
+                         long_exposure_s=long_exposure, scaled_sigma_ratio=ratio[index],
+                         low_95=ratio_low[index], high_95=ratio_high[index])
+                    for index, (left, right) in enumerate(pairs)]
+    pd.DataFrame(scaling_rows).to_csv(output/'exposure_scaling.csv', index=False)
+    pd.DataFrame([dict(record=record, baseline=f'{left}-{right}', projection=long_values[record, index])
+                  for record in range(args.records) for index, (left, right) in enumerate(pairs)]).to_csv(
+                      output/'long_records.csv', index=False)
+    checks.append(dict(name='independent_long_record_noise_scaling',
+                       min_scaled_sigma_ratio=float(ratio.min()), max_scaled_sigma_ratio=float(ratio.max()),
+                       passed=bool(np.all((ratio/np.sqrt(f.ppf(.999, args.records-1, args.records-1)) < 1)
+                                          & (ratio/np.sqrt(f.ppf(.001, args.records-1, args.records-1)) > 1)))))
     # 冻结几何的块内误差是实际转动速度下的上界检查，不把整夜当成固定时延。
     later_delays = geometric_arrival_delays_ns(positions, hour+2*np.pi*duration*1e-9/SIDEREAL_DAY_S, dec, lat)
     code_paths = ['python/sii_unified.py', 'python/sii_validation.py', 'python/sii_observation.py',
                   'tools/validate_sii_observation.py', 'tests/test_sii_observation.py']
     input_paths = [item['path'] for item in manifest['files']]+[layout_path]
-    previous = json.loads((ROOT/'validation/sii_science/summary.json').read_text(encoding='utf-8'))
-    input_paths += list(previous['derived_input_sha256_lf'])
+    input_paths += ['configs/optics/lact2_measured_single_pixel_400nm.csv',
+                    'configs/optics/lact2_measured_single_pixel_400nm.provenance.json']
     summary = dict(seed=args.seed, records=args.records, calibration_records=args.calibration_records,
                    thermal_records=args.thermal_records, python=platform.python_version(),
                    numpy=np.__version__, scipy=scipy.__version__, main_commit=manifest['main_commit'],
@@ -207,6 +288,9 @@ def main():
                                             hour_angle_rad=hour, dec_rad=dec, lat_rad=lat,
                                             coherence=gamma, injection_scale=scale),
                    observation=first_record, frozen_delay_change_ns=later_delays-delays,
+                   kernel_convergence=dict(widths=widths, common_duration_s=common_duration,
+                                           reference_is_exact=False, paired_comparisons=kernel_rows),
+                   exposure_scaling=scaling_rows, long_records=args.records,
                    holdout=dict(truth=truth, means=holdout_mean, total_sem=total_sem,
                                 null_sigma=null_std, null_sigma_95_interval=null_std_interval,
                                 block_minus_whole_mean=diff_mean, block_minus_whole_sem=diff_sem,
@@ -225,7 +309,7 @@ def main():
                               sigma_interval='conditional on fitted response; gain uncertainty reported separately in response.csv',
                               correlation_interval='Fisher approximate 95% interval for nearly normal block estimates',
                               interpolation='finite bandlimited approximation; no recovery of aliased analog frequencies',
-                              long_exposure='existing notebook not switched to this experimental observation path'))
+                              long_exposure='direct 24/96 us comparison; hour-scale statistical branch still separate'))
     def serial(value):
         if isinstance(value, np.ndarray):
             return value.tolist()
@@ -258,6 +342,20 @@ def main():
                  title=('Physical scale = 1' if name == 'physical_scale' else 'Artificial injection scale = 10000'))
     fig.colorbar(plot, ax=axes[1].tolist(), shrink=.8)
     fig.savefig(output/'observation_validation.png', dpi=160)
+    plt.close(fig)
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4), constrained_layout=True)
+    for label, group in kernel_table.groupby('baseline', sort=False):
+        axes[0].errorbar(group.half_width, group.response_minus_reference,
+                         yerr=1.96*group.paired_sem, fmt='o-', capsize=3, label=label)
+    axes[0].axhline(0., color='0.5', ls='--')
+    axes[0].set(xscale='log', xlabel='Interpolation half width (samples)',
+                ylabel='Response minus width 512', title='Same photons and common time interval')
+    axes[0].legend(title='Baseline')
+    axes[1].errorbar(np.arange(3), ratio, yerr=np.array([ratio-ratio_low, ratio_high-ratio]), fmt='o', capsize=4)
+    axes[1].axhline(1., color='0.5', ls='--')
+    axes[1].set(xticks=range(3), xticklabels=['0-1', '0-2', '1-2'], xlabel='Baseline',
+                ylabel='SD(long) / SD(short) * sqrt(Tlong / Tshort)', title='Independent 24 / 96 us raw records; 95% CI')
+    fig.savefig(output/'processing_convergence.png', dpi=160)
     plt.close(fig)
     print(json.dumps(dict(checks=checks, output=str(output)), ensure_ascii=False, indent=2))
     if not all(check['passed'] for check in checks):

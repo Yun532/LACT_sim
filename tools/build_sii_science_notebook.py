@@ -45,6 +45,7 @@ plt.rcParams.update({'figure.dpi':110, 'savefig.dpi':180, 'axes.grid':True, 'gri
 summary = {'seed':SEED, 'python':platform.python_version(), 'numpy':np.__version__, 'scipy':scipy.__version__}
 summary['code_sha256_lf']={path:hashlib.sha256((ROOT/path).read_bytes().replace(b'\\r\\n',b'\\n')).hexdigest()
     for path in ['python/sii_unified.py','python/sii_reconstruction.py','python/sii_validation.py',
+                 'python/sii_observation.py','tools/validate_sii_observation.py',
                  'tools/build_sii_science_notebook.py']}
 manifest = verify_main_parameters(ROOT)
 summary['main_parameter_commit'] = manifest['main_commit']
@@ -200,11 +201,49 @@ for label,g in scale_table.groupby('estimator'):
 axes[1].axhline(1.,color='k',ls='--');axes[1].set(xlabel='Injection multiplier',ylabel='Recovered / injected P')
 axes[1].legend();fig.tight_layout();fig.savefig(FIG/'03_independent_checks.png');plt.show()
 ''')
+md('''### 4.1 三镜共同波形、插值收敛与较长记录
+
+本节实际重新运行联合观测入口，不读取上次保存的结果来代替计算。
+同一台望远镜的ADC由所有相关基线共享。先检验注入后的时延补偿、独立留出和零信号，
+再让16至512点半宽使用同一批光子和相同时间区间，检查响应与噪声变化。
+512点是数值参考，不代表连续模拟真值；误差棒利用同记录的配对差，保留方法间相关性。
+另用独立生成的96 μs物理倍率记录对照24 μs记录的曝光缩放。
+
+下方图表由本节执行生成。三镜弱对过程与独立热光模基准各有适用范围，
+较长记录检验仍局限于微秒级，不足以证明整夜状态平稳。
+''')
+code('''
+import subprocess
+from IPython.display import Image
+completed = subprocess.run([sys.executable, '-X', 'utf8', str(ROOT/'tools/validate_sii_observation.py')],
+                           cwd=ROOT, capture_output=True, text=True, encoding='utf-8')
+print(completed.stdout)
+if completed.stderr:
+    print(completed.stderr)
+completed.check_returncode()
+JOINT = ROOT/'validation/sii_observation'
+joint_summary = json.loads((JOINT/'summary.json').read_text(encoding='utf-8'))
+assert all(item['passed'] for item in joint_summary['checks'])
+summary['joint_observation'] = {
+    'execution': 'fresh waveform simulation executed by this notebook',
+    'summary_sha256_lf': hashlib.sha256((JOINT/'summary.json').read_bytes().replace(b'\\r\\n',b'\\n')).hexdigest(),
+    'short_records': joint_summary['calibration_records']+3*joint_summary['records'],
+    'long_records': joint_summary['long_records'],
+    'checks': joint_summary['checks'],
+    'hour_scale_inference_uses_joint_covariance': False}
+display(pd.DataFrame(joint_summary['checks']))
+display(pd.read_csv(JOINT/'kernel_convergence.csv'))
+display(pd.read_csv(JOINT/'exposure_scaling.csv'))
+display(Image(filename=str(JOINT/'observation_validation.png')))
+display(Image(filename=str(JOINT/'processing_convergence.png')))
+''')
 md('''## 5. 32台望远镜的时间与光谱平均测量
 
 下面实际生成32台望远镜、6小时、每段20分钟的8928个UV测量。
 每段同时平均时间变化和通带内的平方可见度。右图显示带噪声测量，允许出现负值；
 颜色范围仅用于显示，不对拟合输入作裁剪。同一次标定误差在所有测量间共享。
+本节采用双镜波形标定的长曝光统计分支；第4.1节的三镜联合实验并未自动替换
+本节的32镜协方差或完成整夜时变处理。两者通过明确的验证范围关联。
 ''')
 code('''
 source_cases={'binary':sii.BinarySource(),'single_disk':sii.BinarySource(primary_diameter_mas=.16),
@@ -428,6 +467,7 @@ summary['scope']={'source':'static scenes, observed total AB magnitude',
     'weak_thermal_approximation':'pair generator omits thermal self noise; degeneracy is reported',
     'reconstruction_repeats':REPEATS,'pixel_intervals':'not confidence intervals',
     'calibration':'shared gain profiled, independent statistical sigma retained',
+    'joint_observation':'fresh short and longer raw records executed; hour-scale inference remains separate',
     'notebook_execution':'all cells executed in this run'}
 (OUT/'summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2)+'\\n',encoding='utf-8')
 print('科学验证结果已写入：',OUT/'summary.json')

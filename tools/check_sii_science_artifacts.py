@@ -41,7 +41,9 @@ def main():
         for path,expected in joint[section].items():
             content=(ROOT/path).read_bytes().replace(b'\r\n',b'\n')
             assert hashlib.sha256(content).hexdigest()==expected, path
-    assert len(joint['checks'])==4 and all(check['passed'] for check in joint['checks'])
+    assert len(joint['checks'])==5 and all(check['passed'] for check in joint['checks'])
+    assert summary['joint_observation']['execution']=='fresh waveform simulation executed by this notebook'
+    assert hashlib.sha256((observation/'summary.json').read_bytes().replace(b'\r\n',b'\n')).hexdigest()==summary['joint_observation']['summary_sha256_lf']
     sys.path.insert(0,str(ROOT/'python'))
     from sii_unified import Instrument, waveform_instrument_signature, detected_star_rate_hz
     instrument=Instrument.from_repository(ROOT)
@@ -55,6 +57,9 @@ def main():
     records=pd.read_csv(observation/'records.csv')
     assert len(records)==3*(joint['calibration_records']+3*joint['records'])
     assert len(pd.read_csv(observation/'baseline_covariance.csv'))==27
+    assert len(pd.read_csv(observation/'kernel_convergence.csv'))==18
+    assert len(pd.read_csv(observation/'kernel_records.csv'))==2*joint['records']*6*3
+    assert len(pd.read_csv(observation/'long_records.csv'))==3*joint['long_records']
     assert (observation/'observation_validation.png').is_file()
     print('三镜观测验证的输入/代码哈希、独立检查状态及输出条数通过。')
 

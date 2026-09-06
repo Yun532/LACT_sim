@@ -2,6 +2,7 @@
 from itertools import combinations
 
 import numpy as np
+from scipy.signal import correlate
 
 from sii_unified import (
     C_M_S, source_direction_enu, load_measured_spe_template,
@@ -151,8 +152,12 @@ def align_waveforms(adc_mv, arrival_delays_ns, sample_width_ns, half_width=16):
     indices = np.arange(low, high+1)
     aligned = np.empty((len(values), len(indices)))
     for channel, (taps, weights) in enumerate(kernels):
-        aligned[channel] = sum(weight*values[channel, indices+tap]
-                               for tap, weight in zip(taps, weights))
+        if len(taps) == 1:
+            aligned[channel] = values[channel, indices+taps[0]]
+        else:
+            # 有限线性相关直接实现同一FIR求和，避免Python逐抽头循环；仍无周期卷绕。
+            filtered = correlate(values[channel], weights, mode='valid', method='auto')
+            aligned[channel] = filtered[indices+taps[0]]
     return dict(adc_mv=aligned, sample_time_ns=(indices+.5)*sample_width_ns,
                 sample_width_ns=float(sample_width_ns), first_input_index=int(low),
                 effective_duration_ns=float(len(indices)*sample_width_ns),
