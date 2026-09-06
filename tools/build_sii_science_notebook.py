@@ -46,8 +46,9 @@ plt.rcParams.update({'figure.dpi':110, 'savefig.dpi':180, 'axes.grid':True, 'gri
 summary = {'seed':SEED, 'python':platform.python_version(), 'numpy':np.__version__, 'scipy':scipy.__version__}
 summary['code_sha256_lf']={path:hashlib.sha256((ROOT/path).read_bytes().replace(b'\\r\\n',b'\\n')).hexdigest()
     for path in ['python/sii_unified.py','python/sii_reconstruction.py','python/sii_validation.py',
-                 'python/sii_observation.py','python/sii_layout.py','tools/validate_sii_observation.py',
+                 'python/sii_observation.py','python/sii_layout.py','python/sii_performance.py','tools/validate_sii_observation.py',
                  'tools/validate_sii_tracking.py',
+                 'tools/validate_sii_performance.py',
                  'tools/build_sii_science_notebook.py']}
 manifest = verify_main_parameters(ROOT)
 summary['main_parameter_commit'] = manifest['main_commit']
@@ -534,7 +535,33 @@ for column,(case,images) in enumerate(ensembles.items()):
 fig.tight_layout();fig.savefig(FIG/'06_image_stability.png');plt.show()
 display(pd.DataFrame(summary['image_repeats']))
 ''')
-md('''## 9. 哪些结论已验证，哪些结论不能从本Notebook推出
+md('''## 9. 36镜灵敏度与角直径的固定性能验证集
+
+本节是本版的最终角直径性能入口。实际执行36镜共享ADC训练、零信号和圆盘留出，
+采用整数时延补偿与分数时延模板，按每条基线的段内采样相位计算长曝光方差。
+共享增益、噪声学习误差及弱光Bartlett共镜协方差界进入下面的性能扫描。
+前面图像重建保留原估计器，不能将本节误差校验自动归给那些图像。
+
+固定星等2/4/6、角直径0.08/0.16/0.32 mas、曝光1/3/6小时，每场景500次重复。
+规格书暗计数另作25℃、过压8.5 V对照，默认电子学不改变。
+''')
+code('''
+import subprocess
+subprocess.run([sys.executable,str(ROOT/'tools/validate_sii_performance.py')],cwd=ROOT,check=True)
+performance_dir=ROOT/'validation/sii_performance'
+performance_summary=json.loads((performance_dir/'summary.json').read_text(encoding='utf-8'))
+assert all(performance_summary['checks'].values())
+summary['performance']={
+    'execution':'fresh full-array short records and fixed performance suite executed by this notebook',
+    'summary_sha256_lf':hashlib.sha256((performance_dir/'summary.json').read_bytes().replace(b'\\r\\n',b'\\n')).hexdigest(),
+    'raw':performance_summary['raw'],'scenarios':performance_summary['scenarios']}
+display(pd.read_csv(performance_dir/'performance.csv').query("method == 'profile_gain' and hours == 6"))
+display(pd.read_csv(performance_dir/'covariance_budget.csv'))
+display(pd.read_csv(performance_dir/'approximation_budget.csv'))
+display(pd.read_csv(performance_dir/'datasheet_scenarios.csv'))
+display(__import__('IPython.display',fromlist=['Image']).Image(filename=str(performance_dir/'performance.png')))
+''')
+md('''## 10. 哪些结论已验证，哪些结论不能从本Notebook推出
 
 该工作流检验了参数来源、相关关系、线性响应、协方差、共同标定误差、光谱/时间平均和重建稳定性。
 它仍采用弱热光近似、静态天体和固定透过率场景；未知电子学项关闭。
@@ -548,7 +575,7 @@ summary['scope']={'source':'static scenes, observed total AB magnitude',
     'weak_thermal_approximation':'pair generator omits thermal self noise; degeneracy is reported',
     'reconstruction_repeats':REPEATS,'pixel_intervals':'not confidence intervals',
     'calibration':'shared gain profiled, independent statistical sigma retained',
-    'joint_observation':'fresh short, longer and sparse tracked epoch records executed; hour-scale inference remains separate',
+    'joint_observation':'section 9 connects full-array short records to diameter sufficient statistics; image reconstruction retains the earlier estimator',
     'notebook_execution':'all cells executed in this run'}
 (OUT/'summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2)+'\\n',encoding='utf-8')
 print('科学验证结果已写入：',OUT/'summary.json')

@@ -53,6 +53,8 @@ __pycache__/
 !validation/sii_tracking/*.png
 !validation/sii_source_tracking/*.csv
 !validation/sii_source_tracking/*.png
+!validation/sii_performance/*.csv
+!validation/sii_performance/*.png
 !external/hessioxxx/hessioxxx.tar.gz
 !external/hessioxxx/sha256.sum
 external/hessioxxx/source/bin/

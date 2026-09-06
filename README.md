@@ -1,10 +1,11 @@
 # LACT 单像素恒星强度干涉模拟
 
-使用LACT光学与电子学响应，生成双镜光电子波形、全阵列平方可见度测量，并进行GLS估计与图像重建。
+本版提供新36镜布局下、给定仪器条件的SII灵敏度与均匀圆盘角直径模拟：共享光电子波形、相位匹配的GLS、标定误差传播及27个固定性能场景。图像重建保留为探索性结果。
 
 - [物理原理与适用范围](docs/SII_PHYSICS_ZH.md)
 - [代码实现、参数接口与复现](docs/SII_IMPLEMENTATION_ZH.md)
 - [完整可执行Notebook](notebooks/sii_complete_waveform_report.ipynb)
+- [36镜最终性能结果](validation/sii_performance/summary.json)：每场景500次重复、有限口径对照和SiPM规格书暗计数情景。
 - [验证结果](validation/sii_science/summary.json)
 - [时延追踪验证](validation/sii_tracking/summary.json)：36镜几何、七时刻三镜短波形及初始时延对照。
 
@@ -20,6 +21,8 @@ python tools/check_sii_science_artifacts.py
 ```
 
 需要与已验证环境保持相同直接依赖版本时，使用`requirements-sii-validated.txt`。
+
+只运行最终性能验证集：`python tools/validate_sii_performance.py`。完整Notebook第9节会实际执行同一命令；前面的图像结果保留原估计器，不能将新误差验证自动归给旧图像。
 
 ## Python接口
 
@@ -66,6 +69,8 @@ image = sii.reconstruct_uv(
 默认仪器入口为`configs/examples/corsika_lact_pylast_root_only_measured_waveform.cfg`，由组件配置读取光谱响应、SPE、电荷分布和微单元几何。参数覆盖及数据格式见[实现说明](docs/SII_IMPLEMENTATION_ZH.md)。
 
 缺失电子学参数保留接口，默认`0`且关闭；SPE长尾不作为微单元恢复时间。尚无实现或未标定的效应设为非零会明确报错。2 nm通带和固定源透过率属于场景假设。
+
+S17351规格书的有条件参数保存在[结构化摘录](configs/sii/s17351_datasheet.json)。25℃暗计数可单独启用1或8通道汇总情景；不会自动覆盖main的实测响应。仍缺的六组电子学信息见[实现说明第10节](docs/SII_IMPLEMENTATION_ZH.md#10-36镜角直径性能入口及sipm规格书)。
 
 Notebook输出保存在`validation/sii_science/`，图片位于`docs/sii_science_figures/`。短波形实际生成光电子与采样电压；长曝光使用经标定的统计模型，不生成整夜ADC。结果用于给定假设下的性能预测，重建的收敛状态和形态稳定性需分别检查。
 

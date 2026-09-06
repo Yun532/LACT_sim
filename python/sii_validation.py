@@ -27,7 +27,8 @@ def verify_main_parameters(root):
 
 
 def analytic_waveform_calibration(instrument: Instrument, magnitude=2.,
-                                 block_duration_ns=20_000., max_lag_ns=200., fine_dt_ns=.05):
+                                 block_duration_ns=20_000., max_lag_ns=200., fine_dt_ns=.05,
+                                 residual_delay_ns=0.):
     """由连续SPE自相关、光学传递函数和Bartlett公式推导GLS模板与零信号协方差。
 
     这是线性探测、弱HBT、长于脉冲支持区间的块近似。电子学噪声可为白噪声，
@@ -37,7 +38,8 @@ def analytic_waveform_calibration(instrument: Instrument, magnitude=2.,
             or instrument.sipm_crosstalk_probability != 0
             or instrument.sipm_afterpulse_probability != 0):
         raise ValueError('解析对照要求线性响应；请关闭非线性效应或使用波形标定')
-    if fine_dt_ns <= 0 or block_duration_ns <= 4*max_lag_ns:
+    if (fine_dt_ns <= 0 or block_duration_ns <= 4*max_lag_ns
+            or not np.isfinite(residual_delay_ns)):
         raise ValueError('细网格必须为正，标定块必须足够长')
     t, h = load_measured_spe_template(instrument.spe_template_path)
     fine_t = np.arange(t[0], t[-1]+fine_dt_ns/2, fine_dt_ns)
@@ -77,8 +79,10 @@ def analytic_waveform_calibration(instrument: Instrument, magnitude=2.,
     # 块内减均值同时轻微降低信号和样本方差，保留其一阶有限块修正。
     normalization = 1-np.sum(np.maximum(samples-abs(steps), 0)*rho)/samples**2
     pair_rate = star**2*instrument.coherence_area_s
-    sampled_signal = pair_rate*1e-9*np.interp(steps*dt, kernel_time, kernel)/variance
-    peak = (pair_rate*1e-9*np.interp(lags, kernel_time, kernel)/variance
+    # correlate(left,right)的峰位为-(右镜到达时间-左镜到达时间)。
+    # 整数样本对齐后，把剩余分数时延留在模板中，避免对ADC做分数插值。
+    sampled_signal = pair_rate*1e-9*np.interp(steps*dt+residual_delay_ns, kernel_time, kernel)/variance
+    peak = (pair_rate*1e-9*np.interp(lags+residual_delay_ns, kernel_time, kernel)/variance
             -sampled_signal.sum()/samples)/normalization
     bartlett = fftconvolve(rho, rho[::-1], mode='full')/samples/normalization**2
     differences = lag_steps[:, None]-lag_steps[None, :]

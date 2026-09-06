@@ -1,0 +1,94 @@
+{
+  "seed": 20260909,
+  "trials": 500,
+  "raw_records_per_case": 96,
+  "raw": {
+    "gain": 1.0047962567350652,
+    "gain_relative_sigma": 0.010804029219526964,
+    "noise_scale": 1.0062786158169328,
+    "noise_relative_sigma": 0.002621177525274978,
+    "raw_records": 1152,
+    "raw_duration_s": 0.027648000000000002,
+    "effective_duration_s": 0.026164224000000003,
+    "phase_holdout_max_abs_z": 2.3411508018875584,
+    "phase_null_max_abs_z": 2.266909870524035,
+    "scope": "36 shared ADC channels, 3 short-record epochs; weak pair process. Full night uses sufficient statistics."
+  },
+  "code_sha256_lf": {
+    "python/sii_performance.py": "c6e88a136c41fc0e785685a6f0dfe627cd932c149958ddbc7fec4a0a2378bbe9",
+    "python/sii_validation.py": "534222c77d3ad4eed08a1605e3c57ea939aa6324a03559ab7cc012edaa998b7e",
+    "python/sii_unified.py": "9e18045755855136e471043db5955b11810ef9fb628159c61872650657786e37",
+    "python/sii_observation.py": "62da7142299077223cf99adac60841fa22d8fb92d9284f7ea7aa15f87fe74cf8",
+    "python/sii_layout.py": "575edbf011d41b3f2689e12cd21152261f97c707d04f0564c93bde94a83a9341",
+    "tools/validate_sii_performance.py": "e5a78ec743a232bed9dd4b31efc66c6d2137d2ac495b8140720a1da22e95e852",
+    "tests/test_sii_performance.py": "f2527cf5e4bc0183bc73e60040522fb8ceddc736c13a0fb22b2a28b57b24e8b5"
+  },
+  "input_sha256_lf": {
+    "configs/electronics/measured_spe_4ns.cfg": "153df0c5e2bb2b1e50038d48f34bfd315af568236062d31583cb1e43d5da6256",
+    "configs/electronics/parameters/spe_template_measured.csv": "37f0f38a87b3bed0e1d64e1f4ef2f37877bd06b3a4bca7fe5221034e575e3b8f",
+    "configs/electronics/parameters/spe_charge_samples_measured.csv": "ba27c1248f744525b146517e8292a99e7af025be4bdc9f8ec6f8d9b55c808383",
+    "configs/electronics/devices/s17351_tiled_2x4.cfg": "ef0441ace5e2352f19ee427805c790d1eae0d253baa2c5453863d014c31e0e57",
+    "configs/efficiency/mirror_reflectivity_dm0113_13point_mean.csv": "b97747ce7d7335890f00170babc25eab1347ec36b05e7049ad72401699dfc231",
+    "configs/efficiency/filter_transmission.csv": "1d726926d917d0a6803a4f76b65651cf0672f03f832a29eefe530c5ddcd646c8",
+    "configs/efficiency/sipm_pde.csv": "c166c3336115ce33269dc80f3459fc72e48889f6b91afb331e6612f08aa15762",
+    "configs/nsb/nsb_spectrum.csv": "5f202dbc0928ebb71b775b7054950d70eb68c9cfb50ef5f4c70fff12dd54bf17",
+    "configs/calibrated/lact2_measured_20260622/mirror_20260622.cfg": "1ea985be1b03063afd2f265352bf63c8ef8ae3d2d22938639201d58676e2a444",
+    "configs/calibrated/lact2_measured_20260622/mirror_elevation_series_20260622.csv": "2610282598463858dfcd69e77b5a65350efe847c3fbcbe2dcc88803297229fcc",
+    "configs/sii/s17351_datasheet.json": "89b934de1a21908ff13357cf53ec9329de0a927c39e13b5edd9f4cdcc3377cd2",
+    "configs/arrays/lact36_20260906.input": "c779add28768de604d9a548dec85fb9d85e47938647f3d440879721ebf338e8e",
+    "configs/optics/lact2_measured_single_pixel_400nm.csv": "51192df2901fa72a5c91840d1d8bda728ffe08f240b383c8de56769a7987dd7e",
+    "configs/optics/lact2_measured_single_pixel_400nm.provenance.json": "8908936000594fdbc73251c70071c43c516d8aae6cba98e0e067015272e2f9ed"
+  },
+  "science_scope": "36-telescope sensitivity and uniform-disk diameter, conditional on main response and disabled unknown electronics",
+  "scenarios": 27,
+  "methods": [
+    "profile_gain",
+    "fixed_gain"
+  ],
+  "magnitudes": [
+    2.0,
+    4.0,
+    6.0
+  ],
+  "diameters_mas": [
+    0.08,
+    0.16,
+    0.32
+  ],
+  "hours": [
+    1.0,
+    3.0,
+    6.0
+  ],
+  "diameter_grid_mas": [
+    0.0,
+    0.64,
+    0.0005
+  ],
+  "likelihood_refinement_step_mas": 5e-05,
+  "pupil": "Uniform circular radius 4m comparison; actual pupil weights unavailable",
+  "covariance": "Bartlett weak-light spectral operator bound propagated as variance inflation; separate exact thermal count fourth-moment check",
+  "default_electronics_changed": false,
+  "instrument_signature": "ef8ba0a9011afabfe1fd2d3838b68caf233d946500448190d6fb012227eface6",
+  "artifact_sha256": {
+    "approximation_budget.csv": "7a88337a73fe2329f3e155eebb815cf9fa3a7ac4b0e141fea5c92beec18a9659",
+    "covariance_budget.csv": "18a8097977bfad11e6eaaeb73e4ec20e5c4c966c192f1657833c920bb15352d5",
+    "datasheet_scenarios.csv": "31e69e6a4c22d84454c3f61f4b96f1d7c03429f2767c0cec6e53c6eace0347dc",
+    "performance.csv": "dcf59a8aa9f10d4b9b4d41f82f049268e3e1a2532d51b691e5ede1ed2f4e012f",
+    "performance.png": "4b5a024b8a430e63471cb8de2b18018436de65ab8598f1b56f1ec32c1bef42ed",
+    "phase_templates.csv": "9b83f1d9faa8fca91919e2ca4b663d26629ccea750b796b261e77e5c1d49b10d",
+    "raw_baselines.csv": "eef6347febf1ac61bb31878db4c3d0b5cb6b7541ad357f5296e17e6c04df6e28",
+    "raw_epochs.csv": "2e3201ae626dae2909bd42ddc17e7f86764276af2e15cb9b6740e8ecbec0eaee",
+    "raw_phase_holdout.csv": "725930279539a15da478965276b109ffaff127cac78010a8afce3bab084e4a6f",
+    "raw_projections.npz": "eab945f524ab5413e235ff6e6379fdeb2589e07920dbc4d16ffe98b4a293fee6"
+  },
+  "checks": {
+    "raw_phase_holdout": true,
+    "raw_phase_null": true,
+    "phase_quadrature": true,
+    "pupil_quadrature": true,
+    "model_compression": true,
+    "diameter_interpolation": true,
+    "finite_results": true
+  }
+}

@@ -120,6 +120,51 @@ def main():
                 assert math.isclose(prediction,row.truth,rel_tol=1e-12)
         print(f'{directory}：七时刻的输入/代码/结果哈希、留出检查及实际曝光计数通过。')
 
+    import numpy as np
+    performance_dir=ROOT/'validation/sii_performance'
+    performance=json.loads((performance_dir/'summary.json').read_text(encoding='utf-8'))
+    assert all(performance['checks'].values())
+    assert performance['instrument_signature']==waveform_instrument_signature(instrument)
+    for section in ['code_sha256_lf','input_sha256_lf']:
+        for path,expected in performance[section].items():
+            assert hashlib.sha256((ROOT/path).read_bytes().replace(b'\r\n',b'\n')).hexdigest()==expected,path
+    for path,expected in performance['artifact_sha256'].items():
+        assert hashlib.sha256((performance_dir/path).read_bytes()).hexdigest()==expected,path
+    assert hashlib.sha256((performance_dir/'summary.json').read_bytes().replace(b'\r\n',b'\n')).hexdigest()==summary['performance']['summary_sha256_lf']
+    table=pd.read_csv(performance_dir/'performance.csv')
+    assert len(table)==54 and not table.duplicated(['hours','magnitude','diameter_mas','method']).any()
+    assert (table.trials==500).all() and performance['scenarios']==27
+    np.testing.assert_allclose(table.coverage,table.covered/table.trials,rtol=1e-12)
+    assert ((table.coverage_ci_low<=table.coverage)&(table.coverage<=table.coverage_ci_high)).all()
+    epochs=pd.read_csv(performance_dir/'raw_epochs.csv')
+    baselines=pd.read_csv(performance_dir/'raw_baselines.csv')
+    assert len(epochs)==3 and len(baselines)==3*630
+    assert not baselines.duplicated(['epoch','telescope_i','telescope_j']).any()
+    records=performance['raw_records_per_case']
+    with np.load(performance_dir/'raw_projections.npz') as raw:
+        for epoch in epochs.itertuples():
+            train=raw[f'epoch_{epoch.epoch}_train']
+            null=raw[f'epoch_{epoch.epoch}_null']
+            holdout=raw[f'epoch_{epoch.epoch}_holdout']
+            assert train.shape==holdout.shape==(records,630) and null.shape==(2*records,630)
+            per_record=(train/300.).mean(axis=1)
+            assert math.isclose(per_record.mean(),epoch.gain,rel_tol=1e-12)
+            assert math.isclose(per_record.std(ddof=1)/math.sqrt(records),epoch.gain_sem,rel_tol=1e-12)
+            selected=baselines[baselines.epoch==epoch.epoch]
+            np.testing.assert_allclose(holdout.mean(axis=0)/300./epoch.gain,selected['mean'],atol=1e-13)
+            np.testing.assert_allclose(raw[f'epoch_{epoch.epoch}_truth'],selected.truth,atol=1e-13)
+            sigma=raw[f'epoch_{epoch.epoch}_sigma']
+            assert math.isclose(float(np.sqrt(np.mean((null/sigma)**2))),epoch.null_sigma_scale,rel_tol=1e-12)
+    assert performance['raw']['raw_records']==12*records
+    assert math.isclose(performance['raw']['effective_duration_s'],float(np.sum(epochs.raw_records*epochs.effective_record_s)),rel_tol=1e-12)
+    datasheet=json.loads((ROOT/'configs/sii/s17351_datasheet.json').read_text(encoding='utf-8'))
+    assert datasheet['channels']*datasheet['microcells_per_channel']==instrument.microcells_per_pixel
+    pdf=ROOT/datasheet['source']
+    if pdf.exists():
+        assert hashlib.sha256(pdf.read_bytes()).hexdigest()==datasheet['source_sha256']
+    assert instrument.dark_count_rate_hz==0 and not datasheet['apply_to_default_instrument']
+    print('36镜性能：54行结果、1152条共享ADC记录、逐记录标定、PDF来源及全部哈希通过。')
+
 
 if __name__=='__main__':
     main()

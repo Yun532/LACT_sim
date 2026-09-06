@@ -1,0 +1,73 @@
+{
+  "source": "K30-B60168_S17351 specification sheet.pdf",
+  "document_date": "2025-01-29",
+  "status": "PRELIMINARY; manufacturer specification, not LACT operating measurement",
+  "page": 1,
+  "default_temperature_c": 25,
+  "overvoltage_v": 8.5,
+  "channels": 8,
+  "channel_area_mm": [
+    6.6,
+    3.2
+  ],
+  "microcell_pitch_um": 25,
+  "microcells_per_channel": 33792,
+  "fill_factor": 0.47,
+  "window_refractive_index": 1.57,
+  "pde_wavelength_nm": [
+    310,
+    325,
+    365,
+    405,
+    450
+  ],
+  "pde_min": [
+    0.26,
+    0.28,
+    0.29,
+    0.31,
+    0.34
+  ],
+  "pde_typical": [
+    0.29,
+    0.31,
+    0.32,
+    0.34,
+    0.37
+  ],
+  "pde_excludes_crosstalk_afterpulses": true,
+  "breakdown_voltage_v": {
+    "min": 49,
+    "typical": 52,
+    "max": 55
+  },
+  "operating_voltage_v": {
+    "min": 57.5,
+    "typical": 60.5,
+    "max": 63.5
+  },
+  "gain_typical": 1100000,
+  "terminal_capacitance_pf_per_channel": 750,
+  "capacitance_test_frequency_hz": 100000,
+  "dark_count_hz_per_channel": {
+    "typical": 1200000,
+    "max": 3000000
+  },
+  "prompt_crosstalk_probability": {
+    "typical": 0.03,
+    "max": 0.05
+  },
+  "afterpulse": {
+    "probability_typical": 0.05,
+    "temperature_c": -10,
+    "delay_distribution_ns": null
+  },
+  "gain_uniformity_max_deviation_fraction": {
+    "typical": 0.017,
+    "max": 0.027
+  },
+  "gain_stability_24h_max_fraction": 0.005,
+  "voltage_temperature_coefficient_mv_per_c": 54,
+  "apply_to_default_instrument": false,
+  "source_sha256": "9eb9f5cd4beed5d5ce98fc4aaed177a8776f993ef445d2e766c9f8b3a732fded"
+}
