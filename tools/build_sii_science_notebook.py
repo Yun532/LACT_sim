@@ -33,6 +33,7 @@ if not (ROOT/'python').exists():
 sys.path.insert(0, str(ROOT/'python'))
 import sii_unified as sii
 import sii_reconstruction as reco
+from sii_layout import read_corsika_layout
 from sii_validation import (verify_main_parameters, analytic_waveform_calibration,
     thermal_mode_counts, waveform_records, standard_deviation_interval, proportion_interval,
     profile_model_grid, profile_grid_interval)
@@ -45,15 +46,16 @@ plt.rcParams.update({'figure.dpi':110, 'savefig.dpi':180, 'axes.grid':True, 'gri
 summary = {'seed':SEED, 'python':platform.python_version(), 'numpy':np.__version__, 'scipy':scipy.__version__}
 summary['code_sha256_lf']={path:hashlib.sha256((ROOT/path).read_bytes().replace(b'\\r\\n',b'\\n')).hexdigest()
     for path in ['python/sii_unified.py','python/sii_reconstruction.py','python/sii_validation.py',
-                 'python/sii_observation.py','tools/validate_sii_observation.py',
+                 'python/sii_observation.py','python/sii_layout.py','tools/validate_sii_observation.py',
                  'tools/build_sii_science_notebook.py']}
 manifest = verify_main_parameters(ROOT)
 summary['main_parameter_commit'] = manifest['main_commit']
 instrument = sii.Instrument.from_repository(ROOT)
 observation = sii.Observation(hours_per_night=6., segment_s=1200, visibility_subsamples_per_segment=9)
-layout = pd.read_csv(ROOT/'configs/arrays/layout_0803_reco32_coordinates.csv')
+layout = read_corsika_layout(ROOT/'configs/arrays/lact36_20260906.input')
 summary['derived_input_sha256_lf']={path:hashlib.sha256((ROOT/path).read_bytes().replace(b'\\r\\n',b'\\n')).hexdigest()
-    for path in ['configs/arrays/layout_0803_reco32_coordinates.csv',
+    for path in ['configs/arrays/lact36_20260906.input',
+                 'configs/arrays/lact36_20260906_coordinates.csv',
                  'configs/optics/lact2_measured_single_pixel_400nm.csv',
                  'configs/optics/lact2_measured_single_pixel_400nm.provenance.json']}
 unknown = ['microcell_recovery_time_ns','intrinsic_time_jitter_ns','electronic_noise_rms_mv',
@@ -237,13 +239,14 @@ display(pd.read_csv(JOINT/'exposure_scaling.csv'))
 display(Image(filename=str(JOINT/'observation_validation.png')))
 display(Image(filename=str(JOINT/'processing_convergence.png')))
 ''')
-md('''## 5. 32台望远镜的时间与光谱平均测量
+md('''## 5. 36台望远镜的时间与光谱平均测量
 
-下面实际生成32台望远镜、6小时、每段20分钟的8928个UV测量。
+从原始TELESCOPE input按NWU厘米转ENU米，实际生成36台望远镜、630条基线、
+6小时、每段20分钟的11340个UV测量；位置原点和镜名顺序保持input约定。
 每段同时平均时间变化和通带内的平方可见度。右图显示带噪声测量，允许出现负值；
 颜色范围仅用于显示，不对拟合输入作裁剪。同一次标定误差在所有测量间共享。
 本节采用双镜波形标定的长曝光统计分支；第4.1节的三镜联合实验并未自动替换
-本节的32镜协方差或完成整夜时变处理。两者通过明确的验证范围关联。
+本节的36镜协方差或完成整夜时变处理。两者通过明确的验证范围关联。
 ''')
 code('''
 source_cases={'binary':sii.BinarySource(),'single_disk':sii.BinarySource(primary_diameter_mas=.16),
@@ -254,7 +257,25 @@ for index,(case,source) in enumerate(source_cases.items()):
         seed=SEED+400+index,source_case=case,estimator='waveform_gls',
         waveform_calibration=calibration,do_reconstruction=False)
 frame=pipelines['binary'].measurements
-assert len(frame)==32*31//2*18
+assert len(layout)==36
+assert len(frame)==len(layout)*(len(layout)-1)//2*18
+baselines=frame.drop_duplicates(['telescope_i_index','telescope_j_index'])[
+    ['telescope_i','telescope_j','baseline_east_m','baseline_north_m','baseline_up_m','baseline_m']]
+baselines.to_csv(OUT/'array_baselines.csv',index=False)
+summary['array_geometry']={'input':'configs/arrays/lact36_20260906.input',
+    'coordinate_conversion':'ENU_m = (-west_cm, north_cm, up_cm) / 100',
+    'baselines':len(baselines),'min_baseline_m':float(baselines.baseline_m.min()),
+    'max_baseline_m':float(baselines.baseline_m.max())}
+fig,axes=plt.subplots(1,2,figsize=(10,4))
+axes[0].scatter(layout.east_m,layout.north_m,s=14)
+for row in layout.itertuples():
+    axes[0].annotate(str(row.telescope_id),(row.east_m,row.north_m),xytext=(3,3),
+                     textcoords='offset points',fontsize=7)
+axes[0].set(xlabel='East [m]',ylabel='North [m]',title='36 telescopes from CORSIKA input')
+axes[0].set_aspect('equal')
+axes[1].hist(baselines.baseline_m,bins=20)
+axes[1].set(xlabel='Ground baseline length [m]',ylabel='Number of pairs',title='630 unique baselines')
+fig.tight_layout();fig.savefig(FIG/'08_array_layout.png');plt.show()
 fig,axes=plt.subplots(1,2,figsize=(10,4))
 for ax,column,title in zip(axes,['visibility2_true','visibility2_measured'],['Time + band averaged truth','Simulated measurement']):
     im=ax.scatter(frame.u_lambda/1e6,frame.v_lambda/1e6,c=frame[column],s=3,cmap='viridis',vmin=-.2,vmax=1.2)

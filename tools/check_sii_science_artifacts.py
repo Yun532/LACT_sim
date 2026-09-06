@@ -47,13 +47,28 @@ def main():
     sys.path.insert(0,str(ROOT/'python'))
     from sii_unified import Instrument, waveform_instrument_signature, detected_star_rate_hz
     instrument=Instrument.from_repository(ROOT)
+    from sii_layout import read_corsika_layout
+    import pandas as pd
+    layout=read_corsika_layout(ROOT/'configs/arrays/lact36_20260906.input')
+    pd.testing.assert_frame_equal(layout,pd.read_csv(ROOT/'configs/arrays/lact36_20260906_coordinates.csv'),
+                                  check_exact=False,atol=1e-10,rtol=0)
+    assert len(layout)==36
+    assert summary['observation']['telescopes']==len(layout)
+    assert summary['observation']['uv_measurements']==len(layout)*(len(layout)-1)//2*18
+    baselines=pd.read_csv(ROOT/'validation/sii_science/array_baselines.csv')
+    assert len(baselines)==len(layout)*(len(layout)-1)//2
+    assert not baselines.duplicated(['telescope_i','telescope_j']).any()
+    assert summary['array_geometry']['baselines']==len(baselines)
+    for bound in ['min','max']:
+        assert math.isclose(summary['array_geometry'][f'{bound}_baseline_m'],
+                            getattr(baselines.baseline_m,bound)(),rel_tol=1e-12)
+    print('36台原始input与ENU坐标一致；630条基线和11340个UV测量的结果计数通过。')
     assert waveform_instrument_signature(instrument)==joint['instrument_signature']
     scenario=joint['instrument_scenario']
     assert math.isclose(detected_star_rate_hz(scenario['magnitude_ab'],instrument),
                         scenario['star_rate_hz'],rel_tol=1e-12)
     assert math.isclose(instrument.detected_nsb_rate_hz+instrument.dark_count_rate_hz,
                         scenario['background_rate_hz'],rel_tol=1e-12)
-    import pandas as pd
     records=pd.read_csv(observation/'records.csv')
     assert len(records)==3*(joint['calibration_records']+3*joint['records'])
     assert len(pd.read_csv(observation/'baseline_covariance.csv'))==27

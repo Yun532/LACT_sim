@@ -23,6 +23,7 @@ from scipy.stats import chi2, f
 from sii_unified import (Instrument, detected_star_rate_hz, waveform_gls_weights,
                          waveform_instrument_signature, SIDEREAL_DAY_S)
 from sii_validation import analytic_waveform_calibration, verify_main_parameters
+from sii_layout import read_corsika_layout
 from sii_observation import (geometric_arrival_delays_ns, simulate_array_waveforms,
                              align_waveforms, correlate_blocks, joint_thermal_mode_counts)
 
@@ -64,8 +65,8 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     manifest = verify_main_parameters(ROOT)
     instrument = Instrument.from_repository(ROOT)
-    layout_path = 'configs/arrays/layout_0803_reco32_coordinates.csv'
-    layout = pd.read_csv(ROOT/layout_path).iloc[[0, 1, 5]]
+    layout_path = 'configs/arrays/lact36_20260906.input'
+    layout = read_corsika_layout(ROOT/layout_path).iloc[[0, 1, 5]]
     positions = layout[['east_m', 'north_m', 'up_m']].to_numpy()
     # 几何来自LACT布局；以下赤经对应的时角、赤纬及复相干矩阵是明确的检验场景。
     hour, dec, lat = .5, .3, np.deg2rad(29.3586)
@@ -274,9 +275,9 @@ def main():
                                           & (ratio/np.sqrt(f.ppf(.001, args.records-1, args.records-1)) > 1)))))
     # 冻结几何的块内误差是实际转动速度下的上界检查，不把整夜当成固定时延。
     later_delays = geometric_arrival_delays_ns(positions, hour+2*np.pi*duration*1e-9/SIDEREAL_DAY_S, dec, lat)
-    code_paths = ['python/sii_unified.py', 'python/sii_validation.py', 'python/sii_observation.py',
+    code_paths = ['python/sii_unified.py', 'python/sii_validation.py', 'python/sii_observation.py', 'python/sii_layout.py',
                   'tools/validate_sii_observation.py', 'tests/test_sii_observation.py']
-    input_paths = [item['path'] for item in manifest['files']]+[layout_path]
+    input_paths = [item['path'] for item in manifest['files']]+[layout_path, 'configs/arrays/lact36_20260906_coordinates.csv']
     input_paths += ['configs/optics/lact2_measured_single_pixel_400nm.csv',
                     'configs/optics/lact2_measured_single_pixel_400nm.provenance.json']
     summary = dict(seed=args.seed, records=args.records, calibration_records=args.calibration_records,

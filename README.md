@@ -25,7 +25,6 @@ python tools/check_sii_science_artifacts.py
 ```python
 from pathlib import Path
 import sys
-import pandas as pd
 
 root = Path.cwd()
 sys.path.insert(0, str(root / "python"))
@@ -35,7 +34,7 @@ import sii_unified as sii
 instrument = sii.Instrument.from_repository(root)
 source = sii.BinarySource()
 observation = sii.Observation()
-layout = pd.read_csv(root / "configs/arrays/layout_0803_reco32_coordinates.csv")
+layout = root / "configs/arrays/lact36_20260906.input"
 
 # 仪器响应、星等或背景改变后，需要重新标定。
 calibration, _ = sii.simulate_waveform_gls_calibration(
@@ -56,6 +55,8 @@ image = sii.reconstruct_uv(
 主Notebook第4.1节实际执行三镜观测链、同区间插值收敛与24/96 μs曝光对照；也可运行`python tools/validate_sii_observation.py`。结果保存在`validation/sii_observation/`，输入格式和适用范围见[实现说明](docs/SII_IMPLEMENTATION_ZH.md#41-多镜观测入口)。
 
 ## 参数与输出
+
+默认阵列采用[36台原始input](configs/arrays/lact36_20260906.input)。沿用CORSIKA的北、西、上厘米坐标：`East=-West/100`、`North=North/100`、`Up=Up/100`，得到630条基线。派生坐标见[ENU米制CSV](configs/arrays/lact36_20260906_coordinates.csv)。
 
 默认仪器入口为`configs/examples/corsika_lact_pylast_root_only_measured_waveform.cfg`，由组件配置读取光谱响应、SPE、电荷分布和微单元几何。参数覆盖及数据格式见[实现说明](docs/SII_IMPLEMENTATION_ZH.md)。
 

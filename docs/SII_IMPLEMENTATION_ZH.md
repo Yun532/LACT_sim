@@ -9,6 +9,7 @@
 | [`python/sii_unified.py`](../python/sii_unified.py) | 读配置、源模型、几何、光子流、波形、GLS标定、长曝光数据和数据整理 | 波形GLS与旧解析SNR分支分别命名 |
 | [`python/sii_reconstruction.py`](../python/sii_reconstruction.py) | 只根据测量和采样重建；处理共同增益先验、正则化与收敛诊断 | 真值只能在拟合完成后用于评价 |
 | [`python/sii_validation.py`](../python/sii_validation.py) | 独立热光场、连续响应解析对照、留出波形、参数剖面和覆盖率工具 | 解析参考不调用共享光电子对生成器 |
+| [`python/sii_layout.py`](../python/sii_layout.py) | 从TELESCOPE input读取原始NWU厘米坐标，转换ENU米并保留原值及行号 | 镜号按input顺序，标签保留；半径400 cm表示4 m半径 |
 | [`python/sii_observation.py`](../python/sii_observation.py) | 多镜共享事件及波形、到达时差、分数采样补偿、分块相关、独立多镜热光模 | 主Notebook第4.1节实际执行；第5节整阵列长曝光仍是独立统计分支 |
 | [`tools/build_sii_science_notebook.py`](../tools/build_sii_science_notebook.py) | 用nbformat生成主Notebook的代码及中文解释 | 重新生成会清空该Notebook的执行输出，随后必须从头运行 |
 | [`tools/execute_notebook.py`](../tools/execute_notebook.py) | 用nbclient在指定目录完整执行并保存Notebook | 单元报错时保留已执行输出，进程仍返回失败 |
@@ -54,6 +55,18 @@ run_sii_pipeline
 
 主Notebook记录源代码、布局和光追缓存哈希、随机种子及Python/NumPy/SciPy版本。光追缓存的原始逐光子文件位于历史溯源记录中的路径；本次没有重新运行百万光子的完整C++光追，不能将输入参数一致性核对说成重新验证了整条光学链。
 
+### 2.1 阵列input的转换
+
+当前阵列输入为[`lact36_20260906.input`](../configs/arrays/lact36_20260906.input)，来源是用户提供的36行TELESCOPE卡片，独立于main仪器参数清单。`read_corsika_layout`只读取TELESCOPE卡片，检查有限坐标、正半径和唯一标签；按出现顺序生成1起始镜号和0起始索引，保留原始NWU厘米、转换ENU米、半径与input行号。`generate_uvw`和`run_sii_pipeline`可直接接收`.input`路径，也兼容已有CSV及DataFrame。DataFrame中的非有限ENU位置会明确报错。
+
+转换遵循[`EventIOPhotonSource.cpp`](../src/io/EventIOPhotonSource.cpp)的厘米到米，以及[`CorsikaTraceEventIOInput.cpp`](../src/io/CorsikaTraceEventIOInput.cpp)中的`(-y, x, z)`。例如Tel.1得到ENU=(-434.92063, 417.46032, 0) m，Tel.36得到(266.66667, 136.50794, 0) m；所有镜的半径为4 m。旧32台CSV是历史布局，当前入口不再默认使用它。需要重新导出可运行：
+
+```powershell
+python python/sii_layout.py configs/arrays/lact36_20260906.input configs/arrays/lact36_20260906_coordinates.csv
+```
+
+测试和结果检查脚本同时核对raw input与派生CSV，检查630条唯一基线和11340条分段测量，避免只更新坐标文件却继续使用旧阵列结果。
+
 ## 3. 缺失参数的零值约定
 
 `Instrument`是不可变dataclass，修改使用`dataclasses.replace`或`from_repository(..., **overrides)`。字段名保留英文，物理用途和关键算法用中文注释。
@@ -77,7 +90,6 @@ run_sii_pipeline
 from pathlib import Path
 from dataclasses import replace
 import sys
-import pandas as pd
 
 ROOT = Path.cwd()  # 在仓库根目录运行
 sys.path.insert(0, str(ROOT / "python"))
@@ -88,7 +100,7 @@ instrument = sii.Instrument.from_repository(ROOT)
 instrument = replace(instrument, intrinsic_time_jitter_ns=0.0)
 calibration, diagnostics = sii.simulate_waveform_gls_calibration(
     instrument, null_records=2048, signal_records=512, seed=20260905)
-layout = pd.read_csv(ROOT / "configs/arrays/layout_0803_reco32_coordinates.csv")
+layout = ROOT / "configs/arrays/lact36_20260906.input"
 result = sii.run_sii_pipeline(
     layout, sii.BinarySource(), sii.Observation(), instrument,
     estimator="waveform_gls", waveform_calibration=calibration,
@@ -209,7 +221,7 @@ print(result["mean_correlation"].shape, result["effective_duration_s"])
 
 独立解析对照只适用于线性探测和弱信号。ADC剪裁、微单元恢复、串扰和后脉冲开启时，它显式拒绝计算。白噪声和高斯本征抖动可在该解析对照中传播。解析网格0.05 ns与0.025 ns另作收敛检查。
 
-圆盘的剖面区间采用0.12至0.20 mas、801个固定网格点。`profile_grid_interval`报告碰边和不连通情况。当前1000次检验为953次覆盖，比例0.953，95%二项区间约[0.9380, 0.9653]；这与名义95%相容。噪声尺度改变约±6.13%后，覆盖率分别为0.939和0.963，说明有限尺度标定值得保留，不能只报告漂亮的中心数值。
+圆盘剖面区间采用0.12至0.20 mas、801个网格点，并报告碰边和不连通情况。新36台布局的1000次检验为959次覆盖，比例0.959，95%二项区间约[0.9448, 0.9704]，与名义95%相容。噪声尺度改变约±6.13%后，覆盖率为0.942和0.971；有限标定误差仍会影响推断。
 
 ## 8. 如何完整复现
 
@@ -232,6 +244,7 @@ python tools/execute_notebook.py notebooks/sii_complete_waveform_report.ipynb --
 - `response.csv`、`covariance.csv`、`waveform_calibration.npz`：本次GLS标定。
 - `independent_null.csv`、`injection_scale.csv`、`block_duration.csv`：独立波形结果。
 - `binary_measurements.csv`：供检查和画图的长曝光测量简表。
+- `array_baselines.csv`：由36台input转换位置生成的630条唯一基线及长度。
 - `diameter_profile.csv`、`diameter_coverage.csv`、`time_quadrature.csv`：参数区间、覆盖率和时间积分检验。
 - `reconstruction.csv`、`convergence.csv`、`image_alignment.csv`、`image_repeats.csv`和各源`*_image.npy`：重建与稳定性。
 - `summary.json`：实际运行版本、输入哈希、种子、所有核心结果及适用范围。
@@ -248,15 +261,15 @@ python tools/check_sii_science_artifacts.py
 
 它默认生成256条训练记录、各384条注入留出/物理倍率/零信号记录，共1408条24 μs三镜原始波形；另生成384条96 μs物理倍率波形，并做30万条独立热光模计算。结果位于[`validation/sii_observation`](../validation/sii_observation)：`records.csv`保留固定解析权重的逐记录投影，`response.csv`保存各处理方法及基线的训练增益和标准误，`baseline_covariance.csv`保存基线联合协方差和近似相关区间，`thermal_moments.csv`为独立物理矩检验，`summary.json`记录输入、种子、代码哈希和适用范围。图由本次运行直接绘制。
 
-`kernel_records.csv`保留16、32、64、128、256、512点半宽在相同19.352 μs区间内的逐记录投影；`kernel_convergence.csv`报告相对512点的配对响应差、均值标准误和噪声标准差比。比较时不对每个核单独除以新训练增益，否则会掩盖数值响应差。512点只是有限宽度参考，不能把参考曲线的零差、零误差棒解释为模拟真值精确已知。
+`kernel_records.csv`保留16、32、64、128、256、512点半宽在相同19.232 μs区间内的逐记录投影；`kernel_convergence.csv`报告相对512点的配对响应差、均值标准误和噪声标准差比。比较时不对每个核单独除以新训练增益，否则会掩盖数值响应差。512点只是有限宽度参考，不能把参考曲线的零差、零误差棒解释为模拟真值精确已知。
 
-`long_records.csv`保存独立生成的96 μs记录；`exposure_scaling.csv`将其噪声与原24 μs物理倍率样本比较。计算使用裁剪后的95.320和23.320 μs，标准差比乘曝光比平方根；表中95%区间来自近似正态块统计量的F分布。自动异常检查采用预先固定的双侧99.8%区间，图中仍展示较窄的95%区间，二者不能混称。通过这一检查不证明微秒到整夜的全部外推成立。
+`long_records.csv`保存独立生成的96 μs记录；`exposure_scaling.csv`将其噪声与原24 μs物理倍率样本比较。计算使用裁剪后的95.024和23.024 μs，标准差比乘曝光比平方根；表中95%区间来自近似正态块统计量的F分布。自动异常检查采用预先固定的双侧99.8%区间，图中仍展示较窄的95%区间，二者不能混称。通过这一检查不证明微秒到整夜的全部外推成立。
 
 此入口采用固定解析GLS投影，再用独立训练数据校准补偿后的响应；尚未重新优化插值后的完整滞后权重。噪声尺度区间以训练增益固定为条件，增益误差在`response.csv`另报；注入恢复误差棒包含训练与留出两部分。物理倍率记录不与放大注入混合估计噪声，更不能用放大注入的基线相关外推整夜。处理链检验与主Notebook的长曝光灵敏度、重建结果有各自的代码哈希，保持清楚的证据范围。
 
-主Notebook包含24个单元，其中13个代码单元；自动测试共67项。完整执行状态及结果版本由下述检查脚本核对。
+主Notebook包含24个单元，其中13个代码单元；自动测试共74项。完整执行状态及结果版本由下述检查脚本核对。
 运行`python tools/check_sii_science_artifacts.py`可再检查说明链接、公式分隔符、Notebook执行状态和结果中的源代码/输入哈希。
-36次图像重复中，35次优化器正常结束，31次通过驻点阈值；5次驻点未通过全部来自单圆盘，其中1次优化器也未报告收敛。失败记录和对应图像仍参与公开的稳定性汇总，不能把35/36的优化器状态写成全部图像可靠。
+新36台布局的36次图像重复均由优化器正常结束，并通过驻点阈值。逐次误差及配准保留通量仍公开在`image_repeats.csv`；通过数值诊断不等于图像唯一、全局最优或遮挡结构已检出。程序仍保留失败记录，不按成功状态筛选稳定性汇总。
 
 ## 9. 收到下一批真实参数时怎样更新
 

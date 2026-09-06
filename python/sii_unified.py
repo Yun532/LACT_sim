@@ -1494,13 +1494,19 @@ def sample_waveform_gls_visibility2(
 
 
 def _load_layout(layout) -> pd.DataFrame:
-    frame = pd.read_csv(layout) if isinstance(layout, (str, Path)) else layout.copy()
+    if isinstance(layout, (str, Path)) and Path(layout).suffix.lower() == '.input':
+        from sii_layout import read_corsika_layout
+        frame = read_corsika_layout(layout)
+    else:
+        frame = pd.read_csv(layout) if isinstance(layout, (str, Path)) else layout.copy()
     aliases = {"position_x_m": "east_m", "position_y_m": "north_m",
                "position_z_m": "up_m"}
     frame = frame.rename(columns=aliases)
     required = {"east_m", "north_m", "up_m"}
     if not required.issubset(frame):
         raise ValueError(f"layout is missing {sorted(required-set(frame.columns))}")
+    if not np.all(np.isfinite(frame[['east_m', 'north_m', 'up_m']].to_numpy(float))):
+        raise ValueError('望远镜ENU坐标必须为有限数值')
     if "telescope_id" not in frame:
         frame["telescope_id"] = np.arange(1, len(frame)+1)
     if "name" not in frame:
