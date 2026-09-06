@@ -22,7 +22,7 @@ python tools/check_sii_science_artifacts.py
 
 需要与已验证环境保持相同直接依赖版本时，使用`requirements-sii-validated.txt`。
 
-只运行最终性能验证集：`python tools/validate_sii_performance.py`。完整Notebook第9节会实际执行同一命令；前面的图像结果保留原估计器，不能将新误差验证自动归给旧图像。
+只运行最终性能验证集：`python tools/validate_sii_performance.py`。完整Notebook第9节会实际执行同一命令；主UV/图像与最终性能共用采样相位处理，后者另用共享36镜ADC标定和共同噪声预算。
 
 ## Python接口
 
@@ -56,7 +56,7 @@ image = sii.reconstruct_uv(
 
 主要模块：`python/sii_unified.py`负责模拟和GLS标定，`python/sii_reconstruction.py`负责重建，`python/sii_validation.py`提供独立验证，`python/sii_observation.py`提供多镜共享波形、时延补偿及分块相关。
 
-主Notebook附加验证C实际执行三镜观测链、同区间插值收敛与24/96 μs曝光对照；也可运行`python tools/validate_sii_observation.py`。结果保存在`validation/sii_observation/`，输入格式和适用范围见[实现说明](docs/SII_IMPLEMENTATION_ZH.md#41-多镜观测入口)。
+主Notebook附加验证C实际执行三镜观测链、同区间插值收敛与24/96 μs曝光对照；也可运行`python tools/validate_sii_observation.py`。结果保存在`validation/sii_observation/`，输入格式和适用范围见[实现说明](docs/SII_IMPLEMENTATION_ZH.md)。
 
 附加验证D实际执行跨时刻的局部时延率注入与波形追踪；可单独运行`python tools/validate_sii_tracking.py`。七个时刻的短记录是独立处理检验，不计作连续6小时曝光。
 
@@ -70,7 +70,9 @@ image = sii.reconstruct_uv(
 
 缺失电子学参数保留接口，默认`0`且关闭；SPE长尾不作为微单元恢复时间。尚无实现或未标定的效应设为非零会明确报错。2 nm通带和固定源透过率属于场景假设。
 
-S17351规格书的有条件参数保存在[结构化摘录](configs/sii/s17351_datasheet.json)。25℃暗计数可单独启用1或8通道汇总情景；不会自动覆盖main的实测响应。仍缺的六组电子学信息见[实现说明第10节](docs/SII_IMPLEMENTATION_ZH.md#10-36镜角直径性能入口及sipm规格书)。
+S17351规格书的有条件参数保存在[结构化摘录](configs/sii/s17351_datasheet.json)。25℃暗计数可单独启用1或8通道汇总情景；不会自动覆盖main的实测响应。接口和缺项见[实现说明第14节](docs/SII_IMPLEMENTATION_ZH.md#14-保留的零值接口替代路径与规格书边界)。
+
+跨文件重建使用`write_uv_data/read_uv_data`的完整NPZ，保留时间/光谱积分节点、共享增益先验及可选协方差。Notebook保存后读回四个`*_uv.npz`再拟合；浏览用CSV不替代完整推断输入。
 
 Notebook输出保存在`validation/sii_science/`，图片位于`docs/sii_science_figures/`。短波形实际生成光电子与采样电压；长曝光使用经标定的统计模型，不生成整夜ADC。结果用于给定假设下的性能预测，重建的收敛状态和形态稳定性需分别检查。
 

@@ -31,10 +31,18 @@ def theoretical_scene(root, instrument, observation, layout, source, figures, ou
     # 与主程序使用同一窄带及三条响应曲线；共同通光比例在归一场相关中抵消。
     wavelength=np.linspace(instrument.wavelength_nm-instrument.optical_width_nm/2,
                            instrument.wavelength_nm+instrument.optical_width_nm/2,4097)
+    bandpass = None
+    if instrument.sii_bandpass_path:
+        bandpass = sii._read_two_column_curve(instrument.sii_bandpass_path)
+        wavelength = np.unique(np.concatenate((wavelength, bandpass[0])))
+        wavelength = wavelength[(wavelength >= instrument.wavelength_nm-instrument.optical_width_nm/2)
+                                & (wavelength <= instrument.wavelength_nm+instrument.optical_width_nm/2)]
     response=np.ones_like(wavelength)
     for filename in ['mirror_reflectivity_dm0113_13point_mean.csv','filter_transmission.csv','sipm_pde.csv']:
         xx,yy=sii._read_two_column_curve(root/'configs/efficiency'/filename)
         response*=np.interp(wavelength,xx,yy)
+    if bandpass is not None:
+        response*=np.interp(wavelength,*bandpass,left=0.,right=0.)
     density=response/wavelength
     lag_ps=np.linspace(-1.,1.,801)
     frequency=sii.C_M_S/(wavelength*1e-9)
@@ -135,7 +143,7 @@ def array_and_model_views(pipelines,instrument,observation,figures,output):
     limit=max(abs(frame.u_lambda).max(),abs(frame.v_lambda).max())/1e6*1.03
     axis=np.linspace(-limit,limit,321);uu,vv=np.meshgrid(axis*1e6,axis*1e6)
     theoretical=sii.uniform_disk_visibility(np.hypot(uu,vv),.16)**2
-    fig,axes=plt.subplots(1,3,figsize=(13,4))
+    fig,axes=plt.subplots(1,3,figsize=(15,4),layout='constrained')
     image=axes[0].imshow(theoretical,origin='lower',extent=[-limit,limit,-limit,limit],vmin=0,vmax=1,cmap='viridis')
     axes[0].set(title='Continuous theory: 0.16 mas disk')
     for ax,column,title in zip(axes[1:],['visibility2_true','visibility2_measured'],['Sampled, time + band average','Simulated measurements']):

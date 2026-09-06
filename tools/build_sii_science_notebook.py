@@ -121,7 +121,8 @@ display(thermal)
 md('''## 3. 波形标定与独立解析响应
 
 Monte Carlo将记录分为训练、选择、尺度估计和最终响应检验部分。
-解析对照由连续SPE自相关、光学时间核和Bartlett协方差计算，不用Monte Carlo的峰形作为输入。
+连续SPE和时间核提供主标定的相位模板形状；Monte Carlo确定协方差、响应增益和噪声尺度。
+图中另外显示实际模拟相关的样本均值；它才是独立于连续模板的波形响应对照。
 图中的曲线都是单位平方可见度的期望响应，不是单次物理波形中可见的相关峰。
 ''')
 code('''
@@ -144,8 +145,10 @@ pd.DataFrame({'lag_ns':calibration.lags_ns,'mc_peak':calibration.peak_per_visibi
 pd.DataFrame(calibration.covariance_per_block).to_csv(OUT/'covariance.csv',index=False)
 display(pd.DataFrame([summary['calibration']]))
 fig, axes = plt.subplots(1,2,figsize=(10,3.3))
-axes[0].plot(calibration.lags_ns,calibration.peak_per_visibility2*1e6,label='MC calibration')
-axes[0].plot(analytic.lags_ns,analytic.peak_per_visibility2*1e6,'--',label='Independent response')
+axes[0].plot(calibration.lags_ns,calibration.peak_per_visibility2*1e6,label='Continuous shape + MC gain')
+raw_peak=calibration_diagnostics['mean_signal_correlation']/(calibration.calibration_visibility2*calibration.hbt_pair_rate_scale)
+axes[0].plot(calibration.lags_ns,raw_peak*1e6,alpha=.6,label='Raw MC mean')
+axes[0].plot(analytic.lags_ns,analytic.peak_per_visibility2*1e6,'--',label='Continuous response')
 axes[0].set(xlabel='Lag [ns]',ylabel='Correlation / P [1e-6]'); axes[0].legend()
 corr = calibration.covariance_per_block/np.sqrt(np.outer(np.diag(calibration.covariance_per_block),np.diag(calibration.covariance_per_block)))
 im=axes[1].imshow(corr,origin='lower',extent=[-200,200,-200,200],vmin=-1,vmax=1,cmap='coolwarm')
@@ -420,6 +423,8 @@ fits={}; kernels={}; uv_data={}
 reconstruction_rows=[]
 for index,(case,pipeline) in enumerate(pipelines.items()):
     uv=sii.prepare_reconstruction_uv(pipeline.measurements,cell_mlambda=120.)
+    reco.write_uv_data(OUT/(case+'_uv.npz'),uv)
+    uv=reco.read_uv_data(OUT/(case+'_uv.npz'))
     kernel=reco.power_sampling_kernel(uv,GRID,FOV)
     fit=reco.reconstruct_uv_data(uv,grid_size=GRID,fov_mas=FOV,support_radius_mas=.32,
         starts=3,max_iter=8000,smoothness='cv',smoothness_candidates=(0.,1e-4,.01),
@@ -646,9 +651,9 @@ display(pd.DataFrame([lesson_pair]))
 md('''## 5. 用整个相关峰估计信号及误差
 
 相关函数的相邻滞后点并非独立。下面显示完整峰模板和滞后噪声协方差，
-说明GLS为什么不能只取最高点。Monte Carlo与连续响应解析式独立计算。
-接下来的探索性UV/图像采用该双镜标定；末尾最终性能另用36镜相位匹配标定。
-两条估计器会明确分开，不能将它们的误差数值混用。
+说明GLS为什么不能只取最高点。连续SPE决定相位模板形状，Monte Carlo标定增益和协方差；
+另画原始MC样本均值检验响应。接下来的UV/图像与最终性能共用采样相位处理，
+但前者用两镜标定，后者另做共享36镜标定与误差预算，数值不能混用。
 ''')
 code(evidence[7].source)
 md('''## 6. 地球自转把一个镜对扩展成整个UV观测
@@ -686,7 +691,7 @@ code(evidence[21].source)
 code(evidence[22].source)
 md('''## 9. 最后看性能：哪些条件下能测得准
 
-这里切换到最终36镜相位匹配估计器：实际生成共享ADC，独立训练响应和零信号噪声，
+这里用共享36镜ADC独立训练响应和零信号噪声，继续使用前面同一套相位处理，
 把标定误差、段内相位和弱光共镜误差修正传入角直径推断。
 固定星等2/4/6、直径0.08/0.16/0.32 mas、曝光1/3/6小时，逐项与基准比较。
 三幅主图依次展示精度、区间覆盖率及规格书暗计数影响。低信噪比触边结果照常保留。

@@ -94,7 +94,7 @@ def analytic_waveform_calibration(instrument: Instrument, magnitude=2.,
     calibration = WaveformGLSCalibration(
         lags, np.zeros(len(lags)), peak, covariance, block_duration_ns*1e-9,
         star, background, 1., 1., 0, 0, 0.,
-        instrument_signature=waveform_instrument_signature(instrument))
+        instrument_signature=waveform_instrument_signature(instrument), phase_model='linear_spe')
     diagnostics = dict(variance_mv2=variance, spe_area_mv_ns=float(np.trapezoid(pulse, fine_t)),
                        charge_second_moment=second_moment,
                        photon_degeneracy=star*instrument.coherence_area_s,

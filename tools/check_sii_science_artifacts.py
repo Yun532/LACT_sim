@@ -117,6 +117,27 @@ def main():
     expected=sii.segment_averaged_visibility2(disk,source,observation,instrument,'single_disk')
     np.testing.assert_allclose(disk.visibility2_true,expected,rtol=1e-11,atol=1e-13)
     assert len(disk)==11340 and (disk.visibility2_measured<0).any()
+    # 发布的完整输入要和浏览表对应；用几何重新恢复积分节点，检查保存后没有换模型。
+    from sii_reconstruction import read_uv_data
+    for case, table in [('single_disk', disk),
+                        ('binary', pd.read_csv(lesson_dir/'binary_measurements.csv'))]:
+        u, v = sii.segment_uv_samples(table, observation, instrument)
+        table = table.copy()
+        table['uv_samples_u'], table['uv_samples_v'] = list(u), list(v)
+        table['uv_samples_weight'] = [sii.segment_sampling_weights(observation,instrument)]*len(table)
+        rebuilt = sii.prepare_reconstruction_uv(table,cell_mlambda=120.)
+        portable = read_uv_data(lesson_dir/(case+'_uv.npz'))
+        for name in ('u_lambda','v_lambda','visibility_abs2','sigma','weight','multiplicity'):
+            tolerance = 1e-5 if name in ('u_lambda','v_lambda') else 1e-12
+            np.testing.assert_allclose(getattr(rebuilt,name),getattr(portable,name),rtol=1e-12,atol=tolerance)
+        assert math.isclose(rebuilt.calibration_relative_sigma,portable.calibration_relative_sigma,rel_tol=1e-12)
+        for index,(first,second) in enumerate(zip(rebuilt.sampling,portable.sampling)):
+            # CSV几何的十进制往返在投影相消处有浮点误差；1e-5波长仅为4e-12 m。
+            np.testing.assert_allclose(first,second,rtol=1e-12,atol=1e-5 if index<2 else 1e-12)
+    for case in ('ellipse','transit'):
+        portable = read_uv_data(lesson_dir/(case+'_uv.npz'))
+        assert portable.input_rows==11340 and portable.sampling is not None
+    print('四种源的完整UV文件可读；圆盘/双星测量、积分节点、权重及共享先验与几何重算一致。')
     ideal=pd.read_csv(lesson_dir/'walkthrough_ideal_hbt.csv')
     assert math.isclose(ideal.loc[ideal.lag_ps.abs().idxmin(),'g2_zero'],1.5,rel_tol=1e-12)
     print('教学主线：物理倍率事件和ADC可重放；同一记录的相关/GLS、基准圆盘的全部UV期望一致。')

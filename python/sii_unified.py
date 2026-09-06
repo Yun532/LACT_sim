@@ -162,6 +162,20 @@ class Instrument:
             knots.append(bandpass[0])
         wavelength = np.unique(np.concatenate(knots))
         wavelength = wavelength[(wavelength >= lower) & (wavelength <= upper)]
+        integration_weights = None
+        if bandpass is not None:
+            # 在实测曲线的每个线性区间积分，窄峰不会被固定全带宽节点漏掉。
+            edges = np.unique(np.concatenate((wave_mirror, wave_filter,
+                wave_pde, wave_nsb, bandpass[0], [lower, upper])))
+            edges = edges[(edges >= lower) & (edges <= upper)]
+            nodes, weights = np.polynomial.legendre.leggauss(5)
+            half = np.diff(edges)/2
+            wavelength = ((edges[:-1]+half)[:, None]
+                          + half[:, None]*nodes).ravel()
+            integration_weights = (half[:, None]*weights).ravel()
+        def integrate(values):
+            return (np.trapezoid(values, wavelength) if integration_weights is None
+                    else np.dot(integration_weights, values))
         response = np.ones_like(wavelength)
         for x, y in ((wave_mirror, mirror), (wave_filter, filt), (wave_pde, pde)):
             response *= np.interp(wavelength, x, y, left=0., right=0.)
@@ -169,7 +183,7 @@ class Instrument:
             if np.any((bandpass[1] < 0) | (bandpass[1] > 1)):
                 raise ValueError("SII passband transmission must lie in [0, 1]")
             response *= np.interp(wavelength, *bandpass, left=0., right=0.)
-        photon_integral = np.trapezoid(response/wavelength, wavelength)
+        photon_integral = integrate(response/wavelength)
         if photon_integral <= 0:
             raise ValueError("SII passband has no detected throughput")
         central_response = (np.interp(wavelength_nm, wave_mirror, mirror)
@@ -178,17 +192,24 @@ class Instrument:
         if central_response <= 0:
             raise ValueError("central wavelength has no detected throughput")
         band_average_ratio = photon_integral/(width_nm/wavelength_nm)/central_response
-        spectral_shape = (width_nm*np.trapezoid(response**2, wavelength)
+        spectral_shape = (width_nm*integrate(response**2)
                           / (wavelength_nm**2*photon_integral**2))
         # HBT相关面积按探测光谱密度平方加权；平坦AB谱下换成波长后正比于响应平方。
         nodes, quadrature = np.polynomial.legendre.leggauss(5)
         spectral_nodes = wavelength_nm+width_nm/2*nodes
         spectral_weights = quadrature*np.interp(spectral_nodes, wavelength, response)**2
+        if integration_weights is not None:
+            spectral_nodes = wavelength.copy()
+            spectral_weights = integration_weights*response**2
+            active = spectral_weights > 0
+            spectral_nodes, spectral_weights = spectral_nodes[active], spectral_weights[active]
+        if not np.isfinite(spectral_weights.sum()) or spectral_weights.sum() <= 0:
+            raise ValueError("SII visibility quadrature has no finite positive response")
         spectral_weights /= spectral_weights.sum()
         detected_spectrum = np.interp(wavelength, wave_nsb, nsb_flux,
                                      left=0., right=0.)*response
         # main 的诊断工具把结果写成 p.e./ns；这里的公共接口统一使用 Hz。
-        nsb_rate = (np.trapezoid(detected_spectrum, wavelength)
+        nsb_rate = (integrate(detected_spectrum)
                     * effective_area * (pixel_size/focal_length)**2 * collector)
 
         electronics_path = component_paths["electronics"]
@@ -349,6 +370,7 @@ class WaveformGLSCalibration:
     instrument_signature: str | None = None
     response_relative_uncertainty: float = 0.0
     sigma_relative_uncertainty: float = 0.0
+    phase_model: str = ""
 
     def covariance(self, exposure_s: float) -> np.ndarray:
         """按独立数据块平均的 ``1/T`` 定律返回指定曝光协方差。"""
@@ -700,6 +722,8 @@ def matched_effective_bandwidth_hz(
         np.exp(-2j*np.pi*frequency_per_ns[:, None]*means_ns[None, :])
         * np.exp(-2*np.pi**2*frequency_per_ns[:, None]**2
                  * sigmas_ns[None, :]**2)) @ weights
+    optical_transfer *= np.exp(-2*np.pi**2*frequency_per_ns**2
+                               * instrument.intrinsic_time_jitter_ns**2)
 
     star_rate_hz = detected_star_rate_hz(source_ab_magnitude, instrument)
     total_rate_hz = (star_rate_hz + instrument.detected_nsb_rate_hz
@@ -1395,6 +1419,15 @@ def simulate_waveform_gls_calibration(
     calibration.null_mean = np.zeros(lag_count)
     calibration.peak_per_visibility2 = 0.5*(
         calibration.peak_per_visibility2+calibration.peak_per_visibility2[::-1])
+    # 线性响应的连续模板保留亚采样形状；独立波形仍决定协方差、增益和误差。
+    if (spe_template is None and nsb_rate == instrument.detected_nsb_rate_hz
+            and not any((instrument.adc_bits, instrument.microcell_recovery_time_ns,
+                         instrument.sipm_crosstalk_probability, instrument.sipm_afterpulse_probability))):
+        from sii_validation import analytic_waveform_calibration
+        reference, _ = analytic_waveform_calibration(instrument, source_ab_magnitude,
+            block_duration_ns=block_duration_ns, max_lag_ns=max_lag_ns)
+        calibration.peak_per_visibility2 = reference.peak_per_visibility2.copy()
+        calibration.phase_model = "linear_spe"
     diagonal = np.diag(np.diag(stationary_covariance))
     injected_visibility2 = calibration_visibility2*hbt_pair_rate_scale
     selection = []
@@ -1734,9 +1767,14 @@ def simulate_uv_observation(
             raise NotImplementedError(
                 "waveform_gls systematics are not calibrated: " + ", ".join(enabled))
         exposure_s = observation.segment_s*observation.nights
-        measured, sigma_value = sample_waveform_gls_visibility2(
-            truth, waveform_calibration, exposure_s, rng)
-        sigma_stat = np.full(len(frame), sigma_value)
+        from sii_performance import phase_template_bank, tracked_segment_precision
+        bank = phase_template_bank(instrument, source.ab_magnitude,
+            block_duration_ns=waveform_calibration.block_duration_s*1e9,
+            calibration=waveform_calibration)
+        sigma_stat = tracked_segment_precision(frame, observation, instrument, bank)
+        gain = 1+rng.normal(0., waveform_calibration.response_relative_uncertainty)
+        measured = gain*truth+rng.normal(0., sigma_stat)
+        sigma_value = float(np.median(sigma_stat))
         frame["visibility2_measured"] = measured
         frame["sigma_visibility2_stat"] = sigma_stat
         frame["sigma_visibility2"] = sigma_stat
@@ -1751,6 +1789,7 @@ def simulate_uv_observation(
             math.radians(observation.site_lat_deg))[2]) for sign in (-1, 1)]
         metadata = {
             "estimator": "waveform_gls",
+            "delay_processing": "integer ADC shifts with continuous residual-phase templates; equal-time variance integration",
             "uncertainty_model": "independent statistical errors plus one shared Gaussian calibration gain, profiled in reconstruction",
             "calibration_response_relative_uncertainty": waveform_calibration.response_relative_uncertainty,
             "calibration_sigma_relative_uncertainty": waveform_calibration.sigma_relative_uncertainty,
@@ -1786,13 +1825,20 @@ def simulate_uv_observation(
         return frame, metadata
     if estimator != "analytic":
         raise ValueError("estimator must be analytic or waveform_gls")
+    unsupported = ('telescope_gain_calibration_rms', 'per_night_gain_rms',
+                   'residual_timing_rms_ns', 'transparency_fractional_rms', 'nsb_fractional_rms')
+    enabled = [name for name in unsupported if getattr(instrument, name) != 0]
+    if enabled:
+        raise NotImplementedError('analytic drift likelihood is not calibrated: '+', '.join(enabled))
 
     if electronics_case == "ideal":
         charge_rms, electronics_efficiency = 1.0, 1.0
     elif electronics_case == "reference":
         charge_rms = instrument.excess_noise_factor
         electronics_efficiency = _electronics_correlation_efficiency(
-            instrument, star_rate+nsb_rate)
+            instrument, star_rate+nsb_rate+dark_rate)
+        if instrument.optical_timing_in_effective_bandwidth:
+            electronics_efficiency = 1.0  # 匹配积分已包含电子/量化噪声，不再扣一次。
     else:
         raise ValueError("electronics_case must be reference or ideal")
 
@@ -1871,6 +1917,7 @@ def simulate_uv_observation(
     frame["visibility2_measured"] = measured
     frame["sigma_visibility2_stat"] = sigma_stat
     frame["sigma_visibility2"] = sigma_total
+    frame["baseline_zero_point_sigma"] = instrument.baseline_zero_point_rms
 
     endpoint = observation.hours_per_night*3600.*math.pi/SIDEREAL_DAY_S
     altitude = [math.asin(source_direction_enu(
@@ -1940,7 +1987,20 @@ def prepare_reconstruction_uv(measurements, cell_mlambda=120.0, legacy=False):
             raise ValueError("cell_mlambda must be positive or None")
         data["ku"] = np.round(data.u_lambda/1.0e6/cell_mlambda).astype(int)
         data["kv"] = np.round(data.v_lambda/1.0e6/cell_mlambda).astype(int)
-    data["inverse_variance"] = 1.0/data.sigma_visibility2**2
+    shared_zero = ("baseline_zero_point_sigma" in data
+                   and np.any(data.baseline_zero_point_sigma.to_numpy() != 0))
+    if shared_zero:
+        if legacy:
+            raise ValueError("legacy reconstruction does not support shared baseline offsets")
+        if not {"sigma_visibility2_stat", "telescope_i", "telescope_j"}.issubset(data):
+            raise ValueError("shared baseline offsets require statistical sigma and telescope IDs")
+        if (not np.all(np.isfinite(data.baseline_zero_point_sigma))
+                or np.any(data.baseline_zero_point_sigma < 0)
+                or not np.all(np.isfinite(data.sigma_visibility2_stat))
+                or np.any(data.sigma_visibility2_stat <= 0)):
+            raise ValueError("invalid shared or independent baseline uncertainty")
+    independent_sigma = data.sigma_visibility2_stat if shared_zero else data.sigma_visibility2
+    data["inverse_variance"] = 1.0/independent_sigma**2
     data["weighted_value"] = (
         data.visibility2_measured*data.inverse_variance)
     grouped = data.groupby(["ku", "kv"], as_index=False).agg(
@@ -1979,6 +2039,17 @@ def prepare_reconstruction_uv(measurements, cell_mlambda=120.0, legacy=False):
         fractions = data.inverse_variance.to_numpy()/grouped.inverse_variance.to_numpy()[groups]
         sampling = (np.concatenate(us), np.concatenate(vs), np.repeat(groups, lengths),
                     np.concatenate([w*f for w, f in zip(time_weights, fractions)]))
+    covariance = None
+    if shared_zero:
+        # A先合并独立测量；AB保留同一基线跨时间共享的零点，不按点数缩小。
+        baseline_ids = pd.MultiIndex.from_frame(data[["telescope_i", "telescope_j"]])
+        baseline_index, unique_baselines = pd.factorize(baseline_ids)
+        design = np.zeros((len(grouped), len(unique_baselines)))
+        np.add.at(design, (groups, baseline_index),
+                  fractions*data.baseline_zero_point_sigma.to_numpy())
+        covariance = np.diag(grouped.sigma.to_numpy()**2)+design@design.T
+        grouped["sigma"] = np.sqrt(np.diag(covariance))
+        weight = 1/grouped.sigma.to_numpy()**2
     uv = UvData(
         u_lambda=grouped.u_lambda.to_numpy(float),
         v_lambda=grouped.v_lambda.to_numpy(float),
@@ -1988,7 +2059,7 @@ def prepare_reconstruction_uv(measurements, cell_mlambda=120.0, legacy=False):
         input_rows=len(data), finite_rows=len(data),
         physical_violations=int(((grouped.visibility2 < 0)
                                  | (grouped.visibility2 > 1)).sum()), sampling=sampling,
-        calibration_relative_sigma=gain_sigma)
+        calibration_relative_sigma=gain_sigma, covariance=covariance)
     return uv
 
 

@@ -22,17 +22,33 @@ def datasheet_dark_scenario(instrument, root, summed_channels=8, rating='typical
 
 
 def phase_template_bank(instrument, magnitude=2., block_duration_ns=24000., nodes=65,
-                        fine_dt_ns=.05):
+                        fine_dt_ns=.05, calibration=None):
     """整数移位后，相关峰模板保留[-dt,dt]残差；所有相位共用零信号协方差。"""
     if not isinstance(nodes, int) or nodes < 5 or nodes % 2 != 1:
         raise ValueError('相位节点需要至少5个奇数节点')
     phase = np.linspace(-instrument.sample_width_ns, instrument.sample_width_ns, nodes)
+    maximum_lag = 200. if calibration is None else float(max(abs(calibration.lags_ns)))
+    if calibration is not None and calibration.phase_model != 'linear_spe':
+        raise ValueError('long-exposure GLS needs a calibrated continuous phase model; recalibrate')
+    if calibration is not None and not np.isclose(calibration.block_duration_s,
+                                                   block_duration_ns*1e-9, rtol=1e-12, atol=0):
+        raise ValueError('phase bank and calibration block durations differ')
     templates = []
     for delay in phase:
-        calibration, _ = analytic_waveform_calibration(instrument, magnitude,
-            block_duration_ns=block_duration_ns, residual_delay_ns=delay, fine_dt_ns=fine_dt_ns)
-        templates.append(calibration.peak_per_visibility2)
+        reference, _ = analytic_waveform_calibration(instrument, magnitude,
+            block_duration_ns=block_duration_ns, residual_delay_ns=delay,
+            fine_dt_ns=fine_dt_ns, max_lag_ns=maximum_lag)
+        templates.append(reference.peak_per_visibility2)
     templates = np.asarray(templates)
+    if calibration is None:
+        calibration = reference
+    else:
+        # 零相位模板只允许是连续理论的共同增益缩放；拒绝凭插值平移粗采样峰。
+        zero = templates[nodes//2]
+        gain = float(zero @ calibration.peak_per_visibility2/(zero @ zero))
+        if gain <= 0 or not np.allclose(calibration.peak_per_visibility2, gain*zero, rtol=1e-7, atol=1e-14):
+            raise ValueError('calibration peak is incompatible with the continuous phase model')
+        templates *= gain
     solved = cho_solve(cho_factor(calibration.covariance_per_block), templates.T).T
     information = np.einsum('ij,ij->i', templates, solved)
     return dict(phase_ns=phase, templates=templates, weights=solved/information[:, None],

@@ -76,6 +76,65 @@ def _parse_float(row, key):
         return math.nan
 
 
+def write_uv_data(path, uv):
+    """无损保存推断输入：积分节点、共享先验和协方差均随测量一起保存。"""
+    payload = {name: getattr(uv, name) for name in (
+        "u_lambda", "v_lambda", "visibility_abs2", "sigma", "weight",
+        "multiplicity", "input_rows", "finite_rows", "physical_violations",
+        "calibration_relative_sigma")}
+    payload["schema_version"] = 1
+    if uv.sampling is not None:
+        payload.update(zip(("sample_u", "sample_v", "sample_group", "sample_weight"), uv.sampling))
+    if uv.covariance is not None:
+        payload["covariance"] = uv.covariance
+    # 文件句柄避免numpy自动补后缀导致调用者读错文件。
+    with Path(path).open("wb") as handle:
+        np.savez_compressed(handle, **payload)
+
+
+def read_uv_data(path):
+    """读取完整UV数据；禁止pickle，且不以默认值补掉缺失的物理字段。"""
+    with np.load(path, allow_pickle=False) as archive:
+        if int(archive["schema_version"]) != 1:
+            raise ValueError("unsupported UV data schema")
+        values = {name: archive[name].copy() for name in (
+            "u_lambda", "v_lambda", "visibility_abs2", "sigma", "weight", "multiplicity")}
+        for name in ("input_rows", "finite_rows", "physical_violations"):
+            values[name] = int(archive[name])
+        values["calibration_relative_sigma"] = float(archive["calibration_relative_sigma"])
+        sample_keys = ("sample_u", "sample_v", "sample_group", "sample_weight")
+        if any(key in archive for key in sample_keys):
+            values["sampling"] = tuple(archive[key].copy() for key in sample_keys)
+        if "covariance" in archive:
+            values["covariance"] = archive["covariance"].copy()
+    uv = UvData(**values)
+    n = len(uv.u_lambda)
+    if (n == 0 or any(np.shape(values[key]) != (n,) for key in (
+            "v_lambda", "visibility_abs2", "sigma", "weight", "multiplicity"))
+            or any(not np.all(np.isfinite(values[key])) for key in (
+                "u_lambda", "v_lambda", "visibility_abs2", "sigma", "weight"))
+            or np.any(uv.sigma <= 0) or np.any(uv.weight <= 0)
+            or not np.isfinite(uv.calibration_relative_sigma)
+            or uv.calibration_relative_sigma < 0):
+        raise ValueError("invalid complete UV measurements or uncertainties")
+    if uv.sampling is not None:
+        u, v, group, weight = uv.sampling
+        if (any(x.ndim != 1 or len(x) != len(u) for x in (u, v, group, weight))
+                or not all(np.all(np.isfinite(x)) for x in (u, v, group, weight))
+                or not np.issubdtype(group.dtype, np.integer)
+                or np.any(group < 0) or np.any(group >= n) or np.any(weight < 0)
+                or not np.allclose(np.bincount(group, weights=weight, minlength=n), 1)):
+            raise ValueError("invalid UV integration sampling")
+    if uv.covariance is not None:
+        cov = uv.covariance
+        if (cov.shape != (n, n) or not np.all(np.isfinite(cov))
+                or not np.allclose(cov, cov.T)
+                or not np.allclose(np.diag(cov), uv.sigma**2)):
+            raise ValueError("invalid UV covariance")
+        np.linalg.cholesky(cov)
+    return uv
+
+
 def read_uv_measurements(
         path,
         value_column,
@@ -83,8 +142,13 @@ def read_uv_measurements(
         sigma_column="auto"):
     """读取并合并重复 UV 样本；不会插值或虚构未观测的 UV 点。"""
     path = Path(path)
+    if path.suffix.lower() == ".npz":
+        return read_uv_data(path)
     with path.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
+    if rows and ({"uv_samples_u", "uv_samples_v", "calibration_relative_sigma",
+                  "baseline_zero_point_sigma"} & set(rows[0])):
+        raise ValueError("CSV contains integrated/shared-error observations; use write_uv_data/read_uv_data NPZ to preserve the likelihood")
     required = {"u_lambda", "v_lambda", value_column}
     if not rows or not required.issubset(rows[0]):
         missing = ", ".join(sorted(required - (set(rows[0]) if rows else set())))

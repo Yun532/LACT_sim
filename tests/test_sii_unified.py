@@ -374,7 +374,7 @@ def test_transit_requires_planet_inside_stellar_disk():
         sii.transit_visibility(np.array([0.0]), np.array([0.0]), source)
 
 
-def test_waveform_gls_long_uv_path_uses_calibrated_peak_covariance():
+def test_waveform_gls_long_uv_path_rejects_peak_without_phase_calibration():
     instrument = sii.Instrument(detected_nsb_rate_hz=3.0e6)
     star_rate = sii.detected_star_rate_hz(2.0, instrument)
     calibration = sii.WaveformGLSCalibration(
@@ -393,13 +393,10 @@ def test_waveform_gls_long_uv_path_uses_calibrated_peak_covariance():
     observation = sii.Observation(
         hours_per_night=1.0/3.0, segment_s=1200.0)
     uvw = sii.generate_uvw(layout, observation, instrument)
-    measured, metadata = sii.simulate_uv_observation(
-        uvw, sii.BinarySource(), observation, instrument, seed=7,
-        estimator="waveform_gls", waveform_calibration=calibration)
-    _, expected_sigma = sii.waveform_gls_weights(calibration, 1200.0)
-    assert metadata["estimator"] == "waveform_gls"
-    assert np.allclose(measured.sigma_visibility2, expected_sigma)
-    assert measured.visibility2_measured.notna().all()
+    with pytest.raises(ValueError, match="continuous phase model"):
+        sii.simulate_uv_observation(
+            uvw, sii.BinarySource(), observation, instrument, seed=7,
+            estimator="waveform_gls", waveform_calibration=calibration)
 
 
 def test_hbt_calibration_scale_does_not_change_reported_physical_rate():

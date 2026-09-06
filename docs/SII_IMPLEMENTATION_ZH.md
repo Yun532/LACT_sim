@@ -1,432 +1,426 @@
-# SII程序实现、数据接口与复现
+# SII 代码如何把一个天体算成 LACT 观测与推断
 
-当前主入口是[`sii_complete_waveform_report.ipynb`](../notebooks/sii_complete_waveform_report.ipynb)。它先显示统一基准源的理论，再实际生成同一条事件/电压记录和两镜相关，扩展到整阵列测量，最后比较模型、重建与性能。详细验证放在附加单元中。本文说明程序如何计算；物理推导见[原理说明](SII_PHYSICS_ZH.md)。不要用历史Notebook的图片或早期标定数值替代当前结果。
+本文按数据流阅读程序：先给定天体与仪器，把光变成探测事件和电压，处理两镜时差，从整段相关曲线估计平方可见度，再构造整夜阵列观测，最后用同一测量模型反推天体。每一节说明实际调用、输入、计算和输出；较长的物理推导链接到[物理说明](SII_PHYSICS_ZH.md)。
 
-## 1. 文件职责与调用关系
+主入口是[完整 notebook](../notebooks/sii_complete_waveform_report.ipynb)，其源码由[生成脚本](../tools/build_sii_science_notebook.py)维护。Notebook先看理论和中间图，再做模型与性能比较；本文则把分散在不同单元和模块中的同一条计算链连起来。复现命令在末节。
 
-| 文件 | 负责什么 | 不应混用的层次 |
+需要先分清两种产物。微秒记录真的逐事件生成、逐采样求电压、逐滞后算相关。六小时数据使用短波形标定的响应与误差，抽样长曝光的充分统计量，并没有生成六小时连续 ADC。两者通过同一 SPE、光学时间核、光子率、采样相位和 GLS 定义连接。以下所有“观测”均指这套已注明条件的模拟，实测输入不等于实测观测结果。
+
+## 1. 程序启动时，先固定一套不会中途改变的场景
+
+Notebook设置随机种子 `SEED=20260905`，记录 Python、NumPy、SciPy 版本，将 BLAS 线程设为1，然后调用 `verify_main_parameters(ROOT)` 和 `Instrument.from_repository(ROOT)`。前者核对输入内容，后者真正解析配置。它们读取本地检出的文件，不在每次运行时联网获取 main。
+
+基准计算的输入如下。表中数值是本例，不是所有库函数的内建默认值；例如直接调用 `Instrument()` 不会自动获得 main 的4 ns采样和实测模板。
+
+| 量 | 本例取值 | 在程序中的位置 |
 |---|---|---|
-| [`python/sii_unified.py`](../python/sii_unified.py) | 读配置、源模型、几何、光子流、波形、GLS标定、长曝光数据和数据整理 | 波形GLS与旧解析SNR分支分别命名 |
-| [`python/sii_reconstruction.py`](../python/sii_reconstruction.py) | 只根据测量和采样重建；处理共同增益先验、正则化与收敛诊断 | 真值只能在拟合完成后用于评价 |
-| [`python/sii_validation.py`](../python/sii_validation.py) | 独立热光场、连续响应解析对照、留出波形、参数剖面和覆盖率工具 | 解析参考不调用共享光电子对生成器 |
-| [`python/sii_layout.py`](../python/sii_layout.py) | 从TELESCOPE input读取原始NWU厘米坐标，转换ENU米并保留原值及行号 | 镜号按input顺序，标签保留；半径400 cm表示4 m半径 |
-| [`python/sii_observation.py`](../python/sii_observation.py) | 天体逐波长相干、多镜共享事件及波形、时延追踪、分块相关、独立多镜热光模 | 主Notebook附加验证C至E实际执行；第6节整阵列长曝光使用统计分支 |
-| [`python/sii_performance.py`](../python/sii_performance.py) | 整数时延对齐、相位模板、段内误差积分、圆瞳对照和角直径似然 | 第9节最终性能入口；没有替换前面的探索性图像估计器 |
-| [`python/sii_walkthrough.py`](../python/sii_walkthrough.py) | 统一基准理论、同一事件到波形/相关、圆盘UV及模型对照图 | 调用现有物理模块；24 μs记录倍率1；长曝光图仍是统计模拟 |
-| [`tools/build_sii_science_notebook.py`](../tools/build_sii_science_notebook.py) | 用nbformat生成主Notebook的代码及中文解释 | 重新生成会清空该Notebook的执行输出，随后必须从头运行 |
-| [`tools/execute_notebook.py`](../tools/execute_notebook.py) | 用nbclient在指定目录完整执行并保存Notebook | 单元报错时保留已执行输出，进程仍返回失败 |
-| [`tests`](../tests)中的SII测试文件 | 物理恒等式、统计目标、数据独立性及数值边界检查 | 自动测试通过不等于所有科学主张通过 |
-| [`validation/sii_science`](../validation/sii_science) | 本次计算结果表、标定、图像数组及汇总 | 图像重复、区间覆盖和波形检验各有不同样本含义 |
+| 天体 | AB 2等，直径0.16 mas均匀盘 | `BinarySource(primary_diameter_mas=.16)`，`source_case='single_disk'` |
+| 仪器 | 400 nm中心，2 nm全宽，双偏振 | `Instrument.from_repository`，`polarization_factor=.5` |
+| 阵列 | 用户提供的36台input，630条镜对基线 | `configs/arrays/lact36_20260906.input` |
+| 观测 | 赤纬22°，纬度29.36°，过中天前后合计6小时 | `Observation`，曝光单位为SI秒 |
+| 输出分段 | 每段1200 s，一夜18段，共11340条测量 | `segment_s`、`nights` |
+| 可见度积分 | 每段9个时间中点，基准通带5个波长点 | 每条测量45个子采样，均不增加独立观测数 |
+| 电压采样 | 250 MS/s，间隔4 ns | 实测SPE在采样中心取值 |
+| 教学短记录 | Tel.1与Tel.2，时角0.5 rad，24 μs，注入倍率1 | `sii_walkthrough`；这一时刻不是0.5小时 |
+| 图像计算 | 32×32像素，0.70 mas视场，0.32 mas支撑半径 | `reconstruct_uv_data`的显式参数 |
 
-```text
-Instrument.from_repository
-    ├─ 模板/电荷样本/时间核/同通带光谱积分
-    └─ simulate_waveform_gls_calibration
-         ├─ simulate_hbt_primary_pe
-         ├─ render_pe_waveform
-         ├─ waveform_cross_correlation
-         └─ 分组估计模板、协方差、增益和误差
+这里把亮度形态与总通量分开。改变圆盘直径只改变归一化可见度；保持AB星等不变就保持总星光率。双星、椭圆和遮挡盘在后文作为明确更换的源模型，不会偷偷改变基准单镜电压的参数。
 
-run_sii_pipeline
-    ├─ generate_uvw
-    ├─ simulate_uv_observation(estimator="waveform_gls")
-    │    ├─ segment_uv_samples + segment_sampling_weights
-    │    ├─ source_visibility → 时间/通带平均的P
-    │    └─ sample_waveform_gls_visibility2 → 随机测量
-    └─ prepare_reconstruction_uv → UvData
-         └─ reconstruct_uv_data
-              ├─ power_sampling_kernel → 与数据相同的平均算子
-              ├─ statistical_loss → 剖面共同标定增益
-              ├─ 测量留出选择平滑项 + 多起点优化
-              └─ 驻点、预测残差、峰数和拟合后评价
+输入核对清单是[main_parameter_manifest.json](../configs/sii/main_parameter_manifest.json)，对应 main 提交 `2926031b14c8aa2164a4d9233f5c2d0a75324127`。清单以统一LF换行后的SHA-256检查10个关键文件。额外光追缓存、布局和数值代码也写入本次结果摘要。缓存的原始C++光追并未在本次notebook中重跑，来源与复现边界见物理说明第1、3节。
+
+## 2. 先把配置变成三个真正控制信号的量
+
+接下来的事件生成首先需要星光率、背景率和相干面积，而不是一个笼统的“探测效率”。`Instrument.from_repository`从 `corsika_lact_pylast_root_only_measured_waveform.cfg` 展开组件，读镜面反射率、滤光片透过率、PDE、天空谱、像素尺寸与焦距，再读电子学文件中的SPE、电荷样本和微单元结构。
+
+记波长为 $\lambda$，三条效率曲线乘积再乘可选SII滤光片得到 $R(\lambda)$。$R$ 无量纲，曲线之间用线性插值。恒星采用平坦 $F_\nu$ 的AB谱，因而真正积分的是
+
+$$
+J_1=\int \frac{R(\lambda)}{\lambda}\,d\lambda,
+\qquad J_2=\int R^2(\lambda)\,d\lambda.
+$$
+
+同一式内波长单位必须一致。$J_1$ 无量纲，$J_2$ 的单位随波长网格为nm；程序中的比例式消去该单位。`throughput` 中的通带校正为 $J_1/[R(\lambda_0)\Delta\lambda/\lambda_0]$，这里 $\lambda_0$ 是中心，$\Delta\lambda$ 是全宽。它使外层保留中心谱密度接口，同时得到通带积分后的星光率。
+
+中心有效探测面积优先取400 nm光追缓存 `lact2_measured_single_pixel_400nm.provenance.json` 中的5.92276165 m²。这一面积已经含镜面、遮挡、PSF、像素接收、集光器、滤光片与PDE，代码用它除以面积字段24.57686 m²得到中心效率，再乘源透射假设0.7836336和上述通带校正。不能再乘一遍中心PDE。完整核缺失时库有旧光学核回退，所以正式结果还核对实际输入路径和哈希。
+
+`detected_star_rate_hz`使用AB零点和光子能量把结果转成Hz。基准得到 $R_\star=1.99889298\times10^8\ \mathrm{s^{-1}}$。NSB另算 $\int L_\lambda R\,d\lambda$，乘面积、集光器和像素立体角近似 $(\mathrm{pixel\ size}/\mathrm{focal\ length})^2$，得到0.573214 MHz；不再乘源的上游透射系数。天空谱是既有SkyCalc情景，不能称为LACT当晚实测。启用暗计数时仅加一次 $R_b=R_{\rm NSB}+R_{\rm dark}$。
+
+相关信号使用的是相干面积 $\tau_{\rm eff}$，不是ADC宽度。代码设置
+
+$$
+\tau_{\rm eff}=\frac{p}{\Delta\nu}\,
+\frac{\Delta\lambda J_2}{\lambda_0^2 J_1^2},
+\qquad \Delta\nu=\frac{c\Delta\lambda}{\lambda_0^2}.
+$$
+
+$p=.5$ 是偏振系数，$c$ 为光速，$\tau_{\rm eff}$ 单位为s。它来自探测光谱平方的积分，推导见[物理说明附录C](SII_PHYSICS_ZH.md#appendix-c)。本例为 $1.334291922\times10^{-13}$ s，已经包含偏振，后面不能再乘一次0.5。
+
+这一步同时生成 `visibility_wavelength_nm` 和 `visibility_spectral_weights`。后者按 $R^2$ 加权并归一化，而不是按光子率的一次方加权。默认平滑2 nm通带使用密集梯形积分计算率和面积、5点Gauss–Legendre计算可见度。若给 `sii_bandpass_path`，程序改在所有输入曲线的相邻物理节点之间做5点Gauss–Legendre积分，并用同一组节点积分率、面积和可见度权重。因此399.2 nm附近很窄的透射峰也不会落在全部节点之间。全零或非有限响应明确报错。窄通带改变积分点数，但不代表增加探测通道。
+
+这一节的输出仍只有仪器常数和求积网格，没有随机数、没有天体图像，也没有观测误差。
+
+## 3. 用同一套坐标决定“在哪里看”和“何时到达”
+
+`read_corsika_layout`读取TELESCOPE卡片，保留原始坐标、标签、行号和半径。原始单位为cm，三个方向为北、西、上；转成ENU米遵循原项目的转换：
+
+$$
+(E,N,U)=(-y_{\rm input},x_{\rm input},z_{\rm input})/100.
+$$
+
+程序没有重新居中或额外旋转。Tel.1为 $(-434.92063,417.46032,0)$ m，Tel.36为 $(266.66667,136.50794,0)$ m。400 cm是4 m半径，不能当作镜直径。派生坐标见[CSV](../configs/arrays/lact36_20260906_coordinates.csv)；检查脚本会从input重新转换后比较。
+
+`generate_uvw`遍历所有 $i<j$，定义基线 $\boldsymbol B_{ij}=\boldsymbol r_j-\boldsymbol r_i$。每段取时间中心，调用 `celestial_tangent_axes_enu` 得天球的三个单位轴，再由 `uvw_from_enu`点乘得到米单位的 $(u_m,v_m,w_m)$。前两轴固定于赤道坐标切平面，第三轴指向源，不用当地天顶与源的叉乘引入额外视场转动。
+
+时角定义为 $H=\mathrm{LST}-\mathrm{RA}$，西向为正。SI秒转时角用平均恒星日86164.0905 s，因此6小时窗口的角宽并非直接把SI小时当恒星时小时。程序要求总时长是完整段数，并拒绝源在该观测窗口的检查点落到地平线以下。
+
+几何表保留 `u_m/v_m/w_m`、基线ENU、镜号、段号和时角。用中心波长除前两项得 `u_lambda/v_lambda`，单位是“波长数”。表内 `geometric_delay_ns=w_m/c` 是几何投影约定；事件到达的右镜减左镜时间差为它的负值。`geometric_arrival_delays_ns`与`tracking_geometry`使用后一约定：
+
+$$
+d_i=-\frac{(\boldsymbol r_i-\boldsymbol r_{\rm ref})\cdot\boldsymbol s(H)}{c}.
+$$
+
+$\boldsymbol s$ 是源方向单位向量，$d_i$ 是相对参考镜的到达时差，换成ns交给波形。几何投影符号与到达时差符号必须区分；否则补偿方向会反。源方向与切向轴的具体分量见物理说明第4节。
+
+`tracking_geometry`还对时角求导，输出每秒变化多少ns的时延率及二阶曲率界。短记录用 $d_i(t)=d_i(0)+\dot d_i t$，局部时间从零起算，避免把整夜绝对纳秒数放进插值丢精度。其近似误差用曲率界乘记录时长平方的一半检查。
+
+## 4. 在这些位置算出理想可见度，然后才做曝光平均
+
+`source_visibility`返回复振幅 $V$；外层取模平方得到 $P=|V|^2$。可见度是归一化亮度的傅里叶变换，零基线为1，公式及推导见[物理说明附录A](SII_PHYSICS_ZH.md#appendix-a)。各分支的真实运算如下。
+
+均匀盘以 $q=\sqrt{u^2+v^2}$ 及弧度直径 $d$ 计算 $V=2J_1(\pi dq)/(\pi dq)$。`uniform_disk_visibility`单独处理零自变量为1。mas先乘 `MAS_TO_RAD`；贝塞尔函数变负时保留振幅符号，到外层才平方。
+
+双星先分别算两个圆盘的 $V_1,V_2$，再计算 $(V_1+rV_2e^{-2\pi i(u\Delta E+v\Delta N)})/(1+r)$。$r$ 为次星/主星流量比，偏移 $(\Delta E,\Delta N)$ 由分离和从北向东的位置角决定，单位为rad。因此有干涉交叉项，不能平均两个盘的功率。椭圆先旋转UV坐标，再按长、短轴缩放自变量，使用同一圆盘贝塞尔形式。
+
+静态遮挡盘用恒星圆盘振幅减去带位移相位的行星圆盘振幅，按剩余通量归一化。挡光比例取面积比；程序要求行星完整位于恒星盘内，不把部分入凌几何交集当成已实现。它是单个时刻的遮挡形态，不是随轨道演化的凌星光变模型。
+
+`segment_uv_samples`只使用几何与仪器，不读源。它在每段9个时间中点重新投影，并按各波长重新除以波长。`segment_sampling_weights`给出时间等权乘光谱权重。第 $a$ 条测量的期望是
+
+$$
+\overline P_a=\sum_{q=1}^{n_a}\omega_{aq}|V(u_{aq},v_{aq})|^2,
+\qquad \sum_q\omega_{aq}=1.
+$$
+
+$q$ 标识该条测量的时间/波长节点，$n_a=45$ 是基准节点数。必须逐节点平方后平均；先平均复振幅或只在代表UV坐标计算均不等价。`simulate_uv_observation`保存中心真值、平均真值以及 `uv_samples_u/v/weight`。中心真值用于量化曝光模糊；反演使用的是完整节点，真值列不传给反演器。
+
+到这里可以画连续理论平面，也可以画11340个有限曝光理论点。两者都没有加入噪声；图上的像素密度不等于观测数。
+
+## 5. 产生光电子：二阶信号如何进入连续事件时刻
+
+理论 $P$ 进入短记录时，`simulate_hbt_primary_pe`处理两镜，`simulate_array_photon_times`处理共享的多镜事件流。两者都用弱光下的稀疏共享对近似，而不逐飞秒生成电磁场。
+
+两镜共享对率为
+
+$$
+R_{ij}^{\rm pair}=R_{\star,i}R_{\star,j}\tau_{\rm eff}\overline P_{ij}.
+$$
+
+其单位是s⁻¹。生成器先抽泊松个数，再在连续记录区间均匀抽参考时刻，把同一个参考时刻加入两个镜的事件流。各镜还生成独立星光和独立背景。为了保持给定单镜星光率，多镜情况下必须扣除该镜参与的全部共享对率：$R_i^{\rm single}=R_{\star,i}-\alpha\sum_{j\ne i}R_{ij}^{\rm pair}$。$\alpha$ 是已知注入倍率；若独立率变负，立即拒绝该倍率。
+
+正常物理记录取 $\alpha=1$。增大倍率只用于短样本响应标定，输出同时记录物理率和注入率，并在估计响应时除以倍率。它不能使记录变成等效真实长曝光，也不能把放大注入的高阶协方差当作天体的协方差。
+
+多镜入口先从 `source_coherence_spectrum`取得每个波长的复相干矩阵 $\Gamma^{(r)}$，检查Hermitian、单位对角和半正定，再算 $\sum_r w_r|\Gamma_{ij}^{(r)}|^2$。每台望远镜只有一个事件流，参与它的所有基线都使用这同一个流，不能为每一镜对重新渲染一台虚拟望远镜。
+
+星光事件按 $t\mapsto t+d_i+\dot d_i t$ 到达探测端，再抽独立光学延迟。时间伸缩的Jacobian会使接收星光率成为 $R_{\star,i}/(1+\dot d_i10^{-9})$，元数据分别记录参考率和接收率；背景按接收时间独立生成。生成区间两端扩展到包含几何时差、SPE支持区及光学核保护区，避免记录开头无故少光子。
+
+光学延迟来自 `load_optical_timing_mixture`读出的混合分布：按权重选分量，再按该分量均值、标准差抽高斯延迟。相关对的参考时刻共享，两端光学延迟独立。因此保留超额对数，却把飞秒相关面积展宽到纳秒响应里。
+
+基准退化参数 $R_\star\tau_{\rm eff}\approx2.67\times10^{-5}$，弱对模型适合验证这一条件下的二阶响应；它没有生成完整热光自聚束、三阶闭合相位和全部四阶累积量。独立复高斯热光模检验及弱光误差预算放在第13节，不把缺失项藏在代码标签里。兼容main事件CSV时 `origin='cherenkov'` 只是原接口信号标签，此处源仍为恒星。
+
+## 6. 同一批光电子怎样变成单镜电压
+
+`render_pe_waveform`接收连续ns时刻，先加入已启用的本征高斯抖动，再为每个事件抽电荷因子。`load_empirical_charge_factors`把实测电荷样本归一到均值1，因此保留幅度涨落而不重复改变平均SPE增益。二阶矩为 $F_q^2=\langle q^2\rangle=1.03254526$，`excess_noise_factor`保存其平方根。
+
+若微单元恢复时间非零，为事件抽微单元号，逐单元按事件时序更新恢复状态；恢复因子为 $1-e^{-\Delta t/\tau_r}$。$\Delta t$ 是该单元前后事件间隔，$\tau_r$ 是独立给定的恢复时间。当前 $\tau_r=0$ 时全部因子为1，也不抽无意义的微单元随机号。SPE电压尾部不能直接解释为这一恢复时间。
+
+随后在采样中心 $t_n=(n+1/2)\Delta t_{\rm ADC}$ 求
+
+$$
+x_i[n]=\sum_k q_{ik}f_{ik}h(t_n-t_{ik})+\epsilon_i[n].
+$$
+
+$h$ 为实测SPE模板，单位mV；$t_{ik}$ 是第 $k$ 个事件到达时刻，$q_{ik}$ 是电荷因子，$f_{ik}$ 是恢复比例，$\epsilon$ 是可选白噪声。代码只计算每个SPE支持范围内的采样点，分块构造索引，用线性插值读连续平移模板，再用 `bincount` 累加。没有先把光子时间取整到4 ns格；同一脉冲的不同采样相位确实能产生不同数组。
+
+噪声RMS为0时直接复制模拟电压，不额外抽噪声。ADC位数为0时保留浮点电压；启用时 `digitize_adc`按满量程剪裁和量化。输出包含 `sample_time_ns`、`analog_mv`、`noisy_mv`、`adc_mv`、电荷与恢复因子。24 μs的每镜6000点是真正计算的ADC数组。
+
+教学图调用 `single_record`一次，把事件和ADC放入同一个 `lesson_scene`；随后 `pair_correlation`直接读取这一对象。保存的 [walkthrough_record.npz](../validation/sii_science/walkthrough_record.npz) 包含两镜事件、ADC、采样中心、时差和种子。检查脚本既按种子重放，也从保存ADC重算相关，防止前后图暗中换了一次随机记录。
+
+## 7. 先补偿几何时延，再计算相关曲线
+
+主相位处理使用 `integer_align`。对每镜到达时差 $d_i$ 取最接近的整数样本 $n_i=\mathrm{round}(d_i/\Delta t_{\rm ADC})$，读 $x_i[n+n_i]$，并裁剪所有镜共同有真实输入的区间。没有周期卷绕，也不对ADC做分数插值。两镜剩余时差为
+
+$$
+\delta_{ij}=(d_j-n_j\Delta t_{\rm ADC})-(d_i-n_i\Delta t_{\rm ADC}).
+$$
+
+它可落在 $[-\Delta t_{\rm ADC},\Delta t_{\rm ADC}]$，会改变采样相关峰，所以必须交给下一节的连续模板。教学记录右镜平移58点即232 ns，剩余 $-0.967249$ ns；6000点裁成5942点，实际曝光23.768 μs。估计误差用裁后的曝光。
+
+`waveform_cross_correlation`对两条数组分别减块均值，使用FFT求完整线性互相关，以每个滞后的实际重叠点数 $N-|\ell|$ 除回，并以两条波形的样本标准差归一：
+
+$$
+\widehat C[\ell]=\frac{\sum_{n\in\mathrm{overlap}}(x[n+\ell]-\bar x)(y[n]-\bar y)}
+{(N-|\ell|)s_xs_y}.
+$$
+
+$\ell$ 是整数滞后，乘采样宽度得到ns；$s_x,s_y$单位mV，所以 $\widehat C$ 无量纲。这是电压涨落的相关系数，不是光学 $g^{(2)}$；分母含散粒噪声、SPE电荷涨落和已启用的电噪声。默认只保留±200 ns滞后，用整段相关曲线进行拟合，不能把某个随机最大值当作HBT峰。
+
+`correlate_blocks`可对阵列使用同一组完整块，返回“块×基线×滞后”数组和等曝光平均，不足一个块的尾部单独记录后丢弃。单个常量通道不能做有意义的归一化，阵列入口会拒绝。
+
+另一个 `align_waveforms` 入口是分数Lanczos–sinc插值及块内时延率追踪，用于处理对照。它按ADC半样本中心计算实际读取坐标，显式裁掉无完整抽头支持的边缘；半宽默认16，并做16至512的对照。插值会同时改变响应和噪声，必须标定插值后的处理。它没有与整数移位的标定静默混用。
+
+## 8. 从相关曲线估计一个平方可见度，而非读取零滞后
+
+`WaveformGLSCalibration`的核心是：滞后坐标、零信号均值 $\boldsymbol C_0$、单位可见度模板 $\boldsymbol k$、标定块协方差 $\boldsymbol\Sigma_b$、块时长 $T_b$，以及共享响应增益误差。物理模型为 $E[\widehat{\boldsymbol C}]=\boldsymbol C_0+P\boldsymbol k$。
+
+相邻滞后由同一波形构成，噪声不独立。`waveform_gls_weights`求线性方程得到
+
+$$
+\boldsymbol w=\frac{\boldsymbol\Sigma_b^{-1}\boldsymbol k}
+{\boldsymbol k^T\boldsymbol\Sigma_b^{-1}\boldsymbol k},
+\quad \widehat P=\boldsymbol w^T(\widehat{\boldsymbol C}-\boldsymbol C_0),
+\quad \sigma_P(T)=\sqrt{\frac{T_b/T}{\boldsymbol k^T\boldsymbol\Sigma_b^{-1}\boldsymbol k}}.
+$$
+
+$T$为实际曝光秒，转置记为上标 $T$；逆矩阵在代码中通过线性求解实现。$\boldsymbol w^T\boldsymbol k=1$保证模板幅度正确恢复，最小方差推导见[物理说明附录H](SII_PHYSICS_ZH.md#appendix-h)。负权重可用于抑制共同噪声，负 $\widehat P$ 则是有限噪声估计，均不应截断。
+
+### 8.1 连续SPE决定任意分数时延下的峰形
+
+`analytic_waveform_calibration`先在0.05 ns细网格插值SPE，计算自相关 $A_h(\tau)=\int h(t)h(t+\tau)dt$。星光共享对的相关响应是它与两端光学延迟差分布的卷积，频域通过乘光学传递函数的模平方完成。本征时间抖动也乘入同一传递函数。单镜平稳泊松自相关保留SPE散粒噪声，光学到达抖动不额外降低单镜泊松噪声。
+
+这个连续相关核在 $\ell\Delta t_{\rm ADC}+\delta$ 处采样，再按光子率与波形方差归一，并保留块内减均值的一阶有限时长修正，得到 $\boldsymbol k(\delta)$。零信号协方差由单镜归一自相关的Bartlett卷积得到。该解析模型支持线性SPE和独立白噪声；非线性ADC、恢复、串扰和后脉冲不在此闭式模型内。
+
+主标定现在明确使用这一连续峰形，再让波形Monte Carlo校准增益与协方差。它不靠平移已经粗采样的零相位峰去猜2 ns处的形状。`phase_template_bank`默认在−4到4 ns放65个节点，为每个节点求模板、权重和块误差。输入一个已有MC标定时，要求其 `phase_model='linear_spe'`，且零相位模板确实是连续模型的单一增益缩放，块时长也必须相同。只有任意离散峰、没有连续相位模型的旧标定不能进入长曝光主流程。
+
+### 8.2 波形Monte Carlo怎样确定剩余未知量
+
+`simulate_waveform_gls_calibration`生成2048条零信号与512条已知注入两镜记录，默认每条20 μs，信号倍率10000。每条都经过事件、SPE、ADC和互相关，结果是两张“记录×滞后”矩阵。
+
+零信号前一半估计样本协方差；同一滞后差的矩阵对角线取平均，施加平稳Toeplitz结构以减少有限样本噪声。协方差再按比例 $\rho$ 向其对角阵收缩，候选 $\rho=10^{-4},10^{-3},10^{-2},.05$；特征值下限设为最大值的 $10^{-10}$，以便稳定求解。
+
+第二个四分之一零信号与信号校正集共同选择“噪声标准差/正响应增益”最小的候选。信号校正集是512条中的第三个四分之一；用其平均投影除已知注入幅度，得到共同增益，乘回连续模板。均值标准误除均值给出 `response_relative_uncertainty`。前一半信号保留原始MC响应诊断，在线性主路径不再把其粗采样峰作为连续形状来源。
+
+最后四分之一零信号没有参加收缩选择，用它的实际投影标准差与预测标准差之比平方缩放协方差。其有限尺度误差约为 $1/\sqrt{2(n-1)}$，$n$为这批记录数；保存为 `sigma_relative_uncertainty`。最后四分之一信号仅做响应检验，不再修改增益。
+
+图中同时画连续理论、乘MC增益的模板、原始MC样本平均，明确后两者是否独立。使用了连续形状的主标定与连续理论不能仅凭峰形吻合宣称独立验证；独立新种子的零信号、不同倍率及块长记录才继续检验响应与误差。
+
+仪器签名同时记录数值设置与模板/电荷/光学核内容。长曝光入口核对签名、源率和总背景率；改星等或SPE之后不能继续用旧标定。允许自定义短记录模板，不意味着主相位模型已经标定了该模板。
+
+## 9. 把短块标定沿整个观测窗口累积起来
+
+`run_sii_pipeline`先调用 `generate_uvw`，然后调用 `simulate_uv_observation(estimator='waveform_gls', waveform_calibration=...)`。内部先计算第4节的 $\overline P_a$，再调用同一个 `phase_template_bank` 和 `tracked_segment_precision`，而不是给所有基线复制零时延误差。
+
+相位积分比可见度积分更密：每段1200个时间中点，重新计算源方向、基线到达时差和采样周期内的残差，再插值相位表的块标准差。基线间到达时差折回一个采样周期；相差整数滞后只平移峰，±200 ns窗口足够容纳±4 ns残差。该近似的截窗和节点收敛由相位留出、1200/2400点对照检查。
+
+每条长曝光测量对应等时长块平均，所以方差必须平均块方差：
+
+$$
+\sigma_a^2=\frac{T_b}{T_a}\,
+\frac{1}{N_t}\sum_{r=1}^{N_t}\sigma_b^2(\delta_a(t_r)),
+\qquad T_a=\mathrm{segment\_s}\times\mathrm{nights}.
+$$
+
+$N_t$为相位积分点数，$\sigma_b$是标定块误差。不能改为平均信息量的倒数，否则测量会变成依赖相位的加权时间平均，而第4节期望仍是等时间平均。持续观测假定读出缓冲能覆盖几何移位；不会把孤立24 μs测试记录的边缘损失每隔24 μs再扣一遍。
+
+然后只为整批数据抽一个标定增益 $g\sim\mathcal N(1,s_g^2)$，为每行抽独立标准正态 $z_a$，生成
+
+$$
+y_a=g\overline P_a+\sigma_a z_a.
+$$
+
+这正是写入 `visibility2_measured` 的量。`sigma_visibility2_stat` 和主路径的 `sigma_visibility2`均为独立统计误差；`calibration_relative_sigma`携带共同增益先验。逐点显示用的 `sigma_visibility2_calibration` 不作为独立方差加进合并权重。摘要中的单个sigma是各行的中位数，不能代替表内逐基线误差。
+
+`sample_waveform_gls_visibility2`仍保留为固定模板、固定相位的标量统计工具，主整夜入口已经不再用它代替相位追踪。这里使用高斯与独立统计项是弱光、平稳线性条件下的长曝光近似；后文36镜性能另加共同噪声预算与噪声标定尺度对照。
+
+## 10. 整理、保存再读取，必须还是同一个测量模型
+
+`prepare_reconstruction_uv`只读取测量值、误差和几何，不读取真图或 `visibility2_true`。默认以120百万波长为网格宽度，把代表UV坐标舍入成组号。分组用于控制计算量，不是把整个格当成一个精确UV位置。
+
+同组第 $a$ 条测量的独立方差为 $s_a^2$，令 $f_{ga}=s_a^{-2}/\sum_{b\in g}s_b^{-2}$。输出测量为 $y_g=\sum_{a\in g}f_{ga}y_a$，独立方差为 $1/\sum_{a\in g}s_a^{-2}$。与此同时，每个原始积分节点的权重变为 $f_{ga}\omega_{aq}$，坐标本身不变。这样分组后的预测和分组数据经历同一个线性算子。
+
+`UvData.sampling`保存四个一维数组：节点u、节点v、所属输出组、节点权重。`u_lambda/v_lambda`只是代表坐标，可用于画图；存在sampling时，拟合不拿代表坐标代替节点。权重必须有限非负，每个输出组总和为1。
+
+### 10.1 共享零点误差如何传递
+
+旧解析观测入口允许 `baseline_zero_point_rms` 非零。此时同一基线跨时段共享一个零点随机数，而不同基线独立。输出增加 `baseline_zero_point_sigma`；合并使用 `sigma_visibility2_stat`作权重，把共享部分单独传播。
+
+记 $A$为上述分组线性算子，$D$为原始独立方差对角阵，$B$把每个单位正态基线零点映射到对应测量，其元素就是该行的零点RMS。则分组协方差为
+
+$$
+C_{\rm group}=ADA^T+(AB)(AB)^T.
+$$
+
+代码直接累积小矩阵 $AB$，不先分配11340×11340矩阵。全零接口时完全不分配这项。共享零点0.05即使合并很多时段也保留约0.05的误差底限；同一基线进入不同组还留下非零非对角项。`UvData.sigma`改为该完整协方差的对角平方根，`covariance`保存完整矩阵。
+
+当前全协方差高斯拟合可使用固定平滑强度；自动80/20留出选择平滑尚不支持跨训练/验证集的协方差，因而会明确拒绝 `smoothness='cv'`。其余每镜增益、每夜增益、透明度、NSB及未知残余时延漂移的非零长曝光似然尚未标定，两种长曝光入口都拒绝，默认零值照常运行。
+
+### 10.2 用完整NPZ交付可复现的推断输入
+
+`write_uv_data`保存版本号1、所有测量数组、上述sampling、可选协方差、共同增益先验、合并数和输入质量计数。`read_uv_data`以 `allow_pickle=False`读取，检查形状、有限性、正误差、组号、权重和协方差正定性，不以默认零值补掉缺失物理字段。
+
+主notebook实际把四个源的 `UvData`各保存为 `*_uv.npz`，重新读回后才构造图像核并拟合。因此发布结果验证的是磁盘输入流程。最小调用为：
+
+```python
+uv = sii.prepare_reconstruction_uv(result.measurements, cell_mlambda=120.)
+reco.write_uv_data('observation_uv.npz', uv)
+uv = reco.read_uv_data('observation_uv.npz')
+fit = reco.reconstruct_uv_data(uv, grid_size=32, fov_mas=.70,
+    support_radius_mas=.32, starts=3, max_iter=8000)
 ```
 
-### 1.1 Notebook的阅读顺序与两份说明的分工
+`read_uv_measurements`遇到 `.npz`也转入完整读取。传统CSV入口只表示单点UV测量；一旦发现积分节点或共享误差字段，就拒绝并指向完整NPZ，而不静默换模型。发布的 `walkthrough_disk_measurements.csv`和`binary_measurements.csv`是浏览简表，完整推断分别用 `single_disk_uv.npz`和`binary_uv.npz`。简表不足以独立恢复积分观测，不能因列名相似就拿去替代。
 
-物理MD独立解释完整过程和推导；Notebook负责先看到信号，再看到如何生成观测，不复制MD的全部章节。Notebook主线第1–9节依次为理论、仪器输入、单镜电压、同一记录的两镜相关、GLS、阵列UV、模型/参数变化、反演、最终性能。附加验证A–F保留原有的实际计算与独立种子。
+## 11. 反演如何逐次计算一幅候选图的预测
 
-基准是AB 2等、0.16 mas均匀盘、400±1 nm、36镜与6小时。`baseline_source`供理论和短记录使用，`source_cases['single_disk']`供阵列和反演使用；检查脚本重算两者的可见度，防止图表参数不同却只在文字上称为统一。单对示例是Tel.1/Tel.2、H=0.5 rad；整夜模型仍按完整时角窗口积分。
+`reconstruct_uv_data`先建立固定视场、像素坐标和圆形支撑。像素存的是该格归一化流量 $I_p$，不是未经面积归一的亮度密度；支撑外固定零，支撑内 $I_p\ge0$，总和为1。
 
-`sii_walkthrough`中`theoretical_scene`返回`lesson_scene`，`single_record`将同一次实际ADC加入该对象，`pair_correlation`直接读取它。前后图共用事件，不重新抽样。以下新增证据均位于`validation/sii_science/`：
+对一次优化，UV节点不变，只是图像反复变化。若每次都对几十万个节点计算傅里叶会很慢。`power_sampling_kernel`用图像自相关的等价表达，把所有积分几何预计算为
 
-| 文件 | 内容及复现用途 |
-|---|---|
-| `walkthrough_parameters.json` | 统一场景、两镜时刻、率、真P、注入倍率、采样与曝光 |
-| `walkthrough_ideal_hbt.csv` | 同一通带的理想光学g²曲线，ps时延 |
-| `walkthrough_record.npz` | 两镜事件（含边界保护区）、24 μs ADC、采样中心、时差、种子 |
-| `walkthrough_pair_correlation.csv` | 由上述ADC得到的对齐相关及解析期望 |
-| `walkthrough_pair_result.json` | 同一曲线的GLS估计、短记录误差及固定基线长曝光预测 |
-| `walkthrough_disk_measurements.csv` | 0.16 mas圆盘的11340行易读UV测量，不含变长求积节点 |
+$$
+K_{g,\Delta}=\sum_{a,q\in g}f_{ga}\omega_{aq}
+\cos\{2\pi[u_{aq}\Delta\theta_E+v_{aq}\Delta\theta_N]\},
+\qquad m_g(I)=\sum_\Delta K_{g,\Delta}A_I(\Delta).
+$$
 
-检查脚本从保存的ADC重新计算整数对齐、相关与GLS结果，并重建实际几何和通带平均P；它不只检查摘要中的“通过”标签。UV简表与原来的`binary_measurements.csv`一样，不含完整采样节点，精确重建应使用Notebook生成的完整DataFrame。
+$\Delta$标识像素间角位移，单位rad；$A_I$是图像与自身翻转的全线性卷积。`power_from_image`用 `fftconvolve`算自相关再矩阵乘核。该式与逐节点算 $|V|^2$再平均代数等价，不是插值补UV，也不是对观测测量再次自相关。32×32图对应63×63位移格，核大小为“合并测量数×3969”；预计超过1 GB则明确报错。
 
-## 2. 从main读取的是什么
+`_power_gradient`把测量损失的导数经核转置传回位移格，消除浮点非对称后，与图像作卷积并乘2，得到对像素流量的导数。这是自相关两端都依赖图像产生的因子2。预计算只改变速度，不改变曝光积分或误差定义。
 
-`Instrument.from_repository(ROOT)`读取**当前本地检出的配置文件**，不会在每次调用时联网取GitHub。此次已核对main提交`2926031b14c8aa2164a4d9233f5c2d0a75324127`中的10个关键参数文件，其内容与当前工作树一致。清单存于[`main_parameter_manifest.json`](../configs/sii/main_parameter_manifest.json)，使用统一换行后的SHA-256，避免Windows与Linux换行差异造成假变更。
+## 12. 怎样比较预测与数据、选参数并判断优化结果
 
-另同步保留了main的[`spe_model_measured.yaml`](../configs/electronics/parameters/spe_model_measured.yaml)。运行时的数值来自cfg和CSV；YAML是SPE参数来源补充，不用其中的长尾解释替代微单元恢复测量。
+记测量向量为 $\boldsymbol y$，图像预测为 $\boldsymbol m$，统计协方差为 $C$。`statistical_loss`计算绝对高斯目标的一半：
 
-默认响应入口为`configs/examples/corsika_lact_pylast_root_only_measured_waveform.cfg`，由既有`config_io`展开组件。数据流为：
+$$
+L=\tfrac12(g\boldsymbol m-\boldsymbol y)^TC^{-1}(g\boldsymbol m-\boldsymbol y)
++\frac{(g-1)^2}{2s_g^2}.
+$$
 
-1. 读取镜面、滤光片和PDE曲线，乘用户设置的SII通带，积分星光率、NSB率及相干面积。
-2. 从电子学组件读取4 ns采样、SPE路径、电荷样本和微单元几何。电荷样本强制归一化为均值1，并由样本计算二阶矩。
-3. 优先采用`lact2_measured_single_pixel_400nm.csv`和对应光追溯源JSON。有效探测面积已含光追损失，不重复乘PDE、镜面等因素。
-4. 若完整光追核不可用，库保留旧核回退行为。因此正式报告另记录实际使用的输入哈希，不把回退核说成完整实测光学响应。
-5. 最后应用调用者明确给出的覆盖参数。常数`source_transmission_scale=0.7836336`始终标为场景假设。
+独立情况按sigma逐点白化；有全协方差时用Cholesky和三角求解。权重不截断、不归一为均值1。共同增益在 `profile_calibration_gain`中解析消去：
 
-主Notebook记录源代码、布局和光追缓存哈希、随机种子及Python/NumPy/SciPy版本。光追缓存的原始逐光子文件位于历史溯源记录中的路径；本次没有重新运行百万光子的完整C++光追，不能将输入参数一致性核对说成重新验证了整条光学链。
+$$
+g_* =\frac{\boldsymbol m^TC^{-1}\boldsymbol y+s_g^{-2}}
+{\boldsymbol m^TC^{-1}\boldsymbol m+s_g^{-2}}.
+$$
 
-### 2.1 阵列input的转换
+$s_g=0$直接固定 $g=1$。对图像求导时用包络定理，不再对最优增益求额外导数。完整推导见[物理说明附录I](SII_PHYSICS_ZH.md#appendix-i)。噪声测量可为负或大于1，原值保留；只约束候选图的物理性质。
 
-当前阵列输入为[`lact36_20260906.input`](../configs/arrays/lact36_20260906.input)，来源是用户提供的36行TELESCOPE卡片，独立于main仪器参数清单。`read_corsika_layout`只读取TELESCOPE卡片，检查有限坐标、正半径和唯一标签；按出现顺序生成1起始镜号和0起始索引，保留原始NWU厘米、转换ENU米、半径与input行号。`generate_uvw`和`run_sii_pipeline`可直接接收`.input`路径，也兼容已有CSV及DataFrame。DataFrame中的非有限ENU位置会明确报错。
+图像平滑项惩罚相邻像素亮度密度梯度。代码把用户强度乘 $(N-1)^4$，补偿网格改变时像素流量的尺度，$N$是每边像素数。默认 `smoothness='cv'`用固定随机划分的80%数据训练、20%验证，在0、0.0001、0.01中选择，不按真图相似度调参。每个候选只在训练集拟合增益；验证评分接收训练增益后验的秩一不确定度及其行列式项，不能在验证集重新校准以降低残差。
 
-转换遵循[`EventIOPhotonSource.cpp`](../src/io/EventIOPhotonSource.cpp)的厘米到米，以及[`CorsikaTraceEventIOInput.cpp`](../src/io/CorsikaTraceEventIOInput.cpp)中的`(-y, x, z)`。例如Tel.1得到ENU=(-434.92063, 417.46032, 0) m，Tel.36得到(266.66667, 136.50794, 0) m；所有镜的半径为4 m。旧32台CSV是历史布局，当前入口不再默认使用它。需要重新导出可运行：
+选择平滑后，在全数据上运行多个初值：集中、弥散、随机平滑图。默认流量参数化将有界非负变量除其总和；也保留softmax对照。优化用带解析梯度的L-BFGS-B，取目标最低的起点。本例最多8000次迭代；失败状态、每起点目标和停止消息都保存，不只保留好看的图。
+
+程序另外计算单纯形驻点间隙 $G=\sum_p I_p\partial L/\partial I_p-\min_p\partial L/\partial I_p$。它衡量向梯度最小像素挪一点流量还能降低多少目标；通过阈值只是局部必要条件，不证明非凸问题全局最优。
+
+优化结束后只允许不损失流量、不越出支撑的整数平移作居中，再重新计算保存图像对应的预测。真图直到拟合后才用于比较；配准只允许平移和180°中心反演，不周期卷绕。原因是这些变换无法由两镜平方可见度区分。峰数、图像误差、配准保留通量及重复模拟的稳定性用于描述解，不能把算法收敛等同于数据唯一重建了遮挡细节。
+
+圆盘参数拟合与图像优化共享同一个平均观测模型，但候选只是一维直径。`profile_model_grid`对每个直径剖面共同增益，`profile_grid_interval`取最小点与 $\Delta\chi^2\le3.8414588$ 的区间，并标记截边和不连通。95%是常规单参数似然近似，最终通过重复模拟检验覆盖，不能从一次拟合推断准确率。
+
+## 13. 最终36镜性能怎样与短波形连接，哪些验证回答哪些问题
+
+前面的流程已经能从源生成并反演UV数据。`tools/validate_sii_performance.py`进一步使用全部36台实际共享ADC来学习响应与噪声，检查这一外推在固定范围内是否可用。它与主流程复用相位模板和段内方差积分，标定记录与图像演示各自独立。
+
+三个时角各生成96条点源训练、192条零信号、96条圆盘留出，合计1152条24 μs阵列记录。点源和圆盘倍率300，零信号单独生成；点源真功率1用于训练，待测圆盘真值不用于校准。630条基线共享36通道，所以响应与噪声学习误差按记录级阵列统计，不把一条记录的630基线当作630条独立标定记录。原始共同时间0.027648 s，裁后0.026164224 s，不能乘36或630。
+
+各相位留出组检查恢复偏差及误差尺度。得到的共同增益与噪声尺度随后用于整夜模型。`weak_light_covariance_budget`计算线性弱光Bartlett跨基线谱界，并用未分辨多模热光计数的精确二至四阶矩作另一对照；计数模型的界不冒充SPE滤波后全部四阶项的严格界。
+
+性能表预定27个场景：星等2、4、6；直径0.08、0.16、0.32 mas；曝光1、3、6小时，每格500次，共13500次。直径候选0至0.64 mas，步长0.0005 mas；似然细化到0.00005 mas，并用非网格直径的直接模型检查插值。误差同时报告偏差、RMSE、区间覆盖、覆盖率二项区间、边界和多峰标记。
+
+`compressed_profiles`为了批量模拟，以候选模型白化后的向量建立QR子空间，真值不参与选基。正交补只给所有候选同一个卡方常数，故似然比可在低维子空间计算；逐候选重构误差超过阈值会报错。每次抽一个共享增益、一个正值噪声尺度和子空间高斯噪声；剖面增益与固定增益两种分析使用同一批观测。拟合sigma还做噪声学习误差及弱光共同协方差的保守修正。这些是已说明的条件模型，不是模拟了未知真实天气或电子学漂移。
+
+有限瞳面另由 `pupil_difference_quadrature`计算两独立均匀圆瞳入射点之差的分布，再由 `aperture_disk_power`对基线加该差向量求平均，量化8 m均匀瞳面对镜心近似的影响。真实遮挡、不同入瞳响应与滤光片角响应的联合分布未给全，故该对照没有冒称自动重现真实瞳面。
+
+其他实际执行的检验各有明确作用，完整数表分别保留：
+
+| 入口/结果目录 | 它检验什么 | 不能据此推出什么 |
+|---|---|---|
+| `thermal_mode_counts`、`joint_thermal_mode_counts` | 独立复高斯场→光强→泊松计数的二阶、三阶及边缘矩 | 没有生成整夜飞秒电场或纳秒SPE波形 |
+| `validate_sii_observation.py` / `sii_observation` | 三镜共享波形、补偿、插值核收敛、24/96 μs曝光缩放 | 短块通过不证明整夜平稳性 |
+| `validate_sii_tracking.py` / `sii_tracking` | 七时刻固定相干矩阵下更新几何优于固定初始时延 | 固定相干不是恒星随UV变化的结果 |
+| 同脚本 `--source-case single_disk` / `sii_source_tracking` | 七时刻真实源相干，点源训练与圆盘留出分开 | 4410个36镜功率预测不等于4410组独立ADC |
+| `test_sii_review_regressions.py` | 分数相位、完整数据往返、共享零点、非零噪声/抖动、窄通带 | 六类回归通过不取代实际仪器标定 |
+| notebook的图像重复与网格对照 | 多种数值设置、随机观测下的解及驻点稳定性 | 局部解稳定不证明相位唯一或行星检出 |
+
+## 14. 保留的零值接口、替代路径与规格书边界
+
+当前实测SPE、电荷涨落、光追时间展宽保持启用。下面的零值只是缺少实测输入时关闭效应的约定，不是把这些效应测成了零。
+
+| 接口 | 当前值 | 已实现范围与下一步需要 |
+|---|---:|---|
+| `dark_count_rate_hz` | 0 | 独立泊松暗计数可用；按实际汇总通道、温度、过压填入并重标定 |
+| `electronic_noise_rms_mv` | 0 | 独立白噪声可用；有色谱或跨通道噪声需要对应模型 |
+| `intrinsic_time_jitter_ns` | 0 | 独立高斯抖动已同时进入波形、连续模板和匹配带宽 |
+| `microcell_recovery_time_ns` | 0 | 短波形有指数恢复；非线性长曝光相位标定尚未支持 |
+| `adc_bits/adc_full_scale_mv` | 0/0 | 短波形有量化剪裁；线性解析相位模型不能直接用于非零ADC |
+| 串扰、后脉冲概率 | 0 | 非零显式拒绝，单个总概率不足以决定时间/电荷分布 |
+| 镜增益、夜增益、时延、透明度和NSB漂移 | 0 | 长曝光非零似然尚未标定，显式拒绝 |
+| `baseline_zero_point_rms` | 0 | 旧解析路径支持共享基线零点及完整协方差传播；主波形路径仍需其专门标定 |
+
+S17351规格书的结构化摘录为 [s17351_datasheet.json](../configs/sii/s17351_datasheet.json)，保留原PDF哈希。8通道、每通道33792微单元与main一致。25℃、过压8.5 V下每通道暗计数典型1.2 MHz、最大3 MHz，通过 `datasheet_dark_scenario`单独比较1或8通道汇总；默认仍关闭。典型串扰3%不会自动再叠加到已有实测电荷涨落里。PDF的PDE点用于核对完整曲线，不能凭典型点补齐真实噪声谱、恢复时间、延迟分布或整机ADC。详细条件与缺项见物理说明第13节。
+
+旧 `estimator='analytic'`按星光/背景计数及解析SNR生成观测，属于替代比较路径。`with_matched_effective_bandwidth`先积分光学及本征抖动传递函数的四次模、散粒噪声占总谱比例的平方，把电子/量化噪声计入 $B_{\rm eff}$。标记 `optical_timing_in_effective_bandwidth=True` 后，解析观测不再乘一次电子学效率或光学衰减。旧带宽模型含采样箱sinc近似，主波形则在采样中心求SPE；不能把匹配带宽后的仪器再送给主波形当作另一段前端滤波。
+
+`likelihood='legacy'`还保留历史幅度/Huber及权重缩放对照，会加旧零基线约束，不是本文的统计推断路径。无噪声数据须显式选择 `likelihood='noiseless'`；不能缺sigma却默认进行有统计意义的性能推断。
+
+库中历史 `simulate_short_pair_waveforms`先在ADC时间箱内抽共享计数，再分别在两镜箱内展开事件时刻；它保存的是箱计数的相关，连续对事件的两端时刻不完全相同。因此它与主流程的 `simulate_hbt_primary_pe`具有不同的亚采样响应，不能用来替代本文标定。`make_fast_spe_template`提供测试用的双指数形状，正式例子读实测模板。`mean_recovery_fraction`计算均匀泊松照明下的平均恢复比例，仅作解析对照；实际启用恢复的电压仍逐微单元处理。这些历史/辅助入口存在于同一个模块，不表示notebook同时混用它们。
+
+## 15. 从干净环境复现，并定位每一步的输出
+
+仓库的 [requirements-sii-validated.txt](../requirements-sii-validated.txt)固定已验证的直接依赖版本，包含ipykernel；它不是操作系统、BLAS及全部传递依赖的完整环境镜像。在仓库根目录运行：
 
 ```powershell
-python python/sii_layout.py configs/arrays/lact36_20260906.input configs/arrays/lact36_20260906_coordinates.csv
-```
-
-测试和结果检查脚本同时核对raw input与派生CSV，检查630条唯一基线和11340条分段测量，避免只更新坐标文件却继续使用旧阵列结果。
-
-## 3. 缺失参数的零值约定
-
-`Instrument`是不可变dataclass，修改使用`dataclasses.replace`或`from_repository(..., **overrides)`。字段名保留英文，物理用途和关键算法用中文注释。
-
-| 接口 | 当前值 | 零值行为 | 将来非零时的处理 |
-|---|---:|---|---|
-| `electronic_noise_rms_mv` | 0 | 不产生加性噪声 | 当前支持独立白噪声；有色谱需扩展模型 |
-| `dark_count_rate_hz` | 0 | 不增加暗计数 | 当前支持独立泊松暗计数并重新标定 |
-| `microcell_recovery_time_ns` | 0 | 所有恢复比例严格为1 | 已有指数恢复模型；仅有独立实测恢复时间后启用 |
-| `intrinsic_time_jitter_ns` | 0 | 不扰动光电子时刻 | 当前支持独立高斯时间抖动，单位ns |
-| `adc_bits`、`adc_full_scale_mv` | 0、0 | 不量化、不剪裁 | 必须同时给有效位数及满量程，重新做波形标定 |
-| `sipm_crosstalk_probability` | 0 | 无串扰 | 非零显式报未实现，等待实测时间/电荷模型 |
-| `sipm_afterpulse_probability` | 0 | 无后脉冲 | 非零显式报未实现，等待实测延迟/幅度分布 |
-| 每镜/每夜增益、基线零点、时延残差、透明度及NSB漂移 | 0 | 不额外扰动长曝光测量 | GLS分支对未标定非零项报错，避免套用平稳标定 |
-
-这些0是“关闭效应”，不是伪造零误差测量。实测SPE、电荷涨落和光追展宽仍然存在。采样率、通带宽度、总光子率等必要物理输入不能用0占位。
-
-最小使用方式：
-
-```python
-from pathlib import Path
-from dataclasses import replace
-import sys
-
-ROOT = Path.cwd()  # 在仓库根目录运行
-sys.path.insert(0, str(ROOT / "python"))
-import sii_unified as sii
-
-instrument = sii.Instrument.from_repository(ROOT)
-# 有本征时间抖动实测后才填写；当前保持0。
-instrument = replace(instrument, intrinsic_time_jitter_ns=0.0)
-calibration, diagnostics = sii.simulate_waveform_gls_calibration(
-    instrument, null_records=2048, signal_records=512, seed=20260905)
-layout = ROOT / "configs/arrays/lact36_20260906.input"
-result = sii.run_sii_pipeline(
-    layout, sii.BinarySource(), sii.Observation(), instrument,
-    estimator="waveform_gls", waveform_calibration=calibration,
-    do_reconstruction=False, seed=20261305)
-# 重建只传测量表；生成函数保留真值列供后验评价，整理函数不读取它。
-image = sii.reconstruct_uv(result.measurements, grid_size=32,
-    fov_mas=0.70, support_radius_mas=0.32, starts=3, max_iter=8000)
-```
-
-波形路径中的`electronics_bandwidth_hz`须与采样Nyquist频率一致，实际前端形状由SPE体现。`with_matched_effective_bandwidth`是旧解析SNR分支的辅助接口，不能先应用它再进入波形模拟，以免重复计算带宽损失。
-
-## 4. 短波形与GLS标定的实现
-
-`simulate_hbt_primary_pe`生成两镜的共享对与独立光电子，保持单镜平均率不变。`hbt_pair_rate_scale`只用于已知注入倍率，输出同时记录物理对率及注入对率。与main逐光电子接口兼容的`origin="cherenkov"`是原接口的信号标签，并不表示这里模拟的是切伦科夫光。
-
-`render_pe_waveform`在每个SPE支持范围内计算连续平移模板，在ADC采样中心插值求和，用分块数组限制内存。它不先把光子时刻取整到采样格。微单元恢复关闭时不抽随机单元；电噪声关闭时不抽噪声数组，保持真正无效应的零值语义。
-
-`waveform_cross_correlation`用FFT计算两条去均值波形的互相关，按重叠样本数修正滞后边缘，并按波形方差归一化。有限样本比值偏差通过解析对照和独立波形检查评估。
-
-`WaveformGLSCalibration`包含以下数值，而不只是一个SNR常数：
-
-| 字段 | 内容 |
-|---|---|
-| `lags_ns` | 完整相关峰的滞后坐标 |
-| `null_mean` | 采用的零信号期望向量 |
-| `peak_per_visibility2` | 单位平方可见度的峰模板 |
-| `covariance_per_block`、`block_duration_s` | 单个标定块的协方差与时长 |
-| `star_rate_hz`、`background_rate_hz` | 标定所对应的源与背景率 |
-| `instrument_signature` | 仪器数值参数及响应内容签名 |
-| `response_relative_uncertainty` | 固定选定权重下的有限响应增益不确定度 |
-| `sigma_relative_uncertainty` | 噪声尺度估计的有限样本相对误差 |
-
-`simulate_waveform_gls_calibration`的样本划分为：零信号一半训练、四分之一选收缩、四分之一定尺度；信号一半训练、四分之一校正响应、最后四分之一检验。候选收缩量为`1e-4, 1e-3, 1e-2, 5e-2`。模型假定平稳，将协方差按滞后差做Toeplitz平均，并给特征值设置相对`1e-10`下限。
-
-`waveform_gls_weights`返回固定峰权重及条件统计误差。`sample_waveform_gls_visibility2`只生成GLS投影后的标量高斯统计量，并为整批数据抽一次共同增益。它不会生成6小时的250 MS/s数组。参数或光子率改变后，`simulate_uv_observation`检查签名和率，不匹配就要求重新标定。
-
-保存的`waveform_calibration.npz`可用`np.load(..., allow_pickle=False)`读取，再将零维数组转为Python标量构造`WaveformGLSCalibration`。加载后仍需执行同样的仪器/率一致性检查；不能仅凭文件名断言有效。
-
-### 4.1 多镜观测入口
-
-`sii_observation.py`提供独立短记录入口，沿用main仪器响应。`simulate_array_photon_times`返回逐镜时间数组及对率、边缘率、填充信息；`simulate_array_waveforms`每镜只渲染一次，返回`adc_mv[镜,样本]`。它们接受复相干矩阵，先检查Hermitian、单位对角和半正定条件。弱对模型按每镜参与的全部对率扣除独立星光率，超额注入导致负率时明确报错。背景率显式传入，调用者将NSB与暗计数相加一次。
-
-`geometric_arrival_delays_ns`返回相对参考镜的**到达时差**，即负的位置投影除以光速；`align_waveforms`执行`x_i(t+d_i)`。它返回共同有效样本中心、实际时长、首个输入索引和丢弃样本数。整数偏移精确索引，分数偏移默认16点半宽；改变半宽、采样率或时差后需匹配处理后的标定。没有共同数据时抛出异常。
-
-分数插值使用有限线性相关实现FIR求和，交给SciPy选择直接计算或补零FFT，避免Python逐抽头循环。`mode='valid'`与显式公共裁剪确保输出只使用实际输入支持区间；这不是对原始记录作周期延拓。
-
-`correlate_blocks`对所有镜使用同一组完整块，返回`block_correlations[块,基线,滞后]`、等曝光平均、基线顺序、块数和实际曝光；不足一块的尾数据计数后丢弃，恒定通道拒绝归一化。它不把相邻块自动视为统计独立，块相关须由重复数据检查。下面是可运行的最小例子，其中单位矩阵表示零跨镜相干的校验场景：
-
-```python
-import sys
-from pathlib import Path
-import numpy as np
-
-root = Path.cwd()
-sys.path.insert(0, str(root / "python"))
-from sii_unified import Instrument, detected_star_rate_hz
-from sii_layout import read_corsika_layout
-from sii_observation import (simulate_array_waveforms, align_waveforms,
-                             correlate_blocks, tracking_geometry)
-
-instrument = Instrument.from_repository(root)
-layout = read_corsika_layout(root / 'configs/arrays/lact36_20260906.input')
-positions = layout.iloc[[0, 1, 5]][['east_m', 'north_m', 'up_m']].to_numpy()
-state = tracking_geometry(positions, 0., .3, np.deg2rad(29.3586), elapsed_s=3600.)
-delay_ns = state['arrival_delays_ns']
-rate_ns_per_s = state['arrival_delay_rates_ns_per_s']
-raw = simulate_array_waveforms(
-    np.random.default_rng(42), 24_000., detected_star_rate_hz(2., instrument),
-    instrument.detected_nsb_rate_hz + instrument.dark_count_rate_hz,
-    np.eye(3), instrument, arrival_delays_ns=delay_ns,
-    arrival_delay_rates_ns_per_s=rate_ns_per_s)
-aligned = align_waveforms(raw["adc_mv"], delay_ns, instrument.sample_width_ns,
-                          arrival_delay_rates_ns_per_s=rate_ns_per_s)
-result = correlate_blocks(aligned["adc_mv"], instrument.sample_width_ns,
-                          block_samples=aligned["adc_mv"].shape[1] // 4)
-print(result["mean_correlation"].shape, result["effective_duration_s"])
-```
-
-`joint_thermal_mode_counts`是另外一条复高斯联合场→光强→泊松计数路径，用于验证二阶、三阶及边缘方差，不调用共享对生成器。它返回离散模平均的计数与光强，不输出真实纳秒波形。缺失时变增益、透明度等参数保持0；在当前联合波形入口设为非零会明确报尚未实现，避免被静默忽略。
-
-### 4.2 随时角更新几何及块内时延率
-
-`tracking_geometry`接受参考时角、赤纬、纬度、经过的SI秒和参考镜索引，返回该时刻的`arrival_delays_ns`、`arrival_delay_rates_ns_per_s`及`curvature_bound_ns_per_s2`。每条短记录的局部时间从0开始，避免用整夜绝对纳秒数参与插值而损失精度。曲率上界乘记录时长平方的一半，是一阶时延展开的误差界。
-
-光子入口与补偿入口都接受可选的`arrival_delay_rates_ns_per_s`。默认省略或全0时沿用固定时延算法；非零时，光子参考时间先作线性伸缩和延迟，然后才抽光学时间响应。元数据中的`star_rate_hz`按参考时间定义，`received_star_rate_hz`明确包含时间映射的Jacobian；背景按接收时间生成。非有限时延率或非递增的时间映射会报错。
-
-动态补偿按ADC半样本中心计算逐点读取位置，用同样的Lanczos-sinc权重，每批最多4096个输出点。公共裁剪确保每个通道的所有抽头都落在原始数据中；它不会把已计算的相关峰平移来冒充波形追踪。非零时延率下，部分通道即使恰好整数延迟，也按共同支持区间保守裁剪。
-
-[`validate_sii_tracking.py`](../tools/validate_sii_tracking.py)在过中天前后3小时的七个时刻，分别生成96条训练、128条注入留出和128条零信号记录。每条24 μs，总计2464条三镜记录，原始共同时间累计0.059136 s；这不是6小时连续ADC，三个通道也不把曝光乘3。每个时刻的两种处理使用同一批ADC和共同参考时间区间。追踪响应只从该时刻训练集估计；初始时延对照除以追踪增益，不用接近零的自身响应放大噪声。
-
-结果保存在[`validation/sii_tracking`](../validation/sii_tracking)：`geometry.csv`为36镜每分钟几何，`epochs.csv`为七个波形时刻的有效单条曝光及展开误差界，`records.csv`保留两种处理的逐条投影，`response.csv`记录训练增益、留出结果、零信号及误差。固定相干矩阵是处理检验场景，未随UV变化；该表不能直接作为恒星六小时光变或36镜重建测量。
-
-本次共同裁剪后单条曝光为20.984至22.400 μs，2464条训练/留出/零信号记录合计有效时间0.054198144 s。统计总时长时按`epoch, case, record`去重，不能再次累加同一记录的三条基线。
-
-### 4.3 从天体亮度构造通带内的联合相干
-
-`source_coherence_spectrum`从实际ENU镜心位置形成`r_j-r_i`基线，调用已有`uvw_from_enu`和`source_visibility`，返回`coherence[波长,镜,镜]`、`wavelength_nm`、`spectral_weights`及`pair_visibility2[镜,镜]`。它支持已有双星、圆盘、椭圆和静态遮挡盘，沿用仪器的HBT谱积分节点；单色场景使用一个节点。每个波长的矩阵都检查Hermitian、单位对角和半正定。
-
-`band_averaged_coherence_power`计算各节点模平方的加权和，不平均复振幅，也不把功率开方后伪装成相干矩阵。权重必须有限、非负且和为1。光子与波形入口新增可选`spectral_weights`，既有二维矩阵调用保持兼容；元数据保留`band_averaged_visibility2`。弱对生成器使用该功率决定对率，但仍不模拟多色热光的完整高阶时间过程。`joint_thermal_mode_counts`继续只接受单个合法矩阵。
-
-下面续接第4.1节已经定义的`positions`、`state`、`instrument`及相关变量，改为实际圆盘源模型：
-
-```python
-from sii_unified import BinarySource
-from sii_observation import source_coherence_spectrum
-
-spectrum = source_coherence_spectrum(
-    positions, state['hour_angle_rad'], .3, np.deg2rad(29.3586),
-    BinarySource(primary_diameter_mas=.16), instrument, 'single_disk')
-raw = simulate_array_waveforms(
-    np.random.default_rng(43), 24_000., detected_star_rate_hz(2., instrument),
-    instrument.detected_nsb_rate_hz + instrument.dark_count_rate_hz,
-    spectrum['coherence'], instrument, arrival_delays_ns=delay_ns,
-    arrival_delay_rates_ns_per_s=rate_ns_per_s,
-    spectral_weights=spectrum['spectral_weights'])
-aligned = align_waveforms(raw['adc_mv'], delay_ns, instrument.sample_width_ns,
-                          arrival_delay_rates_ns_per_s=rate_ns_per_s)
-```
-
-主Notebook附加验证E实际运行`python tools/validate_sii_tracking.py --source-case single_disk --seed 20260908`，输出到[`validation/sii_source_tracking`](../validation/sii_source_tracking)。每个时刻用独立未分辨点源训练响应，`calibration_truth=1`；待测圆盘的`truth`只用于生成和拟合后检验，不参与求训练增益。点源为同星等、同通带、同几何状态的理想参考源，没有假称获得了实测标定星。
-
-该目录沿用第4.2节的逐记录、响应和曝光表，并增加`source_predictions.csv`：七个时刻×630条基线共4410个36镜通带功率预测。`epochs.csv`中的`source_power_change_over_record`记录该24 μs窗口两端的最大功率差；信号强度在短记录内冻结，时延保留一阶变化。源矩阵、光谱权重与半正定检查不同于完整36镜波形或完整联合误差；这两项尚未由该表提供。
-
-## 5. 测量表和重建器之间的边界
-
-`generate_uvw`采用ENU坐标和西向为正的时角。时间推进使用`SIDEREAL_DAY_S`；曝光和协方差缩放使用秒。每段9个时间中点乘5个谱节点，组成45个实际子采样。
-
-| 测量列 | 含义和使用范围 |
-|---|---|
-| `u_lambda`、`v_lambda` | 段中心、中心波长的代表坐标，用于索引和显示 |
-| `uv_samples_u`、`uv_samples_v`、`uv_samples_weight` | 实际时间/光谱采样，用于正向平均与重建 |
-| `visibility2_measured` | 随机测量，不做0至1裁剪 |
-| `sigma_visibility2` | 独立统计标准差，用于逆方差合并 |
-| `calibration_relative_sigma`、`calibration_id` | 共同增益先验及其标定身份 |
-| `visibility2_true`、`visibility2_center` | 仅模拟及拟合后评价；不属于重建输入 |
-
-`sigma_visibility2_calibration`是便于显示的逐行估算，**不能**代替共同协方差，也不能平方相加后假装所有基线独立。旧字段`segment_time_smearing_delta`目前包括时间与光谱平均相对中心值的合并差异。
-
-`prepare_reconstruction_uv`以逆方差合并同一UV格的测量，统计误差按合并权重计算；把每一行内的真实采样权重乘该行在合并格中的权重，存入`UvData.sampling`。共同增益先验保持原值。它拒绝混合多个独立标定ID，因为那需要多组共同增益的似然，不能静默合成一个先验。
-
-主Notebook导出的`binary_measurements.csv`为易读测量表，省去了变长子采样列。**不要直接用这张简表调用通用CSV重建入口来复现精确平均的主结果。** 主结果应从Notebook中的配置、观测及随机种子重新生成完整DataFrame。通用`read_uv_measurements`针对单点UV CSV，不会凭空恢复被省去的积分轨迹或共享标定先验。
-
-## 6. 重建目标和独立性保护
-
-`power_sampling_kernel`利用图像自相关表示平方可见度，提前平均每个像素位移处的余弦核。`power_from_image`用FFT得到图像自相关后乘该核；`_power_gradient`给出同一算子的伴随导数。算子本身只依赖几何和平均权重，不含源真值。
-
-`statistical_loss`采用绝对误差，保留完整逆方差尺度。共同增益由`profile_calibration_gain`解析剖面消去。若直接提供完整`UvData.covariance`，代码检查对称性、正定性及其对角线与`sigma²`一致。当前自动交叉验证只支持独立统计误差加单一共同增益。
-
-验证评分使用训练集的增益后验。若验证预测向量为$m$，统计对角阵为$D$，训练后的增益标准差为$s$，则验证预测协方差是$D+s^2mm^T$。评分包含二次型及其秩一行列式项，不在验证集重新拟合增益。
-
-图像参数默认是有界非负流量再归一化，避免softmax让暗像素难以增长。旧`legacy`模式只用于历史算法对照，保留明确名称，不作为当前科学报告结果。多起点包括集中、弥散和随机平滑形态。
-
-图像结果同时保存优化器状态、迭代次数、各起点目标函数、统计卡方、标定先验惩罚和单纯形驻点间隙。当前默认迭代上限为8000，达到上限仍报告失败，不把正常返回对象当成收敛。驻点阈值是明确数值诊断，不是全局最优证明。
-
-拟合后图像配准只允许平移与180°中心反演，不使用周期卷绕。配准保留通量另作记录。`_peak_diagnostic`寻找局部极大值；单峰不输出第二颗“星”。真值只用于拟合后比较，相关自动测试还会污染真值列，确认测量整理不依赖它。
-
-## 7. 独立验证为何不是程序自己证明自己
-
-| 检查 | 独立输入或方法 | 能排除的问题 |
-|---|---|---|
-| `thermal_mode_counts` | 复高斯场→光强→条件泊松，独立于共享对生成器 | 热光二阶相关和超泊松方差公式/实现错误 |
-| `analytic_waveform_calibration` | 连续SPE自相关、光学传递、Bartlett协方差 | 两个波形函数共享同一错误却互相闭合 |
-| `waveform_records` | 固定新种子、完全独立记录，不训练权重 | 训练数据上的噪声低估和响应偏差 |
-| 不同注入倍率、块长 | 重新生成波形而非缩放既有结果 | 注入非线性及块长归一化错误 |
-| 时延率与变化插值 | 自转几何有限差分、独立解析信号的逆时间映射、共享光子逆映射 | 时延导数符号、ns/s单位、半样本位置或边缘率错误 |
-| 天体联合相干 | 双点源场Gram矩阵、圆盘正亮度像素积分、单色与非相干谱叠加对照 | 基线相位符号、矩阵合法性及先平均振幅造成的功率错误 |
-| 梯度有限差分 | 对标量目标直接作扰动 | 共同增益剖面导数或平均功率伴随错误 |
-| `profile_model_grid` | 逐模型解析剖面，与显式似然优化对照 | 批量参数似然和区间实现错误 |
-| 1000次直径区间 | 独立增益及噪声实现，报告二项区间 | 在指定场景中的区间覆盖不足 |
-| 网格/合并/图像重复 | 固定测量改数值设置，或固定设置改噪声 | 数值误差与随机误差混淆、形态不稳定 |
-
-独立解析对照只适用于线性探测和弱信号。ADC剪裁、微单元恢复、串扰和后脉冲开启时，它显式拒绝计算。白噪声和高斯本征抖动可在该解析对照中传播。解析网格0.05 ns与0.025 ns另作收敛检查。
-
-圆盘剖面区间采用0.12至0.20 mas、801个网格点，并报告碰边和不连通情况。新36台布局的1000次检验为959次覆盖，比例0.959，95%二项区间约[0.9448, 0.9704]，与名义95%相容。噪声尺度改变约±6.13%后，覆盖率为0.942和0.971；有限标定误差仍会影响推断。
-
-## 8. 如何完整复现
-
-在仓库根目录运行，Python环境需包含[`requirements.txt`](../requirements.txt)中的依赖。本次使用Python 3.13.13、NumPy 2.4.4、SciPy 1.17.1；跨平台优化器停止位置可能有小差异，应比较误差及目标函数而不要求所有像素逐位相等。
-
-[`requirements-sii-validated.txt`](../requirements-sii-validated.txt)固定本次直接依赖版本，可用于建立同版本环境；它不锁定操作系统、BLAS或全部传递依赖。`ipykernel`已列为显式依赖，避免干净环境只有nbclient却没有可执行的Python内核。
-
-```powershell
-python -m pip install -r requirements.txt
-python -m pytest -q tests
+python -m pip install -r requirements-sii-validated.txt
+python -m pytest tests -k sii -q
 python tools/build_sii_science_notebook.py
-python tools/execute_notebook.py notebooks/sii_complete_waveform_report.ipynb --cwd . --timeout 3600
-```
-
-运行时间主要由几千条短波形和多次图像优化决定。Notebook固定随机种子，并将BLAS线程数设为1，避免小矩阵过度并行。正式运行不要同时修改导入模块，也不要手工编辑中间CSV后只执行末尾绘图单元。
-
-主要输出为：
-
-- `parameters.csv`、`thermal_modes.csv`：实际输入数值及独立热光检验。
-- `response.csv`、`covariance.csv`、`waveform_calibration.npz`：本次GLS标定。
-- `independent_null.csv`、`injection_scale.csv`、`block_duration.csv`：独立波形结果。
-- `binary_measurements.csv`：供检查和画图的长曝光测量简表。
-- `array_baselines.csv`：由36台input转换位置生成的630条唯一基线及长度。
-- `diameter_profile.csv`、`diameter_coverage.csv`、`time_quadrature.csv`：参数区间、覆盖率和时间积分检验。
-- `reconstruction.csv`、`convergence.csv`、`image_alignment.csv`、`image_repeats.csv`和各源`*_image.npy`：重建与稳定性。
-- `summary.json`：实际运行版本、输入哈希、种子、所有核心结果及适用范围。
-- `docs/sii_science_figures`：Notebook直接生成的科学图，不是手工示意图。
-
-`tools/validate_sii_gls.py`是较小的独立标定/重建检查入口，可用于修改后的快速定位，不能替代主Notebook的完整证据。
-
-主Notebook附加验证C通过当前Python解释器实际执行三镜观测验证，显示结果表与两幅验证图。该节的子进程失败会使Notebook失败；结果摘要的统一换行哈希随主摘要保存，避免旧图表与新计算混用。也可单独运行：
-
-```powershell
-python tools/validate_sii_observation.py
+python tools/execute_notebook.py notebooks/sii_complete_waveform_report.ipynb --cwd . --timeout 7200
 python tools/check_sii_science_artifacts.py
 ```
 
-它默认生成256条训练记录、各384条注入留出/物理倍率/零信号记录，共1408条24 μs三镜原始波形；另生成384条96 μs物理倍率波形，并做30万条独立热光模计算。结果位于[`validation/sii_observation`](../validation/sii_observation)：`records.csv`保留固定解析权重的逐记录投影，`response.csv`保存各处理方法及基线的训练增益和标准误，`baseline_covariance.csv`保存基线联合协方差和近似相关区间，`thermal_moments.csv`为独立物理矩检验，`summary.json`记录输入、种子、代码哈希和适用范围。图由本次运行直接绘制。
+生成脚本会清空旧notebook输出；执行脚本按顺序运行全部38个单元中的20个代码单元，失败时保留已执行输出并返回错误。完整波形验证和图像重复需要较长时间。修改数值代码或输入后应从头重算，不能只运行末尾单元覆盖摘要哈希。
 
-`kernel_records.csv`保留16、32、64、128、256、512点半宽在相同19.232 μs区间内的逐记录投影；`kernel_convergence.csv`报告相对512点的配对响应差、均值标准误和噪声标准差比。比较时不对每个核单独除以新训练增益，否则会掩盖数值响应差。512点只是有限宽度参考，不能把参考曲线的零差、零误差棒解释为模拟真值精确已知。
-
-`long_records.csv`保存独立生成的96 μs记录；`exposure_scaling.csv`将其噪声与原24 μs物理倍率样本比较。计算使用裁剪后的95.024和23.024 μs，标准差比乘曝光比平方根；表中95%区间来自近似正态块统计量的F分布。自动异常检查采用预先固定的双侧99.8%区间，图中仍展示较窄的95%区间，二者不能混称。通过这一检查不证明微秒到整夜的全部外推成立。
-
-此入口采用固定解析GLS投影，再用独立训练数据校准补偿后的响应；尚未重新优化插值后的完整滞后权重。噪声尺度区间以训练增益固定为条件，增益误差在`response.csv`另报；注入恢复误差棒包含训练与留出两部分。物理倍率记录不与放大注入混合估计噪声，更不能用放大注入的基线相关外推整夜。处理链检验与主Notebook的长曝光灵敏度、重建结果有各自的代码哈希，保持清楚的证据范围。
-
-主Notebook包含38个单元，其中20个代码单元；核心自动测试共98项。附加验证D、E分别执行固定相干与圆盘源的七时刻验证，第9节执行36镜性能验证，主摘要绑定这些结果摘要的哈希。完整执行状态及结果版本由下述检查脚本核对。
-运行`python tools/check_sii_science_artifacts.py`可再检查说明链接、公式分隔符、Notebook执行状态和结果中的源代码/输入哈希。
-新36台布局的36次图像重复均由优化器正常结束，并通过驻点阈值。逐次误差及配准保留通量仍公开在`image_repeats.csv`；通过数值诊断不等于图像唯一、全局最优或遮挡结构已检出。程序仍保留失败记录，不按成功状态筛选稳定性汇总。
-
-## 9. 收到下一批真实参数时怎样更新
-
-先保存现有分支或标签，将真实参数文件同步到工作树，记录main提交及文件哈希。`verify_main_parameters`会拒绝与旧清单不一致的文件，提醒来源已经改变；更新清单前应实际核对新文件，不是为使测试通过而覆盖哈希。
-
-SPE形状、电荷分布、采样、通带、光子率或光学核变化后重新生成标定和全部相关结果。新增非线性/相关电子学数据时，先实现对应分布与时间结构，在短波形级验证后再允许长曝光使用。若是每镜各不相同的响应，需要按镜对或响应分组标定；当前示例是同型镜共享一套标定。
-
-当前实现的适用条件及尚未验证的效应见[原理说明中的适用范围](SII_PHYSICS_ZH.md)。
-
-## 10. 36镜角直径性能入口及SiPM规格书
-
-本版固定交付范围是新36镜布局下的SII灵敏度与均匀圆盘角直径性能。完整Notebook实际执行这一验证集；只重算它时运行：
-
-```powershell
-python tools/validate_sii_performance.py
-python tools/check_sii_science_artifacts.py
-```
-
-第二个命令检查整本Notebook及全部证据。修改数值代码或仪器输入后，需要重跑完整Notebook，不能仅更新摘要哈希。原始备份标签仍为`backup/sii-gls-before-fixes-20260905`。
-
-### 10.1 从相位匹配的共享波形到长曝光
-
-`integer_align`每镜仅平移最接近的整数样本、裁剪公共支持，返回镜对剩余分数时延。它不插值ADC、不周期卷绕。`analytic_waveform_calibration(..., residual_delay_ns=...)`将剩余时延放入连续相关峰模板，以相同零信号协方差求GLS权重。`phase_template_bank`使用65个相位节点，覆盖−4至4 ns。
-
-正式验证用全部36镜、630条基线，在三个时角各生成96条点源训练、192条独立零信号和96条圆盘留出记录。共1152条24 μs原始记录，原始时间0.027648 s，公共有效时间0.026164224 s；它们不是连续6小时ADC。点源和圆盘注入倍率300，只用于响应检验；物理零信号数据用于噪声学习，放大注入协方差不进入最终噪声模型。圆盘真值只用于生成和评价，不用于校准。
-
-630条基线共享同一记录的36通道，训练误差因此按每条记录的阵列均值计算，不能当630次独立训练。统一增益为1.00480，共享相对不确定度1.0804%；零信号标准差相对解析预测为1.00628，学习不确定度0.2621%。跨三个时刻的离散也保守计入学习误差。24个相位组的圆盘留出及零信号最大标准化偏差分别为2.341、2.267。预定5个标准误阈值是异常检查，不是逐项95%区间。
-
-`tracked_segment_precision`沿实际基线、恒星日时角和段内相位积累方差。每段等时长短块平均与现有等时间可见度模型对应，因此使用平均块方差；不能改为逆方差平均却仍拟合等时间模型。1200个相位积分节点加倍到2400后，标准差最大变化0.00187%。连续观测假设缓冲区覆盖整数时延，不把独立测试记录的首尾损失重复扣在实际每个ADC块上。
-
-`compressed_profiles`只用候选圆盘模型建立QR子空间，抽样其中的高斯充分统计量；检查每个候选的表示误差。正交补对固定噪声尺度的所有候选只贡献共同卡方常数，因而可以消去。真值不参与基底选择。共同增益逐次抽样并剖面；噪声学习误差作为一次观测共享的正值尺度抽样。拟合误差保守增加1.96倍噪声尺度标准误，并乘弱光Bartlett协方差界对应的标准差修正。
-
-候选直径固定为0至0.64 mas、间隔0.0005 mas；平滑似然细化到0.00005 mas。33个预定非网格中点用直接模型检查，整体模型差最大约为统计误差的0.00000111。27场景各500次，共13500次观测实现；`profile_gain`和`fixed_gain`在每个场景使用相同模拟数据。边界及不连通诊断保留，不筛除困难结果。
-
-| 输出，位于`validation/sii_performance` | 内容 |
-|---|---|
-| `raw_projections.npz` | 每个时刻训练、零信号、留出的逐记录630基线投影，及相位、真值和解析误差 |
-| `raw_epochs.csv`、`raw_baselines.csv`、`raw_phase_holdout.csv` | 标定与误差学习、1890条基线结果、相位分组留出 |
-| `phase_templates.csv` | 剩余相位与24 μs条件误差 |
-| `performance.csv` | 27场景×2方法的偏差、RMSE、覆盖率和边界诊断 |
-| `covariance_budget.csv`、`approximation_budget.csv` | 共镜修正、热光计数四阶对照、圆瞳及数值积分对照 |
-| `datasheet_scenarios.csv` | 独立的25℃暗计数情景；不改变默认仪器 |
-| `summary.json`、`performance.png` | 参数、种子、输入/代码/产物哈希及性能图 |
-
-产物哈希按实际字节保存，本次Windows生成的性能CSV通过`.gitattributes`固定为CRLF换行，以保持检出后的发布文件与记录一致。若外部软件改写文件，需要重新生成这一验证集，不能忽略不匹配。数值源代码和配置另用LF归一化检查。
-
-### 10.2 S17351规格书能补什么
-
-用户提供的`K30-B60168_S17351 specification sheet.pdf`内部标题为S17351，日期2025-01-29，标为PRELIMINARY。已核对第1页表格及第2页脚注；结构化摘录和原PDF SHA-256在[`s17351_datasheet.json`](../configs/sii/s17351_datasheet.json)。原PDF保留为本地来源，运行程序不依赖重新分发该文档。
-
-| 参数 | 规格书值与条件 | 程序处理 |
-|---|---|---|
-| 通道及微单元 | 8通道，每通道33792微单元；25 μm节距 | 总数270336与main一致 |
-| PDE | 405 nm典型34%、450 nm典型37%，过压8.5 V | 用于核对，保留main完整曲线 |
-| 暗计数 | 25℃每通道典型1.2 MHz、最大3 MHz | 独立计算1或8通道汇总情景；默认仍为0 |
-| 瞬时串扰 | 25℃典型3%、最大5% | 保存数值，不自动叠加到实测电荷涨落上 |
-| 后脉冲 | 典型5%，条件为−10℃ | 未给25℃值及延迟、电荷分布，保持关闭 |
-| 雪崩增益 | 典型1.1×10⁶ | 不是mV电压增益，不替换实测SPE |
-| 端电容 | 每通道750 pF，100 kHz测试 | 缺少淬灭电阻等信息，不能推出恢复时间或前端带宽 |
-| 电压及温度系数 | 典型击穿52 V；工作电压为各器件击穿电压+8.5 V；54 mV/℃ | 记录条件，60.5 V不是所有器件统一适用的偏压 |
-| 增益均匀性、稳定性 | 最大相对偏差典型1.7%、最大2.7%；24小时变化上限0.5% | 不是高斯RMS，不直接作为随机增益参数 |
-
-PDF注明PDE不含串扰与后脉冲。现有电荷分布是否已包含这些事件，需要看原测量阈值、积分窗和事件筛选；不能因新增一个概率就再乘一次超额噪声。main在405 nm的曲线插值约35.56%，与表格典型34%不完全相同；这是不同输入的差异，不凭规格书典型点覆盖已有完整曲线。
+若只运行一条基准圆盘链，下面把前述调用接成可直接执行的脚本。它生成完整观测并保存后读回，不执行27场景性能扫描及附加检验：
 
 ```python
-from sii_performance import datasheet_dark_scenario
-# 假设25℃、过压8.5 V、8通道汇总，不表示已确认真实SII接线。
-scenario = datasheet_dark_scenario(instrument, root, summed_channels=8, rating='typical')
-assert scenario.dark_count_rate_hz == 9.6e6
-# 背景改变后须按scenario重新标定，不沿用原缓存。
+from pathlib import Path
+import sys
+
+root = Path.cwd()  # 仓库根目录
+sys.path.insert(0, str(root / 'python'))
+import sii_unified as sii
+import sii_reconstruction as reco
+
+instrument = sii.Instrument.from_repository(root)
+observation = sii.Observation(hours_per_night=6., segment_s=1200,
+                              visibility_subsamples_per_segment=9)
+source = sii.BinarySource(ab_magnitude=2., primary_diameter_mas=.16)
+calibration, diagnostics = sii.simulate_waveform_gls_calibration(
+    instrument, source_ab_magnitude=2., null_records=2048,
+    signal_records=512, covariance_shrinkage='auto', seed=20260905)
+result = sii.run_sii_pipeline(
+    root / 'configs/arrays/lact36_20260906.input', source, observation,
+    instrument, source_case='single_disk', estimator='waveform_gls',
+    waveform_calibration=calibration, do_reconstruction=False, seed=20261306)
+uv = sii.prepare_reconstruction_uv(result.measurements, cell_mlambda=120.)
+reco.write_uv_data('observation_uv.npz', uv)
+uv = reco.read_uv_data('observation_uv.npz')
+fit = reco.reconstruct_uv_data(uv, grid_size=32, fov_mas=.70,
+    support_radius_mas=.32, starts=3, max_iter=8000,
+    smoothness='cv', smoothness_candidates=(0.,1e-4,.01), seed=20261406)
+print(fit.metrics['optimizer_success'], fit.metrics['stationarity_passed'])
 ```
 
-### 10.3 尚缺的电子学信息按六组收集
+主要结果位于 [validation/sii_science](../validation/sii_science)：
 
-这些是六组数据，不是六个独立数字；部分需要曲线或波形。
+| 顺着本文的数据流 | 文件 |
+|---|---|
+| 实际输入与来源 | `parameters.csv`、`walkthrough_parameters.json`、`summary.json` |
+| 理论光学相关 | `walkthrough_ideal_hbt.csv` |
+| 同一事件到ADC到相关 | `walkthrough_record.npz`、`walkthrough_pair_correlation.csv`、`walkthrough_pair_result.json` |
+| 标定峰与协方差 | `response.csv`、`covariance.csv`、`waveform_calibration.npz` |
+| 独立波形检验 | `independent_null.csv`、`injection_scale.csv`、`block_duration.csv` |
+| 实际阵列与浏览测量 | `array_baselines.csv`、`walkthrough_disk_measurements.csv`、`binary_measurements.csv` |
+| 完整反演输入 | `single_disk_uv.npz`、`binary_uv.npz`、`ellipse_uv.npz`、`transit_uv.npz` |
+| 参数与图像推断 | `diameter_profile.csv`、`diameter_coverage.csv`、`reconstruction.csv`、各源`*_image.npy` |
+| 数值及重复稳定性 | `time_quadrature.csv`、`convergence.csv`、`image_alignment.csv`、`image_repeats.csv` |
 
-| 组 | 需要的数据 | PDF是否补足 |
-|---|---|---|
-| ADC | 实际位数、输入满量程、偏置/削顶范围，必要时非线性标定 | 未提供；4 ns采样间隔已在main |
-| 前端噪声与响应 | 遮光基线波形、噪声频谱与跨通道相关，确认SPE对应的前端设置 | 未提供；已有SPE可用，不重复加入同一脉冲响应 |
-| 同步与时延 | 采样时钟抖动、通道间残余延迟和漂移 | 未提供 |
-| 微单元恢复 | 双脉冲间隔—恢复电荷曲线、饱和行为 | 微单元数和端电容不足以确定恢复时间 |
-| 相关雪崩 | 工作条件下串扰/后脉冲的概率、延迟与电荷分布，原电荷样本筛选规则 | 补了部分概率，未补时间结构及重复计数判定 |
-| 运行条件与通道映射 | 实际温度、各器件偏压/过压、1或8通道如何组成SII通道，及该条件下暗计数/增益变化 | 只有厂家典型条件及上限，无LACT运行记录 |
+最终36镜条件性能另位于 [validation/sii_performance](../validation/sii_performance)，包含逐记录630基线投影 `raw_projections.npz`、相位留出 `raw_phase_holdout.csv`、性能表 `performance.csv`、弱光与瞳面对照预算和规格书情景。主摘要绑定这些子验证摘要的哈希。性能CSV按实际字节记哈希，`.gitattributes`固定其CRLF，避免检出换行造成假不一致。
 
-优先提供实际温度/偏压及接线方式、遮光基线波形、ADC位数和满量程，即可先约束目前对灵敏度最直接的缺口。默认缺失项继续0/关闭；规格书情景与实测配置分开保存。
+检查脚本核对公式分隔符、文档链接、notebook顺序执行、输入/代码哈希，从保存ADC重算相关和GLS，并重算完整阵列真功率；完整NPZ往返由回归测试和notebook实际读回覆盖。代码主体在 [sii_unified.py](../python/sii_unified.py)，共享阵列事件在 [sii_observation.py](../python/sii_observation.py)，图像推断在 [sii_reconstruction.py](../python/sii_reconstruction.py)，相位及性能在 [sii_performance.py](../python/sii_performance.py)，独立参考在 [sii_validation.py](../python/sii_validation.py)。这些文件边界服从前述同一数据流。
+
+新的实测输入到来后，先核对来源并更新清单，再重算事件/响应标定、相位表、观测、推断和覆盖率。只改变注释或PDF摘录不会自动进入数值计算。原始备份标签保留为 `backup/sii-gls-before-fixes-20260905`；研究计划与临时审查文件留在本地，不属于本说明的用户复现入口。
