@@ -1,2 +1,2 @@
 *.sh text eol=lf
-validation/sii_performance/*.csv text eol=lf
+validation/sii_performance/*.csv text eol=crlf

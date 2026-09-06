@@ -368,7 +368,7 @@ python tools/check_sii_science_artifacts.py
 | `datasheet_scenarios.csv` | 独立的25℃暗计数情景；不改变默认仪器 |
 | `summary.json`、`performance.png` | 参数、种子、输入/代码/产物哈希及性能图 |
 
-产物哈希按实际字节保存，新性能CSV通过`.gitattributes`固定为LF换行。若外部软件改写文件，需要重新生成这一验证集，不能忽略不匹配。数值源代码和配置另用LF归一化检查。
+产物哈希按实际字节保存，本次Windows生成的性能CSV通过`.gitattributes`固定为CRLF换行，以保持检出后的发布文件与记录一致。若外部软件改写文件，需要重新生成这一验证集，不能忽略不匹配。数值源代码和配置另用LF归一化检查。
 
 ### 10.2 S17351规格书能补什么
 
