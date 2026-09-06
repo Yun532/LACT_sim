@@ -7,11 +7,11 @@
     "python/sii_unified.py": "9e18045755855136e471043db5955b11810ef9fb628159c61872650657786e37",
     "python/sii_reconstruction.py": "d9b1faca0be1990e9b206340efa9d1a3e0c181557997ac15e72d58dbbb01f589",
     "python/sii_validation.py": "5d96a0d55e48b3edf923db468bb319a9efb7b982837d27a885dbd847404ceace",
-    "python/sii_observation.py": "4755a32f36b99939f125aa90691527527fdd61aed3a531d2c0084ab0f1bb9159",
+    "python/sii_observation.py": "62da7142299077223cf99adac60841fa22d8fb92d9284f7ea7aa15f87fe74cf8",
     "python/sii_layout.py": "575edbf011d41b3f2689e12cd21152261f97c707d04f0564c93bde94a83a9341",
     "tools/validate_sii_observation.py": "63e5733064eef1737b33d373b07167bf7d1618dbf5ae6d3f03db710660c139d8",
-    "tools/validate_sii_tracking.py": "bdd8e67d137fb0df68e90a8f6e2efbac96587c6d9bd251f7ace32dddadc36e1f",
-    "tools/build_sii_science_notebook.py": "177a1ce43dcddb00839c4bf7084a90f9b21c8d83d7cd18c29dc1399acfb5bf1e"
+    "tools/validate_sii_tracking.py": "983b0c3d464bf9237c89faedf003b4bf0675d48ee559224a730f56e7791f73a7",
+    "tools/build_sii_science_notebook.py": "888acd326e26669b4ab4f41e5d6b9f79515fe20a4b19dddc62557a8975faa2fc"
   },
   "main_parameter_commit": "2926031b14c8aa2164a4d9233f5c2d0a75324127",
   "derived_input_sha256_lf": {
@@ -230,7 +230,7 @@
   ],
   "joint_observation": {
     "execution": "fresh waveform simulation executed by this notebook",
-    "summary_sha256_lf": "c75d4ee6c093c0093b71d856e129f886019d9bdb961d2c4dfd46d577f8dc66b5",
+    "summary_sha256_lf": "1e4ea69e1b41a7ba48b69cf9cdd91598bb12951375e33ad9749bad7418c9b7cc",
     "short_records": 1408,
     "long_records": 384,
     "checks": [
@@ -265,7 +265,7 @@
   },
   "tracking_observation": {
     "execution": "fresh sparse epoch waveforms executed by this notebook",
-    "summary_sha256_lf": "d923964a77d26751a8a22c2fd035794d312ced43f50956bf8e013c8afcaf917a",
+    "summary_sha256_lf": "6e462545eb9f8dbad744334e1e30c7f0c8595c1991e252ebe195fa8ff4d2fd25",
     "actual_raw_records": 2464,
     "actual_raw_duration_s": 0.059136,
     "checks": [
@@ -309,6 +309,55 @@
         "epoch": 6,
         "max_response_abs_z": 1.3826042298815628,
         "max_null_abs_z": 0.5053812856612002,
+        "passed": true
+      }
+    ]
+  },
+  "source_observation": {
+    "execution": "fresh sparse epoch waveforms executed by this notebook",
+    "summary_sha256_lf": "df5857c8a8bdd8ab993fd18694cb0238e2a1e73f50bdc06a63b3e63bf4a5c961",
+    "actual_raw_records": 2464,
+    "checks": [
+      {
+        "epoch": 0,
+        "max_response_abs_z": 1.2870951895190996,
+        "max_null_abs_z": 0.9295492942224057,
+        "passed": true
+      },
+      {
+        "epoch": 1,
+        "max_response_abs_z": 0.4628315590913723,
+        "max_null_abs_z": 1.8694973835932216,
+        "passed": true
+      },
+      {
+        "epoch": 2,
+        "max_response_abs_z": 3.2755013205795938,
+        "max_null_abs_z": 1.2966466685388165,
+        "passed": true
+      },
+      {
+        "epoch": 3,
+        "max_response_abs_z": 0.32293352305991785,
+        "max_null_abs_z": 1.8024750193630648,
+        "passed": true
+      },
+      {
+        "epoch": 4,
+        "max_response_abs_z": 1.1894447092583929,
+        "max_null_abs_z": 0.659741642129096,
+        "passed": true
+      },
+      {
+        "epoch": 5,
+        "max_response_abs_z": 1.404111501979785,
+        "max_null_abs_z": 1.7083415776655135,
+        "passed": true
+      },
+      {
+        "epoch": 6,
+        "max_response_abs_z": 0.719055926345477,
+        "max_null_abs_z": 1.4448224154906992,
         "passed": true
       }
     ]

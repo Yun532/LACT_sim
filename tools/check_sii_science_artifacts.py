@@ -77,35 +77,48 @@ def main():
     assert len(pd.read_csv(observation/'long_records.csv'))==3*joint['long_records']
     assert (observation/'observation_validation.png').is_file()
     print('三镜观测验证的输入/代码哈希、独立检查状态及输出条数通过。')
-    tracking=ROOT/'validation/sii_tracking'
-    tracked=json.loads((tracking/'summary.json').read_text(encoding='utf-8'))
-    for section in ['code_sha256_lf','input_sha256_lf']:
-        for path,expected in tracked[section].items():
-            assert hashlib.sha256((ROOT/path).read_bytes().replace(b'\r\n',b'\n')).hexdigest()==expected, path
-    assert summary['tracking_observation']['execution']=='fresh sparse epoch waveforms executed by this notebook'
-    assert hashlib.sha256((tracking/'summary.json').read_bytes().replace(b'\r\n',b'\n')).hexdigest()==summary['tracking_observation']['summary_sha256_lf']
-    assert len(tracked['checks'])==7 and all(item['passed'] for item in tracked['checks'])
-    assert len(pd.read_csv(tracking/'geometry.csv'))==361*36
-    responses=pd.read_csv(tracking/'response.csv')
-    samples=pd.read_csv(tracking/'records.csv')
-    assert len(responses)==7*3 and not responses.duplicated(['epoch','baseline']).any()
-    assert len(samples)==3*tracked['actual_raw_records']
-    assert not samples.duplicated(['epoch','case','record','baseline']).any()
-    assert samples.effective_duration_s.between(0,tracked['duration_ns']*1e-9,inclusive='right').all()
-    # 从逐记录投影重算训练和留出均值，避免只核对摘要、漏掉表之间的不一致。
-    for row in responses.itertuples():
-        group=samples[(samples.epoch==row.epoch)&(samples.baseline==row.baseline)]
-        training=group[group.case=='calibration'].tracked_projection
-        holdout=group[group.case=='holdout']
-        assert len(training)==tracked['calibration_records'] and len(holdout)==tracked['records']
-        assert math.isclose(training.mean()/(tracked['pair_rate_scale']*row.truth),row.gain,rel_tol=1e-12)
-        assert math.isclose(holdout.tracked_projection.mean()/(tracked['pair_rate_scale']*row.gain),
-                            row.tracked_power,rel_tol=1e-12)
-        assert math.isclose(holdout.initial_delay_projection.mean()/(tracked['pair_rate_scale']*row.gain),
-                            row.initial_delay_power,rel_tol=1e-12,abs_tol=1e-14)
-    assert tracked['actual_raw_records']==7*(tracked['calibration_records']+2*tracked['records'])
-    assert math.isclose(tracked['actual_raw_duration_s'],tracked['actual_raw_records']*tracked['duration_ns']*1e-9)
-    print('七时刻追踪验证的输入/代码/结果哈希、留出检查及实际曝光计数通过。')
+    for directory,summary_key in [('sii_tracking','tracking_observation'),
+                                  ('sii_source_tracking','source_observation')]:
+        tracking=ROOT/'validation'/directory
+        tracked=json.loads((tracking/'summary.json').read_text(encoding='utf-8'))
+        for section in ['code_sha256_lf','input_sha256_lf']:
+            for path,expected in tracked[section].items():
+                assert hashlib.sha256((ROOT/path).read_bytes().replace(b'\r\n',b'\n')).hexdigest()==expected, path
+        assert summary[summary_key]['execution']=='fresh sparse epoch waveforms executed by this notebook'
+        assert hashlib.sha256((tracking/'summary.json').read_bytes().replace(b'\r\n',b'\n')).hexdigest()==summary[summary_key]['summary_sha256_lf']
+        assert len(tracked['checks'])==7 and all(item['passed'] for item in tracked['checks'])
+        assert len(pd.read_csv(tracking/'geometry.csv'))==361*36
+        responses=pd.read_csv(tracking/'response.csv')
+        samples=pd.read_csv(tracking/'records.csv')
+        assert len(responses)==7*3 and not responses.duplicated(['epoch','baseline']).any()
+        assert len(samples)==3*tracked['actual_raw_records']
+        assert not samples.duplicated(['epoch','case','record','baseline']).any()
+        assert samples.effective_duration_s.between(0,tracked['duration_ns']*1e-9,inclusive='right').all()
+        # 从逐记录投影重算训练和留出均值，避免只核对摘要、漏掉表之间的不一致。
+        for row in responses.itertuples():
+            group=samples[(samples.epoch==row.epoch)&(samples.baseline==row.baseline)]
+            training=group[group.case=='calibration'].tracked_projection
+            holdout=group[group.case=='holdout']
+            assert len(training)==tracked['calibration_records'] and len(holdout)==tracked['records']
+            assert math.isclose(training.mean()/(tracked['pair_rate_scale']*row.calibration_truth),row.gain,rel_tol=1e-12)
+            assert math.isclose(holdout.tracked_projection.mean()/(tracked['pair_rate_scale']*row.gain),
+                                row.tracked_power,rel_tol=1e-12)
+            assert math.isclose(holdout.initial_delay_projection.mean()/(tracked['pair_rate_scale']*row.gain),
+                                row.initial_delay_power,rel_tol=1e-12,abs_tol=1e-14)
+        assert tracked['actual_raw_records']==7*(tracked['calibration_records']+2*tracked['records'])
+        assert math.isclose(tracked['actual_raw_duration_s'],tracked['actual_raw_records']*tracked['duration_ns']*1e-9)
+        if directory=='sii_source_tracking':
+            assert tracked['source_case']=='single_disk'
+            assert (responses.calibration_truth==1.).all()
+            predictions=pd.read_csv(tracking/'source_predictions.csv')
+            assert len(predictions)==7*630
+            assert not predictions.duplicated(['epoch','telescope_i','telescope_j']).any()
+            for row in responses.itertuples():
+                left,right=[tracked['raw_telescope_ids'][int(value)] for value in row.baseline.split('-')]
+                prediction=predictions[(predictions.epoch==row.epoch)&(predictions.telescope_i==left)
+                                       &(predictions.telescope_j==right)].visibility2.item()
+                assert math.isclose(prediction,row.truth,rel_tol=1e-12)
+        print(f'{directory}：七时刻的输入/代码/结果哈希、留出检查及实际曝光计数通过。')
 
 
 if __name__=='__main__':

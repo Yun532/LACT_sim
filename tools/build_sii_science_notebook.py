@@ -270,13 +270,42 @@ display(pd.DataFrame(tracking_summary['checks']))
 display(pd.read_csv(TRACKING/'response.csv'))
 display(Image(filename=str(TRACKING/'tracking_validation.png')))
 ''')
+md('''### 4.3 天体亮度模型、通带相干与独立点源标定
+
+下面由0.16 mas均匀圆盘及36台实际位置构造逐波长复相干矩阵，
+以同一HBT光谱权重平均模平方，得到随自转变化的功率，再注入Tel.1/2/6共享波形。
+响应使用同星等、同仪器、同时延状态的独立未分辨点源训练；不读取待测圆盘真值来求增益。
+图中直接显示平方可见度和误差，零点附近不除以真值。
+
+这仍是七个时刻的短波形处理检验，人工放大相关信号；并非真实恒星观测或连续整夜ADC。
+逐波长矩阵保留合法复相干关系，但当前弱对生成器仍只模拟二阶统计。
+''')
+code('''
+completed = subprocess.run([sys.executable, '-X', 'utf8', str(ROOT/'tools/validate_sii_tracking.py'),
+                           '--source-case', 'single_disk', '--seed', '20260908'],
+                           cwd=ROOT, capture_output=True, text=True, encoding='utf-8')
+print(completed.stdout)
+if completed.stderr:
+    print(completed.stderr)
+completed.check_returncode()
+SOURCE_OBS = ROOT/'validation/sii_source_tracking'
+source_summary = json.loads((SOURCE_OBS/'summary.json').read_text(encoding='utf-8'))
+summary['source_observation'] = {
+    'execution': 'fresh sparse epoch waveforms executed by this notebook',
+    'summary_sha256_lf': hashlib.sha256((SOURCE_OBS/'summary.json').read_bytes().replace(b'\\r\\n',b'\\n')).hexdigest(),
+    'actual_raw_records': source_summary['actual_raw_records'],
+    'checks': source_summary['checks']}
+display(pd.DataFrame(source_summary['checks']))
+display(pd.read_csv(SOURCE_OBS/'response.csv'))
+display(Image(filename=str(SOURCE_OBS/'tracking_validation.png')))
+''')
 md('''## 5. 36台望远镜的时间与光谱平均测量
 
 从原始TELESCOPE input按NWU厘米转ENU米，实际生成36台望远镜、630条基线、
 6小时、每段20分钟的11340个UV测量；位置原点和镜名顺序保持input约定。
 每段同时平均时间变化和通带内的平方可见度。右图显示带噪声测量，允许出现负值；
 颜色范围仅用于显示，不对拟合输入作裁剪。同一次标定误差在所有测量间共享。
-本节采用双镜波形标定的长曝光统计分支；第4.1及4.2节的三镜实验并未自动替换
+本节采用双镜波形标定的长曝光统计分支；第4.1至4.3节的三镜实验并未自动替换
 本节的36镜协方差或完成整夜时变处理。两者通过明确的验证范围关联。
 ''')
 code('''

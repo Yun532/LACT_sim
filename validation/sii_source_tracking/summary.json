@@ -1,9 +1,16 @@
 {
-  "seed": 20260907,
+  "seed": 20260908,
   "records": 128,
   "calibration_records": 96,
-  "source_case": "fixed",
-  "source_parameters": null,
+  "source_case": "single_disk",
+  "source_parameters": {
+    "ab_magnitude": 2.0,
+    "separation_mas": 0.2,
+    "position_angle_deg": 35.0,
+    "flux_ratio_secondary_to_primary": 0.55,
+    "primary_diameter_mas": 0.16,
+    "secondary_diameter_mas": 0.04
+  },
   "telescopes": 36,
   "raw_telescope_ids": [
     1,
@@ -15,93 +22,93 @@
       "elapsed_s": -10800.0,
       "effective_record_duration_s": 2.2400000000000002e-05,
       "delay_rate_max_ns_per_s": 0.09463078137011036,
-      "source_power_change_over_record": 0.0,
+      "source_power_change_over_record": 1.2014421679751308e-09,
       "local_linear_error_bound_ns": 3.1826766236766082e-15
     },
     {
       "elapsed_s": -7200.0,
       "effective_record_duration_s": 2.2400000000000002e-05,
       "delay_rate_max_ns_per_s": 0.12137323771700635,
-      "source_power_change_over_record": 0.0,
+      "source_power_change_over_record": 7.345681285464423e-10,
       "local_linear_error_bound_ns": 3.1826766236766082e-15
     },
     {
       "elapsed_s": -3600.0,
       "effective_record_duration_s": 2.2400000000000002e-05,
       "delay_rate_max_ns_per_s": 0.13979921463652342,
-      "source_power_change_over_record": 0.0,
+      "source_power_change_over_record": 3.8566083659929973e-10,
       "local_linear_error_bound_ns": 3.1826766236766082e-15
     },
     {
       "elapsed_s": 0.0,
       "effective_record_duration_s": 2.2396e-05,
       "delay_rate_max_ns_per_s": 0.14864616644014814,
-      "source_power_change_over_record": 0.0,
+      "source_power_change_over_record": 1.4590401109515483e-10,
       "local_linear_error_bound_ns": 3.1826766236766082e-15
     },
     {
       "elapsed_s": 3600.0,
       "effective_record_duration_s": 2.1952000000000003e-05,
       "delay_rate_max_ns_per_s": 0.14730790107060507,
-      "source_power_change_over_record": 0.0,
+      "source_power_change_over_record": 3.859506048087269e-10,
       "local_linear_error_bound_ns": 3.1826766236766082e-15
     },
     {
       "elapsed_s": 7200.0,
       "effective_record_duration_s": 2.144e-05,
       "delay_rate_max_ns_per_s": 0.13587611630759855,
-      "source_power_change_over_record": 0.0,
+      "source_power_change_over_record": 7.370723476007868e-10,
       "local_linear_error_bound_ns": 3.1826766236766082e-15
     },
     {
       "elapsed_s": 10800.0,
       "effective_record_duration_s": 2.0984e-05,
       "delay_rate_max_ns_per_s": 0.11513411664714472,
-      "source_power_change_over_record": 0.0,
+      "source_power_change_over_record": 1.205874788912098e-09,
       "local_linear_error_bound_ns": 3.1826766236766082e-15
     }
   ],
   "checks": [
     {
       "epoch": 0,
-      "max_response_abs_z": 1.2451023349068395,
-      "max_null_abs_z": 2.299553403549272,
+      "max_response_abs_z": 1.2870951895190996,
+      "max_null_abs_z": 0.9295492942224057,
       "passed": true
     },
     {
       "epoch": 1,
-      "max_response_abs_z": 1.0094721187292117,
-      "max_null_abs_z": 0.8221169552105541,
+      "max_response_abs_z": 0.4628315590913723,
+      "max_null_abs_z": 1.8694973835932216,
       "passed": true
     },
     {
       "epoch": 2,
-      "max_response_abs_z": 0.6883134038816339,
-      "max_null_abs_z": 0.9235598465589708,
+      "max_response_abs_z": 3.2755013205795938,
+      "max_null_abs_z": 1.2966466685388165,
       "passed": true
     },
     {
       "epoch": 3,
-      "max_response_abs_z": 0.8237684558831386,
-      "max_null_abs_z": 0.5049726312960934,
+      "max_response_abs_z": 0.32293352305991785,
+      "max_null_abs_z": 1.8024750193630648,
       "passed": true
     },
     {
       "epoch": 4,
-      "max_response_abs_z": 1.2318195827549785,
-      "max_null_abs_z": 1.4597493173160956,
+      "max_response_abs_z": 1.1894447092583929,
+      "max_null_abs_z": 0.659741642129096,
       "passed": true
     },
     {
       "epoch": 5,
-      "max_response_abs_z": 1.5884228497479393,
-      "max_null_abs_z": 0.9885504516893696,
+      "max_response_abs_z": 1.404111501979785,
+      "max_null_abs_z": 1.7083415776655135,
       "passed": true
     },
     {
       "epoch": 6,
-      "max_response_abs_z": 1.3826042298815628,
-      "max_null_abs_z": 0.5053812856612002,
+      "max_response_abs_z": 0.719055926345477,
+      "max_null_abs_z": 1.4448224154906992,
       "passed": true
     }
   ],
@@ -135,7 +142,7 @@
   "max_array_stale_pair_residual_ns": 5190.157742784702,
   "actual_raw_records": 2464,
   "actual_raw_duration_s": 0.059136,
-  "scope": "Seven independent short-record epochs; not continuous six-hour ADC or full-array covariance. Fixed test coherence.",
+  "scope": "Seven independent short-record epochs; not continuous six-hour ADC or full-array covariance. Static uniform disk; rotating baselines and HBT spectral power average. Independent unresolved calibrator.",
   "timing_model": "SI sidereal rotation at each epoch, local affine arrival-time map before optical response; receiver stellar rate includes Jacobian.",
   "geometry_dec_rad": 0.3,
   "geometry_lat_rad": 0.5124042337760072,
@@ -143,23 +150,7 @@
   "pair_rate_scale": 10000.0,
   "star_rate_hz": 199889298.29641628,
   "background_rate_hz": 573214.0884464285,
-  "fixed_coherence": [
-    [
-      1.0,
-      0.7,
-      0.5
-    ],
-    [
-      0.7,
-      1.0,
-      0.6
-    ],
-    [
-      0.5,
-      0.6,
-      1.0
-    ]
-  ],
+  "fixed_coherence": null,
   "spectral_wavelength_nm": [
     399.09382015406135,
     399.4615306898943,

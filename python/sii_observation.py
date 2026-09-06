@@ -7,7 +7,7 @@ from scipy.signal import correlate
 from sii_unified import (
     C_M_S, SIDEREAL_DAY_S, source_direction_enu, load_measured_spe_template,
     load_optical_timing_mixture, sample_optical_delays_ns,
-    render_pe_waveform, waveform_cross_correlation,
+    render_pe_waveform, waveform_cross_correlation, uvw_from_enu, source_visibility,
 )
 
 
@@ -30,6 +30,47 @@ def _rates(value, size):
     return rates
 
 
+def band_averaged_coherence_power(coherence, spectral_weights=None):
+    """各波长先验证复相干矩阵，再平均|Gamma|²；权重为HBT相关面积权重。
+
+    返回的是对过程所需的二阶功率，不能开方后当作一个多色复相干矩阵。
+    单矩阵且省略权重时保持已有单色/固定相干接口。
+    """
+    gamma = np.asarray(coherence, complex)
+    if gamma.ndim == 2:
+        gamma = gamma[None]
+    if gamma.ndim != 3 or len(gamma) == 0:
+        raise ValueError('需要单个复相干矩阵或[波长,镜,镜]矩阵组')
+    gamma = np.stack([_coherence_matrix(item) for item in gamma])
+    weights = np.ones(1) if spectral_weights is None else np.asarray(spectral_weights, float)
+    if (weights.shape != (len(gamma),) or not np.all(np.isfinite(weights))
+            or np.any(weights < 0) or not np.isclose(weights.sum(), 1., rtol=0, atol=1e-12)):
+        raise ValueError('每个谱节点需要有限非负HBT权重，且权重和为1')
+    return np.einsum('k,kij->ij', weights, abs(gamma)**2)
+
+
+def source_coherence_spectrum(positions_enu_m, hour_angle_rad, dec_rad, lat_rad,
+                              source, instrument, source_case='binary'):
+    """从实际镜心基线与天体亮度模型构造逐波长Gamma，采用现有UV符号和HBT谱权重。
+
+    内置形态在通带内固定；光学响应沿用当前窄带共用时间核的近似。
+    不包含有限瞳面、颜色梯度或轨道演化，不能用于宣称已模拟完整热光时间过程。
+    """
+    geometric_arrival_delays_ns(positions_enu_m, hour_angle_rad, dec_rad, lat_rad)
+    positions = np.asarray(positions_enu_m, float)
+    baselines = positions[None, :, :]-positions[:, None, :]
+    u, v, _ = uvw_from_enu(baselines, hour_angle_rad, dec_rad, lat_rad)
+    wavelengths = np.asarray(instrument.visibility_wavelength_nm or (instrument.wavelength_nm,), float)
+    weights = np.asarray(instrument.visibility_spectral_weights or (1.,), float)
+    if wavelengths.ndim != 1 or not np.all(np.isfinite(wavelengths)) or np.any(wavelengths <= 0):
+        raise ValueError('波长节点必须为有限正nm')
+    gamma = np.asarray([source_visibility(u/(wave*1e-9), v/(wave*1e-9), source, source_case)
+                        for wave in wavelengths], complex)
+    power = band_averaged_coherence_power(gamma, weights)
+    return dict(coherence=gamma, spectral_weights=weights, wavelength_nm=wavelengths,
+                pair_visibility2=power)
+
+
 def geometric_arrival_delays_ns(positions_enu_m, hour_angle_rad, dec_rad, lat_rad,
                                reference=0):
     """源方向s指向天体，入射波传播方向为-s；到达时差为-(r_i-r_ref)·s/c。"""
@@ -47,7 +88,7 @@ def geometric_arrival_delays_ns(positions_enu_m, hour_angle_rad, dec_rad, lat_ra
 def simulate_array_photon_times(rng, duration_ns, star_rate_hz, background_rate_hz,
                                coherence, instrument, arrival_delays_ns=None,
                                pair_rate_scale=1., padding_ns=200.,
-                               arrival_delay_rates_ns_per_s=None):
+                               arrival_delay_rates_ns_per_s=None, spectral_weights=None):
     """稀疏HBT对过程的多镜扩展：每镜只有一个事件流，由所有相关基线共享。
 
     镜对率为R_i R_j tau_eff |Gamma_ij|²。各镜独立星光率减去其参与的全部
@@ -56,8 +97,8 @@ def simulate_array_photon_times(rng, duration_ns, star_rate_hz, background_rate_
     可选时延率将参考波面时刻t映射到t+d+dot(d)*t；在光学响应之前作用。
     星光率按参考时间定义，接收端边缘率为R/(1+dot(d)*1e-9)；背景按接收时间定义。
     """
-    gamma = _coherence_matrix(coherence)
-    size = len(gamma)
+    power = band_averaged_coherence_power(coherence, spectral_weights)
+    size = len(power)
     star, background = _rates(star_rate_hz, size), _rates(background_rate_hz, size)
     delays = np.zeros(size) if arrival_delays_ns is None else np.asarray(arrival_delays_ns, float)
     delay_rates = _delay_rates(arrival_delay_rates_ns_per_s, size)
@@ -66,7 +107,7 @@ def simulate_array_photon_times(rng, duration_ns, star_rate_hz, background_rate_
             or duration_ns <= 0 or padding_ns < 0 or pair_rate_scale <= 0
             or not np.isfinite(instrument.coherence_area_s) or instrument.coherence_area_s < 0):
         raise ValueError('无效的时长、填充、到达时差或注入倍率')
-    pair_rates = star[:, None]*star[None, :]*instrument.coherence_area_s*abs(gamma)**2
+    pair_rates = star[:, None]*star[None, :]*instrument.coherence_area_s*power
     np.fill_diagonal(pair_rates, 0.)
     injected = pair_rates*pair_rate_scale
     single_rates = star-injected.sum(axis=1)
@@ -103,6 +144,7 @@ def simulate_array_photon_times(rng, duration_ns, star_rate_hz, background_rate_
                        arrival_delays_ns=delays, star_rate_hz=star,
                        arrival_delay_rates_ns_per_s=delay_rates,
                        received_star_rate_hz=star/factors,
+                       band_averaged_visibility2=power,
                        background_rate_hz=background, physical_pair_rates_hz=pair_rates,
                        injected_pair_rates_hz=injected, single_star_rates_hz=single_rates,
                        pair_counts_with_padding=pair_counts, pair_rate_scale=float(pair_rate_scale),
@@ -111,7 +153,8 @@ def simulate_array_photon_times(rng, duration_ns, star_rate_hz, background_rate_
 
 def simulate_array_waveforms(rng, duration_ns, star_rate_hz, background_rate_hz,
                              coherence, instrument, arrival_delays_ns=None,
-                             pair_rate_scale=1., arrival_delay_rates_ns_per_s=None):
+                             pair_rate_scale=1., arrival_delay_rates_ns_per_s=None,
+                             spectral_weights=None):
     """按main响应生成一次逐镜ADC；背景率应显式包含所需的NSB和暗计数。"""
     for name in ('telescope_gain_calibration_rms', 'per_night_gain_rms',
                  'baseline_zero_point_rms', 'residual_timing_rms_ns',
@@ -122,7 +165,7 @@ def simulate_array_waveforms(rng, duration_ns, star_rate_hz, background_rate_hz,
     padding = float(np.max(abs(template[0])))+8*instrument.intrinsic_time_jitter_ns
     times, metadata = simulate_array_photon_times(
         rng, duration_ns, star_rate_hz, background_rate_hz, coherence, instrument,
-        arrival_delays_ns, pair_rate_scale, padding, arrival_delay_rates_ns_per_s)
+        arrival_delays_ns, pair_rate_scale, padding, arrival_delay_rates_ns_per_s, spectral_weights)
     waveforms = [render_pe_waveform(rng, events, duration_ns, instrument, template=template)
                  for events in times]
     return dict(adc_mv=np.stack([item['adc_mv'] for item in waveforms]),

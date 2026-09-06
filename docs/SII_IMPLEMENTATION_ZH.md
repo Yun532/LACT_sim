@@ -10,7 +10,7 @@
 | [`python/sii_reconstruction.py`](../python/sii_reconstruction.py) | 只根据测量和采样重建；处理共同增益先验、正则化与收敛诊断 | 真值只能在拟合完成后用于评价 |
 | [`python/sii_validation.py`](../python/sii_validation.py) | 独立热光场、连续响应解析对照、留出波形、参数剖面和覆盖率工具 | 解析参考不调用共享光电子对生成器 |
 | [`python/sii_layout.py`](../python/sii_layout.py) | 从TELESCOPE input读取原始NWU厘米坐标，转换ENU米并保留原值及行号 | 镜号按input顺序，标签保留；半径400 cm表示4 m半径 |
-| [`python/sii_observation.py`](../python/sii_observation.py) | 多镜共享事件及波形、到达时差与时延率、分数采样补偿、分块相关、独立多镜热光模 | 主Notebook第4.1、4.2节实际执行；第5节整阵列长曝光仍是独立统计分支 |
+| [`python/sii_observation.py`](../python/sii_observation.py) | 天体逐波长相干、多镜共享事件及波形、时延追踪、分块相关、独立多镜热光模 | 主Notebook第4.1至4.3节实际执行；第5节整阵列长曝光仍是独立统计分支 |
 | [`tools/build_sii_science_notebook.py`](../tools/build_sii_science_notebook.py) | 用nbformat生成主Notebook的代码及中文解释 | 重新生成会清空该Notebook的执行输出，随后必须从头运行 |
 | [`tools/execute_notebook.py`](../tools/execute_notebook.py) | 用nbclient在指定目录完整执行并保存Notebook | 单元报错时保留已执行输出，进程仍返回失败 |
 | [`tests`](../tests)中的SII测试文件 | 物理恒等式、统计目标、数据独立性及数值边界检查 | 自动测试通过不等于所有科学主张通过 |
@@ -195,6 +195,35 @@ print(result["mean_correlation"].shape, result["effective_duration_s"])
 
 本次共同裁剪后单条曝光为20.984至22.400 μs，2464条训练/留出/零信号记录合计有效时间0.054198144 s。统计总时长时按`epoch, case, record`去重，不能再次累加同一记录的三条基线。
 
+### 4.3 从天体亮度构造通带内的联合相干
+
+`source_coherence_spectrum`从实际ENU镜心位置形成`r_j-r_i`基线，调用已有`uvw_from_enu`和`source_visibility`，返回`coherence[波长,镜,镜]`、`wavelength_nm`、`spectral_weights`及`pair_visibility2[镜,镜]`。它支持已有双星、圆盘、椭圆和静态遮挡盘，沿用仪器的HBT谱积分节点；单色场景使用一个节点。每个波长的矩阵都检查Hermitian、单位对角和半正定。
+
+`band_averaged_coherence_power`计算各节点模平方的加权和，不平均复振幅，也不把功率开方后伪装成相干矩阵。权重必须有限、非负且和为1。光子与波形入口新增可选`spectral_weights`，既有二维矩阵调用保持兼容；元数据保留`band_averaged_visibility2`。弱对生成器使用该功率决定对率，但仍不模拟多色热光的完整高阶时间过程。`joint_thermal_mode_counts`继续只接受单个合法矩阵。
+
+下面续接第4.1节已经定义的`positions`、`state`、`instrument`及相关变量，改为实际圆盘源模型：
+
+```python
+from sii_unified import BinarySource
+from sii_observation import source_coherence_spectrum
+
+spectrum = source_coherence_spectrum(
+    positions, state['hour_angle_rad'], .3, np.deg2rad(29.3586),
+    BinarySource(primary_diameter_mas=.16), instrument, 'single_disk')
+raw = simulate_array_waveforms(
+    np.random.default_rng(43), 24_000., detected_star_rate_hz(2., instrument),
+    instrument.detected_nsb_rate_hz + instrument.dark_count_rate_hz,
+    spectrum['coherence'], instrument, arrival_delays_ns=delay_ns,
+    arrival_delay_rates_ns_per_s=rate_ns_per_s,
+    spectral_weights=spectrum['spectral_weights'])
+aligned = align_waveforms(raw['adc_mv'], delay_ns, instrument.sample_width_ns,
+                          arrival_delay_rates_ns_per_s=rate_ns_per_s)
+```
+
+主Notebook第4.3节实际运行`python tools/validate_sii_tracking.py --source-case single_disk --seed 20260908`，输出到[`validation/sii_source_tracking`](../validation/sii_source_tracking)。每个时刻用独立未分辨点源训练响应，`calibration_truth=1`；待测圆盘的`truth`只用于生成和拟合后检验，不参与求训练增益。点源为同星等、同通带、同几何状态的理想参考源，没有假称获得了实测标定星。
+
+该目录沿用第4.2节的逐记录、响应和曝光表，并增加`source_predictions.csv`：七个时刻×630条基线共4410个36镜通带功率预测。`epochs.csv`中的`source_power_change_over_record`记录该24 μs窗口两端的最大功率差；信号强度在短记录内冻结，时延保留一阶变化。源矩阵、光谱权重与半正定检查不同于完整36镜波形或完整联合误差；这两项尚未由该表提供。
+
 ## 5. 测量表和重建器之间的边界
 
 `generate_uvw`采用ENU坐标和西向为正的时角。时间推进使用`SIDEREAL_DAY_S`；曝光和协方差缩放使用秒。每段9个时间中点乘5个谱节点，组成45个实际子采样。
@@ -237,6 +266,7 @@ print(result["mean_correlation"].shape, result["effective_duration_s"])
 | `waveform_records` | 固定新种子、完全独立记录，不训练权重 | 训练数据上的噪声低估和响应偏差 |
 | 不同注入倍率、块长 | 重新生成波形而非缩放既有结果 | 注入非线性及块长归一化错误 |
 | 时延率与变化插值 | 自转几何有限差分、独立解析信号的逆时间映射、共享光子逆映射 | 时延导数符号、ns/s单位、半样本位置或边缘率错误 |
+| 天体联合相干 | 双点源场Gram矩阵、圆盘正亮度像素积分、单色与非相干谱叠加对照 | 基线相位符号、矩阵合法性及先平均振幅造成的功率错误 |
 | 梯度有限差分 | 对标量目标直接作扰动 | 共同增益剖面导数或平均功率伴随错误 |
 | `profile_model_grid` | 逐模型解析剖面，与显式似然优化对照 | 批量参数似然和区间实现错误 |
 | 1000次直径区间 | 独立增益及噪声实现，报告二项区间 | 在指定场景中的区间覆盖不足 |
@@ -290,7 +320,7 @@ python tools/check_sii_science_artifacts.py
 
 此入口采用固定解析GLS投影，再用独立训练数据校准补偿后的响应；尚未重新优化插值后的完整滞后权重。噪声尺度区间以训练增益固定为条件，增益误差在`response.csv`另报；注入恢复误差棒包含训练与留出两部分。物理倍率记录不与放大注入混合估计噪声，更不能用放大注入的基线相关外推整夜。处理链检验与主Notebook的长曝光灵敏度、重建结果有各自的代码哈希，保持清楚的证据范围。
 
-主Notebook包含26个单元，其中14个代码单元；自动测试共80项。第4.2节实际执行七时刻追踪验证，主摘要绑定其结果摘要哈希；可单独运行`python tools/validate_sii_tracking.py`。完整执行状态及结果版本由下述检查脚本核对。
+主Notebook包含28个单元，其中15个代码单元；自动测试共92项。第4.2、4.3节分别执行固定相干与圆盘源的七时刻验证，主摘要绑定两个结果摘要的哈希。完整执行状态及结果版本由下述检查脚本核对。
 运行`python tools/check_sii_science_artifacts.py`可再检查说明链接、公式分隔符、Notebook执行状态和结果中的源代码/输入哈希。
 新36台布局的36次图像重复均由优化器正常结束，并通过驻点阈值。逐次误差及配准保留通量仍公开在`image_repeats.csv`；通过数值诊断不等于图像唯一、全局最优或遮挡结构已检出。程序仍保留失败记录，不按成功状态筛选稳定性汇总。
 

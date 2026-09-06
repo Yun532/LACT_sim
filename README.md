@@ -57,6 +57,8 @@ image = sii.reconstruct_uv(
 
 第4.2节实际执行跨时刻的局部时延率注入与波形追踪；可单独运行`python tools/validate_sii_tracking.py`。七个时刻的短记录是独立处理检验，不计作连续6小时曝光。
 
+第4.3节从圆盘亮度及实际基线构造逐波长相干，生成共享波形，并使用独立点源标定；可运行`python tools/validate_sii_tracking.py --source-case single_disk --seed 20260908`，结果位于`validation/sii_source_tracking/`。
+
 ## 参数与输出
 
 默认阵列采用[36台原始input](configs/arrays/lact36_20260906.input)。沿用CORSIKA的北、西、上厘米坐标：`East=-West/100`、`North=North/100`、`Up=Up/100`，得到630条基线。派生坐标见[ENU米制CSV](configs/arrays/lact36_20260906_coordinates.csv)。
