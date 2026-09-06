@@ -1,0 +1,155 @@
+{
+  "seed": 20260907,
+  "records": 128,
+  "calibration_records": 96,
+  "telescopes": 36,
+  "raw_telescope_ids": [
+    1,
+    2,
+    6
+  ],
+  "epochs": [
+    {
+      "elapsed_s": -10800.0,
+      "effective_record_duration_s": 2.2400000000000002e-05,
+      "delay_rate_max_ns_per_s": 0.09463078137011036,
+      "local_linear_error_bound_ns": 3.1826766236766082e-15
+    },
+    {
+      "elapsed_s": -7200.0,
+      "effective_record_duration_s": 2.2400000000000002e-05,
+      "delay_rate_max_ns_per_s": 0.12137323771700635,
+      "local_linear_error_bound_ns": 3.1826766236766082e-15
+    },
+    {
+      "elapsed_s": -3600.0,
+      "effective_record_duration_s": 2.2400000000000002e-05,
+      "delay_rate_max_ns_per_s": 0.13979921463652342,
+      "local_linear_error_bound_ns": 3.1826766236766082e-15
+    },
+    {
+      "elapsed_s": 0.0,
+      "effective_record_duration_s": 2.2396e-05,
+      "delay_rate_max_ns_per_s": 0.14864616644014814,
+      "local_linear_error_bound_ns": 3.1826766236766082e-15
+    },
+    {
+      "elapsed_s": 3600.0,
+      "effective_record_duration_s": 2.1952000000000003e-05,
+      "delay_rate_max_ns_per_s": 0.14730790107060507,
+      "local_linear_error_bound_ns": 3.1826766236766082e-15
+    },
+    {
+      "elapsed_s": 7200.0,
+      "effective_record_duration_s": 2.144e-05,
+      "delay_rate_max_ns_per_s": 0.13587611630759855,
+      "local_linear_error_bound_ns": 3.1826766236766082e-15
+    },
+    {
+      "elapsed_s": 10800.0,
+      "effective_record_duration_s": 2.0984e-05,
+      "delay_rate_max_ns_per_s": 0.11513411664714472,
+      "local_linear_error_bound_ns": 3.1826766236766082e-15
+    }
+  ],
+  "checks": [
+    {
+      "epoch": 0,
+      "max_response_abs_z": 1.2451023349068395,
+      "max_null_abs_z": 2.299553403549272,
+      "passed": true
+    },
+    {
+      "epoch": 1,
+      "max_response_abs_z": 1.0094721187292117,
+      "max_null_abs_z": 0.8221169552105541,
+      "passed": true
+    },
+    {
+      "epoch": 2,
+      "max_response_abs_z": 0.6883134038816339,
+      "max_null_abs_z": 0.9235598465589708,
+      "passed": true
+    },
+    {
+      "epoch": 3,
+      "max_response_abs_z": 0.8237684558831386,
+      "max_null_abs_z": 0.5049726312960934,
+      "passed": true
+    },
+    {
+      "epoch": 4,
+      "max_response_abs_z": 1.2318195827549785,
+      "max_null_abs_z": 1.4597493173160956,
+      "passed": true
+    },
+    {
+      "epoch": 5,
+      "max_response_abs_z": 1.5884228497479393,
+      "max_null_abs_z": 0.9885504516893696,
+      "passed": true
+    },
+    {
+      "epoch": 6,
+      "max_response_abs_z": 1.3826042298815628,
+      "max_null_abs_z": 0.5053812856612002,
+      "passed": true
+    }
+  ],
+  "code_sha256_lf": {
+    "python/sii_unified.py": "9e18045755855136e471043db5955b11810ef9fb628159c61872650657786e37",
+    "python/sii_observation.py": "4755a32f36b99939f125aa90691527527fdd61aed3a531d2c0084ab0f1bb9159",
+    "python/sii_layout.py": "575edbf011d41b3f2689e12cd21152261f97c707d04f0564c93bde94a83a9341",
+    "python/sii_validation.py": "5d96a0d55e48b3edf923db468bb319a9efb7b982837d27a885dbd847404ceace",
+    "tools/validate_sii_tracking.py": "bdd8e67d137fb0df68e90a8f6e2efbac96587c6d9bd251f7ace32dddadc36e1f",
+    "tests/test_sii_observation.py": "d003707fb82b5fafee47ae583f7c6b6e3d99057210b9e66fb4467c7540ba9121"
+  },
+  "input_sha256_lf": {
+    "configs/electronics/measured_spe_4ns.cfg": "153df0c5e2bb2b1e50038d48f34bfd315af568236062d31583cb1e43d5da6256",
+    "configs/electronics/parameters/spe_template_measured.csv": "37f0f38a87b3bed0e1d64e1f4ef2f37877bd06b3a4bca7fe5221034e575e3b8f",
+    "configs/electronics/parameters/spe_charge_samples_measured.csv": "ba27c1248f744525b146517e8292a99e7af025be4bdc9f8ec6f8d9b55c808383",
+    "configs/electronics/devices/s17351_tiled_2x4.cfg": "ef0441ace5e2352f19ee427805c790d1eae0d253baa2c5453863d014c31e0e57",
+    "configs/efficiency/mirror_reflectivity_dm0113_13point_mean.csv": "b97747ce7d7335890f00170babc25eab1347ec36b05e7049ad72401699dfc231",
+    "configs/efficiency/filter_transmission.csv": "1d726926d917d0a6803a4f76b65651cf0672f03f832a29eefe530c5ddcd646c8",
+    "configs/efficiency/sipm_pde.csv": "c166c3336115ce33269dc80f3459fc72e48889f6b91afb331e6612f08aa15762",
+    "configs/nsb/nsb_spectrum.csv": "5f202dbc0928ebb71b775b7054950d70eb68c9cfb50ef5f4c70fff12dd54bf17",
+    "configs/calibrated/lact2_measured_20260622/mirror_20260622.cfg": "1ea985be1b03063afd2f265352bf63c8ef8ae3d2d22938639201d58676e2a444",
+    "configs/calibrated/lact2_measured_20260622/mirror_elevation_series_20260622.csv": "2610282598463858dfcd69e77b5a65350efe847c3fbcbe2dcc88803297229fcc",
+    "configs/arrays/lact36_20260906.input": "c779add28768de604d9a548dec85fb9d85e47938647f3d440879721ebf338e8e",
+    "configs/optics/lact2_measured_single_pixel_400nm.csv": "51192df2901fa72a5c91840d1d8bda728ffe08f240b383c8de56769a7987dd7e",
+    "configs/optics/lact2_measured_single_pixel_400nm.provenance.json": "8908936000594fdbc73251c70071c43c516d8aae6cba98e0e067015272e2f9ed"
+  },
+  "max_array_delay_rate_ns_per_s": 0.23359726107352435,
+  "max_array_pair_delay_rate_ns_per_s": 0.26789778358078103,
+  "max_array_24us_linear_error_bound_ns": 5.775005861531099e-15,
+  "max_array_stale_pair_residual_ns": 5190.157742784702,
+  "actual_raw_records": 2464,
+  "actual_raw_duration_s": 0.059136,
+  "scope": "Seven independent short-record epochs; not continuous six-hour ADC or full-array covariance. Fixed test coherence, not a stellar light curve.",
+  "timing_model": "SI sidereal rotation at each epoch, local affine arrival-time map before optical response; receiver stellar rate includes Jacobian.",
+  "geometry_dec_rad": 0.3,
+  "geometry_lat_rad": 0.5124042337760072,
+  "duration_ns": 24000.0,
+  "pair_rate_scale": 10000.0,
+  "star_rate_hz": 199889298.29641628,
+  "background_rate_hz": 573214.0884464285,
+  "coherence": [
+    [
+      1.0,
+      0.7,
+      0.5
+    ],
+    [
+      0.7,
+      1.0,
+      0.6
+    ],
+    [
+      0.5,
+      0.6,
+      1.0
+    ]
+  ],
+  "calibration": "Fixed analytic projection; independent per-epoch training response. Null intervals conditional on training gain.",
+  "initial_delay_control": "Same raw record and common reference-time interval, divided by tracked gain; control is not calibrated as a separate detector."
+}

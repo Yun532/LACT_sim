@@ -7,10 +7,11 @@
     "python/sii_unified.py": "9e18045755855136e471043db5955b11810ef9fb628159c61872650657786e37",
     "python/sii_reconstruction.py": "d9b1faca0be1990e9b206340efa9d1a3e0c181557997ac15e72d58dbbb01f589",
     "python/sii_validation.py": "5d96a0d55e48b3edf923db468bb319a9efb7b982837d27a885dbd847404ceace",
-    "python/sii_observation.py": "b89e0e4d3992cdd4c6802f12b61305a38907c52eab687952cd2ae45b104c4883",
+    "python/sii_observation.py": "4755a32f36b99939f125aa90691527527fdd61aed3a531d2c0084ab0f1bb9159",
     "python/sii_layout.py": "575edbf011d41b3f2689e12cd21152261f97c707d04f0564c93bde94a83a9341",
     "tools/validate_sii_observation.py": "63e5733064eef1737b33d373b07167bf7d1618dbf5ae6d3f03db710660c139d8",
-    "tools/build_sii_science_notebook.py": "21eab020bb265dcfa703cf0e1ae60f25c37d8095c0ca995a086c6b9fba3a84ed"
+    "tools/validate_sii_tracking.py": "bdd8e67d137fb0df68e90a8f6e2efbac96587c6d9bd251f7ace32dddadc36e1f",
+    "tools/build_sii_science_notebook.py": "177a1ce43dcddb00839c4bf7084a90f9b21c8d83d7cd18c29dc1399acfb5bf1e"
   },
   "main_parameter_commit": "2926031b14c8aa2164a4d9233f5c2d0a75324127",
   "derived_input_sha256_lf": {
@@ -229,7 +230,7 @@
   ],
   "joint_observation": {
     "execution": "fresh waveform simulation executed by this notebook",
-    "summary_sha256_lf": "dc267401048396b5396a785161118563c8fc05214148309570bb642d60400c3d",
+    "summary_sha256_lf": "c75d4ee6c093c0093b71d856e129f886019d9bdb961d2c4dfd46d577f8dc66b5",
     "short_records": 1408,
     "long_records": 384,
     "checks": [
@@ -261,6 +262,56 @@
       }
     ],
     "hour_scale_inference_uses_joint_covariance": false
+  },
+  "tracking_observation": {
+    "execution": "fresh sparse epoch waveforms executed by this notebook",
+    "summary_sha256_lf": "d923964a77d26751a8a22c2fd035794d312ced43f50956bf8e013c8afcaf917a",
+    "actual_raw_records": 2464,
+    "actual_raw_duration_s": 0.059136,
+    "checks": [
+      {
+        "epoch": 0,
+        "max_response_abs_z": 1.2451023349068395,
+        "max_null_abs_z": 2.299553403549272,
+        "passed": true
+      },
+      {
+        "epoch": 1,
+        "max_response_abs_z": 1.0094721187292117,
+        "max_null_abs_z": 0.8221169552105541,
+        "passed": true
+      },
+      {
+        "epoch": 2,
+        "max_response_abs_z": 0.6883134038816339,
+        "max_null_abs_z": 0.9235598465589708,
+        "passed": true
+      },
+      {
+        "epoch": 3,
+        "max_response_abs_z": 0.8237684558831386,
+        "max_null_abs_z": 0.5049726312960934,
+        "passed": true
+      },
+      {
+        "epoch": 4,
+        "max_response_abs_z": 1.2318195827549785,
+        "max_null_abs_z": 1.4597493173160956,
+        "passed": true
+      },
+      {
+        "epoch": 5,
+        "max_response_abs_z": 1.5884228497479393,
+        "max_null_abs_z": 0.9885504516893696,
+        "passed": true
+      },
+      {
+        "epoch": 6,
+        "max_response_abs_z": 1.3826042298815628,
+        "max_null_abs_z": 0.5053812856612002,
+        "passed": true
+      }
+    ]
   },
   "array_geometry": {
     "input": "configs/arrays/lact36_20260906.input",
@@ -490,7 +541,7 @@
     "reconstruction_repeats": 12,
     "pixel_intervals": "not confidence intervals",
     "calibration": "shared gain profiled, independent statistical sigma retained",
-    "joint_observation": "fresh short and longer raw records executed; hour-scale inference remains separate",
+    "joint_observation": "fresh short, longer and sparse tracked epoch records executed; hour-scale inference remains separate",
     "notebook_execution": "all cells executed in this run"
   }
 }

@@ -11,7 +11,62 @@ sys.path.insert(0, str(ROOT/'python'))
 from sii_unified import Instrument, C_M_S
 from sii_observation import (geometric_arrival_delays_ns, align_waveforms,
                              correlate_blocks, simulate_array_photon_times,
-                             simulate_array_waveforms, joint_thermal_mode_counts)
+                             simulate_array_waveforms, joint_thermal_mode_counts, tracking_geometry)
+
+
+def test_tracking_derivative_and_curvature_against_rotating_direction():
+    from sii_layout import read_corsika_layout
+    positions = read_corsika_layout(ROOT/'configs/arrays/lact36_20260906.input')[
+        ['east_m', 'north_m', 'up_m']].to_numpy()
+    for elapsed in [-10800., 0., 10800.]:
+        state = tracking_geometry(positions, .1, .3, .5, elapsed)
+        before = tracking_geometry(positions, .1, .3, .5, elapsed-.1)['arrival_delays_ns']
+        after = tracking_geometry(positions, .1, .3, .5, elapsed+.1)['arrival_delays_ns']
+        np.testing.assert_allclose((after-before)/.2, state['arrival_delay_rates_ns_per_s'], atol=2e-11)
+        exact = tracking_geometry(positions, .1, .3, .5, elapsed+10.)['arrival_delays_ns']
+        linear = state['arrival_delays_ns']+10*state['arrival_delay_rates_ns_per_s']
+        assert np.all(abs(exact-linear) <= .5*state['curvature_bound_ns_per_s2']*100+1e-10)
+
+
+def test_varying_delay_tracks_independent_analytic_signal():
+    dt = 4.
+    time = (np.arange(12000)+.5)*dt
+    delays, rates = np.array([0., 13.3, -19.1]), np.array([0., 2e6, -3e6])
+    # 人工加大时间伸缩，只验证符号、半样本坐标及变化读取；不是地球自转场景。
+    def signal(t):
+        return 2.+np.cos(.021*t)+.4*np.sin(.113*t)
+    adc = np.array([signal((time-delay)/(1+rate*1e-9)) for delay, rate in zip(delays, rates)])
+    result = align_waveforms(adc, delays, dt, half_width=64, arrival_delay_rates_ns_per_s=rates)
+    expected = np.tile(signal(result['sample_time_ns']), (3, 1))
+    np.testing.assert_allclose(result['adc_mv'], expected, atol=3e-5, rtol=0)
+    frozen = align_waveforms(adc, delays, dt, half_width=64)
+    assert np.sqrt(np.mean((frozen['adc_mv'][1]-signal(frozen['sample_time_ns']))**2)) > .1
+    np.testing.assert_array_equal(align_waveforms(adc, delays, dt)['adc_mv'],
+                                  align_waveforms(adc, delays, dt, arrival_delay_rates_ns_per_s=[0.,0.,0.])['adc_mv'])
+
+
+def test_time_mapped_photons_keep_shared_wavefronts_and_receiver_rate():
+    instrument = replace(Instrument.from_repository(ROOT), optical_timing_kernel_path=None)
+    # 两镜全相关且独立余项为零；接收时刻逆映射必须还原同一组真实共享事件。
+    rate = 1e9
+    scale = 1/(rate*instrument.coherence_area_s)
+    factors = np.array([1., 1.05])
+    delays = np.array([0., 17.])
+    times, meta = simulate_array_photon_times(np.random.default_rng(25), 1e5, rate, 0.,
+        np.ones((2,2)), instrument, delays, scale, padding_ns=0.,
+        arrival_delay_rates_ns_per_s=(factors-1)*1e9)
+    np.testing.assert_allclose(times[0], (times[1]-delays[1])/factors[1], atol=1e-10, rtol=0)
+    for index in range(2):
+        observed = np.count_nonzero((times[index]>=0)&(times[index]<1e5))
+        expected = rate/factors[index]*1e-4
+        assert abs(observed-expected) < 6*np.sqrt(expected)
+    np.testing.assert_allclose(meta['received_star_rate_hz'], rate/factors)
+
+
+@pytest.mark.parametrize('rates', [[0., np.nan], [0., -1e9], [0.]])
+def test_invalid_time_mapping_is_rejected(rates):
+    with pytest.raises(ValueError, match='时延率'):
+        align_waveforms(np.ones((2, 200)), [0., 0.], 4., arrival_delay_rates_ns_per_s=rates)
 
 
 def test_wavefront_arrival_sign_and_reference():

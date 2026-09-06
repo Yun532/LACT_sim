@@ -1,11 +1,11 @@
-"""多镜共享光子/波形、几何时延补偿与分块相关；短记录使用冻结几何。"""
+"""多镜共享光子/波形、几何时延与局部时延率、共同区间补偿及分块相关。"""
 from itertools import combinations
 
 import numpy as np
 from scipy.signal import correlate
 
 from sii_unified import (
-    C_M_S, source_direction_enu, load_measured_spe_template,
+    C_M_S, SIDEREAL_DAY_S, source_direction_enu, load_measured_spe_template,
     load_optical_timing_mixture, sample_optical_delays_ns,
     render_pe_waveform, waveform_cross_correlation,
 )
@@ -46,17 +46,21 @@ def geometric_arrival_delays_ns(positions_enu_m, hour_angle_rad, dec_rad, lat_ra
 
 def simulate_array_photon_times(rng, duration_ns, star_rate_hz, background_rate_hz,
                                coherence, instrument, arrival_delays_ns=None,
-                               pair_rate_scale=1., padding_ns=200.):
+                               pair_rate_scale=1., padding_ns=200.,
+                               arrival_delay_rates_ns_per_s=None):
     """稀疏HBT对过程的多镜扩展：每镜只有一个事件流，由所有相关基线共享。
 
     镜对率为R_i R_j tau_eff |Gamma_ij|²。各镜独立星光率减去其参与的全部
     镜对率，保持边缘平均光子率。此近似不包含热光自聚束和三阶闭合相位项，
     放大注入仅用于处理链检验；不能把其高阶统计当作完整热光模型。
+    可选时延率将参考波面时刻t映射到t+d+dot(d)*t；在光学响应之前作用。
+    星光率按参考时间定义，接收端边缘率为R/(1+dot(d)*1e-9)；背景按接收时间定义。
     """
     gamma = _coherence_matrix(coherence)
     size = len(gamma)
     star, background = _rates(star_rate_hz, size), _rates(background_rate_hz, size)
     delays = np.zeros(size) if arrival_delays_ns is None else np.asarray(arrival_delays_ns, float)
+    delay_rates = _delay_rates(arrival_delay_rates_ns_per_s, size)
     if (delays.shape != (size,) or not np.all(np.isfinite(delays))
             or not np.all(np.isfinite([duration_ns, padding_ns, pair_rate_scale]))
             or duration_ns <= 0 or padding_ns < 0 or pair_rate_scale <= 0
@@ -73,7 +77,10 @@ def simulate_array_photon_times(rng, duration_ns, star_rate_hz, background_rate_
               if instrument.optical_timing_kernel_path else None)
     timing_guard = (0. if timing is None else
                     float(np.max(abs(timing['mean_delay_ns'])+8*timing['std_delay_ns'])))
-    guard = padding_ns+float(np.max(abs(delays)))+timing_guard
+    # 时钟映射必须单调；把两端映射及响应支持区一起纳入填充。
+    factors = 1.+delay_rates*1e-9
+    guard = (padding_ns+float(np.max(abs(delays)))+timing_guard
+             +duration_ns*float(np.max(abs(factors-1))))/min(1., float(factors.min()))
     start, stop = -guard, duration_ns+guard
     seconds = (stop-start)*1e-9
     streams = [[rng.uniform(start, stop, rng.poisson(rate*seconds))] for rate in single_rates]
@@ -87,13 +94,15 @@ def simulate_array_photon_times(rng, duration_ns, star_rate_hz, background_rate_
     times = []
     for index in range(size):
         # 光学飞行时间独立作用于每个光子；同一事件在不同基线中不再重新抽样。
-        stellar = np.concatenate(streams[index])+delays[index]
+        stellar = np.concatenate(streams[index])*factors[index]+delays[index]
         if timing is not None:
             stellar += sample_optical_delays_ns(rng, len(stellar), timing)
         sky = rng.uniform(start, stop, rng.poisson(background[index]*seconds))
         times.append(np.sort(np.concatenate((stellar, sky))))
     return times, dict(duration_ns=float(duration_ns), guard_ns=guard,
                        arrival_delays_ns=delays, star_rate_hz=star,
+                       arrival_delay_rates_ns_per_s=delay_rates,
+                       received_star_rate_hz=star/factors,
                        background_rate_hz=background, physical_pair_rates_hz=pair_rates,
                        injected_pair_rates_hz=injected, single_star_rates_hz=single_rates,
                        pair_counts_with_padding=pair_counts, pair_rate_scale=float(pair_rate_scale),
@@ -102,7 +111,7 @@ def simulate_array_photon_times(rng, duration_ns, star_rate_hz, background_rate_
 
 def simulate_array_waveforms(rng, duration_ns, star_rate_hz, background_rate_hz,
                              coherence, instrument, arrival_delays_ns=None,
-                             pair_rate_scale=1.):
+                             pair_rate_scale=1., arrival_delay_rates_ns_per_s=None):
     """按main响应生成一次逐镜ADC；背景率应显式包含所需的NSB和暗计数。"""
     for name in ('telescope_gain_calibration_rms', 'per_night_gain_rms',
                  'baseline_zero_point_rms', 'residual_timing_rms_ns',
@@ -113,7 +122,7 @@ def simulate_array_waveforms(rng, duration_ns, star_rate_hz, background_rate_hz,
     padding = float(np.max(abs(template[0])))+8*instrument.intrinsic_time_jitter_ns
     times, metadata = simulate_array_photon_times(
         rng, duration_ns, star_rate_hz, background_rate_hz, coherence, instrument,
-        arrival_delays_ns, pair_rate_scale, padding)
+        arrival_delays_ns, pair_rate_scale, padding, arrival_delay_rates_ns_per_s)
     waveforms = [render_pe_waveform(rng, events, duration_ns, instrument, template=template)
                  for events in times]
     return dict(adc_mv=np.stack([item['adc_mv'] for item in waveforms]),
@@ -121,11 +130,41 @@ def simulate_array_waveforms(rng, duration_ns, star_rate_hz, background_rate_hz,
                 sample_width_ns=instrument.sample_width_ns, metadata=metadata)
 
 
-def align_waveforms(adc_mv, arrival_delays_ns, sample_width_ns, half_width=16):
+def _delay_rates(value, size):
+    """ns/s只在此换成无量纲时间伸缩；拒绝时间反转及不可逆映射。"""
+    rates = np.zeros(size) if value is None else np.asarray(value, float)
+    if rates.shape != (size,) or not np.all(np.isfinite(rates)) or np.any(1.+rates*1e-9 <= 0):
+        raise ValueError('时延率必须为每镜有限ns/s，且接收时间映射严格递增')
+    return rates
+
+
+def tracking_geometry(positions_enu_m, hour_angle_rad, dec_rad, lat_rad, elapsed_s=0., reference=0):
+    """时角按SI秒推进；返回记录起点时差、解析时延率和全时角曲率上界。
+
+    记录内使用一阶展开，遗漏时延不超过0.5*curvature_bound*T²（T以秒计）。
+    这是平均自转模型，未加入日期历表、折射或仪器时钟误差。
+    """
+    if not np.isscalar(elapsed_s) or not np.isfinite(elapsed_s):
+        raise ValueError('elapsed_s必须为有限SI秒')
+    omega = 2*np.pi/SIDEREAL_DAY_S
+    hour = hour_angle_rad+omega*elapsed_s
+    delays = geometric_arrival_delays_ns(positions_enu_m, hour, dec_rad, lat_rad, reference)
+    baseline = np.asarray(positions_enu_m, float)-np.asarray(positions_enu_m, float)[reference]
+    derivative = np.cos(dec_rad)*np.array([-np.cos(hour), np.sin(lat_rad)*np.sin(hour),
+                                           -np.cos(lat_rad)*np.sin(hour)])
+    rates = -baseline @ derivative*omega/C_M_S*1e9
+    curvature = np.linalg.norm(baseline, axis=1)*abs(np.cos(dec_rad))*omega**2/C_M_S*1e9
+    return dict(arrival_delays_ns=delays, arrival_delay_rates_ns_per_s=rates,
+                curvature_bound_ns_per_s2=curvature, hour_angle_rad=float(hour))
+
+
+def align_waveforms(adc_mv, arrival_delays_ns, sample_width_ns, half_width=16,
+                    arrival_delay_rates_ns_per_s=None):
     """取y_i(t)=x_i(t+d_i)，用有限Lanczos-sinc插值并裁到全镜共同有效区。
 
     不循环卷绕、不补零进入相关。整数延迟精确索引，分数延迟按带限近似插值。
     真实SPE未必严格带限，插值后的模板和噪声必须按同一处理重新标定。
+    非零时延率逐样本更新读取坐标，输出仍为均匀参考时间，不重采样已算好的相关峰。
     """
     values, delays = np.asarray(adc_mv, float), np.asarray(arrival_delays_ns, float)
     if (values.ndim != 2 or values.shape[0] < 2 or values.shape[1] < 2
@@ -134,6 +173,32 @@ def align_waveforms(adc_mv, arrival_delays_ns, sample_width_ns, half_width=16):
             or sample_width_ns <= 0 or not isinstance(half_width, int) or half_width < 2):
         raise ValueError('需要有限逐镜波形、每镜时延、正采样间隔及至少2点的插值半宽')
     offsets = delays/sample_width_ns
+    rates = _delay_rates(arrival_delay_rates_ns_per_s, len(values))
+    if np.any(rates != 0):
+        factors = 1.+rates*1e-9
+        # ADC样本位于(k+1/2)dt。保守裁剪确保所有输出、全部抽头均有真实输入。
+        offsets = offsets+.5*(factors-1)
+        low = max(0, int(np.ceil(np.max((half_width-1-offsets)/factors))))
+        high = min(values.shape[1]-1,
+                   int(np.floor(np.min((values.shape[1]-1-half_width-offsets)/factors))))
+        if high-low < 1:
+            raise ValueError('时延与插值支持区间超过记录长度，没有共同有效数据')
+        indices = np.arange(low, high+1)
+        aligned = np.empty((len(values), len(indices)))
+        taps = np.arange(1-half_width, half_width+1)
+        for channel in range(len(values)):
+            # 按4096点分批，内存不随整夜样本数乘核宽增长。
+            for first in range(0, len(indices), 4096):
+                target = indices[first:first+4096]*factors[channel]+offsets[channel]
+                locations = np.floor(target).astype(np.int64)[:, None]+taps
+                distance = target[:, None]-locations
+                weights = np.sinc(distance)*np.sinc(distance/half_width)
+                weights /= weights.sum(axis=1, keepdims=True)
+                aligned[channel, first:first+len(target)] = np.sum(values[channel, locations]*weights, axis=1)
+        return dict(adc_mv=aligned, sample_time_ns=(indices+.5)*sample_width_ns,
+                    sample_width_ns=float(sample_width_ns), first_input_index=int(low),
+                    effective_duration_ns=float(len(indices)*sample_width_ns),
+                    discarded_samples=int(values.shape[1]-len(indices)), half_width=half_width)
     kernels = []
     low, high = 0, values.shape[1]-1
     for offset in offsets:

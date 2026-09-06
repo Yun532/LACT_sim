@@ -47,6 +47,7 @@ summary = {'seed':SEED, 'python':platform.python_version(), 'numpy':np.__version
 summary['code_sha256_lf']={path:hashlib.sha256((ROOT/path).read_bytes().replace(b'\\r\\n',b'\\n')).hexdigest()
     for path in ['python/sii_unified.py','python/sii_reconstruction.py','python/sii_validation.py',
                  'python/sii_observation.py','python/sii_layout.py','tools/validate_sii_observation.py',
+                 'tools/validate_sii_tracking.py',
                  'tools/build_sii_science_notebook.py']}
 manifest = verify_main_parameters(ROOT)
 summary['main_parameter_commit'] = manifest['main_commit']
@@ -239,13 +240,43 @@ display(pd.read_csv(JOINT/'exposure_scaling.csv'))
 display(Image(filename=str(JOINT/'observation_validation.png')))
 display(Image(filename=str(JOINT/'processing_convergence.png')))
 ''')
+md('''### 4.2 随自转更新时延并追踪块内变化
+
+本节计算36台镜跨6小时的几何，并在七个时刻独立生成Tel.1/2/6的短波形。
+光子到达时刻加入局部时延率，光学响应随后作用；处理端按参考时间逐样本更新插值位置。
+同一批原始波形还用初始时延处理，两种方法取共同有效区间。
+每个时刻分开训练响应，独立留出与零信号不参与标定。
+
+这里固定复相干矩阵，用于检查处理链，不是指定恒星的六小时光变。
+七个时刻之间没有模拟连续ADC，真实累计短记录曝光单独计数，不能用6小时替代。
+''')
+code('''
+completed = subprocess.run([sys.executable, '-X', 'utf8', str(ROOT/'tools/validate_sii_tracking.py')],
+                           cwd=ROOT, capture_output=True, text=True, encoding='utf-8')
+print(completed.stdout)
+if completed.stderr:
+    print(completed.stderr)
+completed.check_returncode()
+TRACKING = ROOT/'validation/sii_tracking'
+tracking_summary = json.loads((TRACKING/'summary.json').read_text(encoding='utf-8'))
+assert all(item['passed'] for item in tracking_summary['checks'])
+summary['tracking_observation'] = {
+    'execution': 'fresh sparse epoch waveforms executed by this notebook',
+    'summary_sha256_lf': hashlib.sha256((TRACKING/'summary.json').read_bytes().replace(b'\\r\\n',b'\\n')).hexdigest(),
+    'actual_raw_records': tracking_summary['actual_raw_records'],
+    'actual_raw_duration_s': tracking_summary['actual_raw_duration_s'],
+    'checks': tracking_summary['checks']}
+display(pd.DataFrame(tracking_summary['checks']))
+display(pd.read_csv(TRACKING/'response.csv'))
+display(Image(filename=str(TRACKING/'tracking_validation.png')))
+''')
 md('''## 5. 36台望远镜的时间与光谱平均测量
 
 从原始TELESCOPE input按NWU厘米转ENU米，实际生成36台望远镜、630条基线、
 6小时、每段20分钟的11340个UV测量；位置原点和镜名顺序保持input约定。
 每段同时平均时间变化和通带内的平方可见度。右图显示带噪声测量，允许出现负值；
 颜色范围仅用于显示，不对拟合输入作裁剪。同一次标定误差在所有测量间共享。
-本节采用双镜波形标定的长曝光统计分支；第4.1节的三镜联合实验并未自动替换
+本节采用双镜波形标定的长曝光统计分支；第4.1及4.2节的三镜实验并未自动替换
 本节的36镜协方差或完成整夜时变处理。两者通过明确的验证范围关联。
 ''')
 code('''
@@ -488,7 +519,7 @@ summary['scope']={'source':'static scenes, observed total AB magnitude',
     'weak_thermal_approximation':'pair generator omits thermal self noise; degeneracy is reported',
     'reconstruction_repeats':REPEATS,'pixel_intervals':'not confidence intervals',
     'calibration':'shared gain profiled, independent statistical sigma retained',
-    'joint_observation':'fresh short and longer raw records executed; hour-scale inference remains separate',
+    'joint_observation':'fresh short, longer and sparse tracked epoch records executed; hour-scale inference remains separate',
     'notebook_execution':'all cells executed in this run'}
 (OUT/'summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2)+'\\n',encoding='utf-8')
 print('科学验证结果已写入：',OUT/'summary.json')

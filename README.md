@@ -6,6 +6,7 @@
 - [代码实现、参数接口与复现](docs/SII_IMPLEMENTATION_ZH.md)
 - [完整可执行Notebook](notebooks/sii_complete_waveform_report.ipynb)
 - [验证结果](validation/sii_science/summary.json)
+- [时延追踪验证](validation/sii_tracking/summary.json)：36镜几何、七时刻三镜短波形及初始时延对照。
 
 ## 安装与运行
 
@@ -53,6 +54,8 @@ image = sii.reconstruct_uv(
 主要模块：`python/sii_unified.py`负责模拟和GLS标定，`python/sii_reconstruction.py`负责重建，`python/sii_validation.py`提供独立验证，`python/sii_observation.py`提供多镜共享波形、时延补偿及分块相关。
 
 主Notebook第4.1节实际执行三镜观测链、同区间插值收敛与24/96 μs曝光对照；也可运行`python tools/validate_sii_observation.py`。结果保存在`validation/sii_observation/`，输入格式和适用范围见[实现说明](docs/SII_IMPLEMENTATION_ZH.md#41-多镜观测入口)。
+
+第4.2节实际执行跨时刻的局部时延率注入与波形追踪；可单独运行`python tools/validate_sii_tracking.py`。七个时刻的短记录是独立处理检验，不计作连续6小时曝光。
 
 ## 参数与输出
 

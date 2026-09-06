@@ -10,7 +10,7 @@
 | [`python/sii_reconstruction.py`](../python/sii_reconstruction.py) | 只根据测量和采样重建；处理共同增益先验、正则化与收敛诊断 | 真值只能在拟合完成后用于评价 |
 | [`python/sii_validation.py`](../python/sii_validation.py) | 独立热光场、连续响应解析对照、留出波形、参数剖面和覆盖率工具 | 解析参考不调用共享光电子对生成器 |
 | [`python/sii_layout.py`](../python/sii_layout.py) | 从TELESCOPE input读取原始NWU厘米坐标，转换ENU米并保留原值及行号 | 镜号按input顺序，标签保留；半径400 cm表示4 m半径 |
-| [`python/sii_observation.py`](../python/sii_observation.py) | 多镜共享事件及波形、到达时差、分数采样补偿、分块相关、独立多镜热光模 | 主Notebook第4.1节实际执行；第5节整阵列长曝光仍是独立统计分支 |
+| [`python/sii_observation.py`](../python/sii_observation.py) | 多镜共享事件及波形、到达时差与时延率、分数采样补偿、分块相关、独立多镜热光模 | 主Notebook第4.1、4.2节实际执行；第5节整阵列长曝光仍是独立统计分支 |
 | [`tools/build_sii_science_notebook.py`](../tools/build_sii_science_notebook.py) | 用nbformat生成主Notebook的代码及中文解释 | 重新生成会清空该Notebook的执行输出，随后必须从头运行 |
 | [`tools/execute_notebook.py`](../tools/execute_notebook.py) | 用nbclient在指定目录完整执行并保存Notebook | 单元报错时保留已执行输出，进程仍返回失败 |
 | [`tests`](../tests)中的SII测试文件 | 物理恒等式、统计目标、数据独立性及数值边界检查 | 自动测试通过不等于所有科学主张通过 |
@@ -157,21 +157,43 @@ import numpy as np
 root = Path.cwd()
 sys.path.insert(0, str(root / "python"))
 from sii_unified import Instrument, detected_star_rate_hz
-from sii_observation import simulate_array_waveforms, align_waveforms, correlate_blocks
+from sii_layout import read_corsika_layout
+from sii_observation import (simulate_array_waveforms, align_waveforms,
+                             correlate_blocks, tracking_geometry)
 
 instrument = Instrument.from_repository(root)
-delay_ns = np.array([0., -66.713, 489.583])
+layout = read_corsika_layout(root / 'configs/arrays/lact36_20260906.input')
+positions = layout.iloc[[0, 1, 5]][['east_m', 'north_m', 'up_m']].to_numpy()
+state = tracking_geometry(positions, 0., .3, np.deg2rad(29.3586), elapsed_s=3600.)
+delay_ns = state['arrival_delays_ns']
+rate_ns_per_s = state['arrival_delay_rates_ns_per_s']
 raw = simulate_array_waveforms(
     np.random.default_rng(42), 24_000., detected_star_rate_hz(2., instrument),
     instrument.detected_nsb_rate_hz + instrument.dark_count_rate_hz,
-    np.eye(3), instrument, arrival_delays_ns=delay_ns)
-aligned = align_waveforms(raw["adc_mv"], delay_ns, instrument.sample_width_ns)
+    np.eye(3), instrument, arrival_delays_ns=delay_ns,
+    arrival_delay_rates_ns_per_s=rate_ns_per_s)
+aligned = align_waveforms(raw["adc_mv"], delay_ns, instrument.sample_width_ns,
+                          arrival_delay_rates_ns_per_s=rate_ns_per_s)
 result = correlate_blocks(aligned["adc_mv"], instrument.sample_width_ns,
                           block_samples=aligned["adc_mv"].shape[1] // 4)
 print(result["mean_correlation"].shape, result["effective_duration_s"])
 ```
 
 `joint_thermal_mode_counts`是另外一条复高斯联合场→光强→泊松计数路径，用于验证二阶、三阶及边缘方差，不调用共享对生成器。它返回离散模平均的计数与光强，不输出真实纳秒波形。缺失时变增益、透明度等参数保持0；在当前联合波形入口设为非零会明确报尚未实现，避免被静默忽略。
+
+### 4.2 随时角更新几何及块内时延率
+
+`tracking_geometry`接受参考时角、赤纬、纬度、经过的SI秒和参考镜索引，返回该时刻的`arrival_delays_ns`、`arrival_delay_rates_ns_per_s`及`curvature_bound_ns_per_s2`。每条短记录的局部时间从0开始，避免用整夜绝对纳秒数参与插值而损失精度。曲率上界乘记录时长平方的一半，是一阶时延展开的误差界。
+
+光子入口与补偿入口都接受可选的`arrival_delay_rates_ns_per_s`。默认省略或全0时沿用固定时延算法；非零时，光子参考时间先作线性伸缩和延迟，然后才抽光学时间响应。元数据中的`star_rate_hz`按参考时间定义，`received_star_rate_hz`明确包含时间映射的Jacobian；背景按接收时间生成。非有限时延率或非递增的时间映射会报错。
+
+动态补偿按ADC半样本中心计算逐点读取位置，用同样的Lanczos-sinc权重，每批最多4096个输出点。公共裁剪确保每个通道的所有抽头都落在原始数据中；它不会把已计算的相关峰平移来冒充波形追踪。非零时延率下，部分通道即使恰好整数延迟，也按共同支持区间保守裁剪。
+
+[`validate_sii_tracking.py`](../tools/validate_sii_tracking.py)在过中天前后3小时的七个时刻，分别生成96条训练、128条注入留出和128条零信号记录。每条24 μs，总计2464条三镜记录，原始共同时间累计0.059136 s；这不是6小时连续ADC，三个通道也不把曝光乘3。每个时刻的两种处理使用同一批ADC和共同参考时间区间。追踪响应只从该时刻训练集估计；初始时延对照除以追踪增益，不用接近零的自身响应放大噪声。
+
+结果保存在[`validation/sii_tracking`](../validation/sii_tracking)：`geometry.csv`为36镜每分钟几何，`epochs.csv`为七个波形时刻的有效单条曝光及展开误差界，`records.csv`保留两种处理的逐条投影，`response.csv`记录训练增益、留出结果、零信号及误差。固定相干矩阵是处理检验场景，未随UV变化；该表不能直接作为恒星六小时光变或36镜重建测量。
+
+本次共同裁剪后单条曝光为20.984至22.400 μs，2464条训练/留出/零信号记录合计有效时间0.054198144 s。统计总时长时按`epoch, case, record`去重，不能再次累加同一记录的三条基线。
 
 ## 5. 测量表和重建器之间的边界
 
@@ -214,6 +236,7 @@ print(result["mean_correlation"].shape, result["effective_duration_s"])
 | `analytic_waveform_calibration` | 连续SPE自相关、光学传递、Bartlett协方差 | 两个波形函数共享同一错误却互相闭合 |
 | `waveform_records` | 固定新种子、完全独立记录，不训练权重 | 训练数据上的噪声低估和响应偏差 |
 | 不同注入倍率、块长 | 重新生成波形而非缩放既有结果 | 注入非线性及块长归一化错误 |
+| 时延率与变化插值 | 自转几何有限差分、独立解析信号的逆时间映射、共享光子逆映射 | 时延导数符号、ns/s单位、半样本位置或边缘率错误 |
 | 梯度有限差分 | 对标量目标直接作扰动 | 共同增益剖面导数或平均功率伴随错误 |
 | `profile_model_grid` | 逐模型解析剖面，与显式似然优化对照 | 批量参数似然和区间实现错误 |
 | 1000次直径区间 | 独立增益及噪声实现，报告二项区间 | 在指定场景中的区间覆盖不足 |
@@ -267,7 +290,7 @@ python tools/check_sii_science_artifacts.py
 
 此入口采用固定解析GLS投影，再用独立训练数据校准补偿后的响应；尚未重新优化插值后的完整滞后权重。噪声尺度区间以训练增益固定为条件，增益误差在`response.csv`另报；注入恢复误差棒包含训练与留出两部分。物理倍率记录不与放大注入混合估计噪声，更不能用放大注入的基线相关外推整夜。处理链检验与主Notebook的长曝光灵敏度、重建结果有各自的代码哈希，保持清楚的证据范围。
 
-主Notebook包含24个单元，其中13个代码单元；自动测试共74项。完整执行状态及结果版本由下述检查脚本核对。
+主Notebook包含26个单元，其中14个代码单元；自动测试共80项。第4.2节实际执行七时刻追踪验证，主摘要绑定其结果摘要哈希；可单独运行`python tools/validate_sii_tracking.py`。完整执行状态及结果版本由下述检查脚本核对。
 运行`python tools/check_sii_science_artifacts.py`可再检查说明链接、公式分隔符、Notebook执行状态和结果中的源代码/输入哈希。
 新36台布局的36次图像重复均由优化器正常结束，并通过驻点阈值。逐次误差及配准保留通量仍公开在`image_repeats.csv`；通过数值诊断不等于图像唯一、全局最优或遮挡结构已检出。程序仍保留失败记录，不按成功状态筛选稳定性汇总。
 

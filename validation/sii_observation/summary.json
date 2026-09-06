@@ -422,10 +422,10 @@
   "code_sha256_lf": {
     "python/sii_unified.py": "9e18045755855136e471043db5955b11810ef9fb628159c61872650657786e37",
     "python/sii_validation.py": "5d96a0d55e48b3edf923db468bb319a9efb7b982837d27a885dbd847404ceace",
-    "python/sii_observation.py": "b89e0e4d3992cdd4c6802f12b61305a38907c52eab687952cd2ae45b104c4883",
+    "python/sii_observation.py": "4755a32f36b99939f125aa90691527527fdd61aed3a531d2c0084ab0f1bb9159",
     "python/sii_layout.py": "575edbf011d41b3f2689e12cd21152261f97c707d04f0564c93bde94a83a9341",
     "tools/validate_sii_observation.py": "63e5733064eef1737b33d373b07167bf7d1618dbf5ae6d3f03db710660c139d8",
-    "tests/test_sii_observation.py": "95ba08bd271eb66b8eee0d4076ae01880901876b56eb7376b4bf49b28e113684"
+    "tests/test_sii_observation.py": "d003707fb82b5fafee47ae583f7c6b6e3d99057210b9e66fb4467c7540ba9121"
   },
   "input_sha256_lf": {
     "configs/arrays/lact36_20260906.input": "c779add28768de604d9a548dec85fb9d85e47938647f3d440879721ebf338e8e",
