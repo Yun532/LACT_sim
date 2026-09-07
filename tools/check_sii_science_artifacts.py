@@ -253,6 +253,30 @@ def main():
         assert hashlib.sha256(pdf.read_bytes()).hexdigest()==datasheet['source_sha256']
     assert instrument.dark_count_rate_hz==0 and not datasheet['apply_to_default_instrument']
     print('36镜性能：54行结果、1152条共享ADC记录、逐记录标定、PDF来源及全部哈希通过。')
+    design_dir = ROOT/'validation/sii_design'
+    design = json.loads((design_dir/'summary.json').read_text(encoding='utf-8'))
+    for path, expected in design['input_sha256_lf'].items():
+        assert hashlib.sha256((ROOT/path).read_bytes().replace(b'\r\n',b'\n')).hexdigest() == expected, path
+    for name, expected in design['output_sha256_lf'].items():
+        assert hashlib.sha256((design_dir/name).read_bytes().replace(b'\r\n',b'\n')).hexdigest() == expected, name
+    changes = pd.read_csv(design_dir/'design.csv').set_index('case')
+    channels = pd.read_csv(design_dir/'channels.csv')
+    assert len(changes) == 48 and len(channels) == 10
+    assert design['rows'] == 11340 and design['telescopes'] == 36
+    for magnitude in [2, 6]:
+        assert math.isclose(changes.loc[f'm{magnitude}_e0_eff2','snr_gain'], 2., rel_tol=1e-5)
+    ideal = channels[channels.scenario == 'ideal']
+    np.testing.assert_allclose(ideal.star_hz_total, detected_star_rate_hz(2., instrument), rtol=1e-4)
+    # 固定增益时相同总通带的独立分色信息近似正比通道数。
+    fixed = ideal.diameter_sigma_fixed_gain_mas.to_numpy()
+    np.testing.assert_allclose(fixed[0]/fixed, np.sqrt(ideal.channels), rtol=.002)
+    assert np.max(pd.read_csv(design_dir/'convergence.csv').refined_max_sigma_relative_change) < .02
+    floors = pd.read_csv(design_dir/'covariance_floor.csv')
+    assert len(floors) == 15
+    nominal = floors[floors.relative_eigenvalue_floor == 1e-10]
+    for row in nominal.itertuples():
+        assert math.isclose(row.sigma_P_median, changes.loc[row.case,'sigma_P_median'], rel_tol=2e-6)
+    print('仪器设计：48个单通道情景、10个分色组合、收敛/正则化对照及来源哈希通过。')
 
 
 if __name__=='__main__':

@@ -424,3 +424,33 @@ print(fit.metrics['optimizer_success'], fit.metrics['stationarity_passed'])
 检查脚本核对公式分隔符、文档链接、notebook顺序执行、输入/代码哈希，从保存ADC重算相关和GLS，并重算完整阵列真功率；完整NPZ往返由回归测试和notebook实际读回覆盖。代码主体在 [sii_unified.py](../python/sii_unified.py)，共享阵列事件在 [sii_observation.py](../python/sii_observation.py)，图像推断在 [sii_reconstruction.py](../python/sii_reconstruction.py)，相位及性能在 [sii_performance.py](../python/sii_performance.py)，独立参考在 [sii_validation.py](../python/sii_validation.py)。这些文件边界服从前述同一数据流。
 
 新的实测输入到来后，先核对来源并更新清单，再重算事件/响应标定、相位表、观测、推断和覆盖率。只改变注释或PDF摘录不会自动进入数值计算。原始备份标签保留为 `backup/sii-gls-before-fixes-20260905`；研究计划与临时审查文件留在本地，不属于本说明的用户复现入口。
+
+## 16. 改变仪器参数时，设计对照从头算了什么
+
+运行 `python tools/evaluate_sii_design.py`。这个入口复用上述物理链，输出到 `validation/sii_design/`；它不修改默认配置，也不修改原Notebook的模拟记录。物理解释与收益表在[物理说明第14节](SII_PHYSICS_ZH.md#instrument-design)，公式推导在[附录M](SII_PHYSICS_ZH.md#appendix-m)。
+
+第一步仍调用 `verify_main_parameters` 检查输入来源，再用 `Instrument.from_repository` 读取同一实测SPE、光谱响应、电荷样本和光追时延。阵列仍从36镜input通过原坐标转换生成。`Observation()` 保持6小时、1200秒分段、9个时间节点，共11340行；源直径固定0.16 mas，星等分别为AB 2和明确标记的AB 6对照。
+
+随后脚本按情景构造新的 `Instrument`，原对象不变。`eff` 同比改变星光通光效率与NSB率；`iso` 关闭光学时间核并保持收光效率不变；`jitter` 设独立到达时间RMS；`dt` 改ADC率及对应Nyquist标记，不凭空创建新的模拟前端。`spe_time_*.csv` 将原SPE时间缩短为一半或四分之一，同时反比放大电压以保持面积。它们是写明假设的新硬件输入，不能与实测SPE混淆。白噪声组以4 ns下1 mV为基准，随采样率的平方根缩放样本RMS，保持噪声谱密度固定。
+
+每个情景都重新执行 `analytic_waveform_calibration`，从该SPE的自相关、星光/背景率、光学时延和白噪声建立单位功率模板与Bartlett协方差。`phase_template_bank` 计算17个残余时延的GLS权重与误差；`tracked_segment_precision` 再用每段1200个时刻的真实几何时差折叠采样相位，累计等时间块的方差，得到11340个统计误差。这里是条件解析预测，没有假装已对每种假设硬件采集新的波形标定。脚本另外保留零残余时延处单位功率的相关峰高，不能把它当作整夜测量的峰高。
+
+接下来 `disk_model_grid` 在0.16 mas及其两侧各 $10^{-5}$ mas处计算同样的曝光/光谱平均模型，中心差分给出直径导数。`diameter_information` 将“直径导数”和“共同增益导数”按逐点统计误差白化，求二乘二Fisher矩阵。`diameter_sigma` 用Schur补消去共同增益，返回mas单位的局部标准差；同时保存固定已知增益的结果。共同先验取已有验证值1.0804%作为一致的比较假设。它不替代正式性能工具的非线性区间与覆盖率，也不表示一般图像误差已经测定。
+
+多色对照生成399–401 nm内1、2、4、8、16个不重叠有效通带，每个滤波边缘用 $10^{-6}$ nm的过渡避免不连续表格。每通道继续从同一个400 nm光学缓存构造仪器，但光谱积分按自己的真实窄通带计算率、相干面积和可见度节点。极窄过渡的残余重叠受总光子率守恒检查约束；这里不模拟实际滤光片串漏。各通道再次走完整解析相位与直径链，然后相加数据Fisher矩阵，只加入一次共同增益先验。除了无损、无附加噪声情况，还运行额外透过率0.8、每通道1 mV噪声及9.6 MHz暗计数的独立情景。不能把这里的通道数替换成单通道的数值积分节点数。
+
+恢复时间走单独的占据率计算：由总率、有效微单元数及假设恢复时间得到 $x=R_{\rm tot}\tau_r/N_{\rm eff}$，积分泊松间隔得到电荷一、二阶矩，并抽样50万次作验证。它没有越过连续解析GLS对非零恢复的拒绝，也没有将平均电荷损失错误换算成SNR损失。
+
+最后检查效率缩放、分色光子守恒、直径差分与相位/连续时间求积的收敛。`covariance_floor_probe` 独立由SPE自相关重建未经特征值截断的Bartlett矩阵，默认下限必须与主函数一致，再降低数值下限检查高采样率、零噪声的条件敏感性。这一步是为了识别数值瓶颈，不能将更小下限自动解释成更真实的硬件。
+
+| 输出 | 看它能回答什么 |
+|---|---|
+| [design.csv](../validation/sii_design/design.csv) | 48个单通道情景的光子率、峰高、统计误差、SNR与直径精度倍率 |
+| [channels.csv](../validation/sii_design/channels.csv) | 10个通道数/器件预算组合的总光子率和联合直径约束 |
+| [recovery.csv](../validation/sii_design/recovery.csv) | 均匀及集中照明假设下的占据率、电荷矩和随机验证 |
+| [convergence.csv](../validation/sii_design/convergence.csv) | 代表情景的更密相位、时间与SPE积分对照 |
+| [covariance_floor.csv](../validation/sii_design/covariance_floor.csv) | 特征值下限对高速零电子噪声结果的影响 |
+| [design.png](../validation/sii_design/design.png) | SPE硬件假设、采样与分色收益图 |
+| [summary.json](../validation/sii_design/summary.json) | 参数、限制、输入/代码/结果哈希；目录内另保留派生通带与SPE输入 |
+
+`check_sii_science_artifacts.py` 同时检查这些设计输出的来源与关键比例。设计目录独立记录本次运行，原科学Notebook的验证目录仍绑定其原始执行，不因新增设计情景而声称重新执行过整本Notebook。

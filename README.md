@@ -70,6 +70,8 @@ image = sii.reconstruct_uv(
 
 缺失电子学参数保留接口，默认`0`且关闭；SPE长尾不作为微单元恢复时间。尚无实现或未标定的效应设为非零会明确报错。2 nm通带和固定源透过率属于场景假设。
 
+仪器设计影响见[物理说明第14节](docs/SII_PHYSICS_ZH.md#instrument-design)：SPE、微单元恢复、光学时间弥散、PDE、采样、分色及角直径精度。运行 `python tools/evaluate_sii_design.py` 可复算条件对照，输出在 `validation/sii_design/`；高速零电子噪声结果附数值正则化敏感性检查，不作为皮秒硬件预测。
+
 S17351规格书的有条件参数保存在[结构化摘录](configs/sii/s17351_datasheet.json)。25℃暗计数可单独启用1或8通道汇总情景；不会自动覆盖main的实测响应。接口和缺项见[实现说明第14节](docs/SII_IMPLEMENTATION_ZH.md#14-保留的零值接口替代路径与规格书边界)。
 
 跨文件重建使用`write_uv_data/read_uv_data`的完整NPZ，保留时间/光谱积分节点、共享增益先验及可选协方差。Notebook保存后读回四个`*_uv.npz`再拟合；浏览用CSV不替代完整推断输入。
