@@ -9,6 +9,8 @@
 - [验证结果](validation/sii_science/summary.json)
 - [时延追踪验证](validation/sii_tracking/summary.json)：36镜几何、七时刻三镜短波形及初始时延对照。
 
+初次接触SII可顺着物理说明正文阅读；复数、概率和协方差见[附录0](docs/SII_PHYSICS_ZH.md#appendix-zero)，平稳性、频率相关和g1积分的逐步推导见[附录A.0](docs/SII_PHYSICS_ZH.md#stationary-spectrum)。后续附录依次展开计数、波形、GLS与反演的基础。
+
 ## 安装与运行
 
 在仓库根目录执行：
